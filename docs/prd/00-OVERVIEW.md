@@ -1,85 +1,85 @@
-# PRD 00 — roadmap: shrinking the host-tool footprint
+# PRD 00 — overview: scope, inheritance, and the AWS retarget
 
-Index document for the multi-phase plan to evolve `roksbnkctl` toward a single-binary tool that executes its dependent operations locally, in a container, in a remote cluster, or over SSH — eliminating the current need to install `kubectl`, `oc`, `iperf3`, and `ibmcloud` on the user's host.
+Index document for `awsbnkctl`'s product requirements docs. This PRD frames the **scope of the AWS retarget**, lists which PRDs are inherited verbatim from `roksbnkctl` and which are net-new, and pins down the load-bearing design decisions.
 
-## Why
+## What awsbnkctl is
 
-Today's prereqs (per `roksbnkctl doctor`):
+A single-binary Go CLI to deploy F5 BIG-IP Next for Kubernetes (BNK) onto AWS EKS, manage its supply chain in S3 (and optionally ECR), and validate the deployment with built-in DNS, connectivity, and throughput tests. Same 4-command lifecycle (`init` → `up` → `test` → `down`) as roksbnkctl, retargeted at AWS primitives.
 
-| Binary | Required | Used by |
-|---|---|---|
-| `terraform` | yes | every `up`/`down` |
-| `kubectl` | yes (effectively) | passthrough, `logs`, `status` reachability check |
-| `oc` | optional | passthrough |
-| `ibmcloud` | optional | passthrough |
-| `iperf3` | yes for `test throughput` | local client driver |
+## Why this is a fork, not a rewrite
 
-That's 4-5 binaries to install across Linux/macOS/Windows. The E2E test we just shipped found `iperf3` missing on a development host and had to skip the throughput test entirely. The "single binary" promise is currently aspirational.
+Three of roksbnkctl's five Terraform modules — `cert_manager`, `flo`, `cne_instance`, `license` — are pure Kubernetes manifests parameterised by namespace, image, and cert chain. They port to AWS unchanged. The Go scaffolding (cobra CLI, terraform-exec wrapper, client-go k8s wrapper, miekg/dns probe, doctor framework, four-role sprint pattern, mdBook framework, execution backends, cred resolver) is also reusable as-is. Net new work concentrates on the cloud-side primitives:
+
+- EKS in place of ROKS (cluster + node group + data plane)
+- S3 (or ECR mirror) in place of IBM Cloud Object Storage
+- IRSA in place of IBM Trusted Profile workload identity
+- AWS credential chain in place of IBM Cloud API key chain
+- Self-managed node groups on ENA-enabled instances in place of ROKS's managed worker pool, to support BNK's SR-IOV requirement
+
+The fork preserves the upstream relationship: `git remote get-url upstream` returns `https://github.com/jgruberf5/roksbnkctl.git`, and shared-surface improvements can be cherry-picked across with `git fetch upstream && git log upstream/main ^main`.
 
 ## Goal
 
-Trim the prereq list to **`terraform` only** for the happy path, while:
+A user with an AWS account, `terraform` 1.5+ installed, and AWS credentials available via the standard chain (env / profile / instance role / SSO) can:
 
-- Keeping power users' direct CLI access intact (`roksbnkctl kubectl <args>` passthrough still works when host kubectl exists)
-- Adding execution flexibility (`--on jumphost`, `--backend docker`, `--backend k8s`) for environments where the current local-exec model doesn't fit (firewalls, air-gapped, customer compliance, frozen toolchain versions)
+1. Run `awsbnkctl init` (interactive wizard → workspace config).
+2. Run `awsbnkctl up` and get a healthy BNK deployment on an EKS cluster with SR-IOV node groups in **~30 minutes** on first run.
+3. Run `awsbnkctl test` and confirm DNS, connectivity, and throughput against the deployment.
+4. Run `awsbnkctl down` and return the account to clean state.
 
-## Phasing
+No `kubectl`, `aws` CLI, `iperf3`, or `dig` host install required — every dependency except `terraform` is internalised, either via SDK or via a bundled tools image.
 
-Each phase is a discrete PRD in this directory. They build on each other in the order shown, but Phase 4 (credentials) is cross-cutting and informs the design of Phase 3.
+## PRD inheritance map
 
-| Phase | PRD | Outcome |
+PRDs 01-06 are inherited from roksbnkctl. PRDs 07-08 are net-new for the AWS retarget. PRDs 09+ are reserved for v1.x scope.
+
+| PRD | Status | Outcome |
 |---|---|---|
-| 1 | [`01-SSH-AND-ON-FLAG.md`](./01-SSH-AND-ON-FLAG.md) | `--on <target>` flag, embedded SSH client, `targets:` config block, jumphost auto-discovery from TF outputs |
-| 2 | [`02-KUBECTL-INTERNAL.md`](./02-KUBECTL-INTERNAL.md) | Native `roksbnkctl get/apply/logs/exec/port-forward` via `client-go`; OpenShift subset via `openshift/client-go`; kubectl/oc passthroughs preserved as opt-in |
-| 3 | [`03-EXECUTION-BACKENDS.md`](./03-EXECUTION-BACKENDS.md) | Backend abstraction with four implementations (local / docker / k8s / ssh) applied to iperf3, ibmcloud, and as an optional alternative to terraform-exec |
-| ⌬ | [`04-CREDENTIALS.md`](./04-CREDENTIALS.md) | Cross-cutting: kubeconfig + IBMCLOUD_API_KEY + SSH key propagation safely across all backends |
-| 5 | [`05-E2E-TEST-PLAN.md`](./05-E2E-TEST-PLAN.md) | New E2E phases I-N that exercise every backend × tool combination on a live IBM Cloud account |
+| [`01-SSH-AND-ON-FLAG.md`](./01-SSH-AND-ON-FLAG.md) | **inherited** (no rewrite needed) | `--on <target>` flag, embedded SSH client, `targets:` config block, jumphost auto-discovery from TF outputs |
+| [`02-KUBECTL-INTERNAL.md`](./02-KUBECTL-INTERNAL.md) | **inherited** | Native `awsbnkctl get/apply/logs/exec/port-forward` via `client-go` — `oc` subset dropped (EKS isn't OpenShift) |
+| [`03-EXECUTION-BACKENDS.md`](./03-EXECUTION-BACKENDS.md) | **inherited** (light edits) | Backend abstraction with four implementations (local / docker / k8s / ssh) applied to iperf3, terraform, and AWS API calls. The `ibmcloud` passthrough is dropped (no `aws` CLI passthrough planned — direct SDK use only) |
+| [`04-CREDENTIALS.md`](./04-CREDENTIALS.md) | **inherited** (Sprint 2 edits) | Cred propagation; AWS adapter added in Sprint 2 (IRSA + standard chain) |
+| [`05-E2E-TEST-PLAN.md`](./05-E2E-TEST-PLAN.md) | **inherited** (Sprint 6 edits) | E2E phases A-N + L-DNS; AWS-shaped equivalents in Sprint 6 |
+| [`06-CLUSTER-TRIAL-PHASE-SPLIT.md`](./06-CLUSTER-TRIAL-PHASE-SPLIT.md) | **inherited** | Cluster phase / BNK trial phase split — semantics carry through |
+| [`07-EKS-CLUSTER-SRIOV.md`](./07-EKS-CLUSTER-SRIOV.md) | **to author** (Sprint 1) | EKS cluster module + self-managed SR-IOV node group + Multus / SR-IOV CNI / SR-IOV device plugin stack. **Load-bearing design decision.** |
+| [`08-S3-SUPPLY-CHAIN-IRSA.md`](./08-S3-SUPPLY-CHAIN-IRSA.md) | **to author** (Sprint 2) | S3 bucket for FAR pull keys + JWT licence + optional ECR mirror; IAM OIDC provider + IRSA for FLO service account |
 
 ## Dependency graph
 
 ```
-                Phase 1 (SSH/--on)
+                PRD 07 (EKS + SR-IOV)  ◀──── load-bearing
                     │
                     ▼
-                Phase 2 (kubectl)
+                PRD 08 (S3 + IRSA)
                     │
                     ▼
-                Phase 3 (backends) ──────────┐
-                    │                        │
-                    │   ◀── Phase 4 (creds, cross-cutting)
-                    │
+                inherited PRD 03 (backends) + PRD 04 (creds)
+                    │   inherited PRDs 01, 02, 06 are surface-stable
                     ▼
-                Phase 5 (E2E)
+                inherited PRD 05 (E2E) — AWS phases added Sprint 6
 ```
 
-Phase 1 lands the SSH client and target abstraction the SSH backend in Phase 3 will reuse. Phase 2 gives Phase 3 a "no-op" reference (kubectl-via-Go) it can compare other backends against for output equivalence. Phase 4 informs the `RunOpts` shape every backend uses.
+PRD 07 gates everything: if SR-IOV on EKS doesn't work the way BNK needs, the entire deployment shape is back to the drawing board. PRD 08 layers cleanly on top because IRSA needs the EKS OIDC provider that PRD 07 creates. The inherited PRDs touch the cloud-side surface only at parameter boundaries (cred chain, backend selection), so they need light edits, not rewrites.
 
-## Success criteria
+## Success criteria (v1.0)
 
-- Fresh Ubuntu / macOS dev machine: `roksbnkctl doctor` shows green for `terraform` only, with the rest as optional informationals
-- E2E Phases A-H pass with `kubectl`, `oc`, `iperf3`, and `ibmcloud` removed from `$PATH`
-- E2E Phases I-N (new) pass on the same host, exercising all four backends
-- Pre-cluster operations (`init`, jumphost-routed `ibmcloud iam`) work via `--on jumphost` against a TF-provisioned bastion
-- Credential audit: no API key strings appear in `docker inspect`, `ps`, kube events, or any log file readable by another local user
+- Fresh Ubuntu / macOS dev host with only `terraform` installed: `awsbnkctl doctor` reports green; `awsbnkctl up` lands a healthy BNK deployment.
+- E2E phases (roksbnkctl PRD 05 inheritance + Sprint 6 AWS phases) all pass.
+- A `c5n.4xlarge` worker node advertises SR-IOV VFs to the scheduler; a BNK CNEInstance schedules onto it and reports `Ready` within 15 minutes.
+- Credential audit: no AWS access key, secret key, session token, FAR pull-key, or licence JWT appears in `docker inspect`, `ps`, kube events, or any log file readable by another local user.
+- `awsbnkctl down` on a fresh deployment leaves no leaked S3 objects, IAM roles, ENIs, or VPCs.
 
-## Out of scope (this roadmap)
+## Out of scope (v1.0)
 
-- Full kubectl / oc / ibmcloud command coverage — only the BNK-relevant subset that `roksbnkctl` actually uses internally + the few high-frequency passthrough verbs
-- Windows-specific Docker fallback (rely on internalized Go paths for kubectl/iperf3 instead)
-- HCP Terraform / Terraform Cloud integration
-- A web UI / REST API surface
-- Multi-region or multi-cloud (still IBM Cloud + ROKS)
-
-## Implementation order recommendation
-
-1. **Phase 1 first** — small (~600 LOC), unblocks the SSH backend in Phase 3, immediately useful to users who want jumphost-routed operations.
-2. **Phase 2 second** — biggest UX win; eliminates the kubectl install requirement which is the most common cause of "doctor flagged a warning."
-3. **Phase 4 third (informational)** — read before designing Phase 3 backends so the credential interfaces are baked in correctly.
-4. **Phase 3 fourth** — biggest engineering effort (~2000+ LOC across four backend implementations + tool migration).
-5. **Phase 5 last** — extends the existing e2e-test driver with new phases; can be drafted in parallel with Phase 3 implementation.
+- AWS regions outside the v1.0 tested set (us-east-1, us-west-2, eu-west-1). Other regions are best-effort.
+- Karpenter / EKS Auto Mode / Fargate. v1.0 ships a fixed self-managed node group. v1.x revisits elasticity if SR-IOV semantics permit.
+- Multi-region GSLB testing. v1.0 ships single-region DNS probes; v1.x adds multi-region.
+- Air-gapped install. v1.0 assumes outbound HTTPS to AWS APIs + ECR + FAR registry; v1.x adds the ECR-mirror-only mode as a first-class story.
+- Azure or GCP retargets. Forkable from this codebase the same way `awsbnkctl` was forked from `roksbnkctl`; not the scope of this project.
 
 ## Open meta-questions
 
-- Should we ship phases as separate releases (`v0.7` → SSH, `v0.8` → kubectl, etc.) or land them on `main` and tag a single `v1.0` once everything is in?
-- Should the docker / k8s backend tools images be hosted in `ghcr.io/jgruberf5/...` or under an F5-owned org?
-- Naming: `--on` for SSH targets, `--backend` for execution mode — confusingly similar. Consolidate? `--via local|docker|k8s|ssh:<target>`?
+- **Module path under `JLCode-tech/` vs. an F5-owned org.** v1.0 ships under `github.com/JLCode-tech/awsbnkctl`. Donating to an F5-owned org is a v1.x option; module-path rewrites are an SDK consumer break, so the decision needs to happen before v1.0 if it's happening at all.
+- **Tools image hosting.** `ghcr.io/JLCode-tech/awsbnkctl-tools-*` for v1.0; donatable alongside the module path.
+- **CNI baseline.** AWS VPC CNI is the obvious default, with Multus + SR-IOV CNI layered on top. Calico-on-EKS is an alternative for customers who already standardise on it; v1.0 supports VPC CNI only, v1.x evaluates Calico.
+- **Karpenter readiness.** Karpenter doesn't have a clean integration with SR-IOV device plugins as of writing. Sprint 1 spike confirms the gap; v1.x revisits.

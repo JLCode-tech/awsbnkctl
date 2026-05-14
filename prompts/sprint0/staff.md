@@ -1,105 +1,77 @@
-You are the staff engineer agent for Sprint 0 of the roksbnkctl project. Refactor the doctor command and expand CI infrastructure.
+You are the staff engineer agent for Sprint 0 of the `awsbnkctl` project. The repo is a hard fork of `jgruberf5/roksbnkctl` being retargeted at AWS EKS. Sprint 0's theme is "identity rewrite + IBM strip + AWS stub" — you do the implementation work.
 
-Project location: `/mnt/d/project/roksbnkctl/`. Go module `github.com/jgruberf5/roksbnkctl`. Existing doctor command lives at `internal/cli/doctor.go` with helper logic in `internal/doctor/`.
+Project location: `/Users/j.lucia/Code/github/awsbnkctl/`. Current Go module: `github.com/jgruberf5/roksbnkctl`. Target Go module: `github.com/JLCode-tech/awsbnkctl`. Current binary entry point: `cmd/roksbnkctl/`. Target: `cmd/awsbnkctl/`.
+
+**Read first** before any edits:
+
+1. `docs/PLAN.md` § Sprint 0 — your scope is bounded by the "Code deliverables" table there.
+2. `docs/prd/00-OVERVIEW.md` — the inheritance map. PRDs 01-06 are inherited (don't touch their implementations); PRDs 07-08 are net-new for Sprints 1-2 (don't pre-empt them — your job is to stub, not build).
+3. `agents/staff.md` — your own role definition.
+4. The current Go tree shape: `ls internal/`, `ls cmd/`, `ls terraform/modules/`. Understand what you're stripping before you strip it.
+5. `embedded.go` and `.goreleaser.yml` — both reference the binary name and module path; you'll touch both.
 
 ## Coordinate with parallel agents
 
-An architect agent is creating `book/` + `.github/workflows/book.yml` + adding `book/book-serve/book-clean` targets to Makefile + adding a book link to README.md. A validator agent is creating `tools/docker/` + `.github/workflows/spellcheck.yml` + `cspell.json` + writing the "Long-running smoke test" section of CONTRIBUTING.md. **Do not touch their files.** For Makefile and CONTRIBUTING.md, your edits should be append-only and on disjoint sections from theirs.
+An **architect** agent is finalising the prose surface (`README.md`, `CHANGELOG.md`, `MIGRATING.md`, `docs/PLAN.md`, `docs/prd/`, `agents/`, `book/src/preface.md`, `book/src/SUMMARY.md`). **Do not touch any of those files.**
 
-## Tasks
+A **validator** agent is updating `.github/workflows/*.yml`, `cspell.json`, `tools/docker/` matrix, `scripts/*.sh`. **Do not touch `.github/`, `cspell.json`, `tools/`, or `scripts/`.**
 
-1. **Read** `internal/cli/doctor.go` and `internal/doctor/*.go` to understand the current structure. Note: there is already an `internal/doctor` package — preserve and extend it rather than creating parallel structure.
+A **tech-writer** agent runs after you (read-only).
 
-2. **Refactor doctor** to use a new `Check` struct. Add to `internal/doctor/check.go` (new file):
-   ```go
-   package doctor
+If you and the validator agent need to coordinate on a workflow file or script — file an issue; do not silent-merge.
 
-   type CheckStatus string
+## Your scope
 
-   const (
-       StatusOK      CheckStatus = "ok"
-       StatusWarning CheckStatus = "warning"
-       StatusError   CheckStatus = "error"
-       StatusSkipped CheckStatus = "skipped"
-   )
+| Surface | Action |
+|---|---|
+| `go.mod` | Rewrite module path from `github.com/jgruberf5/roksbnkctl` to `github.com/JLCode-tech/awsbnkctl` |
+| Every `.go` file | Update import paths from `github.com/jgruberf5/roksbnkctl/...` to `github.com/JLCode-tech/awsbnkctl/...` |
+| `cmd/roksbnkctl/` | Rename directory to `cmd/awsbnkctl/`; update `main.go` references |
+| `internal/ibm/` | Delete (entire directory) |
+| `internal/cos/` | Delete (entire directory) |
+| `terraform/modules/roks_cluster/` | Delete (entire directory) |
+| `tools/docker/ibmcloud/` | Delete (entire directory) — but coordinate with validator on the workflow that builds it |
+| `internal/aws/` | Create with one file: `doc.go` containing a package comment describing future scope; do not implement any AWS surface yet (Sprint 1 owns that) |
+| `terraform/modules/eks_cluster/` | Create with placeholder `main.tf` + `variables.tf` + `outputs.tf` that error out cleanly when invoked (`terraform plan` should fail with a clear "not yet implemented; see PRD 07" message, not silently succeed) |
+| `terraform/main.tf` | Strip module wiring that references the deleted `roks_cluster` / IBM-COS modules; replace with TODO comments referencing the Sprint 1 + Sprint 3 deliverables |
+| `terraform/variables.tf` | Strip `ibmcloud_*` variables; add placeholder AWS variables matching PRD 07's input table (`region`, `cluster_name`, `cluster_version`, `vpc_id`, `subnet_ids`, `node_instance_types`, `node_min_size`, `node_max_size`, `node_desired_size`) |
+| `terraform/providers.tf` | Drop `ibm` provider; add `aws` provider block |
+| `terraform/versions.tf` | Update required_providers: remove `IBM-Cloud/ibm`, add `hashicorp/aws ~> 5.x` |
+| `Makefile` | Update binary name references from `roksbnkctl` to `awsbnkctl`; targets stay otherwise identical |
+| `.goreleaser.yml` | Update `project_name`, binary `main` path, archive name templates, GitHub release config to point at `JLCode-tech/awsbnkctl` |
+| `embedded.go` | Update any string constants / paths that reference the old binary name |
+| `install_build_dependencies.sh` | Update curl URLs / binary references if any point at `jgruberf5/roksbnkctl` |
+| `internal/cli/*.go` | Audit for any IBM-only CLI verbs (e.g., `awsbnkctl ibmcloud …` passthrough). Delete them. Keep AWS-shaped stubs only if PRD 00 indicates an AWS equivalent (e.g., `awsbnkctl aws …` — PRD 00 says this is **dropped**, so just delete the IBM passthrough). |
+| Any `*_test.go` that hits IBM endpoints or requires `IBMCLOUD_API_KEY` | Add `t.Skip("inherited test — retargets in Sprint N")` referencing the sprint that will replace it. Do not delete. |
 
-   // Check is a single doctor diagnostic. Future per-backend checks
-   // (Phase 3, see docs/prd/03-EXECUTION-BACKENDS.md) will be expressed
-   // as Check values with BackendName set so the same rendering logic
-   // covers them.
-   type Check struct {
-       Name        string
-       Status      CheckStatus
-       Detail      string
-       Optional    bool
-       BackendName string // empty for general; "docker"|"k8s"|"ssh" later
-   }
-   ```
+## Tasks (priority order)
 
-   Update existing doctor logic so each check produces a `Check` value, then a single rendering function iterates checks and emits the existing ✓/⚠/✗ table format. **Output and exit-code semantics must stay identical** to the current behavior — this is a refactor, not a behavior change. Run `roksbnkctl doctor` before and after to confirm output is byte-identical (or note any unavoidable differences in your issues file).
+1. **Module path rewrite.** Use a single pass: `find . -type f -name '*.go' -exec sed -i '' 's|github.com/jgruberf5/roksbnkctl|github.com/JLCode-tech/awsbnkctl|g' {} +` (note the macOS `sed -i ''` form). Update `go.mod` separately. Run `go build ./...` to find stragglers; the compiler tells you where. Run `go mod tidy` to refresh `go.sum`.
 
-3. **Create or update `.github/workflows/ci.yml`**. If a workflow already exists, extend it; otherwise create:
-   ```yaml
-   name: CI
-   on:
-     push:
-       branches: [main]
-     pull_request:
-   jobs:
-     test:
-       strategy:
-         matrix:
-           os: [ubuntu-latest, macos-latest]
-       runs-on: ${{ matrix.os }}
-       steps:
-         - uses: actions/checkout@v4
-         - uses: actions/setup-go@v5
-           with: { go-version: '1.23' }
-         - run: go vet ./...
-         - run: gofmt -d -l . | tee /tmp/gofmt.diff && test ! -s /tmp/gofmt.diff
-         - uses: dominikh/staticcheck-action@v1
-           with: { version: 'latest', install-go: false }
-         - run: go test ./...
-     windows-build:
-       runs-on: windows-latest
-       steps:
-         - uses: actions/checkout@v4
-         - uses: actions/setup-go@v5
-           with: { go-version: '1.23' }
-         - run: go build ./...
-   ```
+2. **Binary rename.** `git mv cmd/roksbnkctl cmd/awsbnkctl`. Update `cmd/awsbnkctl/main.go` if it references the old name in flags or version output. Run `go build -o /tmp/awsbnkctl ./cmd/awsbnkctl` to confirm.
 
-4. **Add `scripts/pre-commit.sh`** — bash script that runs `gofmt -d -l .` (failing on non-empty output), `go vet ./...`, and `go test -short ./internal/...`. Must be `chmod +x`. Write this carefully — keep it fast (well under 30s on a clean tree).
+3. **IBM strip.** Delete the four directories in the scope table. Use `git rm -r` so the deletions are staged cleanly. Run `go build ./...` — the compiler surfaces every consumer of the deleted packages; chase each down. For inherited CLI verbs that depended on the deleted packages, delete the verb file from `internal/cli/` and remove its registration from the cobra root command.
 
-5. **Update Makefile** — APPEND ONLY. Do not modify existing targets. Add:
-   ```
-   .PHONY: build test test-short lint pre-commit-install
+4. **AWS stubs.** Create `internal/aws/doc.go` with a package doc comment explaining the scope (per PRD 07, this package wraps `aws-sdk-go-v2` for STS, EC2, EKS, S3, IAM — Sprint 1+ implements). Create `terraform/modules/eks_cluster/{main.tf, variables.tf, outputs.tf}` with a `null_resource` `local-exec` that errors out: `provisioner "local-exec" { command = "echo 'eks_cluster module is a Sprint 1 deliverable; see docs/prd/07-EKS-CLUSTER-SRIOV.md' && exit 1" }`.
 
-   build:
-       go build -o bin/roksbnkctl ./cmd/roksbnkctl
+5. **Terraform top-level rewire.** Strip module calls in `terraform/main.tf` that consumed the deleted modules. Leave clearly-marked TODO blocks for Sprint 3 to wire up `cert_manager`, `flo`, `cne_instance`, `license`, `testing` with AWS-shaped inputs. Strip IBM variables from `variables.tf`; add the AWS placeholders per scope table.
 
-   test:
-       go test ./...
+6. **Build green gate.** Run in order:
+   - `go vet ./...` — must pass
+   - `gofmt -d -l .` — must produce no diff
+   - `go build ./...` — must succeed
+   - `go test ./...` — must succeed (skipped tests count as success; failures don't)
+   - `terraform -chdir=terraform init` — must succeed
+   - `terraform -chdir=terraform validate` — must succeed (the stub `eks_cluster` provisioner is OK at validate time; it errors at apply time)
 
-   test-short:
-       go test -short ./...
-
-   lint:
-       gofmt -d -l . && go vet ./... && (command -v staticcheck >/dev/null && staticcheck ./... || echo "staticcheck not on PATH; skipping")
-
-   pre-commit-install:
-       ln -sf ../../scripts/pre-commit.sh .git/hooks/pre-commit && echo "Pre-commit hook installed."
-   ```
-   Append-only behavior is critical — the architect agent is also adding targets (book-related). If you find conflicting target names, file an issue rather than overwriting.
-
-6. **Update CONTRIBUTING.md** (create if missing). Add these sections — only these, do not edit other sections (the validator agent owns the smoke-test section):
-   - **## Running tests** — `go test ./...` for full suite, `make test-short` or `go test -short ./...` for fast pass
-   - **## Pre-commit hook** — what it does, how to install (`make pre-commit-install`), how to bypass (`git commit --no-verify`)
-   - **## Code style** — gofmt enforced (CI fails on non-empty diff), `go vet` enforced, staticcheck enforced (Linux + macOS), targeted import grouping (stdlib / third-party / project)
+7. **Smoke test the binary.**
+   - `./bin/awsbnkctl --help` → prints the expected command tree, no panics.
+   - `./bin/awsbnkctl --version` → reports a version string (even `dev`).
+   - `./bin/awsbnkctl doctor` → runs; if it reports "AWS support coming in Sprint 1" rather than panicking, that's correct for this sprint.
 
 ## Issue tracking
 
-File any issues to `/mnt/d/project/roksbnkctl/issues/issue_sprint0_staff.md` using this format:
+File any issues to `/Users/j.lucia/Code/github/awsbnkctl/issues/issue_sprint0_staff.md` in the standard schema:
 
 ```markdown
 # Sprint 0 — staff engineer issues
@@ -112,24 +84,32 @@ File any issues to `/mnt/d/project/roksbnkctl/issues/issue_sprint0_staff.md` usi
 **Proposed fix**: how to resolve
 ```
 
-If everything goes cleanly, create the file with just the heading and `*No issues filed.*`.
+If clean: heading + `*No issues filed.*`.
+
+Severity guide:
+- **blocker**: build fails, tests broken, the binary doesn't run
+- **high**: a test had to be deleted (not skipped) — the deletion needs integrator review
+- **medium**: an inherited package depended on IBM surface in a non-obvious way that needed restructuring
+- **low**: cosmetic — comment cleanups, dead-code finds
 
 ## Verification before reporting done
 
+- `go vet ./...` clean
+- `gofmt -d -l .` produces empty output
 - `go build ./...` succeeds
-- `go test ./...` succeeds (matches pre-refactor green state)
-- `go vet ./...` succeeds
-- `gofmt -d -l .` produces no diff for files you edited
-- `roksbnkctl doctor` output is identical to before the refactor (run it both ways if you can; or describe any unavoidable differences in your issue file)
+- `go test ./...` passes (with skip annotations on inherited IBM-dependent tests, where each skip cites the sprint that retargets)
+- `terraform -chdir=terraform init && terraform -chdir=terraform validate` succeed
+- `./bin/awsbnkctl --help` runs cleanly
+- `grep -r 'jgruberf5/roksbnkctl' .` returns hits only in: `.git/`, `CHANGELOG.md`, `MIGRATING.md`, `README.md` (fork-relationship contexts the architect agent owns), `upstream/` references in CI workflows (validator's surface — flag for them if you see drift)
+- `grep -r 'ibmcloud\|IBMCLOUD' --include='*.go' .` returns no hits (test skip strings citing "IBM" are OK)
 
 ## Final report
 
-Return a concise summary (under 200 words):
-- Files created (counts + key paths)
-- Files edited
-- Build / test / vet results
-- Whether the doctor output is byte-identical post-refactor
-- Whether you filed any issues
-- Anything the integrator should be aware of
+Under 200 words:
+- Files created / deleted / renamed (counts + key paths)
+- Build + test + vet + terraform validate results
+- Tests skipped (count + a one-line summary of which sprints retarget each)
+- Any issues filed (count + severity breakdown)
+- Anything the integrator should know before committing
 
-Do NOT commit anything. The integrator will commit the aggregated work.
+Do NOT commit anything. The integrator commits the aggregated four-agent output.

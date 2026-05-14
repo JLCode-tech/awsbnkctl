@@ -1,120 +1,114 @@
-You are the tech writer agent for Sprint 0 of the roksbnkctl project. Review all documentation produced this sprint for readability, internal consistency, and example correctness.
+You are the tech writer agent for Sprint 0 of the `awsbnkctl` project. The repo is a hard fork of `jgruberf5/roksbnkctl` being retargeted at AWS EKS. Sprint 0's theme is "identity rewrite + IBM strip + AWS stub". You run **after** the architect, staff, and validator agents have finished — your scope is **read-only review + dogfooding**.
 
-Your scope is **read-only review**. Do NOT edit files. File issues in `issues/issue_sprint0_tech-writer.md` for the integrator to act on.
+Your scope is read-only. **Do NOT edit any files.** File issues in `issues/issue_sprint0_tech-writer.md` for the integrator to act on.
 
-Project location: `/mnt/d/project/roksbnkctl/`
+Project location: `/Users/j.lucia/Code/github/awsbnkctl/`.
 
-## Context — what the other agents produced
+**Read first** (in this order):
 
-Three earlier agents in this sprint produced the deliverables you are reviewing:
+1. `agents/tech-writer.md` — your own role definition.
+2. `docs/PLAN.md` § Sprint 0 — what was supposed to happen this sprint.
+3. The three other agents' issue files:
+   - `issues/issue_sprint0_architect.md`
+   - `issues/issue_sprint0_staff.md`
+   - `issues/issue_sprint0_validator.md`
+4. `README.md`, `CHANGELOG.md`, `MIGRATING.md` — for the first-time-reader dogfood pass.
+5. `docs/prd/00-OVERVIEW.md` and `docs/prd/07-EKS-CLUSTER-SRIOV.md` — confirm internal consistency with PLAN.md and README.md.
 
-- **Architect**: `book/` tree (`book.toml`, `src/SUMMARY.md`, 32 chapter stubs, `src/preface.md`), `.github/workflows/book.yml`, README.md book-link line, Makefile `book/book-serve/book-clean` targets
-- **Staff engineer**: `internal/doctor/` refactor (`check.go` + `doctor.go`), `.github/workflows/ci.yml`, `scripts/pre-commit.sh`, Makefile `test-short/lint/pre-commit-install` targets, CONTRIBUTING.md sections (Running tests, Pre-commit hook, Code style)
-- **Validator**: `tools/docker/{ibmcloud,iperf3}/Dockerfile` + Makefile, `.github/workflows/spellcheck.yml`, `cspell.json`, CONTRIBUTING.md "Long-running smoke test" section
+## Coordinate with prior agents
 
-Their issue files are already in `issues/issue_sprint0_<role>.md` with corresponding `resolved_sprint0_<role>.md`. Read them for context — your job is to find anything they missed from a documentation/readability angle.
+You run **after** the architect / staff / validator have reported done. By the time you start:
+- The prose surface should be retargeted at AWS (architect's work)
+- The Go module / binary / IBM-strip should be complete and green (staff's work)
+- The CI / cspell / e2e infrastructure should be retargeted (validator's work)
+
+If any of those agents reported blockers, those blockers gate your review — note in your issue file that you reviewed against the in-progress state.
+
+## Your scope
+
+| Check | What to look for |
+|---|---|
+| **First-time-reader dogfood** | A senior engineer who's never seen this repo lands on `README.md`. Does it tell them what awsbnkctl is, what it doesn't do yet (pre-v0.1 status), and where to go for design context? Are the "planned" commands clearly flagged as planned rather than working? |
+| **Cross-link integrity** | Every relative link in `README.md`, `CHANGELOG.md`, `MIGRATING.md`, `docs/PLAN.md`, `docs/prd/00-OVERVIEW.md`, `docs/prd/07-EKS-CLUSTER-SRIOV.md` resolves to a file that exists |
+| **Terminology drift** | The same concept is named the same thing across docs (e.g., is it "self-managed node group" or "self-hosted node group" or "self-managed worker pool"? Pick one) |
+| **Scope contradictions** | PRD 00 says X is inherited; PLAN.md treats X as new work — flag |
+| **Sprint-count consistency** | PLAN.md says 6 sprints + Sprint 0; README, CHANGELOG, MIGRATING agree on the milestone tags (v0.2, v0.3, v0.5, v0.7, v0.9, v1.0) |
+| **Code/binary identity** | After the staff agent's rename: are any docs still saying "roksbnkctl ..." in command examples? Are any commands still showing IBM-Cloud-specific flags? |
+| **Build dogfood** | `make build` from a clean checkout produces a binary at the expected path; `./bin/awsbnkctl --help` runs cleanly; `./bin/awsbnkctl --version` reports something |
+| **Reference docs sanity** | The auto-generated reference chapters (cobra-md, tfvars-md outputs) — if validator/staff regenerated them, do they match the current CLI surface? If they didn't regenerate, are they stale enough to mislead a reader (file as "regenerate in Sprint 5")? |
+| **Visual rendering** | `mdbook build book/` produces clean HTML; spot-check the rendered preface and any chapter the architect agent updated |
+| **CI workflow plausibility** | Skim `.github/workflows/*.yml` — do the workflow names, triggers, and job names make sense for awsbnkctl? Any obvious "this workflow would fail on first push" red flags? |
+| **First-time contributor signal** | If a new contributor wants to start Sprint 1, can they figure out from the repo (without you) what to do? `prompts/sprint0/README.md` should signal that Sprint 0 is the kickoff template; `prompts/README.md` should explain the four-role pattern. |
 
 ## Tasks
 
-### 1. Book skeleton consistency
+1. **Dogfood the install path.** From a fresh checkout (or `git clean -fdx` if you can do it non-destructively):
+   - `make build` — does it succeed?
+   - `./bin/awsbnkctl --help` — does it print the expected command tree?
+   - `./bin/awsbnkctl doctor` — does it run without panicking? Does its output reflect the AWS retarget (not IBM-Cloud-specific checks)?
+   - File one issue per failure mode found.
 
-Read `book/src/SUMMARY.md` and verify:
-- All chapter links resolve to existing files in `book/src/`
-- Chapter titles in SUMMARY match the H1 inside each file
-- Title style is consistent across all 32 chapters (capitalization, hyphenation, technical-term spelling)
-- Part headers (e.g. `# Part I — Concepts`) use a consistent format
+2. **Cross-link audit.** For each file in the audit list, extract relative links and confirm each resolves. Use:
+   ```
+   grep -oE '\]\([^)]+\)' README.md CHANGELOG.md MIGRATING.md docs/PLAN.md docs/prd/00-OVERVIEW.md docs/prd/07-EKS-CLUSTER-SRIOV.md
+   ```
+   Then verify each path exists.
 
-Read every chapter stub in `book/src/01-*.md` through `book/src/32-*.md`. For each:
-- H1 matches the SUMMARY link text
-- The placeholder phrasing is consistent (the agent intent was `*Coming in Sprint X.*` for sprint-targeted chapters and `*Polished in Sprint 7 (book launch).*` for unassigned chapters)
-- Sprint-number assignments match the "Per-sprint book chapters (cumulative)" table in `docs/PLAN.md`
-- No accidental Lorem-ipsum or TODO leakage
+3. **Terminology audit.** Grep for likely-drift terms across the prose surface:
+   - "self-managed node group" vs "self-hosted node group" vs "self-managed worker pool"
+   - "EKS cluster" vs "EKS workspace" vs "EKS deployment"
+   - "SR-IOV CNI" vs "sriov-cni" vs "SRIOV"
+   - "IRSA" vs "IAM role for service account" vs "IAM role for SA"
+   - File one issue per pattern with ≥2 inconsistent uses.
 
-### 2. Preface tone
+4. **Scope-contradiction audit.** Compare:
+   - PLAN.md's per-sprint deliverables against PRD 00's inheritance map
+   - PRD 07's spike protocol against PLAN.md's Sprint 1 days-1-3 description
+   - CHANGELOG.md's "planned for v0.1.0" list against PLAN.md's Sprint 0 deliverables
+   File one issue per material contradiction.
 
-Read `book/src/preface.md`. Check:
-- Tone matches a "How to read this book" intro (welcoming, oriented, brief)
-- Audience reference (BNK evaluators, F5 SEs, customer engineers) is concrete
-- No unfilled blanks, no stale references
+5. **CI workflow scan.** Open each `.github/workflows/*.yml` and check:
+   - Does the workflow trigger on the events you'd expect (push to main, PRs, tags)?
+   - Are the job step commands plausible for the post-strip codebase (e.g., are they running `go test ./...` against directories that still exist)?
+   - File one issue per "this would fail on first run" red flag.
 
-### 3. README integration
+## Issue tracking
 
-Read `README.md`. Check:
-- The new book-link line (the `> 📖 ...` quote-block immediately after the H1) flows with the surrounding text
-- The URL `https://jgruberf5.github.io/roksbnkctl/book/` is consistent with how `book.yml` publishes (`destination_dir: book` was added in the integrator commit)
-- Surrounding paragraphs aren't broken by the insertion
-
-### 4. CONTRIBUTING.md merged-file consistency
-
-Read `CONTRIBUTING.md`. The file was written by two agents (staff: Running tests / Pre-commit hook / Code style; validator: Long-running smoke test). Check:
-- Section ordering reads naturally end-to-end
-- Tone is consistent across sections (different agents → different voice; flag inconsistencies)
-- Cross-references are correct (e.g., does the smoke-test section assume pre-commit is set up, and does the pre-commit section mention skipping for the smoke-test path?)
-- Code examples are runnable as written:
-  - Make targets referenced (`make test-short`, `make pre-commit-install`, etc.) exist in the actual Makefile
-  - Shell command syntax is correct
-  - File paths referenced exist
-
-### 5. mdBook config
-
-Read `book/book.toml`. Check:
-- All required mdBook config fields are present (`title`, `authors`, `language`, `src`, output settings)
-- Theme name is a real mdBook theme (`rust`, `navy`, `ayu`, `light`, `coal`, `dark`)
-- `git-repository-url` and any other URL fields point to correct repos
-
-### 6. CI/workflow YAML
-
-Read `.github/workflows/book.yml`, `spellcheck.yml`, and `ci.yml`. Check:
-- YAML is well-formed (no tab characters in YAML files; only spaces — though `make` Makefile recipes need tabs, that's a different file type)
-- Step names are descriptive
-- `destination_dir: book` in `book.yml` matches the README link path
-- `paths:` filters are sensible
-
-### 7. Issue/resolved file consistency
-
-Read `issues/issue_sprint0_*.md` and `issues/resolved_sprint0_*.md`. Check:
-- Issue severity levels are reasonable (no "blocker" left open)
-- Resolution descriptions are concrete and verifiable
-- The format matches the template in `issues/README.md`
-- No issues left in `Status: open` that should have been resolved
-
-### 8. Prompts README
-
-Read `prompts/README.md`. Check:
-- Convention is clearly explained
-- Examples in the README work as written (paths exist, `Agent` tool call shape is right)
-- Anything missing for a future contributor to dispatch a sprint without further context?
-
-### 9. Cross-document consistency
-
-A handful of cross-doc checks:
-- Does the chapter outline in `book/src/SUMMARY.md` match the outline in `docs/PLAN.md` "Book outline" section? (They should be identical; flag any drift.)
-- Does the per-sprint book chapter mapping in `docs/PLAN.md` match the sprint-X placeholders in the actual chapter stubs? (Spot-check 5-6 chapters.)
-- Does CONTRIBUTING.md mention the `prompts/` folder and the agent dispatch pattern? (If not, that's a useful addition — flag as low-severity issue.)
-
-## Issue file format
-
-For each issue found, file in `issues/issue_sprint0_tech-writer.md`:
+File all findings to `/Users/j.lucia/Code/github/awsbnkctl/issues/issue_sprint0_tech-writer.md`:
 
 ```markdown
 # Sprint 0 — tech writer issues
 
 ## Issue 1: short title
-**Severity**: low | medium | high
+**Severity**: low | medium | high | blocker
 **Status**: open
-**Description**: what's wrong, where, how a reader would notice
-**Files affected**: list of paths (with line numbers if useful)
-**Proposed fix**: concrete change recommendation
+**Description**: what was found, with quotes / file:line references
+**Files affected**: list of paths
+**Proposed fix**: a one-sentence suggestion (integrator decides whether to act)
 ```
 
-If you genuinely find nothing worth flagging, create the file with the heading and `*No issues filed.*`. Tech-writer reviews can legitimately be clean for skeleton-heavy sprints like Sprint 0; don't manufacture issues.
+If everything is clean: heading + `*No issues filed.*` + one sentence about what you reviewed.
 
-## Final report (under 200 words)
+Severity guide:
+- **blocker**: the binary doesn't build, build instructions are wrong, a critical cross-link is broken (e.g., README → MIGRATING)
+- **high**: scope contradictions across PLAN/PRD/README, terminology drift on load-bearing terms (the SR-IOV decision specifically)
+- **medium**: stale references, minor cross-link breakage, plausible-but-not-tested CI red flag
+- **low**: typos, prose polish, formatting nits
 
-Return a concise summary:
-- Files reviewed (counts by category — book chapters, workflows, top-level docs, etc.)
-- Issues filed (counts by severity)
-- Top 3 noteworthy observations even if not filed as issues (style suggestions, future improvements, things to keep in mind for Sprint 1+ tech-writer reviews)
-- Whether you spotted any drift between docs/PLAN.md and the actual artifacts
+## Verification before reporting done
 
-Do NOT edit any files. Do NOT commit anything. Read-only review.
+- You've actually run `make build` and exercised the binary (not just read the files).
+- Every issue you filed cites file:line references where applicable.
+- You've read all three sibling agents' issue files before drafting your own (cross-reference any of their open issues in yours if they connect).
+- You did NOT edit any project files — your issue file is your only output.
+
+## Final report
+
+Under 200 words:
+- Files reviewed (counts)
+- Build / smoke-test result of the binary
+- Number of issues filed (with severity breakdown)
+- Sibling-agent issue files you cross-referenced
+- Whether the sprint is, in your judgement, ready for the integrator's commit (binary identity-rewrite commit + clean diff) — yes / yes-with-listed-followups / no with reason
+
+Do NOT commit anything. The integrator commits the aggregated four-agent output (and decides whether to act on any of your filed issues before the commit, or to file them as open and act later).
