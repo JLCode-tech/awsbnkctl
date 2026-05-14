@@ -1,59 +1,54 @@
-You are the architect agent for Sprint 0 of the roksbnkctl project. Set up the mdBook infrastructure for the web book titled "Deploying and Testing BIG-IP Next for Kubernetes with roksbnkctl".
+You are the architect agent for Sprint 0 of the `awsbnkctl` project. The repo is a hard fork of `jgruberf5/roksbnkctl` (IBM Cloud ROKS) being retargeted at AWS EKS with self-managed SR-IOV node groups. Sprint 0's theme is "identity rewrite + IBM strip + AWS stub".
 
-Project location: `/mnt/d/project/roksbnkctl/`. This is a Go CLI tool that deploys F5 BIG-IP Next for Kubernetes onto IBM Cloud ROKS, with vendored Terraform under `terraform/`. The book will be the canonical user-facing documentation surface.
+Project location: `/Users/j.lucia/Code/github/awsbnkctl/`. Go module currently `github.com/jgruberf5/roksbnkctl` (the staff agent rewrites this to `github.com/JLCode-tech/awsbnkctl` in their tasks — do not touch the module path yourself). The `upstream` git remote points at `https://github.com/jgruberf5/roksbnkctl.git`.
 
-The full 32-chapter outline lives in `/mnt/d/project/roksbnkctl/docs/PLAN.md` — search that file for "Book outline" to find the complete chapter list across 9 Parts (Concepts, Getting Started, Cluster Lifecycle, Configuration, Remote Execution, Testing, Operations, Reference, Contributing). The same PLAN.md has a "Per-sprint book chapters (cumulative)" table mapping each chapter number to the sprint that will draft it — use that to write the right "coming in Sprint X" placeholder in each stub.
+**Read first** before any edits:
 
-## Your tasks
+1. `docs/PLAN.md` Sprint 0 section — your scope is constrained to the prose deliverables there.
+2. `docs/prd/00-OVERVIEW.md` — confirms the inheritance map; PRDs 01-06 are inherited verbatim from roksbnkctl, PRDs 07-08 are net-new.
+3. `docs/prd/07-EKS-CLUSTER-SRIOV.md` — the load-bearing design decision; sanity-check that the spike protocol and option matrix make sense before sprint dispatch.
+4. `agents/README.md` and `agents/architect.md` — your own role definition. Read for grounding.
+5. The working tree on `main` (uncommitted): `README.md`, `CHANGELOG.md`, `MIGRATING.md`, `docs/PLAN.md`, `docs/prd/00-OVERVIEW.md` (rewritten); `docs/prd/07-EKS-CLUSTER-SRIOV.md` (new). These were drafted by the integrator pre-sprint — your job is to verify and finalise, not redo.
 
-**Coordinate with parallel agents**: A staff-engineer agent is editing internal/cli/doctor.go + .github/workflows/ci.yml + scripts/pre-commit.sh + Makefile (build/test/lint targets) + CONTRIBUTING.md (Style/Tests/Pre-commit sections). A validator agent is editing tools/docker/ + .github/workflows/spellcheck.yml + cspell.json + CONTRIBUTING.md (Smoke test section). Do not touch their files. For Makefile, append new targets only — do not edit existing targets. For CONTRIBUTING.md, do not write to it (the others will).
+## Coordinate with parallel agents
 
-1. Create `book/book.toml` with:
-   - `title = "Deploying and Testing BIG-IP Next for Kubernetes with roksbnkctl"`
-   - `authors = ["roksbnkctl maintainers"]`
-   - `language = "en"`
-   - `src = "src"`
-   - `[output.html]` section with `git-repository-url = "https://github.com/jgruberf5/roksbnkctl"`, `default-theme = "rust"`, `[output.html.search]` with `enable = true`
+A **staff** agent is rewriting the Go module path, renaming `cmd/roksbnkctl/` → `cmd/awsbnkctl/`, deleting `internal/ibm/` + `internal/cos/`, deleting `terraform/modules/roks_cluster/`, stubbing `internal/aws/` and `terraform/modules/eks_cluster/`, and updating `Makefile` / `.goreleaser.yml` / `embedded.go` references. **Do not touch any `.go` file, `go.mod`, `Makefile`, `.goreleaser.yml`, or `terraform/**` content.**
 
-2. Create `book/src/SUMMARY.md` reflecting the 32-chapter outline from docs/PLAN.md. Use kebab-case filenames (e.g. `[What is BIG-IP Next for Kubernetes (BNK)](./01-what-is-bnk.md)`). Group by Part with `# Part I — Concepts` style headers (mdBook accepts these).
+A **validator** agent is updating `.github/workflows/*.yml`, `cspell.json`, `tools/docker/` matrix, and the e2e test scripts. **Do not touch `.github/workflows/`, `cspell.json`, `tools/`, or `scripts/`.**
 
-3. Create one stub markdown file per chapter under `book/src/`. Each stub:
-   - `# Chapter title` h1 matching the SUMMARY entry
-   - 2-3 line "*Coming in Sprint X.*" placeholder paragraph in italics, where X is the sprint slated to draft it (look up in docs/PLAN.md "Per-sprint book chapters" table)
-   - For Sprint 7 chapters or those without a clear sprint, say "*Polished in Sprint 7 (book launch).*"
+A **tech-writer** agent runs after you, read-only — they will catch anything you missed, so don't worry about exhaustive cross-link audits.
 
-4. Create `book/src/preface.md` — a brief "How to read this book" intro: who it's for (BNK evaluators, F5 SEs, customer engineers), linear vs reference, prerequisites (basic IBM Cloud + Kubernetes familiarity).
+## Your scope
 
-5. Create `.github/workflows/book.yml` that:
-   - Triggers on `push: branches: [main], paths: ['book/**', '.github/workflows/book.yml']`
-   - Job: ubuntu-latest, steps:
-     1. `actions/checkout@v4`
-     2. `peaceiris/actions-mdbook@v2` with `mdbook-version: 'latest'`
-     3. `run: mdbook build book/`
-     4. `peaceiris/actions-gh-pages@v4` with `github_token: ${{ secrets.GITHUB_TOKEN }}`, `publish_dir: ./book/book`, `publish_branch: gh-pages`
-     5. `permissions:` block at job level granting `contents: write`
+Prose surface only:
+- `README.md`, `CHANGELOG.md`, `MIGRATING.md` (verify / final polish; the integrator drafted them pre-sprint)
+- `docs/PLAN.md` (verify / final polish)
+- `docs/prd/00-OVERVIEW.md` (verify / final polish)
+- `docs/prd/07-EKS-CLUSTER-SRIOV.md` (verify / final polish)
+- `agents/architect.md`, `agents/staff.md`, `agents/validator.md`, `agents/tech-writer.md` — light touch-up only where wording references roksbnkctl specifics in a way that misleads an awsbnkctl agent (e.g., references to "ROKS cluster" in examples that should now read "EKS cluster")
+- `book/src/preface.md` — if it explicitly names `roksbnkctl`, retarget to `awsbnkctl`; defer chapter rewrites to Sprint 5
 
-6. Update `README.md` (one targeted edit only): add a single line near the top of the README, after the H1 "# roksbnkctl" but before the existing intro text:
-   `> 📖 **[Read the book](https://jgruberf5.github.io/roksbnkctl/book/)** — _Deploying and Testing BIG-IP Next for Kubernetes with roksbnkctl_`
+Out of scope this sprint: rewriting book chapters (Sprint 5 owns that). Stub-only updates to chapter titles in `book/src/SUMMARY.md` are acceptable but not required.
 
-7. Update `Makefile` — APPEND ONLY (do not modify existing targets). Add at the bottom:
-   ```
-   .PHONY: book book-serve book-clean
+## Tasks (priority order)
 
-   book:
-       mdbook build book/
+1. **Audit the integrator's drafts.** Walk `README.md`, `CHANGELOG.md`, `MIGRATING.md`, `docs/PLAN.md`, `docs/prd/00-OVERVIEW.md`, `docs/prd/07-EKS-CLUSTER-SRIOV.md` and confirm:
+   - No `roksbnkctl` / `ibmcloud` / `ROKS` / `COS` references remain that would mislead a new contributor (allowed in: fork-relationship sections, MIGRATING cross-references, CHANGELOG fork-point notes).
+   - PRD 00's inheritance map matches the actual PRD filenames in `docs/prd/`.
+   - PLAN.md's per-sprint deliverables list is realistic and the dependency rationale matches PRD 07's design.
+   - `docs/prd/07-EKS-CLUSTER-SRIOV.md`'s spike protocol is concrete enough for the Sprint 1 staff agent to execute.
 
-   book-serve:
-       mdbook serve book/ --open
+2. **Retarget the `agents/` role definitions** if any of them name roksbnkctl-specific paths, examples, or terminology in a way an awsbnkctl agent would misread. Most of `agents/` is tool-agnostic and ports unchanged; flag any rewrites you make in your final report.
 
-   book-clean:
-       rm -rf book/book
-   ```
-   (Note: real Makefile recipe lines need literal tab indentation, not spaces.)
+3. **Touch `book/src/preface.md`** if it names `roksbnkctl` directly. Replace `roksbnkctl` → `awsbnkctl` and update the one-sentence "what this is" framing. Defer chapter content rewrites to Sprint 5.
+
+4. **Update `book/src/SUMMARY.md` chapter titles** (titles only, not chapter bodies) to match the awsbnkctl outline in `docs/PLAN.md` § "Book outline". Chapter 2 should read "Why EKS + self-managed SR-IOV node groups"; chapter 25 should read "S3 (and optional ECR) supply chain"; chapter 33 should be added if missing. Each touched chapter's body file should have its `# H1` title updated to match — body content stays as "Coming in Sprint X" stubs.
+
+5. **Cross-link sanity check.** Verify every relative link in `README.md`, `CHANGELOG.md`, `MIGRATING.md`, `docs/PLAN.md`, `docs/prd/00-OVERVIEW.md`, `docs/prd/07-EKS-CLUSTER-SRIOV.md` resolves to a file that exists.
 
 ## Issue tracking
 
-If you encounter ambiguities, conflicts, or things you can't complete cleanly, document them in `/mnt/d/project/roksbnkctl/issues/issue_sprint0_architect.md` using this format:
+File any issues to `/Users/j.lucia/Code/github/awsbnkctl/issues/issue_sprint0_architect.md`:
 
 ```markdown
 # Sprint 0 — architect issues
@@ -66,22 +61,27 @@ If you encounter ambiguities, conflicts, or things you can't complete cleanly, d
 **Proposed fix**: how to resolve
 ```
 
-If everything goes cleanly, create the issues file with just the heading and a `*No issues filed.*` note.
+If everything is clean, create the file with the heading + `*No issues filed.*`.
+
+Severity guide:
+- **blocker**: would prevent the integrator's commit from being valid (broken link, contradicting facts across PRDs, missing PRD referenced from PLAN)
+- **high**: misleading wording or scope ambiguity that would cause a Sprint 1 agent to make a wrong call
+- **medium**: editorial inconsistencies (terminology drift between docs, stale references)
+- **low**: typos, formatting nits
 
 ## Verification before reporting done
 
-- All chapter files referenced in SUMMARY.md exist (no broken links)
-- `mdbook build book/` succeeds locally if mdBook is installed (try `which mdbook` first; if not installed, skip this check and note in the issues file)
-- Existing files were not deleted; only README.md and Makefile were edited (append-only on Makefile)
-- The book.yml workflow YAML is valid (no tabs in YAML, only spaces)
+- Grep for `roksbnkctl` across the files in your scope; every hit is in an allowed context (fork-relationship sections, MIGRATING cross-references, CHANGELOG fork-point notes, upstream URL references).
+- Grep for `ibmcloud` / `ROKS` / `COS` across your scope; same check.
+- Every relative link in the touched files resolves.
+- `mdbook build book/` still succeeds (if mdbook is on PATH; if not, skip and note in the issue file).
 
 ## Final report
 
-Return a concise summary (under 200 words):
-- Files created (counts + key paths)
-- Files edited
-- Whether mdbook was available locally and whether the build worked
-- Whether you filed any issues
-- Anything the integrator should be aware of
+Return under 200 words:
+- Files audited (no edit needed) vs. files edited (with reason)
+- Any issues filed (count + severity breakdown)
+- Anything the integrator should know before committing
+- Whether the prose surface is internally consistent (PRD ↔ PLAN ↔ README all agree on scope, sprint count, milestones)
 
-Do NOT commit anything. The integrator will commit the aggregated work.
+Do NOT commit anything. The integrator commits the aggregated four-agent output.
