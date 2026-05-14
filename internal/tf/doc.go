@@ -1,5 +1,5 @@
 // Package tf wraps hashicorp/terraform-exec to drive `terraform init /
-// plan / apply / destroy` against the pinned TF source for a roksbnkctl
+// plan / apply / destroy` against the pinned TF source for a awsbnkctl
 // workspace.
 //
 // Three layers:

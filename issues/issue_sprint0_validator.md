@@ -1,68 +1,118 @@
 # Sprint 0 — validator issues
 
-## Issue 1: stale `bnkctl` reference in docs/E2E_TEST.md
+## Issue 1: cspell dictionary still carries IBM-specific entries
 **Severity**: low
 **Status**: open
-**Description**: Post-rename sweep missed one occurrence of the old name
-in the E2E test plan doc. Line 46 reads "Validates that `cluster
-register` correctly discovers and persists the identity of a cluster
-bnkctl didn't itself create." — the bare `bnkctl` here should read
-`roksbnkctl`. Cosmetic; doesn't affect any code or test runs. The
-script `scripts/e2e-test.sh` itself is clean (verified — all references
-say `roksbnkctl`, log dir is `/tmp/roksbnkctl-e2e`, env var is
-`ROKSBNKCTL`).
-**Files affected**: `docs/E2E_TEST.md` (line 46)
-**Proposed fix**: One-character edit — replace `bnkctl` with
-`roksbnkctl` on that line. Trivial; can ride along with any future doc
-PR.
+**Description**: The IBM-specific dictionary entries (`IBMCLOUD`,
+`ibmcloud`, `ROKS`, `roks`, `OpenShift`, `openshift`, `COS`, `SCC`, `oc`,
+`restricted-v2`) were retained in `cspell.json` because the inherited
+`book/src/` chapters (still IBM-shaped pending Sprint 5's book retarget)
+contain heavy usage — dropping the entries in Sprint 0 would have
+newly red-x'd cspell against architect-touched prose and tripped the
+blocker-severity threshold defined in this brief. Sprint 5 (book
+retarget) owns removing these entries in the same commit that rewrites
+the IBM-shaped chapters.
+**Files affected**: `cspell.json` (lines 162-174)
+**Proposed fix** (for Sprint 5 validator): once `book/src/02-why-eks.md`,
+`book/src/25-s3-supply-chain.md`, etc. land and the chapter-by-chapter
+IBM references are gone, drop the IBM entries from `cspell.json` in the
+same PR. Verify with `npx cspell --config cspell.json 'book/src/**/*.md'
+'docs/**/*.md'` — must stay green or have new exceptions documented.
 
-## Issue 2: `BNKCTL_HOME` env var — N/A (no such variable referenced)
-**Severity**: informational
-**Status**: resolved
-**Description**: The validator brief asked to verify
-`BNKCTL_HOME` → `ROKSBNKCTL_HOME` was renamed in `scripts/e2e-test.sh`.
-Search shows the script never references any `*_HOME` env variable —
-state location is hardcoded as `~/.roksbnkctl/...` and there is no
-overrideable home env. No action required.
-**Files affected**: none
-**Proposed fix**: none
+## Issue 2: tool-image workflow now single-image; Sprint 1 to add AWS replacement
+**Severity**: medium
+**Status**: open
+**Description**: `.github/workflows/tools-images.yml`'s build matrix
+was `[ibmcloud, iperf3]`. The `ibmcloud` entry was dropped in Sprint 0
+because the staff agent is deleting `tools/docker/ibmcloud/`. The
+matrix now only carries `iperf3` (cloud-agnostic, kept). Sprint 1 needs
+to author the AWS-flavoured replacement image (working name:
+`tools-aws`, carrying `aws` CLI + `kubectl` + `eksctl` for the docker
+exec-backend's AWS code paths) and add it back to the matrix. The
+analogous Makefile target (`build-aws`) needs adding to
+`tools/docker/Makefile` at the same time.
+**Files affected**: `.github/workflows/tools-images.yml`,
+`tools/docker/Makefile`
+**Proposed fix** (for Sprint 1 staff): land `tools/docker/aws/Dockerfile`
+with `awscli` + `kubectl` + `eksctl` baked in; add `aws` to the matrix in
+`tools-images.yml`; add the `build-aws` target to `tools/docker/Makefile`
+mirroring the inherited `build-ibmcloud` shape (repo-root context for
+the Go build stage if the image bundles awsbnkctl itself).
 
-## Issue: future testing improvements (roadmap, not bugs)
+## Issue 3: `tools/refgen/` Go source still uses old module path; staff agent's domain
+**Severity**: high
+**Status**: open
+**Description**: `tools/refgen/cobra-md/main.go`,
+`tools/refgen/cobra-md/main_test.go`, and `tools/refgen/tfvars-md/main.go`
+still import `github.com/jgruberf5/roksbnkctl/internal/cli` and embed
+`roksbnkctl` strings in generated-output literals. These files are .go
+source — staff agent's domain per the brief's off-limits contract —
+but the staff agent's module-path rewrite focused on `cmd/awsbnkctl/`
+and `internal/`; the `tools/refgen/` subdirs need the same treatment.
+Same applies to `tools/ciwatch/go.mod` and `tools/sprintwatch/go.mod`
+which still declare `module github.com/jgruberf5/roksbnkctl/tools/...`.
+Sprint 5 owns the actual regeneration of the reference chapters via
+these tools, but the import-path rewrite needs to land first or `go
+build ./tools/refgen/...` will fail once the staff agent's main-module
+deletion of `github.com/jgruberf5/roksbnkctl` completes.
+**Files affected**:
+- `tools/refgen/cobra-md/main.go` (import + comments)
+- `tools/refgen/cobra-md/main_test.go` (import + expected-output assertions)
+- `tools/refgen/tfvars-md/main.go` (comment + chapter-cross-ref string)
+- `tools/refgen/tfvars-md/main_test.go` (`ibmcloud_api_key` /
+  `roks_cluster` literals — these will need updating once the staff
+  agent's `terraform/modules/eks_cluster/` lands and the variables
+  rename in `terraform/variables.tf`)
+- `tools/ciwatch/go.mod` (module path)
+- `tools/sprintwatch/go.mod` (module path)
+**Proposed fix** (carry to staff agent's Sprint 0 follow-up, or Sprint 1
+staff): rerun the import-path sed pass with the glob extended to
+`tools/**/*.go` and `tools/**/go.mod`. Update string literals in
+`tools/refgen/**` to match the new binary name. Sprint 5's chapter
+regeneration depends on these compiling.
 
-**Severity**: roadmap
-**Status**: informational
-**Description**: Survey of the current `internal/` test footprint to
-inform Sprint 1+ planning. Not bugs — these are forward-looking notes
-about which packages most need test scaffolding additions as new
-sprints land. The PLAN.md per-sprint testing additions table already
-covers most of this; this entry confirms the current baseline that
-those additions build on.
-
-### Current internal/ package test coverage
-
-| Package | Has tests | Test files | Approx LOC ratio (test/source) | Recommended addition |
-|---|---|---|---|---|
-| `internal/cli` | no | — | 0 / ~2200 | Cobra subcommand wiring is mostly thin glue; defer dedicated unit tests until Sprint 1's `--on` flag adds branching that's worth covering. Integration via `scripts/e2e-test.sh`. |
-| `internal/config` | yes | `context_test.go` (13 tests) | ~268 / ~880 | Decent coverage of context resolution. **Sprint 3** cred-resolver work (PRD 04) will add `cred/resolver_test.go` next door — keep `config` unit tests close to the schema. |
-| `internal/cos` | no | — | 0 / ~265 | Add table-driven tests for object key/path parsing. **testcontainers-go** with [MinIO image](https://hub.docker.com/r/minio/minio) would let us exercise put/get/delete against a real S3 endpoint — perfect Sprint 3 add when the docker backend lands. |
-| `internal/doctor` | no | — | 0 / ~258 | Sprint 0's doctor refactor (staff-engineer) introduces `Check{Name, Status, Detail}` — unit tests can be table-driven over check structs. Add alongside that refactor. |
-| `internal/ibm` | yes (one) | `client_test.go` (3 tests) | ~89 / ~860 | Coverage thin. The cluster_config / cluster_discover / cos_instance / identity paths are mostly IBM SDK pass-through, but argument-mapping tests would catch regressions cheaply. **httptest.Server** stubbing IBM endpoints (PLAN.md Sprint 3 mentions this) is the right tool — no testcontainers needed. |
-| `internal/k8s` | no | — | 0 / ~340 | Sprint 2 (PRD 02 — kubectl internalization) explicitly adds `client-go/kubernetes/fake` clientset tests. **kind**-based integration tests come in Sprint 4 per the PLAN.md testing pyramid; could also use **testcontainers-go**'s [k3s module](https://golang.testcontainers.org/modules/k3s/) for lighter-weight kube-API in-process testing. |
-| `internal/test` | no | — | 0 / ~457 | DNS probe gets miekg-with-stub-server unit tests in Sprint 5. Connectivity probe could be tested against a `httptest.NewTLSServer`. Throughput probe is the one most likely to need testcontainers — an iperf3 server container as the SUT in CI. |
-| `internal/tf` | yes | `fetch_test.go` (6), `source_test.go` (4), `vars_test.go` (5) | ~271 / ~700 | Strong coverage of vars + fetch + source resolution. The `terraform.go` runner itself (`Apply`, `Destroy`) is untested and probably out-of-reach for unit testing — terraform-exec needs a real TF binary. **testcontainers-go** with `hashicorp/terraform` image becomes relevant when Sprint 5 lands the docker backend for terraform. |
-| `internal/ui` | n/a | — | 0 / ~4 | Stub package (just `doc.go`). Skip. |
-
-### testcontainers-go ranking — most-to-least valuable
-
-1. **`internal/remote` (Sprint 1)** — primary target. `sshd` container is the only sensible way to integration-test the SSH client without a real jumphost. PLAN.md Sprint 1 already calls this out.
-2. **`internal/exec` (Sprint 3+)** — docker backend tests use a local Docker daemon directly (PLAN.md mentions this); k8s backend tests use `kind` per PLAN.md, which testcontainers-go's k3s module could replace for faster CI.
-3. **`internal/cos`** — MinIO container would give us a self-contained S3 endpoint. Worthwhile when the cos package grows beyond simple pass-through; for now httptest is enough.
-4. **`internal/test/throughput`** — iperf3 container as both client and server. Lower priority since the k8s backend test path naturally exercises this.
-
-**Files affected**: forward-looking — no current files
-**Proposed fix**: Track per-sprint additions against this table; revisit at Sprint 3 boundary to confirm the cred-resolver/redactor unit tests land alongside the docker-backend integration tests.
+## Issue 4: e2e-test.sh phase shape changed substantially; PRD step matrix to follow
+**Severity**: low
+**Status**: open
+**Description**: The Sprint 0 retarget reshaped `scripts/e2e-test.sh`
+into a flat skip-stub: every phase A-N + L-DNS is a one-line skip
+banner with no sub-step assertions. The inherited script had ~40
+numbered sub-steps (A1-A5, B1-B10, etc.); these are dropped from the
+script body in Sprint 0 but the sub-step contracts will need to be
+re-authored in `docs/prd/05-E2E-TEST-PLAN.md` when Sprint 4 rehydrates
+the AWS-shaped driver. The sub-step contracts that survive verbatim
+(workspace ops in phase E, helpers like `step` / `capture` /
+`assert_contains` / `assert_matches`) need to come back when phase A
+is rehydrated.
+**Files affected**: `scripts/e2e-test.sh` (reshaped),
+`scripts/e2e-test-backends.sh` (reshaped),
+`scripts/e2e-test-full.sh` (reshaped),
+`docs/prd/05-E2E-TEST-PLAN.md` (Sprint 4 architect to retarget)
+**Proposed fix** (Sprint 4 architect + staff): when authoring the
+AWS-shaped phase A (sanity), reintroduce the `step` / `capture` /
+`assert_contains` helpers (lifted verbatim from the upstream
+`jgruberf5/roksbnkctl@v1.2.1` tree's `scripts/e2e-test.sh` lines
+33-128) before the first phase body. Same for phases B-H when Sprint 3
+delivers `awsbnkctl up cluster`.
 
 ---
 
-*No actionable bugs filed beyond Issue 1 (cosmetic doc nit). Issue 2 is
-informational confirmation. Everything else above is roadmap.*
+*Verification before report:*
+- Every `.github/workflows/*.yml` parses as valid YAML
+  (`python3 -c "import yaml; yaml.safe_load(open(...))"` — all 6 files OK).
+- `bash -n scripts/*.sh` confirms all four scripts have valid syntax.
+- `bash scripts/e2e-test.sh` exits 0 with the
+  "Sprint 0 stub: all e2e phases skipped" banner.
+- `bash scripts/e2e-test-full.sh` exits 0 with the analogous banner.
+- `bash scripts/e2e-test-backends.sh` exits 0 with the analogous banner.
+- `npx cspell --config cspell.json` against `book/src/**/*.md` and
+  `docs/**/*.md` shows the pre-existing baseline of unknown words
+  (753 across 47 files — none introduced by Sprint 0 edits; existing
+  CI workflow `spellcheck.yml` runs with `continue-on-error: true` so
+  these don't block).
+- `go test ./...` not run by validator: `go` is not installed on this
+  dev box. Staff agent's green-gate confirmation stands as the
+  authoritative test-suite run.
+- `mdbook build book/` not run: `mdbook` is not installed on this dev
+  box. Architect agent's chapter-stub edits remain markdown-only;
+  validator-scoped changes did not touch any `book/` file.

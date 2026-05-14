@@ -80,7 +80,7 @@ func startSSHContainer(ctx context.Context, t *testing.T) *sshFixture {
 
 	// Marshal the private half to PEM so tests that exercise the
 	// file-key-source path have something on disk to point at.
-	pemBlock, err := ssh.MarshalPrivateKey(priv, "roksbnkctl-integration")
+	pemBlock, err := ssh.MarshalPrivateKey(priv, "awsbnkctl-integration")
 	if err != nil {
 		t.Fatalf("ssh.MarshalPrivateKey: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestIntegration_Stdout_StreamsAllLines(t *testing.T) {
 
 // TestIntegration_StderrSeparation confirms the two streams stay isolated
 // at the wire level. A bug here would show up as merged output in
-// `roksbnkctl exec --on jumphost -- some-tool` and corrupt downstream
+// `awsbnkctl exec --on jumphost -- some-tool` and corrupt downstream
 // pipelines that expect clean stderr/stdout.
 func TestIntegration_StderrSeparation(t *testing.T) {
 	t.Setenv("ROKSBNKCTL_HOME", t.TempDir())
@@ -335,7 +335,7 @@ func TestIntegration_StderrSeparation(t *testing.T) {
 
 // TestIntegration_HostKeyTOFU is intentionally deferred to a follow-up
 // commit: PRD 01 §Host key handling specifies a TOFU flow against
-// `~/.roksbnkctl/known_hosts` plus an `--insecure-host-key` flag, but
+// `~/.awsbnkctl/known_hosts` plus an `--insecure-host-key` flag, but
 // the exact API shape staff exposes for *injecting* a custom known_hosts
 // path and a per-call insecure override isn't pinned down in their spec
 // (it could be on Target, on RunOpts, on a separate ConnectOpts, or only
@@ -348,7 +348,7 @@ func TestIntegration_StderrSeparation(t *testing.T) {
 
 // TestIntegration_ContextCancellation confirms a cancelled context tears
 // down a long-running remote command within ~5s. Without this, ctrl-C
-// during `roksbnkctl exec --on jumphost -- sleep 30` would hang for the
+// during `awsbnkctl exec --on jumphost -- sleep 30` would hang for the
 // full 30s — bad UX.
 func TestIntegration_ContextCancellation(t *testing.T) {
 	t.Setenv("ROKSBNKCTL_HOME", t.TempDir())

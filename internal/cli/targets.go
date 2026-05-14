@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 )
 
 // Local flag values for `targets add`. Reset every invocation; cobra's
@@ -27,9 +27,9 @@ var targetsCmd = &cobra.Command{
 	Short: "Manage SSH targets used by --on",
 	Long: `Targets are named SSH endpoints stored under the workspace's
 ` + "`targets:`" + ` block. They become reachable via the persistent --on flag
-on commands like ` + "`roksbnkctl exec`" + `, ` + "`roksbnkctl shell`" + `, ` + "`roksbnkctl kubectl`" + `, etc.
+on commands like ` + "`awsbnkctl exec`" + `, ` + "`awsbnkctl shell`" + `, ` + "`awsbnkctl kubectl`" + `, etc.
 
-A jumphost target is auto-populated after a successful ` + "`roksbnkctl up`" + `
+A jumphost target is auto-populated after a successful ` + "`awsbnkctl up`" + `
 when the upstream HCL provisions one (testing_tgw_jumphost outputs).`,
 }
 
@@ -83,7 +83,7 @@ func runTargetsList(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	if len(ts) == 0 {
-		fmt.Fprintf(os.Stderr, "no targets in workspace %q (add one with `roksbnkctl targets add`)\n", cctx.WorkspaceName)
+		fmt.Fprintf(os.Stderr, "no targets in workspace %q (add one with `awsbnkctl targets add`)\n", cctx.WorkspaceName)
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -159,7 +159,7 @@ func requireWorkspace() (*config.Context, error) {
 		return nil, err
 	}
 	if cctx.Workspace == nil {
-		return nil, fmt.Errorf("workspace %q is not initialised; run `roksbnkctl init` first", cctx.WorkspaceName)
+		return nil, fmt.Errorf("workspace %q is not initialised; run `awsbnkctl init` first", cctx.WorkspaceName)
 	}
 	return cctx, nil
 }

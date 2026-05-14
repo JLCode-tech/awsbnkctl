@@ -10,7 +10,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 )
 
 // Exit codes for the SSH backend, aligned with PRD 03 §"Backend interface".
@@ -355,12 +355,12 @@ func (b *SSHBackend) ensureTool(ctx context.Context, client remoteClient, tool s
 	return 0, nil
 }
 
-// makeRemoteTempdir creates `/tmp/roksbnkctl.<random>` on the remote
+// makeRemoteTempdir creates `/tmp/awsbnkctl.<random>` on the remote
 // and returns the path. Uses `mktemp -d` so we don't fight with
 // concurrent invocations.
 func (b *SSHBackend) makeRemoteTempdir(ctx context.Context, client remoteClient) (string, error) {
 	var out bytes.Buffer
-	rc, err := client.Run(ctx, []string{"mktemp", "-d", "/tmp/roksbnkctl.XXXXXXXX"}, remote.RunOpts{
+	rc, err := client.Run(ctx, []string{"mktemp", "-d", "/tmp/awsbnkctl.XXXXXXXX"}, remote.RunOpts{
 		Stdout: &out, Stderr: io.Discard,
 	})
 	if err != nil {

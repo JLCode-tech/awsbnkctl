@@ -1,4 +1,4 @@
-# What roksbnkctl does (and doesn't do)
+# What awsbnkctl does (and doesn't do)
 
 `roksbnkctl` is a single-binary CLI for deploying and validating F5 BIG-IP Next for Kubernetes (BNK) onto IBM Cloud ROKS. It exists to compress a multi-step deployment — clone the right Terraform, configure it, run terraform, fetch a kubeconfig, install BNK, run smoke tests — into a four-command lifecycle.
 

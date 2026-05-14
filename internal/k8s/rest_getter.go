@@ -5,7 +5,7 @@ import (
 )
 
 // newRESTClientGetter builds a cli-runtime RESTClientGetter wired to the
-// roksbnkctl kubeconfig discovery rules. We delegate to cli-runtime's
+// awsbnkctl kubeconfig discovery rules. We delegate to cli-runtime's
 // own ConfigFlags and just plumb our resolved path + namespace through.
 //
 // kubeconfigPath: empty → workspace default via DefaultKubeconfigPath().

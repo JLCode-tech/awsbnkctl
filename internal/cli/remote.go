@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
-	execbackend "github.com/jgruberf5/roksbnkctl/internal/exec"
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
-	"github.com/jgruberf5/roksbnkctl/internal/tf"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/tf"
 )
 
 // rejectOnFlag is the "lifecycle commands don't support --on" gate. Used
@@ -23,11 +23,11 @@ func rejectOnFlag(cmdName string) error {
 	if flagOn == "" {
 		return nil
 	}
-	return fmt.Errorf("--on not supported on `roksbnkctl %s` in v0.7. Use --backend ssh in a future release once Phase 3 lands (see docs/prd/03-EXECUTION-BACKENDS.md)", cmdName)
+	return fmt.Errorf("--on not supported on `awsbnkctl %s` in v0.7. Use --backend ssh in a future release once Phase 3 lands (see docs/prd/03-EXECUTION-BACKENDS.md)", cmdName)
 }
 
 // dispatchRemote opens an SSH connection to the named target, runs argv
-// remotely, streams I/O, and exits roksbnkctl with the remote process's
+// remotely, streams I/O, and exits awsbnkctl with the remote process's
 // exit code (or with 126/127 on auth/connect failures per PRD 01).
 //
 // envExtra is the workspace-derived KEY=VALUE list (IBMCLOUD_API_KEY,
@@ -45,13 +45,13 @@ func dispatchRemote(ctx context.Context, target string, argv []string, envExtra 
 		return err
 	}
 	if cctx.Workspace == nil {
-		return fmt.Errorf("workspace %q is not initialised; run `roksbnkctl init` first", cctx.WorkspaceName)
+		return fmt.Errorf("workspace %q is not initialised; run `awsbnkctl init` first", cctx.WorkspaceName)
 	}
 
 	t, err := remote.LoadTarget(cctx.WorkspaceName, target)
 	if err != nil {
 		if errors.Is(err, remote.ErrTargetNotFound) {
-			return fmt.Errorf("%w (try `roksbnkctl targets list`)", err)
+			return fmt.Errorf("%w (try `awsbnkctl targets list`)", err)
 		}
 		return err
 	}
@@ -73,7 +73,7 @@ func dispatchRemote(ctx context.Context, target string, argv []string, envExtra 
 
 	client, err := remote.Connect(ctx, t)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "roksbnkctl: connect %s: %v\n", t.Name, err)
+		fmt.Fprintf(os.Stderr, "awsbnkctl: connect %s: %v\n", t.Name, err)
 		os.Exit(remote.ExitConnectFailed)
 	}
 	defer client.Close()
@@ -86,7 +86,7 @@ func dispatchRemote(ctx context.Context, target string, argv []string, envExtra 
 		TTY:    tty,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "roksbnkctl: remote run: %v\n", err)
+		fmt.Fprintf(os.Stderr, "awsbnkctl: remote run: %v\n", err)
 		os.Exit(remote.ExitAuthFailed)
 	}
 	if code != 0 {
@@ -102,12 +102,12 @@ func dispatchRemoteShell(ctx context.Context, target string) error {
 		return err
 	}
 	if cctx.Workspace == nil {
-		return fmt.Errorf("workspace %q is not initialised; run `roksbnkctl init` first", cctx.WorkspaceName)
+		return fmt.Errorf("workspace %q is not initialised; run `awsbnkctl init` first", cctx.WorkspaceName)
 	}
 	t, err := remote.LoadTarget(cctx.WorkspaceName, target)
 	if err != nil {
 		if errors.Is(err, remote.ErrTargetNotFound) {
-			return fmt.Errorf("%w (try `roksbnkctl targets list`)", err)
+			return fmt.Errorf("%w (try `awsbnkctl targets list`)", err)
 		}
 		return err
 	}
@@ -124,7 +124,7 @@ func dispatchRemoteShell(ctx context.Context, target string) error {
 
 	client, err := remote.Connect(ctx, t)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "roksbnkctl: connect %s: %v\n", t.Name, err)
+		fmt.Fprintf(os.Stderr, "awsbnkctl: connect %s: %v\n", t.Name, err)
 		os.Exit(remote.ExitConnectFailed)
 	}
 	defer client.Close()

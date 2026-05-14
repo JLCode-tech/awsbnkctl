@@ -1,4 +1,4 @@
-// Unit tests for `roksbnkctl k exec` (`internal/k8s/exec.go`).
+// Unit tests for `awsbnkctl k exec` (`internal/k8s/exec.go`).
 //
 // SPDY exec needs a real upgradeable connection — not fakeable. The
 // validation surface is what's testable: missing pod, missing command,

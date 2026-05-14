@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-// ExecOptions captures the flag-parsed inputs to `roksbnkctl k exec`.
+// ExecOptions captures the flag-parsed inputs to `awsbnkctl k exec`.
 //
 // Stdin allocates an stdin pipe to the remote process; TTY allocates a
 // PTY (use for top, bash-style interactive work). Both default to off

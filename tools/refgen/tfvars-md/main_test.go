@@ -21,6 +21,14 @@ import (
 //   - markdown tables are balanced (every `| Variable |` header has a
 //     `|---|---|---|---|---|` separator on the next line)
 func TestRun_SmokeOutput(t *testing.T) {
+	// Sprint 0 (identity rewrite + IBM strip): the live
+	// terraform/variables.tf was stripped of ibmcloud_* variables and
+	// the roks_cluster module was deleted in favour of an eks_cluster
+	// stub. This smoke test asserted the legacy ROKS shape; the
+	// AWS-shaped equivalent is reauthored in Sprint 3 once
+	// terraform/modules/eks_cluster + the four reusable modules are
+	// rewired against AWS inputs (see docs/PLAN.md § "Sprint 3").
+	t.Skip("inherited test — retargets in Sprint 3")
 	// The generator reads from `terraform/variables.tf` relative to cwd
 	// so the test has to run from the repo root.
 	repoRoot, err := findRepoRoot()
@@ -197,7 +205,7 @@ func findRepoRoot() (string, error) {
 	dir := wd
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			// Confirm it's the roksbnkctl repo by looking for
+			// Confirm it's the awsbnkctl repo by looking for
 			// terraform/variables.tf.
 			if _, err := os.Stat(filepath.Join(dir, "terraform", "variables.tf")); err == nil {
 				return dir, nil

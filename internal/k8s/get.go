@@ -15,7 +15,7 @@ import (
 	"k8s.io/kubectl/pkg/scheme"
 )
 
-// GetOptions captures the flag-parsed inputs to `roksbnkctl k get`.
+// GetOptions captures the flag-parsed inputs to `awsbnkctl k get`.
 //
 // Args is the trailing positional list (e.g. ["pods"], ["pod", "foo"],
 // or ["pods,services"]). Namespace + AllNamespaces are mutually

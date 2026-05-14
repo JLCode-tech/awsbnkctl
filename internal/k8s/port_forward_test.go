@@ -1,4 +1,4 @@
-// Unit tests for `roksbnkctl k port-forward` (`internal/k8s/port_forward.go`).
+// Unit tests for `awsbnkctl k port-forward` (`internal/k8s/port_forward.go`).
 //
 // Port-forward needs a real SPDY upgrade — not fakeable. We test the
 // option-validation surface and the Ports slice round-trip; end-to-end

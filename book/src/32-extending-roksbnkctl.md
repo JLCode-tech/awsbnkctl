@@ -1,4 +1,4 @@
-# Extending roksbnkctl
+# Extending awsbnkctl
 
 This chapter is the hacking guide for contributors. It covers the four most common extension shapes — adding a new execution backend, a new test suite, a new tool to an existing backend, a new chapter to the book — plus the PRD process the project uses to coordinate larger changes and the four-agent sprint-dispatch pattern Sprints 0-6 ran on.
 

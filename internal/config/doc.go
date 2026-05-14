@@ -4,9 +4,9 @@
 //
 // File layout:
 //
-//	~/.roksbnkctl/config.yaml             — global preferences, current_workspace
-//	~/.roksbnkctl/<workspace>/config.yaml — per-workspace inputs
-//	~/.roksbnkctl/<workspace>/state/      — terraform.tfstate, kubeconfig, scratch/
+//	~/.awsbnkctl/config.yaml             — global preferences, current_workspace
+//	~/.awsbnkctl/<workspace>/config.yaml — per-workspace inputs
+//	~/.awsbnkctl/<workspace>/state/      — terraform.tfstate, kubeconfig, scratch/
 //
 // Override the base directory via $ROKSBNKCTL_HOME (used by tests; advanced
 // users with non-home-dir state).

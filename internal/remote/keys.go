@@ -106,7 +106,7 @@ func signerFromAgent() (ssh.Signer, error) {
 	}
 	// We deliberately leak the conn for the lifetime of the process —
 	// signers from agent.Client hold a reference to it and panic if it
-	// closes mid-handshake. The socket FD is small; a roksbnkctl
+	// closes mid-handshake. The socket FD is small; a awsbnkctl
 	// invocation doesn't accumulate them.
 	return signers[0], nil
 }

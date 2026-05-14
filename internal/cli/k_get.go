@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 var (
@@ -26,12 +26,12 @@ The resource argument accepts plurals, singulars, and short names from
 RESTMapper (pods/pod/po, services/svc, deployments/deploy). Multiple
 types can be comma-separated:
 
-  roksbnkctl k get pods,services -n f5-bnk
-  roksbnkctl k get nodes -o yaml
-  roksbnkctl k get pods -A -l app.kubernetes.io/name=f5-lifecycle-operator
-  roksbnkctl k get pod my-pod -n default -o jsonpath='{.status.phase}'
+  awsbnkctl k get pods,services -n f5-bnk
+  awsbnkctl k get nodes -o yaml
+  awsbnkctl k get pods -A -l app.kubernetes.io/name=f5-lifecycle-operator
+  awsbnkctl k get pod my-pod -n default -o jsonpath='{.status.phase}'
 
-CRDs work via dynamic discovery without a hardcoded list — ` + "`" + `roksbnkctl k get
+CRDs work via dynamic discovery without a hardcoded list — ` + "`" + `awsbnkctl k get
 cneinstances` + "`" + ` resolves the same way kubectl does.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: runKGet,

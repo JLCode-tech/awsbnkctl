@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 var (
@@ -25,9 +25,9 @@ use internally, so output is byte-equivalent.
 
 Examples:
 
-  roksbnkctl k describe pod my-pod -n f5-bnk
-  roksbnkctl k describe nodes
-  roksbnkctl k describe deployment f5-lifecycle-operator -n f5-bnk`,
+  awsbnkctl k describe pod my-pod -n f5-bnk
+  awsbnkctl k describe nodes
+  awsbnkctl k describe deployment f5-lifecycle-operator -n f5-bnk`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: runKDescribe,
 	}

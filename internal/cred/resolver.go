@@ -1,5 +1,5 @@
 // Package cred is the single source of truth for credential resolution
-// across roksbnkctl execution backends.
+// across awsbnkctl execution backends.
 //
 // # Background
 //
@@ -20,7 +20,7 @@
 //
 //  1. environment — IBMCLOUD_API_KEY / IC_API_KEY / TF_VAR_ibmcloud_api_key /
 //     TF_VAR_IBMCLOUD_API_KEY / TF_VAR_IC_API_KEY (first non-empty wins)
-//  2. OS keychain — service="roksbnkctl", user="<workspace>/ibmcloud_api_key"
+//  2. OS keychain — service="awsbnkctl", user="<workspace>/ibmcloud_api_key"
 //  3. workspace config.yaml — api_key_b64 (base64-decoded)
 //  4. interactive prompt (TTY) — skipped if NonInteractive=true or stdin
 //     isn't a terminal
@@ -43,13 +43,13 @@ import (
 	"github.com/zalando/go-keyring"
 	"golang.org/x/term"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
 // keychainService is the OS-keychain "service" namespace — must match the
 // constant in internal/config/secrets.go so a key written by the legacy
 // resolver round-trips through this one.
-const keychainService = "roksbnkctl"
+const keychainService = "awsbnkctl"
 
 // apiKeyEnvVars lists the env var names (in order) the resolver consults.
 // Mirrors the legacy list in internal/config/secrets.go so behaviour is
@@ -161,7 +161,7 @@ func errNonInteractiveMiss(ws string) error {
 	if ws == "" {
 		return errors.New("no IBM Cloud API key available (set IBMCLOUD_API_KEY env var)")
 	}
-	return fmt.Errorf("no IBM Cloud API key available for workspace %q (set IBMCLOUD_API_KEY env var, store in OS keychain via `roksbnkctl init`, or add api_key_b64 to config.yaml)", ws)
+	return fmt.Errorf("no IBM Cloud API key available for workspace %q (set IBMCLOUD_API_KEY env var, store in OS keychain via `awsbnkctl init`, or add api_key_b64 to config.yaml)", ws)
 }
 
 func apiKeyFromEnv() (string, bool) {
@@ -227,7 +227,7 @@ func apiKeyFromPrompt(workspace string) (string, error) {
 		if workspace == "" {
 			return "", errors.New("no IBM Cloud API key available and stdin is not a TTY (cannot prompt; set IBMCLOUD_API_KEY)")
 		}
-		return "", fmt.Errorf("no IBM Cloud API key for workspace %q and stdin is not a TTY (cannot prompt; set IBMCLOUD_API_KEY or run `roksbnkctl init`)", workspace)
+		return "", fmt.Errorf("no IBM Cloud API key for workspace %q and stdin is not a TTY (cannot prompt; set IBMCLOUD_API_KEY or run `awsbnkctl init`)", workspace)
 	}
 	wsLabel := workspace
 	if wsLabel == "" {

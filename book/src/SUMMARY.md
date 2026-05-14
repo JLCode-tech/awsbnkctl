@@ -5,15 +5,15 @@
 # Part I — Concepts
 
 - [What is BIG-IP Next for Kubernetes (BNK)](./01-what-is-bnk.md)
-- [Why ROKS (Red Hat OpenShift on IBM Cloud)](./02-why-roks.md)
-- [What roksbnkctl does (and doesn't do)](./03-what-roksbnkctl-does.md)
+- [Why EKS + self-managed SR-IOV node groups](./02-why-roks.md)
+- [What awsbnkctl does (and doesn't do)](./03-what-roksbnkctl-does.md)
 
 # Part II — Getting Started
 
 - [Installation](./04-installation.md)
 - [Doctor: checking your environment](./05-doctor.md)
 - [Workspaces](./06-workspaces.md)
-- [Quick start: from API key to deployed BNK](./07-quick-start.md)
+- [Quick start: from AWS credentials to deployed BNK](./07-quick-start.md)
 
 # Part III — Cluster Lifecycle
 
@@ -26,7 +26,7 @@
 
 - [Workspace config (config.yaml)](./12-workspace-config.md)
 - [Terraform variables (terraform.tfvars)](./13-terraform-variables.md)
-- [Credentials and the resolver chain](./14-credentials-resolver.md)
+- [Credentials and the AWS resolver chain](./14-credentials-resolver.md)
 - [SSH targets](./15-ssh-targets.md)
 
 # Part V — Remote Execution
@@ -46,7 +46,7 @@
 # Part VII — Operations
 
 - [Day-2 ops: status, logs, k get/apply/exec](./24-day-2-ops.md)
-- [COS supply chain management](./25-cos-supply-chain.md)
+- [S3 (and optional ECR) supply chain](./25-cos-supply-chain.md)
 - [Troubleshooting](./26-troubleshooting.md)
 
 # Part VIII — Reference
@@ -59,4 +59,8 @@
 # Part IX — Contributing
 
 - [Building from source](./31-building-from-source.md)
-- [Extending roksbnkctl](./32-extending-roksbnkctl.md)
+- [Extending awsbnkctl](./32-extending-roksbnkctl.md)
+
+# Part X — Design Decisions
+
+- [The data-plane decision: SR-IOV on EKS](./33-data-plane-decision.md)

@@ -1,5 +1,5 @@
 // Package exec defines the Backend interface and per-backend
-// implementations roksbnkctl uses to run external tools (ibmcloud, kubectl,
+// implementations awsbnkctl uses to run external tools (ibmcloud, kubectl,
 // terraform, iperf3, etc.). Backends differ along network locality
 // (where the tool runs) and toolchain freshness (host install vs.
 // pinned image); see PRD 03 (docs/prd/03-EXECUTION-BACKENDS.md) for the
@@ -54,7 +54,7 @@ type Credentials struct {
 // through env vars on a single-user assumption. KUBECONFIG points at a
 // file path the caller has already written; we don't materialise it
 // here because the local backend executes in the same FS namespace as
-// roksbnkctl itself.
+// awsbnkctl itself.
 //
 // IBMCLOUD_API_KEY is also exported as IC_API_KEY because the IBM CLI
 // older versions accept both names — matches the historical workspaceEnv

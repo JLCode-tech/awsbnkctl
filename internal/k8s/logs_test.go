@@ -1,4 +1,4 @@
-// Unit tests for `roksbnkctl k logs` (`internal/k8s/logs.go`).
+// Unit tests for `awsbnkctl k logs` (`internal/k8s/logs.go`).
 //
 // LogsOptions.Run reaches a real REST config to build the typed client
 // (corev1.Pods.GetLogs streams over a real connection). The pure helper

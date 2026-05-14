@@ -1,4 +1,4 @@
-// Unit tests for `roksbnkctl k describe` (`internal/k8s/describe.go`).
+// Unit tests for `awsbnkctl k describe` (`internal/k8s/describe.go`).
 //
 // As with get_test.go, Describe drives cli-runtime's resource.Builder
 // which can't be fakeable without a real REST client. Byte-equivalence

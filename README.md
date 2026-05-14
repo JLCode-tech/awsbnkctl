@@ -2,7 +2,7 @@
 
 A single-binary CLI for deploying F5 BIG-IP Next for Kubernetes (BNK) onto AWS EKS, managing its S3-backed supply chain, and validating the deployment with built-in connectivity, DNS, and throughput tests.
 
-> **Status:** pre-v0.1 — under active construction. Forked from [`jgruberf5/roksbnkctl`](https://github.com/jgruberf5/roksbnkctl) (IBM Cloud ROKS) and being retargeted at AWS EKS with self-managed SR-IOV node groups. The roksbnkctl source is preserved on `upstream/main`; AWS-specific work lands on `main`. **Nothing in this README works yet until Sprint 1 closes** — the surface is documented up front so the implementation has a target to hit.
+> **Status:** pre-release (M0 — Sprint 0 just landed; first tagged release `v0.2` gated on Sprint 1 per [`docs/PLAN.md`](docs/PLAN.md)). Forked from [`jgruberf5/roksbnkctl`](https://github.com/jgruberf5/roksbnkctl) (IBM Cloud ROKS) and being retargeted at AWS EKS with self-managed SR-IOV node groups. The roksbnkctl source is preserved on `upstream/main`; AWS-specific work lands on `main`. **Nothing in this README works yet until Sprint 1 closes** — the surface is documented up front so the implementation has a target to hit.
 
 ## Why fork roksbnkctl instead of starting clean
 
@@ -51,7 +51,7 @@ Same 4-command lifecycle as roksbnkctl: `init` → `up` → `test` → `down`.
 
 ### Data-plane decision (load-bearing)
 
-BNK requires SR-IOV. EKS managed node groups don't expose SR-IOV cleanly, so awsbnkctl uses **self-managed node groups** on ENA-enabled instance types (`c5n.*`, `m5n.*`, `m5dn.*`) with a custom launch template, plus a Multus + SR-IOV CNI + SR-IOV device plugin DaemonSet stack on top of the standard AWS VPC CNI. This is the biggest open design surface; the trade-off vs. managed node groups (more user-managed AMI lifecycle in exchange for actual SR-IOV) is documented in `docs/prd/01-EKS-CLUSTER.md` (to be authored in Sprint 0).
+BNK requires SR-IOV. EKS managed node groups don't expose SR-IOV cleanly, so awsbnkctl uses **self-managed node groups** on ENA-enabled instance types (`c5n.*`, `m5n.*`, `m5dn.*`) with a custom launch template, plus a Multus + SR-IOV CNI + SR-IOV device plugin DaemonSet stack on top of the standard AWS VPC CNI. This is the biggest open design surface; the trade-off vs. managed node groups (more user-managed AMI lifecycle in exchange for actual SR-IOV) is documented in [`docs/prd/07-EKS-CLUSTER-SRIOV.md`](docs/prd/07-EKS-CLUSTER-SRIOV.md) (drafted in Sprint 0; finalised against spike findings in Sprint 1).
 
 ## Prerequisites (target state)
 
@@ -68,7 +68,7 @@ BNK requires SR-IOV. EKS managed node groups don't expose SR-IOV cleanly, so aws
 
 ```
 awsbnkctl/
-├── cmd/awsbnkctl/             # binary entry point (currently cmd/roksbnkctl/ — renamed in Sprint 0)
+├── cmd/awsbnkctl/             # binary entry point (renamed from cmd/roksbnkctl/ in Sprint 0)
 ├── internal/                  # Go packages (cli, tf, aws, k8s, cred, exec, test, doctor, …)
 ├── terraform/                 # the HCL deployment — embedded into the binary at build time
 ├── tools/                     # vendored tool images + cobra-md / tfvars-md reference generators

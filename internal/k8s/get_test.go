@@ -1,4 +1,4 @@
-// Unit tests for `roksbnkctl k get` (`internal/k8s/get.go`).
+// Unit tests for `awsbnkctl k get` (`internal/k8s/get.go`).
 //
 // Staff's GetOptions.Run drives cli-runtime's resource.Builder, which
 // requires a real RESTClientGetter and reaches a real cluster — not

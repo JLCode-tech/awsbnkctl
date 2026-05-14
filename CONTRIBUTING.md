@@ -1,4 +1,4 @@
-# Contributing to roksbnkctl
+# Contributing to awsbnkctl
 
 ## Setting up a contributor host
 
@@ -13,9 +13,9 @@ For Ubuntu/Debian hosts, the repository ships a one-shot installer for everythin
 What it installs (idempotent — re-running skips anything already present):
 
 - `terraform` (HashiCorp apt repo) — required for the binary's local backend
-- `helm` 3 (official apt repo) — required at `roksbnkctl up` time; terraform's `null_resource` + `local-exec` provisioners for the `cert_manager` / `flo` / `cne_instance` modules shell out to host `helm`
-- `ibmcloud` CLI + the `kubernetes-service` and `cloud-object-storage` plugins — required for the `roksbnkctl ibmcloud …` passthrough with `--backend local` and for e2e Phase B/I
-- `oc` (Red Hat OpenShift CLI, from Red Hat's mirror tarball) — required for the e2e flow's Phase B5 step (`roksbnkctl oc whoami` passthrough). The everyday `roksbnkctl k *` verbs don't need it; the passthrough does
+- `helm` 3 (official apt repo) — required at `awsbnkctl up` time; terraform's `null_resource` + `local-exec` provisioners for the `cert_manager` / `flo` / `cne_instance` modules shell out to host `helm`
+- `ibmcloud` CLI + the `kubernetes-service` and `cloud-object-storage` plugins — required for the `awsbnkctl ibmcloud …` passthrough with `--backend local` and for e2e Phase B/I
+- `oc` (Red Hat OpenShift CLI, from Red Hat's mirror tarball) — required for the e2e flow's Phase B5 step (`awsbnkctl oc whoami` passthrough). The everyday `awsbnkctl k *` verbs don't need it; the passthrough does
 - `jq`, `unzip`, `gnupg`, `openssh-client`, `python3` — dev utilities the e2e scripts and Makefile targets shell out to
 
 What it deliberately does NOT install:
@@ -27,7 +27,7 @@ What it deliberately does NOT install:
 
 For other Linux distributions (RHEL, Fedora, Arch, openSUSE, Alpine, …) and for macOS, the script doesn't auto-detect — install the prereqs manually per the per-OS recipes in [chapter 4 of the book](book/src/04-installation.md#installing-prerequisites).
 
-End users running a pre-built `roksbnkctl` binary from the GitHub Release page do **not** need this script — they only need `terraform` and (optionally) the passthrough CLIs. See the book's installation chapter for that path.
+End users running a pre-built `awsbnkctl` binary from the GitHub Release page do **not** need this script — they only need `terraform` and (optionally) the passthrough CLIs. See the book's installation chapter for that path.
 
 ## Running tests
 
@@ -69,7 +69,7 @@ catch real bugs the unit suite can't (the Sprint 1 ctx-cancel fix in
 ### Running golden tests (live cluster)
 
 `internal/k8s/golden_test.go` validates PRD 02's byte-equivalence
-acceptance criterion: `roksbnkctl k get <resource> -o yaml` must match
+acceptance criterion: `awsbnkctl k get <resource> -o yaml` must match
 `kubectl get <resource> -o yaml` for representative resources (Node,
 Pod, Service, ConfigMap), modulo necessarily-volatile fields like
 `managedFields`, `resourceVersion`, `creationTimestamp`. Gated behind a
@@ -87,7 +87,7 @@ Requirements:
   available — running without one is harmless.
 - `kubectl` on `$PATH` for the comparison side. The internalised `k get`
   is what we're validating; `kubectl get` is the reference.
-- `roksbnkctl` built and on `$PATH` (or `$ROKSBNKCTL` set to its path).
+- `awsbnkctl` built and on `$PATH` (or `$ROKSBNKCTL` set to its path).
   The test `exec`s the binary so an unbuilt working tree is detected
   cleanly.
 
@@ -132,10 +132,10 @@ locally:
 
 ```bash
 # Spin a kind cluster (one-time per workstation; reused across runs):
-kind create cluster --name roksbnkctl-test
+kind create cluster --name awsbnkctl-test
 
 # Point your kubeconfig at it:
-kind get kubeconfig --name roksbnkctl-test > ~/.kube/config-kind
+kind get kubeconfig --name awsbnkctl-test > ~/.kube/config-kind
 export KUBECONFIG=~/.kube/config-kind
 
 # Run the integration tier:
@@ -152,11 +152,11 @@ the tests.
 When you're done:
 
 ```bash
-kind delete cluster --name roksbnkctl-test
+kind delete cluster --name awsbnkctl-test
 ```
 
 The integration tests provision their own ops pod (a stand-in for
-`roksbnkctl ops install`) and tear it down via `t.Cleanup`. Leaks
+`awsbnkctl ops install`) and tear it down via `t.Cleanup`. Leaks
 indicate a test bug, not a kind problem.
 
 ### Running the full e2e
@@ -183,7 +183,7 @@ re-running or manually tearing down.
 **Required env vars**:
 
 ```bash
-IBMCLOUD_API_KEY=...                        # required
+AWS_PROFILE=...                        # required
 ./scripts/e2e-test-full.sh                  # full pass; cluster stays up on success
 ```
 
@@ -234,7 +234,7 @@ audit).
 **Pre-requisites** — different per phase:
 
 - **All phases**: a workspace + cluster brought up by a prior
-  `scripts/e2e-test.sh` run (Phase D's `roksbnkctl up`). The backends
+  `scripts/e2e-test.sh` run (Phase D's `awsbnkctl up`). The backends
   driver does NOT bring its own cluster up; it reuses the live one.
 - **Phase K (docker)**: a reachable Docker daemon (`docker info` must
   succeed). The `RUN_K6=1` opt-in additionally requires `sudo
@@ -248,7 +248,7 @@ audit).
 
 ```bash
 # After scripts/e2e-test.sh's Phase D has brought the cluster up:
-IBMCLOUD_API_KEY=... ./scripts/e2e-test-backends.sh
+AWS_PROFILE=... ./scripts/e2e-test-backends.sh
 
 # Resume from a specific phase (K, L, or M):
 PHASE_FROM=L ./scripts/e2e-test-backends.sh
@@ -260,7 +260,7 @@ DRY_RUN=1 ./scripts/e2e-test-backends.sh
 RUN_K6=1 ./scripts/e2e-test-backends.sh
 ```
 
-Per-phase logs land in `/tmp/roksbnkctl-e2e-backends/<phase>-<ts>.log`
+Per-phase logs land in `/tmp/awsbnkctl-e2e-backends/<phase>-<ts>.log`
 for forensics on failure.
 
 ### Running DNS probe unit tests
@@ -295,11 +295,11 @@ item. To validate it against a real F5 BIG-IP Next GSLB record:
 
 ```bash
 # Bring up a cluster + ops pod (Sprint 4 lifecycle):
-roksbnkctl up --auto -w demo --var-file ~/bnkfun/terraform.tfvars
-roksbnkctl ops install -w demo
+awsbnkctl up --auto -w demo --var-file ~/bnkfun/terraform.tfvars
+awsbnkctl ops install -w demo
 
 # Probe a GSLB-managed name from local + k8s vantages:
-roksbnkctl test dns \
+awsbnkctl test dns \
   --target gslb-managed.example.com \
   --type A \
   --server <gslb-vip>:53 \
@@ -312,7 +312,7 @@ roksbnkctl test dns \
 
 # To force a CI-friendly assertion that GSLB is actually doing
 # something (no silent identical-answer regression), add:
-roksbnkctl test dns ... --gslb-compare --require-divergence
+awsbnkctl test dns ... --gslb-compare --require-divergence
 # exits non-zero when gslb_divergence is false
 ```
 
@@ -333,8 +333,8 @@ deployment, or a name with strong DC-affinity DNS like
 
 The PRD 03 docker backend pulls per-tool images at runtime:
 
-- `ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud` — Ubuntu base + `ibmcloud-cli` + `container-service` plugin
-- `ghcr.io/jgruberf5/roksbnkctl-tools-iperf3` — Alpine base + `iperf3`
+- `ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud` — Ubuntu base + `ibmcloud-cli` + `container-service` plugin
+- `ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3` — Alpine base + `iperf3`
 
 Released images are built and pushed by
 `.github/workflows/tools-images.yml` on every `v*` tag push. For local
@@ -343,8 +343,8 @@ the images yourself via the `tools/docker/Makefile`:
 
 ```bash
 cd tools/docker
-make build-ibmcloud                    # ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:dev
-make build-iperf3                      # ghcr.io/jgruberf5/roksbnkctl-tools-iperf3:dev
+make build-ibmcloud                    # ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud:dev
+make build-iperf3                      # ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3:dev
 make build-all                         # both
 make clean                             # remove the local images
 ```
@@ -391,19 +391,19 @@ feedback loop — it doesn't get the change merged.
   `dominikh/staticcheck-action@v1`. Run `staticcheck ./...` locally
   if you want the same feedback before pushing.
 - **Imports** are grouped into three blocks separated by a blank line:
-  stdlib first, third-party second, project (`github.com/jgruberf5/...`)
-  third. `goimports -local github.com/jgruberf5/roksbnkctl` produces
+  stdlib first, third-party second, project (`github.com/JLCode-tech/...`)
+  third. `goimports -local github.com/JLCode-tech/awsbnkctl` produces
   this layout automatically.
 
 ## Long-running smoke test
 
 The full end-to-end test (`scripts/e2e-test.sh`) provisions a real
-ROKS cluster + BNK deployment on IBM Cloud, exercises every roksbnkctl
+ROKS cluster + BNK deployment on IBM Cloud, exercises every awsbnkctl
 verb against it, and tears down. It's the canonical "did we break
 anything" check before tagging a release.
 
 ### Prerequisites
-- `IBMCLOUD_API_KEY` env var (or extracted from `~/bnkfun/terraform.tfvars`)
+- `AWS_PROFILE` env var (or extracted from `~/bnkfun/terraform.tfvars`)
 - `~/bnkfun/terraform.tfvars` with cluster + region + RG values
 - terraform on PATH
 - kubectl, oc, ibmcloud, iperf3 on PATH (Phase 3 plans to remove these
@@ -426,7 +426,7 @@ branch nightly only, until 3 consecutive nights green, then tag.
 ## Working on the book
 
 The web book — _Deploying and Testing BIG-IP Next for Kubernetes with
-roksbnkctl_ — lives under `book/` and ships matched to each release tag.
+awsbnkctl_ — lives under `book/` and ships matched to each release tag.
 Source markdown is at `book/src/`; the build output and TOC are
 generated by [mdBook](https://rust-lang.github.io/mdBook/).
 

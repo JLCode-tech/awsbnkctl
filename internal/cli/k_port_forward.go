@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 var kPortForwardNamespace string
@@ -29,8 +29,8 @@ Port spec:
 
 Examples:
 
-  roksbnkctl k port-forward my-pod 8080:80
-  roksbnkctl k port-forward my-pod -n f5-bnk 9090:9090 8080:80`,
+  awsbnkctl k port-forward my-pod 8080:80
+  awsbnkctl k port-forward my-pod -n f5-bnk 9090:9090 8080:80`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: runKPortForward,
 	}
@@ -44,7 +44,7 @@ func init() {
 
 func runKPortForward(cmd *cobra.Command, args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: roksbnkctl k port-forward <pod> <local>:<remote> [...]")
+		return errors.New("usage: awsbnkctl k port-forward <pod> <local>:<remote> [...]")
 	}
 	pod := args[0]
 	ports := args[1:]

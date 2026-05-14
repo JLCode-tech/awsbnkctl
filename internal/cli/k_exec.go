@@ -8,7 +8,7 @@ import (
 	"golang.org/x/term"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 var (
@@ -31,13 +31,13 @@ mirror kubectl exec:
 
 Examples:
 
-  roksbnkctl k exec my-pod -- ls /tmp
-  roksbnkctl k exec my-pod -it -- bash
-  roksbnkctl k exec my-pod -c sidecar -- cat /etc/hostname
+  awsbnkctl k exec my-pod -- ls /tmp
+  awsbnkctl k exec my-pod -it -- bash
+  awsbnkctl k exec my-pod -c sidecar -- cat /etc/hostname
 
 Note: this is the cluster-side exec. The host-side equivalent is
-'roksbnkctl exec <cmd>' — distinct on purpose (PRD 02 §"Disambiguating
-roksbnkctl exec", Option B).`,
+'awsbnkctl exec <cmd>' — distinct on purpose (PRD 02 §"Disambiguating
+awsbnkctl exec", Option B).`,
 		Args:               cobra.MinimumNArgs(2), // pod + at least one cmd token
 		DisableFlagParsing: false,
 		RunE:               runKExec,
@@ -56,7 +56,7 @@ func init() {
 
 func runKExec(cmd *cobra.Command, args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: roksbnkctl k exec <pod> -- <cmd> [args...]")
+		return errors.New("usage: awsbnkctl k exec <pod> -- <cmd> [args...]")
 	}
 	pod := args[0]
 	command := args[1:]

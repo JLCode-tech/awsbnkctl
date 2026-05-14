@@ -1,4 +1,4 @@
-// Unit tests for `roksbnkctl k apply` (`internal/k8s/apply.go`).
+// Unit tests for `awsbnkctl k apply` (`internal/k8s/apply.go`).
 //
 // Apply.Run reaches a real REST config to build dynamic + discovery
 // clients (server-side apply via dynamic.Interface.Patch needs a real
@@ -131,14 +131,14 @@ func TestSplitYAML_LeadingSeparator(t *testing.T) {
 }
 
 // TestApplyPatchOptions_DefaultFieldManager: PRD 02 §Apply
-// implementation requires field-manager `roksbnkctl`.
+// implementation requires field-manager `awsbnkctl`.
 func TestApplyPatchOptions_DefaultFieldManager(t *testing.T) {
 	po := applyPatchOptions(false)
 	if po.FieldManager != FieldManager {
 		t.Errorf("FieldManager: got %q, want %q", po.FieldManager, FieldManager)
 	}
-	if FieldManager != "roksbnkctl" {
-		t.Errorf("constant FieldManager value: got %q, want \"roksbnkctl\"", FieldManager)
+	if FieldManager != "awsbnkctl" {
+		t.Errorf("constant FieldManager value: got %q, want \"awsbnkctl\"", FieldManager)
 	}
 	if po.Force != nil {
 		t.Errorf("Force should be nil when force=false; got %v", *po.Force)

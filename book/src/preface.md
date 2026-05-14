@@ -1,12 +1,14 @@
 # Preface
 
+> **Status:** scaffolding — Sprint 0 of the AWS retarget. The chapters that follow were inherited verbatim from [`roksbnkctl`](https://github.com/jgruberf5/roksbnkctl) and still describe the IBM Cloud / ROKS / OpenShift workflow. Sprint 5 rewrites every chapter that references IBM-Cloud-specific behaviour against the AWS EKS surface. Until then, swap "ROKS" → "EKS", "IBM Cloud" → "AWS", and "COS" → "S3" mentally while reading.
+
 ## Foreword
 
-Standing up F5 BIG-IP Next for Kubernetes (BNK) on IBM Cloud Red Hat OpenShift (ROKS) used to be a multi-step deployment that hit a different surface at every step. A `terraform init/plan/apply` against an HCL tree somebody handed you. A manual `ibmcloud ks cluster config` to pull a kubeconfig. A separate IBM Cloud CLI install with its own apt-source dance. A manual `oc adm policy add-scc-to-user privileged` to let iperf3 actually run. SSH plumbing, env-var plumbing, kubeconfig plumbing — each one a small thing, and together a half-day of yak-shaving before BNK was even on the cluster.
+Standing up F5 BIG-IP Next for Kubernetes (BNK) on AWS EKS hits a different surface at every step. A `terraform init/plan/apply` against an HCL tree somebody handed you. A manual `aws eks update-kubeconfig` to pull a kubeconfig. A separate `aws` CLI install with its own credential dance. Custom launch templates for SR-IOV-capable self-managed node groups. SSH plumbing, env-var plumbing, kubeconfig plumbing — each one a small thing, and together a half-day of yak-shaving before BNK is even on the cluster.
 
-`roksbnkctl` collapses that into a single static binary plus four interchangeable execution backends (`local`, `docker`, `k8s`, `ssh:<target>`) plus an opt-in in-cluster ops pod. One command brings a workspace up; one command tears it down; the connectivity, DNS, and throughput tests run from whichever network vantage the question actually requires. The tool exists because the manual path has too many moving parts for somebody who just wants to evaluate BNK or run a customer demo.
+`awsbnkctl` collapses that into a single static binary plus four interchangeable execution backends (`local`, `docker`, `k8s`, `ssh:<target>`) plus an opt-in in-cluster ops pod. One command brings a workspace up; one command tears it down; the connectivity, DNS, and throughput tests run from whichever network vantage the question actually requires. The tool exists because the manual path has too many moving parts for somebody who just wants to evaluate BNK on AWS or run a customer demo.
 
-This book is the user-facing documentation for `roksbnkctl`. It ships alongside the v1.0 binary.
+This book is the user-facing documentation for `awsbnkctl`. It will ship alongside the v1.0 binary; Sprints 1-5 land the AWS retarget of the underlying tool and chapters.
 
 ## Who this book is for
 
@@ -15,7 +17,7 @@ Four audiences:
 - **BNK evaluators** kicking the tires on F5 BIG-IP Next for Kubernetes who want a low-friction path to a working trial deployment.
 - **F5 sales engineers (SEs)** who need a repeatable demo and proof-of-concept toolchain for customer engagements.
 - **Customer engineers** standing up BNK in their own IBM Cloud account, either for evaluation or as the foundation of a production rollout.
-- **Contributors** who want to extend `roksbnkctl` — add a backend, add a test suite, ship a new chapter. See [Part IX — Contributing](./32-extending-roksbnkctl.md).
+- **Contributors** who want to extend `awsbnkctl` — add a backend, add a test suite, ship a new chapter. See [Part IX — Contributing](./32-extending-roksbnkctl.md).
 
 ## How to read this book
 
@@ -26,7 +28,7 @@ The book is organised so it can be read either way.
 
 If you have 30 minutes and an IBM Cloud account, skip straight to [Chapter 7 — Quick start](./07-quick-start.md). It's the canonical "first cluster up" walkthrough and the rest of the book makes more sense after you've seen the happy path end-to-end.
 
-Part IX is for contributors who want to build `roksbnkctl` from source or extend it.
+Part IX is for contributors who want to build `awsbnkctl` from source or extend it.
 
 ## Prerequisites
 
@@ -34,11 +36,11 @@ This book assumes:
 
 - Basic familiarity with **IBM Cloud** — you have an account, you know what an API key is, and you've used the IBM Cloud console at least once.
 - Basic familiarity with **Kubernetes** — you know what a pod, service, and namespace are; you've run `kubectl` (or `oc`) before.
-- A working terminal on Linux or macOS. Windows is supported for `roksbnkctl` itself, with documented limitations around interactive SSH (see [Chapter 16](./16-on-flag-ssh-jumphosts.md)).
+- A working terminal on Linux or macOS. Windows is supported for `awsbnkctl` itself, with documented limitations around interactive SSH (see [Chapter 16](./16-on-flag-ssh-jumphosts.md)).
 
 You do **not** need prior experience with:
 
-- **Terraform** — `roksbnkctl` embeds a vetted HCL tree and drives `terraform` for you. You can ignore the underlying HCL until you want to customise it ([Chapter 13](./13-terraform-variables.md)).
+- **Terraform** — `awsbnkctl` embeds a vetted HCL tree and drives `terraform` for you. You can ignore the underlying HCL until you want to customise it ([Chapter 13](./13-terraform-variables.md)).
 - **OpenShift specifics** — the tool treats ROKS as Kubernetes with a thin SCC + project overlay; the few OpenShift-specific gotchas are called out in [Chapter 22](./22-throughput-testing.md) and [Chapter 26](./26-troubleshooting.md).
 - **F5 BIG-IP Next** — BNK is the thing the book deploys; you don't need to be a Big-IP engineer to evaluate it. [Chapter 1](./01-what-is-bnk.md) is the 5-minute "what is this product" primer.
 
@@ -46,7 +48,7 @@ You do **not** need prior experience with:
 
 - **Code blocks**: shell commands use `bash` syntax highlighting; YAML snippets use `yaml`; HCL fragments use `hcl`; sample command output is shown in plain `text` blocks to distinguish output from input.
 - **Cross-references**: every chapter ends with a "Cross-references" section linking related chapters. Inline links use the form `[Chapter 7 — Quick start](./07-quick-start.md)` — a chapter number, an em-dash, the chapter title, and the relative path to the chapter source.
-- **PRD links**: design documents under `docs/prd/` are linked as full GitHub URLs (e.g. `https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/03-EXECUTION-BACKENDS.md`) so they resolve from the published book at GitHub Pages. The PRDs are the design surface; the book is the user surface — read PRDs only if you're contributing or want the *why* behind a design call.
-- **Forward references to post-v1.0 work**: where a feature is explicitly queued for a v1.x release (e.g. `terraform --backend k8s`, multi-hop SSH `ProxyJump`), the prose flags it in future tense and points at [`docs/PLAN.md`](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/PLAN.md) §"What's deliberately deferred to post-v1.0" for the roadmap.
+- **PRD links**: design documents under `docs/prd/` are linked as full GitHub URLs (e.g. `https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/03-EXECUTION-BACKENDS.md`) so they resolve from the published book at GitHub Pages. The PRDs are the design surface; the book is the user surface — read PRDs only if you're contributing or want the *why* behind a design call.
+- **Forward references to post-v1.0 work**: where a feature is explicitly queued for a v1.x release (e.g. `terraform --backend k8s`, multi-hop SSH `ProxyJump`), the prose flags it in future tense and points at [`docs/PLAN.md`](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/PLAN.md) §"What's deliberately deferred to post-v1.0" for the roadmap.
 
 Welcome.

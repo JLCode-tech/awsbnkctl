@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 )
 
 // genHostKey returns an ed25519 ssh.PublicKey for testing host-key

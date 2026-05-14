@@ -12,7 +12,7 @@ package exec
 //     has `bash -x` aliased on the remote).
 //
 //   - File materialization: Files entries land at
-//     /tmp/roksbnkctl.<rand>/<basename>, written via the captured mock
+//     /tmp/awsbnkctl.<rand>/<basename>, written via the captured mock
 //     client's Run invocations.
 //
 //   - Bootstrap failure matrix:
@@ -40,7 +40,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 )
 
 // — mock client surface — //
@@ -145,7 +145,7 @@ func TestSSHWrapper_NoSecretInScriptBody(t *testing.T) {
 
 	mock := &mockRemoteClient{
 		stdoutResponses: map[string]string{
-			"mktemp": "/tmp/roksbnkctl.fake1234\n",
+			"mktemp": "/tmp/awsbnkctl.fake1234\n",
 			// Force the wrapper-script fallback by failing the canary
 			// printenv (rc=1, no echo).
 		},
@@ -216,13 +216,13 @@ func TestSSHWrapper_NoSecretInScriptBody(t *testing.T) {
 }
 
 // TestSSHWrapper_FilesMaterializedAtTempDir asserts: when RunOpts.Files
-// is set, each entry is written to /tmp/roksbnkctl.<rand>/<basename>
+// is set, each entry is written to /tmp/awsbnkctl.<rand>/<basename>
 // on the remote. We capture the mock client's Run invocations for the
 // `cat > <path>` shape and confirm the basenames + paths match.
 func TestSSHWrapper_FilesMaterializedAtTempDir(t *testing.T) {
 	mock := &mockRemoteClient{
 		stdoutResponses: map[string]string{
-			"mktemp": "/tmp/roksbnkctl.fake1234\n",
+			"mktemp": "/tmp/awsbnkctl.fake1234\n",
 		},
 		respond: func(call *mockRemoteCall) {
 			joined := strings.Join(call.Argv, " ")
@@ -260,16 +260,16 @@ func TestSSHWrapper_FilesMaterializedAtTempDir(t *testing.T) {
 			Files: files,
 		})
 
-	// Look for `cat > /tmp/roksbnkctl.fake1234/<basename>` invocations.
+	// Look for `cat > /tmp/awsbnkctl.fake1234/<basename>` invocations.
 	gotBasenames := map[string]bool{}
 	for _, c := range mock.snapshot() {
 		argvStr := strings.Join(c.Argv, " ")
-		if !strings.Contains(argvStr, "/tmp/roksbnkctl.fake1234/") {
+		if !strings.Contains(argvStr, "/tmp/awsbnkctl.fake1234/") {
 			continue
 		}
 		// Extract basename from the cat-redirect — naive: last `/`.
-		idx := strings.Index(argvStr, "/tmp/roksbnkctl.fake1234/")
-		rest := argvStr[idx+len("/tmp/roksbnkctl.fake1234/"):]
+		idx := strings.Index(argvStr, "/tmp/awsbnkctl.fake1234/")
+		rest := argvStr[idx+len("/tmp/awsbnkctl.fake1234/"):]
 		// Strip a trailing single-quote / space.
 		end := strings.IndexAny(rest, "' ")
 		if end > 0 {
@@ -285,7 +285,7 @@ func TestSSHWrapper_FilesMaterializedAtTempDir(t *testing.T) {
 			base = name[i+1:]
 		}
 		if !gotBasenames[base] {
-			t.Errorf("expected to see file basename %q materialized at /tmp/roksbnkctl.<rand>/; got %v", base, gotBasenames)
+			t.Errorf("expected to see file basename %q materialized at /tmp/awsbnkctl.<rand>/; got %v", base, gotBasenames)
 		}
 	}
 }

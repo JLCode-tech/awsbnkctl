@@ -16,7 +16,7 @@ package exec
 //   - --bootstrap opt-in: missing tool without --bootstrap exits 127
 //   - Bootstrap failure modes: non-Ubuntu / sudo refused
 //   - Cleanup-on-exit: trap rm runs even on ctx cancel
-//   - File materialization: Files map → /tmp/roksbnkctl.<rand>/<basename>
+//   - File materialization: Files map → /tmp/awsbnkctl.<rand>/<basename>
 //
 // Run with:
 //
@@ -38,7 +38,7 @@ import (
 	gssh "github.com/gliderlabs/ssh"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 )
 
 // resolveSSH returns the registered SSH backend or skips the calling
@@ -279,7 +279,7 @@ func TestSSHBackend_NoSecretInArgv(t *testing.T) {
 				return 0 // tool present (we lie — we're a fake server)
 			}
 			if strings.HasPrefix(cmd, "mktemp") {
-				_, _ = io.WriteString(s, "/tmp/roksbnkctl.fake1234\n")
+				_, _ = io.WriteString(s, "/tmp/awsbnkctl.fake1234\n")
 				return 0
 			}
 			return 0
@@ -445,7 +445,7 @@ func TestSSHBackend_ContextCancel(t *testing.T) {
 				return 0
 			}
 			if strings.HasPrefix(cmd, "mktemp") {
-				_, _ = io.WriteString(s, "/tmp/roksbnkctl.fake1234\n")
+				_, _ = io.WriteString(s, "/tmp/awsbnkctl.fake1234\n")
 				return 0
 			}
 			// …then block the actual exec command on session.Context

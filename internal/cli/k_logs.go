@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 var (
@@ -23,7 +23,7 @@ func newKLogsCmd() *cobra.Command {
 		Use:   "logs <pod-name> [-n <ns>] [-c <container>] [-f] [--previous] [--since 5m] [--tail N]",
 		Short: "Stream pod logs (kubectl-equivalent direct path)",
 		Long: `Streams logs for a named pod. Differs from the top-level
-'roksbnkctl logs <component>' in that this takes a literal pod name —
+'awsbnkctl logs <component>' in that this takes a literal pod name —
 matching kubectl's surface — while the component variant maps a known
 BNK component name to a label selector.
 

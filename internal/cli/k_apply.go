@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 var (
@@ -31,9 +31,9 @@ kubectl apply --server-side --force-conflicts.
 
 Examples:
 
-  roksbnkctl k apply -f deploy.yaml -n f5-bnk
-  roksbnkctl k apply -f manifests/
-  cat deploy.yaml | roksbnkctl k apply -f -`,
+  awsbnkctl k apply -f deploy.yaml -n f5-bnk
+  awsbnkctl k apply -f manifests/
+  cat deploy.yaml | awsbnkctl k apply -f -`,
 		RunE: runKApply,
 	}
 	flags := cmd.Flags()

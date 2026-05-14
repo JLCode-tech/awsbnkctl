@@ -1,4 +1,4 @@
-# Credentials and the resolver chain
+# Credentials and the AWS resolver chain
 
 `roksbnkctl` handles four kinds of secrets: an IBM Cloud API key, a kubeconfig, an SSH private key, and the Terraform state file. Each has a different threat model, a different lookup chain, and a different rule for "what's safe to commit to a workspace".
 

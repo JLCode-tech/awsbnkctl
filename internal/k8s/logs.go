@@ -12,7 +12,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 )
 
-// LogsOptions captures the flag-parsed inputs to `roksbnkctl k logs`.
+// LogsOptions captures the flag-parsed inputs to `awsbnkctl k logs`.
 //
 // PodName is the literal pod name (the kubectl-style direct path).
 // Container picks one container in a multi-container pod; "" picks the
@@ -90,7 +90,7 @@ func ParseSinceDuration(s string) (int64, error) {
 }
 
 // PodExists is a tiny helper used by callers (e.g. inspect.go's
-// component-aware `roksbnkctl logs`) to disambiguate "pod not found"
+// component-aware `awsbnkctl logs`) to disambiguate "pod not found"
 // from "namespace not found". Returns nil if the pod exists.
 func PodExists(ctx context.Context, kubeconfigPath, namespace, podName string) error {
 	cs, err := BuildClientset(kubeconfigPath)

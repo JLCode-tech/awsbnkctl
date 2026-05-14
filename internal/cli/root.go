@@ -1,4 +1,4 @@
-// Package cli wires the cobra command tree for roksbnkctl.
+// Package cli wires the cobra command tree for awsbnkctl.
 //
 // Build-time variables (Version, Commit, BuildDate) are populated via
 // -ldflags by goreleaser / Makefile.
@@ -14,7 +14,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 
-	execbackend "github.com/jgruberf5/roksbnkctl/internal/exec"
+	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
 )
 
 // Build metadata, populated via -ldflags at link time.
@@ -38,30 +38,31 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "roksbnkctl",
-	Short: "Deploy and validate F5 BIG-IP Next for Kubernetes (BNK) on IBM Cloud ROKS",
-	Long: `roksbnkctl deploys F5 BIG-IP Next for Kubernetes (BNK) onto IBM Cloud ROKS,
-manages the COS supply chain BNK depends on, and runs built-in connectivity,
+	Use:   "awsbnkctl",
+	Short: "Deploy and validate F5 BIG-IP Next for Kubernetes (BNK) on AWS EKS",
+	Long: `awsbnkctl deploys F5 BIG-IP Next for Kubernetes (BNK) onto AWS EKS,
+manages the S3 supply chain BNK depends on, and runs built-in connectivity,
 DNS, and throughput tests against the deployed environment.
 
 The 4-command lifecycle:
-  roksbnkctl init    Interactive setup; writes the workspace config
-  roksbnkctl up      Provision (or attach) and deploy BNK
-  roksbnkctl test    Run connectivity, DNS, and throughput tests
-  roksbnkctl down    Tear down BNK (and the cluster if cluster up provisioned it)
+  awsbnkctl init    Interactive setup; writes the workspace config
+  awsbnkctl up      Provision (or attach) and deploy BNK
+  awsbnkctl test    Run connectivity, DNS, and throughput tests
+  awsbnkctl down    Tear down BNK (and the cluster if cluster up provisioned it)
 
-See https://jgruberf5.github.io/roksbnkctl/book/ for the canonical user guide.`,
+See https://JLCode-tech.github.io/awsbnkctl/book/ for the canonical user guide.`,
 	SilenceUsage:      true,
 	PersistentPreRunE: warnLegacyState,
 }
 
-// warnLegacyState nudges users with leftover ~/.bnkctl/ state from
-// the previous binary name. Single-line, idempotent — printed every
-// invocation until the user moves the directory. No auto-migration:
-// state moves are user decisions (multiple workspaces, kubeconfig
-// linkage, etc.) so we just point at the path and let them act.
+// warnLegacyState nudges users with leftover ~/.roksbnkctl/ or
+// ~/.bnkctl/ state from earlier names of this binary. Single-line,
+// idempotent — printed every invocation until the user moves the
+// directory. No auto-migration: state moves are user decisions
+// (multiple workspaces, kubeconfig linkage, etc.) so we just point at
+// the path and let them act.
 func warnLegacyState(_ *cobra.Command, _ []string) error {
-	if os.Getenv("ROKSBNKCTL_HOME") != "" {
+	if os.Getenv("AWSBNKCTL_HOME") != "" {
 		// Custom home — legacy detection isn't meaningful.
 		return nil
 	}
@@ -69,16 +70,19 @@ func warnLegacyState(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return nil
 	}
-	legacy := filepath.Join(home, ".bnkctl")
-	current := filepath.Join(home, ".roksbnkctl")
-	if _, err := os.Stat(legacy); err != nil {
-		return nil // no legacy dir → nothing to warn about
-	}
+	current := filepath.Join(home, ".awsbnkctl")
 	if _, err := os.Stat(current); err == nil {
-		return nil // both exist → user has already started the new layout, leave them be
+		// User has already started the new layout — leave them be.
+		return nil
 	}
-	fmt.Fprintf(os.Stderr, "warning: found legacy state at %s — move it to %s to keep it (we won't auto-migrate).\n",
-		legacy, current)
+	for _, legacy := range []string{".roksbnkctl", ".bnkctl"} {
+		legacyPath := filepath.Join(home, legacy)
+		if _, err := os.Stat(legacyPath); err == nil {
+			fmt.Fprintf(os.Stderr, "warning: found legacy state at %s — move it to %s to keep it (we won't auto-migrate).\n",
+				legacyPath, current)
+			return nil
+		}
+	}
 	return nil
 }
 
@@ -96,17 +100,17 @@ func Execute() {
 	// rather than init() so the value reflects the build-time Version
 	// even when callers (tests, refgen) import the package and mutate
 	// the Version variable. The custom VersionTemplate produces the
-	// same two-line shape as `roksbnkctl version`:
-	//   roksbnkctl <version> (commit <c>, built <d>)
+	// same two-line shape as `awsbnkctl version`:
+	//   awsbnkctl <version> (commit <c>, built <d>)
 	//   Docs: <url>
 	rootCmd.Version = Version
 	rootCmd.SetVersionTemplate(fmt.Sprintf(
-		"roksbnkctl {{.Version}} (commit %s, built %s)\nDocs: %s\n",
+		"awsbnkctl {{.Version}} (commit %s, built %s)\nDocs: %s\n",
 		Commit, BuildDate, DocsURL))
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "roksbnkctl: %v\n", err)
+		fmt.Fprintf(os.Stderr, "awsbnkctl: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -119,7 +123,7 @@ func loadDotenv() {
 		return
 	}
 	if err := godotenv.Load(); err != nil {
-		fmt.Fprintf(os.Stderr, "roksbnkctl: warning: parsing .env: %v\n", err)
+		fmt.Fprintf(os.Stderr, "awsbnkctl: warning: parsing .env: %v\n", err)
 	}
 }
 
@@ -130,7 +134,7 @@ func init() {
 	pf.BoolVarP(&flagQuiet, "quiet", "q", false, "suppress all but errors")
 	pf.StringVarP(&flagOutput, "output", "o", "text", "output format: text | json")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable colored output")
-	pf.StringVar(&flagOn, "on", "", "run on the named SSH target instead of locally (`roksbnkctl targets list` to see options)")
+	pf.StringVar(&flagOn, "on", "", "run on the named SSH target instead of locally (`awsbnkctl targets list` to see options)")
 	pf.BoolVar(&flagInsecureHostKey, "insecure-host-key", false, "skip the host-key TOFU prompt; record on first contact (CI use)")
 	pf.StringVar(&flagBackend, "backend", "", "execution backend: local | docker | k8s | ssh:<target> (default: per-tool from workspace exec: block, else local)")
 	pf.BoolVar(&flagBootstrap, "bootstrap", false, "for --backend ssh:<target>: auto-install missing tools on Ubuntu via apt-get (requires passwordless sudo on the target)")

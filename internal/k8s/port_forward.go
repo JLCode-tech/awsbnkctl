@@ -14,7 +14,7 @@ import (
 )
 
 // PortForwardOptions captures the flag-parsed inputs to
-// `roksbnkctl k port-forward`.
+// `awsbnkctl k port-forward`.
 //
 // Ports is the same slice form as kubectl ("8080:80", "5000",
 // "5000:5000"). StopCh closes the tunnel; cancelling the context also

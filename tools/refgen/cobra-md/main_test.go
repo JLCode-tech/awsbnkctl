@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jgruberf5/roksbnkctl/internal/cli"
+	"github.com/JLCode-tech/awsbnkctl/internal/cli"
 )
 
 // TestRender_SmokeOutput verifies the generator emits a well-formed
@@ -40,11 +40,11 @@ func TestRender_SmokeOutput(t *testing.T) {
 	if !strings.Contains(out, "## Global flags") {
 		t.Errorf("output missing `## Global flags` section")
 	}
-	if !strings.Contains(out, "## `roksbnkctl init`") {
-		t.Errorf("output missing top-level `roksbnkctl init` section; got headings:\n%s", grepLines(out, "^#"))
+	if !strings.Contains(out, "## `awsbnkctl init`") {
+		t.Errorf("output missing top-level `awsbnkctl init` section; got headings:\n%s", grepLines(out, "^#"))
 	}
-	if !strings.Contains(out, "## `roksbnkctl doctor`") {
-		t.Errorf("output missing top-level `roksbnkctl doctor` section; got headings:\n%s", grepLines(out, "^#"))
+	if !strings.Contains(out, "## `awsbnkctl doctor`") {
+		t.Errorf("output missing top-level `awsbnkctl doctor` section; got headings:\n%s", grepLines(out, "^#"))
 	}
 
 	// Balanced code fences: count triple-backticks at line starts; must
@@ -85,10 +85,10 @@ func TestSlugify(t *testing.T) {
 	tests := []struct {
 		in, want string
 	}{
-		{"roksbnkctl", "roksbnkctl"},
-		{"roksbnkctl ws", "roksbnkctl-ws"},
-		{"roksbnkctl ws delete", "roksbnkctl-ws-delete"},
-		{"roksbnkctl  multi  space", "roksbnkctl-multi-space"},
+		{"awsbnkctl", "awsbnkctl"},
+		{"awsbnkctl ws", "awsbnkctl-ws"},
+		{"awsbnkctl ws delete", "awsbnkctl-ws-delete"},
+		{"awsbnkctl  multi  space", "awsbnkctl-multi-space"},
 	}
 	for _, tc := range tests {
 		if got := slugify(tc.in); got != tc.want {

@@ -1,4 +1,4 @@
-# Quick start: from API key to deployed BNK
+# Quick start: from AWS credentials to deployed BNK
 
 This chapter walks the 4-command lifecycle (`init` → `up` → `test` → `down`) end-to-end. By the time you reach the bottom you'll have a deployed BNK trial on a fresh ROKS cluster, a passing connectivity test, and a clean tear-down command ready when you're done.
 

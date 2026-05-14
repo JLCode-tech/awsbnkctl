@@ -1,4 +1,4 @@
-# COS supply chain management
+# S3 (and optional ECR) supply chain
 
 BIG-IP Next for Kubernetes (BNK) pulls its runtime artefacts — the F5 Application Runtime (FAR) container images, the JWT licence used at install + renewal time, the f5-bigip-k8s-manifest Helm chart, and the schematic JSON the deployer renders — from IBM Cloud Object Storage (COS). The COS bucket is the **supply chain**: it's how artefacts produced upstream (F5 build pipeline, licence-issuing service, schematic generator) reach the cluster.
 

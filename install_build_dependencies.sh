@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # install_build_dependencies.sh — Ubuntu/Debian host prereqs for the
-# roksbnkctl build, test, and release workflow.
+# awsbnkctl build, test, and release workflow.
 #
 # Intended audience: integrators / contributors who clone the repo and
 # need their host set up to run `make build`, `make release`,
-# `scripts/e2e-test-full.sh`, and the binary itself (`roksbnkctl up`
+# `scripts/e2e-test-full.sh`, and the binary itself (`awsbnkctl up`
 # shells out to terraform + optionally ibmcloud).
 #
-# End users who only need to run a pre-built `roksbnkctl` binary from
+# End users who only need to run a pre-built `awsbnkctl` binary from
 # a GitHub release can skip the dev-utility installs (jq, unzip,
 # python3, gnupg) and just install `terraform`. See chapter 4 of the
 # book for the runtime-only install path.
@@ -22,15 +22,15 @@
 # via `sudo -v` so the script doesn't pause halfway through.
 #
 # What this installs:
-#   - terraform      (REQUIRED — roksbnkctl up's local backend needs it;
+#   - terraform      (REQUIRED — awsbnkctl up's local backend needs it;
 #                     installed via HashiCorp's apt repo, pinned to
 #                     amd64 + your distro release)
-#   - ibmcloud CLI   (REQUIRED — roksbnkctl ibmcloud … passthrough with
+#   - ibmcloud CLI   (REQUIRED — awsbnkctl ibmcloud … passthrough with
 #                     the default --backend local; plus e2e Phase B/I
 #                     steps; installed via IBM's clis.cloud.ibm.com/
 #                     install/linux installer; plugins ks + cloud-
 #                     object-storage installed after)
-#   - jq             (e2e scripts parse `roksbnkctl test … -o json` output)
+#   - jq             (e2e scripts parse `awsbnkctl test … -o json` output)
 #   - unzip          (goreleaser windows archives + ad-hoc artifact unpack)
 #   - gnupg          (needed to import HashiCorp's apt signing key)
 #   - openssh-client (Phase I SSH backend coverage; usually present)
@@ -57,7 +57,7 @@
 #                      host helm. Installed via Helm's apt repo
 #                      pinned to amd64 + your distro.)
 #   - kubectl
-#       → Sprint 2 internalised the kubectl surface into `roksbnkctl k
+#       → Sprint 2 internalised the kubectl surface into `awsbnkctl k
 #         get/apply/logs/exec/port-forward` via client-go; the binary
 #         doesn't need a host kubectl. However the e2e scripts SHELL
 #         OUT to host kubectl for cred-audit assertions (Phase M3/M4
@@ -68,10 +68,10 @@
 #
 # What this also installs:
 #   - oc (Red Hat OpenShift CLI) — REQUIRED for the e2e flow's
-#     Phase B5 step (`roksbnkctl oc whoami` passthrough verifies
-#     cluster-admin auth). The `roksbnkctl oc <args>` passthrough
+#     Phase B5 step (`awsbnkctl oc whoami` passthrough verifies
+#     cluster-admin auth). The `awsbnkctl oc <args>` passthrough
 #     shells out to host oc; without it the passthrough errors with
-#     `Error: oc not found on PATH`. The everyday `roksbnkctl k *`
+#     `Error: oc not found on PATH`. The everyday `awsbnkctl k *`
 #     verbs (Sprint 2 internalised surface) don't need host oc and
 #     work fine without it. Installed via Red Hat's official mirror
 #     tarball (no apt package); we extract only the `oc` binary into
@@ -79,8 +79,8 @@
 #     drift with the host's existing kubectl.
 #
 # After this script completes, run:
-#   make build              # builds bin/roksbnkctl with ldflags
-#   ./bin/roksbnkctl doctor # confirms green on this host
+#   make build              # builds bin/awsbnkctl with ldflags
+#   ./bin/awsbnkctl doctor # confirms green on this host
 #
 # Then proceed with `make release` (release-prep) or
 # `scripts/e2e-test-full.sh` (live e2e against IBM Cloud).
@@ -303,7 +303,7 @@ verify() {
 
     log "verification — recommended (NOT installed by this script)"
     # kubectl: the e2e scripts shell out for cred-audit assertions
-    # (Phase M3/M4). roksbnkctl itself has client-go internalised so
+    # (Phase M3/M4). awsbnkctl itself has client-go internalised so
     # the binary doesn't need it, but the .sh drivers do.
     if command -v kubectl >/dev/null 2>&1; then
         ok "kubectl: $(command -v kubectl)"
@@ -324,7 +324,7 @@ hints() {
     log "next steps"
     cat <<'EOF'
   Confirm doctor green:
-      make build && ./bin/roksbnkctl doctor
+      make build && ./bin/awsbnkctl doctor
 
   Build the release-time book image (one-time, ~7 min):
       make -C tools/docker build-mdbook

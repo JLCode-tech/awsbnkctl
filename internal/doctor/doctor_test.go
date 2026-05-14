@@ -1,6 +1,6 @@
 package doctor
 
-// Sprint 6 — Priority 2: green-by-default refresh of `roksbnkctl doctor`.
+// Sprint 6 — Priority 2: green-by-default refresh of `awsbnkctl doctor`.
 //
 // PLAN.md §"Gate to Sprint 7" requires the doctor command to exit 0
 // with zero warnings on a stock dev box that has ONLY `terraform`
@@ -10,7 +10,7 @@ package doctor
 // doctor hard-failed on missing `kubectl` / `oc` / `ibmcloud` /
 // `iperf3` and warned on missing `dig` + missing kubeconfig — all of
 // which are now internalised surfaces (kubectl/oc via client-go in
-// roksbnkctl k *; ibmcloud via --backend docker; iperf3 via --backend
+// awsbnkctl k *; ibmcloud via --backend docker; iperf3 via --backend
 // k8s; dig via miekg/dns).
 //
 // These tests pin the contract so a future refactor can't silently
@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
 // TestRunWithWhy_StockDevBox_NoWorkspace asserts: on a host with
@@ -34,7 +34,7 @@ import (
 //
 // The test passes a nil-Workspace config.Context so the workspace +
 // API-key + IAM-auth checks degrade to "no workspace" warnings, not
-// errors. This is the "fresh dev box, before `roksbnkctl init`" shape.
+// errors. This is the "fresh dev box, before `awsbnkctl init`" shape.
 func TestRunWithWhy_StockDevBox_NoWorkspace(t *testing.T) {
 	cctx := &config.Context{WorkspaceName: "test-stock-dev"}
 	pairs := runWithWhy(context.Background(), cctx)
@@ -126,7 +126,7 @@ func TestRunWithWhy_TerraformIsRequired(t *testing.T) {
 // second hard-required tool. Added in v1.0.2 after a live e2e Phase B1
 // run revealed the terraform `null_resource` + `local-exec`
 // provisioners (cert_manager / flo / cne_instance modules) shell out
-// to host `helm` — without it, `roksbnkctl up` fails with
+// to host `helm` — without it, `awsbnkctl up` fails with
 // `exit status 127 — helm: not found` deep into the cluster lifecycle.
 // Skip on hosts that have helm installed.
 func TestRunWithWhy_HelmIsRequired(t *testing.T) {
@@ -158,7 +158,7 @@ func TestRunWithWhy_HelmIsRequired(t *testing.T) {
 
 // TestHasFailures_StockDevBoxGreen asserts the exit-code semantic:
 // a stock dev box (with `terraform` AND `helm` present) produces no
-// HasFailures-reported failures, so `roksbnkctl doctor` exits 0.
+// HasFailures-reported failures, so `awsbnkctl doctor` exits 0.
 //
 // This is the contract from PLAN.md §"Gate to Sprint 7" line 481.
 // helm was added to the required set in v1.0.2.

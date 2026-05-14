@@ -1,4 +1,4 @@
-module github.com/jgruberf5/roksbnkctl/tools/sprintwatch
+module github.com/JLCode-tech/awsbnkctl/tools/sprintwatch
 
 go 1.25.0
 

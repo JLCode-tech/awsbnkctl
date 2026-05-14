@@ -15,7 +15,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
 // ErrHostKeyMismatch is returned when a known host's stored key differs
@@ -37,7 +37,7 @@ type HostKeyOptions struct {
 }
 
 // HostKeyCallback returns an ssh.HostKeyCallback that consults
-// ~/.roksbnkctl/known_hosts. Behaviour matches PRD 01:
+// ~/.awsbnkctl/known_hosts. Behaviour matches PRD 01:
 //
 //   - Stored key matches: accept silently.
 //   - Stored key differs: error wrapping ErrHostKeyMismatch.
@@ -94,7 +94,7 @@ func HostKeyCallback(opts HostKeyOptions) ssh.HostKeyCallback {
 	}
 }
 
-// KnownHostsPath returns ~/.roksbnkctl/known_hosts (per-tool, distinct
+// KnownHostsPath returns ~/.awsbnkctl/known_hosts (per-tool, distinct
 // from the user's ~/.ssh/known_hosts so we don't mutate their global
 // trust store).
 func KnownHostsPath() (string, error) {

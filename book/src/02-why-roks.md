@@ -1,4 +1,4 @@
-# Why ROKS (Red Hat OpenShift on IBM Cloud)
+# Why EKS + self-managed SR-IOV node groups
 
 This book and the `roksbnkctl` tool target **ROKS** — IBM Cloud's managed Red Hat OpenShift offering — specifically. Other Kubernetes flavours can run BNK, and most of the patterns you'll learn here translate, but the bundled Terraform that `roksbnkctl` ships only knows how to provision a ROKS cluster.
 
