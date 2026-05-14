@@ -69,7 +69,7 @@ func TestIntegration_DockerBackend_BusyboxEcho(t *testing.T) {
 // TestIntegration_DockerBackend_NoLeakInInspect runs a short-lived container
 // with a known IBMCLOUD_API_KEY value, then greps the output for the value.
 // PRD 04 §"Resolved in Sprint 9" §"Cred tmpfile-bind-mount pattern": the
-// secret is written to a 0600 tempfile under $TMPDIR/roksbnkctl-docker-*/
+// secret is written to a 0600 tempfile under $TMPDIR/awsbnkctl-docker-*/
 // creds/api-key, bind-mounted read-only at /run/secrets/ibmcloud_api_key,
 // and container env carries ONLY `IBMCLOUD_API_KEY_FILE=<bind-target>`. So
 // `docker inspect` must NEVER contain the secret value — only the env-file

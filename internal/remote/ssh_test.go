@@ -16,7 +16,7 @@ import (
 	gssh "github.com/gliderlabs/ssh"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 )
 
 // startTestServer spins up an in-process SSH server bound to a random

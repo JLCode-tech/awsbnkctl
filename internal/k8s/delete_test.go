@@ -1,4 +1,4 @@
-// Unit tests for `roksbnkctl k delete` (`internal/k8s/delete.go`).
+// Unit tests for `awsbnkctl k delete` (`internal/k8s/delete.go`).
 //
 // Delete.Run drives cli-runtime resource.Builder + resource.Helper,
 // neither of which is fakeable without a real REST client. We unit-test

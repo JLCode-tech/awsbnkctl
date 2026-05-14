@@ -10,13 +10,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
-	"github.com/jgruberf5/roksbnkctl/internal/cred"
-	"github.com/jgruberf5/roksbnkctl/internal/ibm"
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/cred"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
-// Why is the human-readable "why roksbnkctl cares" clause that the
+// Why is the human-readable "why awsbnkctl cares" clause that the
 // existing doctor table renders alongside each row. It's not part of the
 // spec'd Check struct (see check.go) because future per-backend checks
 // won't always have a why blurb — but the legacy general checks all do,
@@ -33,7 +32,7 @@ type withWhy struct {
 // Run executes all diagnostic checks. cctx may carry a nil Workspace —
 // workspace-dependent checks downgrade to a clear "no workspace" detail.
 //
-// The slice returned is the public API used by `roksbnkctl doctor`'s
+// The slice returned is the public API used by `awsbnkctl doctor`'s
 // rendering; the rendering helper PrintResults takes the same slice so
 // callers don't need to know about the internal withWhy pairing.
 func Run(ctx context.Context, cctx *config.Context) []Check {
@@ -67,7 +66,7 @@ var lastWhys []string
 // tool (kubectl, oc, ibmcloud, iperf3, dig) is now INFORMATIONAL —
 // the binary internalises each surface:
 //
-//   - kubectl + oc: internalised via client-go in `roksbnkctl k *`
+//   - kubectl + oc: internalised via client-go in `awsbnkctl k *`
 //     (PRD 02, Sprint 2).
 //   - ibmcloud: bundled image runnable via `--backend docker` or
 //     `--backend ssh:<target>` (PRD 03, Sprint 3/4).
@@ -77,21 +76,21 @@ var lastWhys []string
 //     §"DNS probe", Sprint 5).
 //
 // A stock dev box with `terraform` installed and nothing else now
-// produces zero warnings and exit 0 from `roksbnkctl doctor`. Backend-
+// produces zero warnings and exit 0 from `awsbnkctl doctor`. Backend-
 // conditional checks (`doctor --backend k8s`) still surface their
 // own failures separately.
 func runWithWhy(ctx context.Context, cctx *config.Context) []withWhy {
 	var out []withWhy
 
-	// REQUIRED: terraform is the workhorse for `roksbnkctl up`; the
+	// REQUIRED: terraform is the workhorse for `awsbnkctl up`; the
 	// binary embeds the HCL but doesn't (yet) ship a terraform-go
 	// runtime — `--backend docker` runs upstream `hashicorp/terraform`
 	// in a container, but the local backend still needs a host
 	// install.
-	out = append(out, checkBinary("terraform", true, "required for `roksbnkctl up` (local backend); `--backend docker` runs containerised but the local path needs a host install"))
+	out = append(out, checkBinary("terraform", true, "required for `awsbnkctl up` (local backend); `--backend docker` runs containerised but the local path needs a host install"))
 
 	// REQUIRED: helm is invoked by terraform's `null_resource` +
-	// `local-exec` provisioners during `roksbnkctl up`. The bundled
+	// `local-exec` provisioners during `awsbnkctl up`. The bundled
 	// HCL modules (cert_manager, flo, cne_instance) shell out to
 	// `helm upgrade --install` from inside terraform's apply phase;
 	// without `helm` on PATH the apply fails with exit 127 ("helm: not
@@ -103,16 +102,17 @@ func runWithWhy(ctx context.Context, cctx *config.Context) []withWhy {
 	// hashicorp/helm provider speaks the Helm 3 protocol via an
 	// embedded Go runtime). Tracked in docs/PLAN.md §"What's
 	// deliberately deferred to post-v1.0".
-	out = append(out, checkBinary("helm", true, "required for `roksbnkctl up`; terraform's null_resource+local-exec provisioners (cert_manager / flo / cne_instance) shell out to `helm upgrade --install`. `--backend docker` runs terraform containerised but the local-exec still needs a host install."))
+	out = append(out, checkBinary("helm", true, "required for `awsbnkctl up`; terraform's null_resource+local-exec provisioners (cert_manager / flo / cne_instance) shell out to `helm upgrade --install`. `--backend docker` runs terraform containerised but the local-exec still needs a host install."))
 
 	// INFORMATIONAL: every other tool. Missing surfaces as StatusOK
 	// with a "(internalised; …)" detail explaining the alternative.
 	// Present surfaces as StatusOK with the path/version.
-	out = append(out, checkBinaryInformational("kubectl", "internalised in `roksbnkctl k *` via client-go; host install used only when passthrough is convenient"))
-	out = append(out, checkBinaryInformational("oc", "internalised in `roksbnkctl k *` via client-go; host install used only when passthrough is convenient"))
-	out = append(out, checkBinaryInformational("ibmcloud", "bundled image runnable via `--backend docker` or `--backend ssh:<target>`; host install used only for the default `--backend local` passthrough"))
+	out = append(out, checkBinaryInformational("kubectl", "internalised in `awsbnkctl k *` via client-go; host install used only when passthrough is convenient"))
+	out = append(out, checkBinaryInformational("oc", "internalised in `awsbnkctl k *` via client-go; host install used only when passthrough is convenient"))
+	// "ibmcloud" row dropped in Sprint 0 (IBM strip). PRD 00 § "Inheritance map" states the awsbnkctl plan drops the IBM passthrough entirely (no `aws` CLI passthrough planned either — direct SDK use only). Sprint 1 lands the internal/aws + STS-caller-identity check that replaces this row.
+
 	out = append(out, checkBinaryInformational("iperf3", "bundled image runnable via `--backend k8s`; host install used only for `--backend local` north-south tests"))
-	out = append(out, checkBinaryInformational("dig", "DNS probe internalised via miekg/dns (`roksbnkctl test dns`); host install no longer required"))
+	out = append(out, checkBinaryInformational("dig", "DNS probe internalised via miekg/dns (`awsbnkctl test dns`); host install no longer required"))
 
 	// Kubeconfig: informational. Many doctor invocations happen
 	// pre-`up`, before any cluster exists; surfacing a missing
@@ -129,7 +129,14 @@ func runWithWhy(ctx context.Context, cctx *config.Context) []withWhy {
 	out = append(out, checkWorkspace(cctx))
 	if cctx.Workspace != nil {
 		out = append(out, checkAPIKey(cctx))
-		out = append(out, checkIBMAuth(ctx, cctx))
+		// Sprint 0 stub: the IBM IAM verify check was removed alongside
+		// internal/ibm. The AWS-shaped equivalent (STS GetCallerIdentity)
+		// lands in Sprint 1 once internal/aws is implemented; see
+		// docs/prd/00-OVERVIEW.md and docs/prd/07-EKS-CLUSTER-SRIOV.md.
+		out = append(out, withWhy{
+			Check: Check{Name: "cloud auth", Status: StatusWarning, Detail: "AWS support coming in Sprint 1 (see docs/prd/07-EKS-CLUSTER-SRIOV.md)"},
+			Why:   "verifies cloud credentials work",
+		})
 	}
 
 	return out
@@ -163,7 +170,7 @@ func checkBinary(name string, required bool, w string) withWhy {
 // fix). Present → StatusOK with the path/version, same as before.
 //
 // The intent: a fresh dev box without kubectl/oc should produce no
-// warnings for everyday roksbnkctl use post-Sprint-2.
+// warnings for everyday awsbnkctl use post-Sprint-2.
 func checkBinaryInformational(name, w string) withWhy {
 	c := Check{Name: name, Optional: true}
 	path, err := exec.LookPath(name)
@@ -218,11 +225,11 @@ func versionLine(name string) string {
 }
 
 // checkKubeconfigInformational is the Sprint 6 green-by-default
-// variant. A doctor run BEFORE `roksbnkctl up` happens on a host that
+// variant. A doctor run BEFORE `awsbnkctl up` happens on a host that
 // hasn't yet downloaded a kubeconfig — surfacing that as a warning is
 // noise. Render the absence as informational with a one-line nudge at
-// how to populate it (`roksbnkctl up` does this automatically post-
-// apply; `roksbnkctl kubeconfig --download` is the manual path).
+// how to populate it (`awsbnkctl up` does this automatically post-
+// apply; `awsbnkctl kubeconfig --download` is the manual path).
 //
 // PLAN.md §"Gate to Sprint 7": stock dev box should produce exit 0 +
 // zero warnings.
@@ -231,7 +238,7 @@ func checkKubeconfigInformational() withWhy {
 	path := k8s.DefaultKubeconfigPath()
 	if path == "" {
 		c.Status = StatusOK
-		c.Detail = "not yet downloaded (auto-populated by `roksbnkctl up`; manual: `roksbnkctl kubeconfig --download`)"
+		c.Detail = "not yet downloaded (auto-populated by `awsbnkctl up`; manual: `awsbnkctl kubeconfig --download`)"
 		return withWhy{Check: c, Why: "needed for cluster-side ops"}
 	}
 	c.Status = StatusOK
@@ -243,7 +250,7 @@ func checkWorkspace(cctx *config.Context) withWhy {
 	c := Check{Name: "workspace"}
 	if cctx.Workspace == nil {
 		c.Status = StatusWarning
-		c.Detail = fmt.Sprintf("%q not initialised — run `roksbnkctl init`", cctx.WorkspaceName)
+		c.Detail = fmt.Sprintf("%q not initialised — run `awsbnkctl init`", cctx.WorkspaceName)
 		return withWhy{Check: c, Why: "per-environment config + state"}
 	}
 	c.Status = StatusOK
@@ -267,38 +274,6 @@ func checkAPIKey(cctx *config.Context) withWhy {
 	c.Status = StatusOK
 	c.Detail = "resolved"
 	return withWhy{Check: c, Why: "auth for terraform + IBM SDK calls"}
-}
-
-func checkIBMAuth(ctx context.Context, cctx *config.Context) withWhy {
-	c := Check{Name: "ibm cloud auth"}
-	resolver := &cred.Resolver{
-		Workspace:      cctx.WorkspaceName,
-		Source:         cctx.Workspace.IBMCloud.APIKeySource,
-		NonInteractive: true,
-	}
-	apiKey, err := resolver.IBMCloudAPIKey(ctx)
-	if err != nil {
-		c.Status = StatusError
-		c.Detail = "no api key: " + err.Error()
-		return withWhy{Check: c, Why: "verifies API key works against IBM IAM"}
-	}
-	cl, err := ibm.New(apiKey, cctx.Workspace.IBMCloud.Region)
-	if err != nil {
-		c.Status = StatusError
-		c.Detail = err.Error()
-		return withWhy{Check: c, Why: "verifies API key works against IBM IAM"}
-	}
-	tctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	id, err := cl.Verify(tctx)
-	if err != nil {
-		c.Status = StatusError
-		c.Detail = err.Error()
-		return withWhy{Check: c, Why: "verifies API key works against IBM IAM"}
-	}
-	c.Status = StatusOK
-	c.Detail = id.String()
-	return withWhy{Check: c, Why: "verifies API key works against IBM IAM"}
 }
 
 // PrintResults writes a tabular human-readable rendering to w.

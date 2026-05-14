@@ -43,7 +43,7 @@ func TestResolver_InvariantAcrossBackends(t *testing.T) {
 	keyring.MockInit()
 
 	// Simulate four backend invocations from the same parent
-	// roksbnkctl process. Each constructs its own Resolver instance
+	// awsbnkctl process. Each constructs its own Resolver instance
 	// (mirroring how the cli layer builds one per command), but the
 	// inputs (Workspace, Source, NonInteractive) are identical — so
 	// the output must be too.
@@ -79,7 +79,7 @@ func TestResolver_InvariantAcrossBackends(t *testing.T) {
 // §3: the Resolver carries no per-backend hidden state. Calling
 // .IBMCloudAPIKey on the same resolver twice (a pattern that arises
 // when the cli layer caches a Resolver across a multi-step command
-// like `roksbnkctl up`) returns the same value with no side-effect on
+// like `awsbnkctl up`) returns the same value with no side-effect on
 // env / keychain.
 func TestResolver_NoBackendState(t *testing.T) {
 	resetEnv(t)

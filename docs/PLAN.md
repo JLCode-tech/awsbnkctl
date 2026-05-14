@@ -105,7 +105,7 @@ Make the fork look and build like `awsbnkctl`: module path, binary name, repo id
 |---|---|
 | `README.md` / `CHANGELOG.md` / `MIGRATING.md` | Already drafted in this fork's working tree; commit alongside the rename. |
 | `docs/PLAN.md` | This file. |
-| `docs/prd/00-OVERVIEW.md` | Inherited from roksbnkctl; rewrite the top section to frame awsbnkctl's scope (AWS, not IBM Cloud). PRDs 01-05 stay inherited; PRD 06 stays inherited; flag PRDs 07-09 as "to author in Sprints 1-2". |
+| `docs/prd/00-OVERVIEW.md` | Inherited from roksbnkctl; rewrite the top section to frame awsbnkctl's scope (AWS, not IBM Cloud). PRDs 01-05 stay inherited; PRD 06 stays inherited; flag PRDs 07-08 as "to author in Sprints 1-2". |
 | `agents/` | Inherited unchanged — the role definitions are tool-agnostic. |
 | `prompts/sprint0/{architect,staff,validator,tech-writer}.md` | Author from scratch using roksbnkctl's `prompts/sprint0/` as the template. Sprint scope = identity rewrite + IBM strip + AWS stub. |
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
 // HostsFromConfig pulls the user-configured host list from the

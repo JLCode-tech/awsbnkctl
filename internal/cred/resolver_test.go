@@ -68,11 +68,11 @@ func TestResolver_EnvOnly(t *testing.T) {
 
 // TestResolver_KeychainOnly asserts: when env is empty, the resolver falls
 // through to the OS keychain entry under
-// service="roksbnkctl", user="<workspace>/ibmcloud_api_key".
+// service="awsbnkctl", user="<workspace>/ibmcloud_api_key".
 func TestResolver_KeychainOnly(t *testing.T) {
 	resetEnv(t)
 	keyring.MockInit()
-	if err := keyring.Set("roksbnkctl", "test-ws/ibmcloud_api_key", "kc-key-456"); err != nil {
+	if err := keyring.Set("awsbnkctl", "test-ws/ibmcloud_api_key", "kc-key-456"); err != nil {
 		t.Skipf("keychain unavailable on this runner: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestResolver_EnvShadowsKeychain(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("IBMCLOUD_API_KEY", "env-wins")
 	keyring.MockInit()
-	if err := keyring.Set("roksbnkctl", "test-ws/ibmcloud_api_key", "kc-loses"); err != nil {
+	if err := keyring.Set("awsbnkctl", "test-ws/ibmcloud_api_key", "kc-loses"); err != nil {
 		t.Skipf("keychain unavailable on this runner: %v", err)
 	}
 

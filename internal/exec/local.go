@@ -10,7 +10,7 @@ import (
 )
 
 // LocalBackend executes argv in a child process on the host running
-// roksbnkctl. Wraps `os/exec` with the credential-propagation +
+// awsbnkctl. Wraps `os/exec` with the credential-propagation +
 // stream-redaction behaviour the Backend interface requires.
 //
 // Behaviour matches the pre-Sprint-3 passthrough callsites in
@@ -83,7 +83,7 @@ func (LocalBackend) Run(ctx context.Context, argv []string, opts RunOpts) (int, 
 	workDir := opts.WorkDir
 	var cleanupTemp func()
 	if len(opts.Files) > 0 && workDir == "" {
-		td, terr := os.MkdirTemp("", "roksbnkctl-local-")
+		td, terr := os.MkdirTemp("", "awsbnkctl-local-")
 		if terr != nil {
 			return 0, terr
 		}

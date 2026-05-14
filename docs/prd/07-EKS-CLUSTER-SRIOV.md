@@ -152,7 +152,7 @@ A `ConfigMap/sriov-device-plugin-config` declares the VF pool by PCIe vendor/dev
 
 ## Spike protocol (Sprint 1, days 1-3)
 
-Before writing the Terraform module, validate end-to-end by hand. Output of the spike folds back into this PRD's "Sprike findings" section at sprint close.
+Before writing the Terraform module, validate end-to-end by hand. Output of the spike folds back into this PRD's "Spike findings" section at sprint close.
 
 ### Day 1 — cluster + node group
 

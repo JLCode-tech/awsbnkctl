@@ -15,7 +15,7 @@ package test
 //   - Error paths: NXDOMAIN, SERVFAIL, REFUSED, TIMEOUT each surface as
 //     the documented Rcode string
 //   - JSON schema conformance: DNSProbeResult marshals into a shape
-//     that matches the roksbnkctl.dns.v1.vantage schema documented in
+//     that matches the awsbnkctl.dns.v1.vantage schema documented in
 //     PRD 03 §"JSON output schema"
 //   - Truncated + Authoritative flags pulled from response.MsgHdr
 //   - Concurrent iterations: N queries against a single mock server all
@@ -469,8 +469,8 @@ func TestProbeResult_JSON_SchemaConformance(t *testing.T) {
 	}
 	// schema must be the documented vantage shape.
 	schema, _ := raw["schema"].(string)
-	if !strings.HasPrefix(schema, "roksbnkctl.dns.v1") {
-		t.Errorf("schema field: got %q, want a roksbnkctl.dns.v1.* value", schema)
+	if !strings.HasPrefix(schema, "awsbnkctl.dns.v1") {
+		t.Errorf("schema field: got %q, want a awsbnkctl.dns.v1.* value", schema)
 	}
 	// rtt_ms must be an object with p50/p95/p99 keys.
 	rtt, ok := raw["rtt_ms"].(map[string]any)

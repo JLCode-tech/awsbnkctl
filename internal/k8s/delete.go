@@ -20,7 +20,7 @@ const (
 	CascadeOrphan     DeleteCascade = "orphan"
 )
 
-// DeleteOptions captures the flag-parsed inputs to `roksbnkctl k delete`.
+// DeleteOptions captures the flag-parsed inputs to `awsbnkctl k delete`.
 //
 // GracePeriod < 0 means use the resource's default; 0 means immediate
 // (with Force). Cascade picks the propagation policy.

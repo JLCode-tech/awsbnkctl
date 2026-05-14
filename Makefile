@@ -3,8 +3,8 @@
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-BIN     := bin/roksbnkctl
-PKG     := github.com/jgruberf5/roksbnkctl
+BIN     := bin/awsbnkctl
+PKG     := github.com/JLCode-tech/awsbnkctl
 
 LDFLAGS := -s -w \
 	-X $(PKG)/internal/cli.Version=$(VERSION) \
@@ -12,7 +12,7 @@ LDFLAGS := -s -w \
 	-X $(PKG)/internal/cli.BuildDate=$(DATE)
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/roksbnkctl
+	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/awsbnkctl
 
 test:
 	go test ./...
@@ -51,7 +51,7 @@ GORELEASER_IMAGE ?= goreleaser/goreleaser:latest
 # `make release` + `make release-publish` so the multi-GB pandoc /
 # XeLaTeX / mermaid-cli toolchain stays off the runner.
 BOOK_BACKEND ?= host
-BOOK_IMAGE   ?= ghcr.io/jgruberf5/roksbnkctl-tools-mdbook:dev
+BOOK_IMAGE   ?= ghcr.io/JLCode-tech/awsbnkctl-tools-mdbook:dev
 
 ifeq ($(BOOK_BACKEND),docker)
 MDBOOK = docker run --rm -v $(CURDIR)/book:/book $(BOOK_IMAGE)
@@ -209,7 +209,7 @@ build-integration-tags:
 #   make release-publish VERSION=vX.Y.Z
 #
 # That single step pushes the locally-built HTML to the gh-pages branch
-# AND uploads book.pdf to the GitHub Release as roksbnkctl-book-vX.Y.Z.pdf.
+# AND uploads book.pdf to the GitHub Release as awsbnkctl-book-vX.Y.Z.pdf.
 # No CI image pulls, no pandoc/LaTeX on the runner.
 release:
 	@echo "==> [1/7] Stamping CHANGELOG.md release-date placeholder (one-time, was for v1.0.0)"
@@ -274,7 +274,7 @@ book-publish:
 	fi
 	@echo "==> Fetching origin/gh-pages"
 	@git fetch origin gh-pages
-	@tmp=$$(mktemp -d -t roksbnkctl-gh-pages.XXXXXX) && \
+	@tmp=$$(mktemp -d -t awsbnkctl-gh-pages.XXXXXX) && \
 	    trap "git worktree remove --force $$tmp >/dev/null 2>&1 || true" EXIT && \
 	    git worktree add --detach $$tmp origin/gh-pages && \
 	    rm -rf $$tmp/book && \
@@ -289,7 +289,7 @@ book-publish:
 	            -c user.email="$$(git -C $(CURDIR) config user.email)" \
 	            commit -m "book: publish $$(git -C $(CURDIR) describe --tags --always)" && \
 	        git push origin HEAD:gh-pages && \
-	        echo "    Pushed to gh-pages — https://jgruberf5.github.io/roksbnkctl/book/"; \
+	        echo "    Pushed to gh-pages — https://JLCode-tech.github.io/awsbnkctl/book/"; \
 	    fi
 
 # release-publish: post-tag publish step. Run after .github/workflows/release.yml
@@ -298,7 +298,7 @@ book-publish:
 #
 #   1. Push the locally-built HTML book to the gh-pages branch
 #   2. Upload the locally-built PDF book to the GitHub Release as
-#      roksbnkctl-book-$(VERSION).pdf
+#      awsbnkctl-book-$(VERSION).pdf
 #
 # Requires VERSION to match the tag you cut (e.g. VERSION=v1.0.0). Will
 # refuse to run with VERSION=dev to prevent accidental publishes.
@@ -326,17 +326,17 @@ release-publish:
 	@echo ""
 	@echo "==> [2/2] Uploading PDF book to GitHub Release $(VERSION)"
 	@# The asset's filename (not just display label) needs to be
-	@# roksbnkctl-book-$(VERSION).pdf so the download URL is predictable
+	@# awsbnkctl-book-$(VERSION).pdf so the download URL is predictable
 	@# and unique-per-release. gh release upload's `path#label` syntax
 	@# only sets the display label — the asset name stays as the source
 	@# filename. So we copy to a properly-named tempfile and upload that.
-	@tmp=$$(mktemp -d -t roksbnkctl-pdf.XXXXXX) && \
+	@tmp=$$(mktemp -d -t awsbnkctl-pdf.XXXXXX) && \
 	    trap "rm -rf $$tmp" EXIT && \
-	    cp book/book/pandoc/pdf/book.pdf "$$tmp/roksbnkctl-book-$(VERSION).pdf" && \
-	    gh release upload $(VERSION) "$$tmp/roksbnkctl-book-$(VERSION).pdf" --clobber
+	    cp book/book/pandoc/pdf/book.pdf "$$tmp/awsbnkctl-book-$(VERSION).pdf" && \
+	    gh release upload $(VERSION) "$$tmp/awsbnkctl-book-$(VERSION).pdf" --clobber
 	@echo ""
 	@echo "==> Published:"
-	@echo "    HTML: https://jgruberf5.github.io/roksbnkctl/book/"
+	@echo "    HTML: https://JLCode-tech.github.io/awsbnkctl/book/"
 	@echo "    PDF:  $$(gh release view $(VERSION) --json url --jq '.url')"
 
 book-test:
@@ -392,11 +392,11 @@ test-integration:
 	go test -tags integration -timeout 5m ./...
 
 # test-live runs golden-file byte-equivalence tests for
-# `roksbnkctl k get -o yaml` against `kubectl get -o yaml`. Requires:
+# `awsbnkctl k get -o yaml` against `kubectl get -o yaml`. Requires:
 #
 #   - $KUBECONFIG (or ~/.kube/config) pointing at a real cluster
 #   - kubectl on PATH for the comparison side
-#   - roksbnkctl built and on PATH (or $ROKSBNKCTL set to its path)
+#   - awsbnkctl built and on PATH (or $AWSBNKCTL set to its path)
 #
 # Tests skip cleanly (rather than fail) when prerequisites are missing,
 # so it's safe to invoke from CI as a manual-trigger job. Recommended:

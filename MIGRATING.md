@@ -43,7 +43,7 @@ A `roksbnkctl` workspace **cannot** be migrated automatically — the underlying
 
 ## Between awsbnkctl versions
 
-Per-version migration notes will land here as releases are cut. Until v0.1.0 ships, there is nothing to migrate between.
+Per-version migration notes will land here as releases are cut. Until `v0.2` ships (gated on Sprint 1 — see [`docs/PLAN.md`](docs/PLAN.md)), there is nothing to migrate between.
 
 ## Cross-references
 

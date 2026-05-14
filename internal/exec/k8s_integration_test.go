@@ -12,9 +12,9 @@ package exec
 // Run locally:
 //
 //	# spin a kind cluster first
-//	kind create cluster --name roksbnkctl-test
+//	kind create cluster --name awsbnkctl-test
 //	go test -tags integration -timeout 10m ./internal/exec/...
-//	kind delete cluster --name roksbnkctl-test
+//	kind delete cluster --name awsbnkctl-test
 //
 // Tests skip cleanly when no cluster is reachable so the suite is safe
 // even on a runner without kind installed (the CI job sets up kind
@@ -76,8 +76,8 @@ func k8sIntegrationClient(t *testing.T) (kubernetes.Interface, *rest.Config) {
 	return cs, cfg
 }
 
-// ensureTestNamespace creates the roksbnkctl-test namespace if missing
-// (mirrors what `roksbnkctl ops install` does). Tests that exercise the
+// ensureTestNamespace creates the awsbnkctl-test namespace if missing
+// (mirrors what `awsbnkctl ops install` does). Tests that exercise the
 // Job path need this to exist before runAsJob is invoked.
 func ensureTestNamespace(t *testing.T, cs kubernetes.Interface) {
 	t.Helper()
@@ -155,7 +155,7 @@ func TestIntegration_K8sBackend_JobMode_Echo(t *testing.T) {
 }
 
 // TestIntegration_K8sBackend_OpsPodExec runs `echo hello` through the
-// long-lived ops-pod exec path. Requires `roksbnkctl ops install` to
+// long-lived ops-pod exec path. Requires `awsbnkctl ops install` to
 // have run (or this test to provision a sleep-infinity pod with
 // equivalent labels).
 func TestIntegration_K8sBackend_OpsPodExec(t *testing.T) {
@@ -163,7 +163,7 @@ func TestIntegration_K8sBackend_OpsPodExec(t *testing.T) {
 	ensureTestNamespace(t, cs)
 
 	// Ensure an ops pod is present. We provision a minimal busybox pod
-	// labelled the same way `roksbnkctl ops install` would so the
+	// labelled the same way `awsbnkctl ops install` would so the
 	// long-lived path can find it.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -201,13 +201,13 @@ func TestIntegration_K8sBackend_OpsPodExec(t *testing.T) {
 
 // ensureOpsPodForTest creates a minimal pod that satisfies the K8sBackend's
 // ops-pod-ready check (Phase=Running + Ready condition). Used by the
-// integration tests as a stand-in for `roksbnkctl ops install`.
+// integration tests as a stand-in for `awsbnkctl ops install`.
 func ensureOpsPodForTest(ctx context.Context, cs kubernetes.Interface) error {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      K8sOpsPodName,
 			Namespace: K8sOpsNamespace,
-			Labels:    map[string]string{"app": "roksbnkctl-ops"},
+			Labels:    map[string]string{"app": "awsbnkctl-ops"},
 		},
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyAlways,

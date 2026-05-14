@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 var (
@@ -31,9 +31,9 @@ func newKDeleteCmd() *cobra.Command {
 
 Examples:
 
-  roksbnkctl k delete pod my-pod -n f5-bnk
-  roksbnkctl k delete pods -l app=stale --force --grace-period=0
-  roksbnkctl k delete deployment foo --cascade=foreground`,
+  awsbnkctl k delete pod my-pod -n f5-bnk
+  awsbnkctl k delete pods -l app=stale --force --grace-period=0
+  awsbnkctl k delete deployment foo --cascade=foreground`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: runKDelete,
 	}

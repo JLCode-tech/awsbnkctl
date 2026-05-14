@@ -142,7 +142,7 @@ func TestCredentials_DockerArgs_CleanupRemovesTempfile(t *testing.T) {
 // distinguishes after the Sprint 6 Dockerfile-ENTRYPOINT drop:
 //
 //  1. tool with an explicit dockerImageBinary entry (ibmcloud,
-//     roksbnkctl) — the binary is prepended to the Cmd slice so the
+//     awsbnkctl) — the binary is prepended to the Cmd slice so the
 //     container has something to run even though the image has no
 //     ENTRYPOINT.
 //  2. tool without a dockerImageBinary entry (iperf3, terraform) —
@@ -169,7 +169,7 @@ func TestResolveDockerImageAndArgv(t *testing.T) {
 			// argv[1:] flows through `"$@"` after the `--` separator.
 			name:    "ibmcloud wraps argv with cred-shim + login-then-exec sh -c",
 			argv:    []string{"ibmcloud", "iam", "oauth-tokens"},
-			wantImg: "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:",
+			wantImg: "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud:",
 			wantCmd: []string{
 				"sh", "-c",
 				credShimScript + `ibmcloud login -a https://cloud.ibm.com -r "${IBMCLOUD_REGION:-us-south}" --apikey "$IBMCLOUD_API_KEY" --quiet > /dev/null 2>&1 && exec ibmcloud "$@"`,
@@ -178,10 +178,10 @@ func TestResolveDockerImageAndArgv(t *testing.T) {
 			},
 		},
 		{
-			name:    "roksbnkctl prepends absolute binary path",
-			argv:    []string{"roksbnkctl", "test", "dns", "--target=example.com"},
-			wantImg: "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:",
-			wantCmd: []string{"/usr/local/bin/roksbnkctl", "test", "dns", "--target=example.com"},
+			name:    "awsbnkctl prepends absolute binary path",
+			argv:    []string{"awsbnkctl", "test", "dns", "--target=example.com"},
+			wantImg: "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud:",
+			wantCmd: []string{"/usr/local/bin/awsbnkctl", "test", "dns", "--target=example.com"},
 		},
 		{
 			// iperf3 image is `networkstatic/iperf3:latest` (public on
@@ -310,7 +310,7 @@ func keysOf(m map[string][]string) []string {
 // This is the unit-tier sibling of
 // TestIntegration_DockerBackend_NoLeakInInspect.
 func TestBuildMountsAndEnv_CredTmpfileBindMount(t *testing.T) {
-	const secret = "test-key-roksbnkctl-tmpfile-NEVER-IN-ENV"
+	const secret = "test-key-awsbnkctl-tmpfile-NEVER-IN-ENV"
 	tempDir := t.TempDir()
 	b := &DockerBackend{}
 	mounts, env, cleanup, err := b.buildMountsAndEnv(RunOpts{
@@ -470,7 +470,7 @@ func TestWrapCmdWithCredShim(t *testing.T) {
 }
 
 // TestNeedsCredShim covers the decision matrix: terraform needs the
-// shim; ibmcloud + roksbnkctl already have it baked into
+// shim; ibmcloud + awsbnkctl already have it baked into
 // dockerImageBinary; iperf3 + literal image refs don't consume the
 // key.
 func TestNeedsCredShim(t *testing.T) {
@@ -480,7 +480,7 @@ func TestNeedsCredShim(t *testing.T) {
 	}{
 		{[]string{"terraform", "plan"}, true},
 		{[]string{"ibmcloud", "iam", "oauth-tokens"}, false}, // already shim-wrapped in dockerImageBinary
-		{[]string{"roksbnkctl", "test", "dns"}, false},       // doesn't read IBMCLOUD_API_KEY env
+		{[]string{"awsbnkctl", "test", "dns"}, false},        // doesn't read IBMCLOUD_API_KEY env
 		{[]string{"iperf3", "-c", "host"}, false},
 		{[]string{"busybox:latest", "echo", "hi"}, false},
 		{nil, false},

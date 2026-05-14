@@ -27,10 +27,10 @@ import (
 // values baked into k8s_install.yaml — the backend assumes ops install
 // has already provisioned these.
 const (
-	K8sOpsNamespace  = "roksbnkctl-ops"
-	K8sTestNamespace = "roksbnkctl-test"
-	K8sOpsPodName    = "roksbnkctl-ops"
-	K8sOpsSecretName = "roksbnkctl-ibm-creds"
+	K8sOpsNamespace  = "awsbnkctl-ops"
+	K8sTestNamespace = "awsbnkctl-test"
+	K8sOpsPodName    = "awsbnkctl-ops"
+	K8sOpsSecretName = "awsbnkctl-ibm-creds"
 
 	// k8sJobReadyTimeout is how long we wait for an ephemeral Job's pod
 	// to reach Running before streaming logs. Image pulls on a cold
@@ -61,7 +61,7 @@ var jobNameSanitizer = strings.NewReplacer(":", "-", "/", "-", "@", "-")
 // entrypoint and dispatch on RunOpts.LongLivedExec — true for the
 // ops-pod exec path, false (default) for the Job path.
 //
-// `roksbnkctl ops install` provisions the namespaces, ServiceAccount,
+// `awsbnkctl ops install` provisions the namespaces, ServiceAccount,
 // Secret, ClusterRole, and ops Pod this backend assumes exist. The
 // backend doesn't try to bootstrap on first call (would race; would
 // surprise users). Callers see a clear "ops not installed" error
@@ -114,7 +114,7 @@ func (b *K8sBackend) Run(ctx context.Context, argv []string, opts RunOpts) (int,
 
 	cs, restCfg, err := b.ensureClient()
 	if err != nil {
-		return k8sExitFailedToStart, fmt.Errorf("k8s backend: %w (run `roksbnkctl ops install` to provision the ops pod)", err)
+		return k8sExitFailedToStart, fmt.Errorf("k8s backend: %w (run `awsbnkctl ops install` to provision the ops pod)", err)
 	}
 
 	longLived, filteredEnv := extractLongLivedFlag(opts.Env)
@@ -178,7 +178,7 @@ func (b *K8sBackend) runOnOpsPod(ctx context.Context, cs kubernetes.Interface, c
 	pod, err := cs.CoreV1().Pods(K8sOpsNamespace).Get(ctx, K8sOpsPodName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return k8sExitFailedToStart, fmt.Errorf("ops pod %s/%s not found; run `roksbnkctl ops install`", K8sOpsNamespace, K8sOpsPodName)
+			return k8sExitFailedToStart, fmt.Errorf("ops pod %s/%s not found; run `awsbnkctl ops install`", K8sOpsNamespace, K8sOpsPodName)
 		}
 		return k8sExitFailedToStart, fmt.Errorf("looking up ops pod: %w", err)
 	}
@@ -200,7 +200,7 @@ func (b *K8sBackend) runOnOpsPod(ctx context.Context, cs kubernetes.Interface, c
 	// ENTRYPOINT, so this is a no-op risk for the long-lived path.
 	// For the one-shot Job path (runAsJob), where Container.Command
 	// DOES override Docker ENTRYPOINT, we use the
-	// `jobToolCmdOverride` map for tools (like `roksbnkctl`) that
+	// `jobToolCmdOverride` map for tools (like `awsbnkctl`) that
 	// need to bypass the bundled tools-image's `ibmcloud`
 	// entrypoint. See `buildJobSpecWithArgs` for the Args plumbing.
 	cmd := argv
@@ -297,9 +297,9 @@ func (b *K8sBackend) runOnOpsPod(ctx context.Context, cs kubernetes.Interface, c
 //     ErrPullBackOff-shaped failures pointing at a nonexistent
 //     command.
 //  2. The tool's image HAS an ENTRYPOINT but the caller wants a
-//     different binary inside the same image (e.g. roksbnkctl is
+//     different binary inside the same image (e.g. awsbnkctl is
 //     bundled into the tools-ibmcloud image; the dns-probe re-exec
-//     path needs `roksbnkctl`, not whatever the image's ENTRYPOINT
+//     path needs `awsbnkctl`, not whatever the image's ENTRYPOINT
 //     used to be).
 //
 // runAsJob picks the entry up, sets `Container.Command` to the
@@ -311,11 +311,11 @@ func (b *K8sBackend) runOnOpsPod(ctx context.Context, cs kubernetes.Interface, c
 // (upstream `hashicorp/terraform` image's ENTRYPOINT="terraform")
 // continue to work without an entry.
 var jobToolCmdOverride = map[string][]string{
-	"ibmcloud":   {"ibmcloud"},
-	"roksbnkctl": {"/usr/local/bin/roksbnkctl"},
+	"ibmcloud":  {"ibmcloud"},
+	"awsbnkctl": {"/usr/local/bin/awsbnkctl"},
 }
 
-// runAsJob spawns a one-shot Job in roksbnkctl-test, materialises Files
+// runAsJob spawns a one-shot Job in awsbnkctl-test, materialises Files
 // + creds via projected Secret(s), waits for Running, streams logs,
 // then waits for completion + cleanup.
 //
@@ -339,7 +339,7 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 	// label-validation regex on Job creation.
 	suffix := rand.String(6)
 	safeTool := jobNameSanitizer.Replace(tool)
-	jobName := "roksbnkctl-" + safeTool + "-" + suffix
+	jobName := "awsbnkctl-" + safeTool + "-" + suffix
 	if len(jobName) > 60 {
 		jobName = jobName[:60]
 	}
@@ -352,7 +352,7 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      filesSecretName,
 				Namespace: K8sTestNamespace,
-				Labels:    map[string]string{"roksbnkctl.io/job": jobName},
+				Labels:    map[string]string{"awsbnkctl.io/job": jobName},
 			},
 			Type: corev1.SecretTypeOpaque,
 			Data: opts.Files,
@@ -456,8 +456,8 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 
 // buildJobSpec renders the per-Job spec. SCC-clean (matches the iperf3
 // SCC fix). Mounts the files Secret at /work read-only when present;
-// envFroms the cred Secret in roksbnkctl-ops (cross-namespace). Note:
-// projected Secret crossing namespaces requires the SA in roksbnkctl-test
+// envFroms the cred Secret in awsbnkctl-ops (cross-namespace). Note:
+// projected Secret crossing namespaces requires the SA in awsbnkctl-test
 // to read the cred Secret; we sidestep that by referencing the cred
 // Secret only from the ops pod (long-lived path) and using a fresh
 // envFrom-style projection out of a per-Job Secret for the Job path.
@@ -470,7 +470,7 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 // buildJobSpec is preserved for the legacy single-argv shape (image
 // ENTRYPOINT picks the binary; cmd is argv[1:]). The Sprint 5 shim
 // `buildJobSpecWithArgs` adds an explicit args slice for tools like
-// `roksbnkctl` that need to bypass the image's ENTRYPOINT.
+// `awsbnkctl` that need to bypass the image's ENTRYPOINT.
 func buildJobSpec(jobName, image string, cmd []string, opts RunOpts, hasFilesSecret bool, filesSecretName string) *batchv1.Job {
 	return buildJobSpecWithArgs(jobName, image, cmd, nil, opts, hasFilesSecret, filesSecretName)
 }
@@ -483,7 +483,7 @@ func buildJobSpec(jobName, image string, cmd []string, opts RunOpts, hasFilesSec
 // args=nil.
 //
 // Sprint 4 validator Issue 7 carry-over: the dns-probe Job sets
-// `cmd=["/usr/local/bin/roksbnkctl"]` + `args=["test","dns",...]` so
+// `cmd=["/usr/local/bin/awsbnkctl"]` + `args=["test","dns",...]` so
 // the tools image's `ibmcloud` ENTRYPOINT doesn't override the binary
 // the dns probe wants to run. PRD 03 §"DNS probe" §"K8s shape".
 func buildJobSpecWithArgs(jobName, image string, cmd, args []string, opts RunOpts, hasFilesSecret bool, filesSecretName string) *batchv1.Job {
@@ -518,7 +518,7 @@ func buildJobSpecWithArgs(jobName, image string, cmd, args []string, opts RunOpt
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: K8sTestNamespace,
-			Labels:    map[string]string{"roksbnkctl.io/managed": "true", "app": jobName},
+			Labels:    map[string]string{"awsbnkctl.io/managed": "true", "app": jobName},
 		},
 		Spec: batchv1.JobSpec{
 			TTLSecondsAfterFinished: &ttl,

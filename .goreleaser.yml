@@ -1,4 +1,4 @@
-# goreleaser config for roksbnkctl.
+# goreleaser config for awsbnkctl.
 # Run with: goreleaser release --clean (after tagging a release)
 # Cross-compile sweep: linux/darwin/windows × amd64/arm64.
 #
@@ -15,16 +15,16 @@
 #    is left commented out below as a marker for when a tap lands).
 version: 2
 
-project_name: roksbnkctl
+project_name: awsbnkctl
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: roksbnkctl
-    main: ./cmd/roksbnkctl
-    binary: roksbnkctl
+  - id: awsbnkctl
+    main: ./cmd/awsbnkctl
+    binary: awsbnkctl
     env:
       - CGO_ENABLED=0
     goos:
@@ -36,14 +36,14 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/jgruberf5/roksbnkctl/internal/cli.Version={{.Version}}
-      - -X github.com/jgruberf5/roksbnkctl/internal/cli.Commit={{.ShortCommit}}
-      - -X github.com/jgruberf5/roksbnkctl/internal/cli.BuildDate={{.Date}}
+      - -X github.com/JLCode-tech/awsbnkctl/internal/cli.Version={{.Version}}
+      - -X github.com/JLCode-tech/awsbnkctl/internal/cli.Commit={{.ShortCommit}}
+      - -X github.com/JLCode-tech/awsbnkctl/internal/cli.BuildDate={{.Date}}
 
 archives:
   # The name_template here is load-bearing: `internal/cli/self.go`
   # rebuilds the same template to find the asset for the host's
-  # OS/arch when `roksbnkctl self update` runs. Keep these aligned.
+  # OS/arch when `awsbnkctl self update` runs. Keep these aligned.
   - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     # goreleaser v2 renamed `format` (singular) to `formats` (list).
     format_overrides:
@@ -76,23 +76,23 @@ release:
   # documentation lives in the book, the per-version detail in
   # CHANGELOG.md.
   header: |
-    ## roksbnkctl {{ .Tag }}
+    ## awsbnkctl {{ .Tag }}
 
     Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on IBM Cloud ROKS.
 
-    Read the book: <https://jgruberf5.github.io/roksbnkctl/book/> — _Deploying and Testing BIG-IP Next for Kubernetes with roksbnkctl_
+    Read the book: <https://JLCode-tech.github.io/awsbnkctl/book/> — _Deploying and Testing BIG-IP Next for Kubernetes with awsbnkctl_
 
-    Migration guide: <https://github.com/jgruberf5/roksbnkctl/blob/main/MIGRATING.md>
+    Migration guide: <https://github.com/JLCode-tech/awsbnkctl/blob/main/MIGRATING.md>
   footer: |
     ---
-    See [`CHANGELOG.md`](https://github.com/jgruberf5/roksbnkctl/blob/main/CHANGELOG.md) for the full per-version change log.
+    See [`CHANGELOG.md`](https://github.com/JLCode-tech/awsbnkctl/blob/main/CHANGELOG.md) for the full per-version change log.
 
     Verify the downloaded archive against `checksums.txt`:
     ```
     sha256sum -c checksums.txt --ignore-missing
     ```
 
-    The attached `roksbnkctl-book-{{ .Tag }}.pdf` is the same book published at <https://jgruberf5.github.io/roksbnkctl/book/>, packaged for offline reading. Build it locally any time via `make release` from the source tree.
+    The attached `awsbnkctl-book-{{ .Tag }}.pdf` is the same book published at <https://JLCode-tech.github.io/awsbnkctl/book/>, packaged for offline reading. Build it locally any time via `make release` from the source tree.
 
   # The PDF book artifact is NOT attached by goreleaser. The CI runner
   # for release.yml doesn't have pandoc/XeLaTeX/mermaid-cli installed
@@ -103,7 +103,7 @@ release:
   #   make release-publish VERSION=vX.Y.Z
   #
   # from their machine, which uploads ./book/book/pandoc/pdf/book.pdf to
-  # this Release as roksbnkctl-book-vX.Y.Z.pdf via `gh release upload`.
+  # this Release as awsbnkctl-book-vX.Y.Z.pdf via `gh release upload`.
   #
   # Earlier versions of this config had `extra_files` pointing at the PDF.
   # That turned out to fail-stop the release (not warn-and-continue as
@@ -114,12 +114,12 @@ release:
 # half-publish a formula pointing at a nonexistent tap.
 #
 # brews:
-#   - name: roksbnkctl
+#   - name: awsbnkctl
 #     repository:
-#       owner: jgruberf5
+#       owner: JLCode-tech
 #       name: homebrew-tap
-#     homepage: "https://jgruberf5.github.io/roksbnkctl/book/"
+#     homepage: "https://JLCode-tech.github.io/awsbnkctl/book/"
 #     description: "Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on IBM Cloud ROKS."
 #     license: "MIT"
 #     test: |
-#       system "#{bin}/roksbnkctl", "version"
+#       system "#{bin}/awsbnkctl", "version"

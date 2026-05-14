@@ -16,12 +16,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
-	"github.com/jgruberf5/roksbnkctl/internal/doctor"
-	execbackend "github.com/jgruberf5/roksbnkctl/internal/exec"
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
-	"github.com/jgruberf5/roksbnkctl/internal/test"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/doctor"
+	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/test"
 )
 
 // runBackendChecks dispatches to the per-backend doctor probes per PRD 03
@@ -86,7 +86,7 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 	defer cancel()
 
 	if _, err := cs.CoreV1().Namespaces().Get(probeCtx, execbackend.K8sOpsNamespace, metav1.GetOptions{}); err != nil {
-		add("ops namespace", doctor.StatusError, "missing — run `roksbnkctl ops install`")
+		add("ops namespace", doctor.StatusError, "missing — run `awsbnkctl ops install`")
 		return out
 	}
 	add("ops namespace", doctor.StatusOK, execbackend.K8sOpsNamespace)
@@ -94,7 +94,7 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 	pod, err := cs.CoreV1().Pods(execbackend.K8sOpsNamespace).Get(probeCtx, execbackend.K8sOpsPodName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			add("ops pod", doctor.StatusError, "not found — run `roksbnkctl ops install`")
+			add("ops pod", doctor.StatusError, "not found — run `awsbnkctl ops install`")
 		} else {
 			add("ops pod", doctor.StatusError, err.Error())
 		}
@@ -106,22 +106,22 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 		add("ops pod", doctor.StatusOK, fmt.Sprintf("%s (image=%s)", pod.Status.Phase, pod.Spec.Containers[0].Image))
 	}
 
-	if _, err := cs.CoreV1().ServiceAccounts(execbackend.K8sOpsNamespace).Get(probeCtx, "roksbnkctl-ops", metav1.GetOptions{}); err != nil {
+	if _, err := cs.CoreV1().ServiceAccounts(execbackend.K8sOpsNamespace).Get(probeCtx, "awsbnkctl-ops", metav1.GetOptions{}); err != nil {
 		add("ops serviceaccount", doctor.StatusError, err.Error())
 	} else {
-		add("ops serviceaccount", doctor.StatusOK, "roksbnkctl-ops")
+		add("ops serviceaccount", doctor.StatusOK, "awsbnkctl-ops")
 	}
 
-	if _, err := cs.RbacV1().ClusterRoles().Get(probeCtx, "roksbnkctl-ops", metav1.GetOptions{}); err != nil {
+	if _, err := cs.RbacV1().ClusterRoles().Get(probeCtx, "awsbnkctl-ops", metav1.GetOptions{}); err != nil {
 		add("ops clusterrole", doctor.StatusError, err.Error())
 	} else {
-		add("ops clusterrole", doctor.StatusOK, "roksbnkctl-ops")
+		add("ops clusterrole", doctor.StatusOK, "awsbnkctl-ops")
 	}
 
-	if _, err := cs.RbacV1().ClusterRoleBindings().Get(probeCtx, "roksbnkctl-ops", metav1.GetOptions{}); err != nil {
+	if _, err := cs.RbacV1().ClusterRoleBindings().Get(probeCtx, "awsbnkctl-ops", metav1.GetOptions{}); err != nil {
 		add("ops clusterrolebinding", doctor.StatusError, err.Error())
 	} else {
-		add("ops clusterrolebinding", doctor.StatusOK, "roksbnkctl-ops")
+		add("ops clusterrolebinding", doctor.StatusOK, "awsbnkctl-ops")
 	}
 
 	secret, err := cs.CoreV1().Secrets(execbackend.K8sOpsNamespace).Get(probeCtx, execbackend.K8sOpsSecretName, metav1.GetOptions{})
@@ -132,18 +132,18 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 		if len(key) == 0 {
 			add("ops cred secret", doctor.StatusError, "IBMCLOUD_API_KEY data field empty")
 		} else {
-			add("ops cred secret", doctor.StatusOK, fmt.Sprintf("%s (rotated %s)", secret.Name, secret.Annotations["roksbnkctl.io/rotated-at"]))
+			add("ops cred secret", doctor.StatusOK, fmt.Sprintf("%s (rotated %s)", secret.Name, secret.Annotations["awsbnkctl.io/rotated-at"]))
 		}
 		// Sprint 5: cred rotation freshness check. Annotated with
-		// roksbnkctl.io/rotated-at on `ops install`; we surface a
+		// awsbnkctl.io/rotated-at on `ops install`; we surface a
 		// warning (not error) when the value is older than 30 days
 		// — best-practice rotation reminder, not a hard fail.
-		if rotated := secret.Annotations["roksbnkctl.io/rotated-at"]; rotated != "" {
+		if rotated := secret.Annotations["awsbnkctl.io/rotated-at"]; rotated != "" {
 			if t, perr := time.Parse(time.RFC3339, rotated); perr == nil {
 				age := time.Since(t)
 				if age > 30*24*time.Hour {
 					add("ops cred rotation", doctor.StatusWarning,
-						fmt.Sprintf("API key has not been rotated for %d days; consider re-running `roksbnkctl ops install` with a fresh key", int(age.Hours()/24)))
+						fmt.Sprintf("API key has not been rotated for %d days; consider re-running `awsbnkctl ops install` with a fresh key", int(age.Hours()/24)))
 				} else {
 					add("ops cred rotation", doctor.StatusOK,
 						fmt.Sprintf("rotated %d days ago", int(age.Hours()/24)))
@@ -168,7 +168,7 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 			add("ops pod env IBMCLOUD_API_KEY", doctor.StatusOK, "(present, redacted)")
 		} else {
 			add("ops pod env IBMCLOUD_API_KEY", doctor.StatusError,
-				"empty at runtime — Secret missing or envFrom misconfigured; rerun `roksbnkctl ops install`")
+				"empty at runtime — Secret missing or envFrom misconfigured; rerun `awsbnkctl ops install`")
 		}
 	} else {
 		add("ops pod env IBMCLOUD_API_KEY", doctor.StatusWarning,
@@ -179,7 +179,7 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 	// Uses SubjectAccessReview impersonating the ops SA.
 	sar := &authv1.SubjectAccessReview{
 		Spec: authv1.SubjectAccessReviewSpec{
-			User: "system:serviceaccount:" + execbackend.K8sOpsNamespace + ":roksbnkctl-ops",
+			User: "system:serviceaccount:" + execbackend.K8sOpsNamespace + ":awsbnkctl-ops",
 			ResourceAttributes: &authv1.ResourceAttributes{
 				Namespace: "default",
 				Verb:      "delete",
@@ -191,7 +191,7 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 	if err != nil {
 		add("ops rbac (least-privilege)", doctor.StatusWarning, "could not run SubjectAccessReview: "+err.Error())
 	} else if resp.Status.Allowed {
-		add("ops rbac (least-privilege)", doctor.StatusError, "ops SA can delete pods in 'default' namespace — too permissive! Reapply `roksbnkctl ops install` to reset RBAC")
+		add("ops rbac (least-privilege)", doctor.StatusError, "ops SA can delete pods in 'default' namespace — too permissive! Reapply `awsbnkctl ops install` to reset RBAC")
 	} else {
 		add("ops rbac (least-privilege)", doctor.StatusOK, "ops SA cannot delete pods cluster-wide (good)")
 	}
@@ -321,7 +321,7 @@ func runDNSProbeCheck(ctx context.Context, cctx *config.Context) (doctor.Check, 
 //
 // Sprint 5 doctor extension: catches the failure mode where a stale
 // envFrom or a missing Secret has the pod running but with no
-// IBMCLOUD_API_KEY available — `roksbnkctl ibmcloud --backend k8s`
+// IBMCLOUD_API_KEY available — `awsbnkctl ibmcloud --backend k8s`
 // would surface as "auth failed" with a confusing error; this probe
 // surfaces it earlier.
 func probeOpsPodEnv(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config) bool {

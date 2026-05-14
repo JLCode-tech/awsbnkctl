@@ -1,4 +1,4 @@
-// Command cobra-md walks the roksbnkctl cobra command tree and emits a
+// Command cobra-md walks the awsbnkctl cobra command tree and emits a
 // single Markdown reference document on stdout.
 //
 // Usage:
@@ -34,7 +34,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/jgruberf5/roksbnkctl/internal/cli"
+	"github.com/JLCode-tech/awsbnkctl/internal/cli"
 )
 
 // anglePlaceholderRE matches placeholder tokens like <name>, <ws>,
@@ -101,11 +101,11 @@ func main() {
 //	  (auto-generation note)
 //	## Global flags
 //	  (PersistentFlags from the root; rendered once)
-//	## roksbnkctl <verb>
+//	## awsbnkctl <verb>
 //	  short + long description, local-flags table, examples, parent backlink
-//	### roksbnkctl <verb> <subverb>
+//	### awsbnkctl <verb> <subverb>
 //	  ...
-//	#### roksbnkctl <verb> <subverb> <sub-sub>
+//	#### awsbnkctl <verb> <subverb> <sub-sub>
 //	  ...
 //
 // Hidden commands (Hidden=true) and the help command are skipped; they
@@ -176,7 +176,7 @@ func renderCommand(w io.Writer, c *cobra.Command, depth int) {
 	}
 
 	// Synopsis: cobra's UseLine() returns the FULL command path plus
-	// the Use suffix (`roksbnkctl ws delete [flags] <name>`). Render it
+	// the Use suffix (`awsbnkctl ws delete [flags] <name>`). Render it
 	// verbatim inside a fenced block when it adds info beyond the path
 	// alone (i.e. when there's a "[flags]" / "<arg>" suffix).
 	useLine := strings.TrimSpace(c.UseLine())
@@ -209,7 +209,7 @@ func renderCommand(w io.Writer, c *cobra.Command, depth int) {
 	}
 
 	// Parent backlink — except at depth 2 (top-level command; parent is
-	// "roksbnkctl" itself which is the chapter title, not a section).
+	// "awsbnkctl" itself which is the chapter title, not a section).
 	if depth > 2 && c.Parent() != nil {
 		parent := c.Parent().CommandPath()
 		anchor := slugify(parent)
@@ -289,8 +289,8 @@ func writeFlagTable(w io.Writer, fs *pflag.FlagSet) {
 	}
 }
 
-// slugify maps a command path like "roksbnkctl ws delete" to the
-// GitHub-Pages anchor "roksbnkctl-ws-delete" that mdBook generates
+// slugify maps a command path like "awsbnkctl ws delete" to the
+// GitHub-Pages anchor "awsbnkctl-ws-delete" that mdBook generates
 // for a backtick-wrapped header at any depth. mdBook's anchor
 // algorithm: lowercase, replace any non-alphanumeric run with `-`,
 // trim leading/trailing dashes, drop backticks.

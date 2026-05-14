@@ -1,4 +1,4 @@
-module github.com/jgruberf5/roksbnkctl/tools/ciwatch
+module github.com/JLCode-tech/awsbnkctl/tools/ciwatch
 
 go 1.25.0
 

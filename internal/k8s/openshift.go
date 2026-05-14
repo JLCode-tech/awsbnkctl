@@ -9,7 +9,7 @@ import (
 // will return a typed openshift/client-go *clientset.Clientset built
 // from the same kubeconfig discovery as BuildClientset, plus a scheme
 // registration step that wires Project/Route/ImageStream/etc. into the
-// resource.Builder so `roksbnkctl k get projects` works against ROKS
+// resource.Builder so `awsbnkctl k get projects` works against ROKS
 // clusters without a hardcoded list.
 //
 // Phase 2.0 ships without this — the dynamic-client + RESTMapper path

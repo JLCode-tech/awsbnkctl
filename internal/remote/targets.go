@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
 // Target is the runtime form of a `targets:` entry. Constructed by
@@ -40,7 +40,7 @@ var errTargetNotFound = errors.New("target not found")
 // ErrTargetNotFound is the sentinel callers use with errors.Is.
 var ErrTargetNotFound = errTargetNotFound
 
-// LoadTarget reads ~/.roksbnkctl/<workspace>/config.yaml and returns the
+// LoadTarget reads ~/.awsbnkctl/<workspace>/config.yaml and returns the
 // named target, with Signer / HostKeyCallback unset (caller fills those
 // before Connect). Returns ErrTargetNotFound if the workspace config
 // has no entry for `name`.
@@ -105,7 +105,7 @@ func SetTarget(workspace string, name string, cfg config.TargetCfg) error {
 }
 
 // RemoveTarget deletes the named target. No-op (no error) when absent —
-// matches `roksbnkctl targets remove` user expectations.
+// matches `awsbnkctl targets remove` user expectations.
 func RemoveTarget(workspace string, name string) error {
 	if name == "" {
 		return errors.New("target name is empty")

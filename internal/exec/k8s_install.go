@@ -5,7 +5,7 @@ import (
 )
 
 // k8sInstallYAML is the multi-document YAML template applied by
-// `roksbnkctl ops install`. Embedded at build time so the binary is
+// `awsbnkctl ops install`. Embedded at build time so the binary is
 // self-contained — no need to ship a separate manifests directory.
 //
 // Template placeholders substituted at apply-time:
@@ -16,7 +16,7 @@ import (
 //	${ROTATED_AT}           — RFC3339 timestamp of the apply, stamped on
 //	                          the Secret as an annotation so `ops show`
 //	                          can render rotation.
-//	${OPS_IMAGE}            — the roksbnkctl-tools-ibmcloud image ref;
+//	${OPS_IMAGE}            — the awsbnkctl-tools-ibmcloud image ref;
 //	                          version-pinned to internal/cli.Version per
 //	                          the toolImages migration (no more :dev hard-
 //	                          code on prod-tag builds).

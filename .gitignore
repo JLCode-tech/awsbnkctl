@@ -1,4 +1,5 @@
 /bin/
+/awsbnkctl
 /roksbnkctl
 *.test
 *.out
@@ -6,7 +7,9 @@
 *.exe~
 .DS_Store
 
-# roksbnkctl-managed state, never commit
+# awsbnkctl-managed state, never commit
+.awsbnkctl/
+# legacy fork-point name; harmless to keep until Sprint 5 polish removes it
 .roksbnkctl/
 
 # IDE
@@ -25,8 +28,9 @@ book/book/
 
 # Local secrets / per-run overrides for scripts/e2e-test-full.sh.
 # Source with `set -a; . .env; set +a` before invoking the script.
-# NEVER commit — contains IBMCLOUD_API_KEY plus optional SSH target
-# names. Copy .env.example as a starting point if one ever lands.
+# NEVER commit — will carry AWS_* credentials + workspace overrides
+# once Sprint 4 rehydrates the e2e drivers. Copy .env.example as a
+# starting point if one ever lands.
 .env
 .env.local
 .env.*.local

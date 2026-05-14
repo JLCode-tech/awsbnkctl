@@ -12,10 +12,10 @@ import (
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
-	execbackend "github.com/jgruberf5/roksbnkctl/internal/exec"
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
-	"github.com/jgruberf5/roksbnkctl/internal/test"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/test"
 )
 
 // jsonDecoder is a tiny shim so test.go's helpers don't need to import
@@ -32,7 +32,7 @@ var (
 	flagInsecureTLS         bool
 
 	// DNS probe flags (Sprint 5; PRD 03 §"DNS probe (GSLB-aware)").
-	// All optional — when none of them are set, `roksbnkctl test dns`
+	// All optional — when none of them are set, `awsbnkctl test dns`
 	// keeps today's workspace-extra_hosts behaviour unchanged. As soon
 	// as any one is set, the new flag-driven path activates.
 	flagDNSTarget            string
@@ -47,7 +47,7 @@ var (
 var testCmd = &cobra.Command{
 	Use:   "test [suite]",
 	Short: "Run deployment validation tests (default: all)",
-	Long: `roksbnkctl test runs deployment validation against the current workspace.
+	Long: `awsbnkctl test runs deployment validation against the current workspace.
 
 Suites:
   connectivity   HTTP/HTTPS reachability of deployed BNK services
@@ -55,7 +55,7 @@ Suites:
   throughput     iperf3 measurements (north-south by default; v1.x)
   all            run all of the above (default if no suite is specified)
 
-Honors -o json with the roksbnkctl.v1 schema. Exit code 0 on all-pass,
+Honors -o json with the awsbnkctl.v1 schema. Exit code 0 on all-pass,
 non-zero on any-fail — CI-friendly.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runTestDispatch,
@@ -70,19 +70,19 @@ var testConnectivityCmd = &cobra.Command{
 var testDNSCmd = &cobra.Command{
 	Use:   "dns",
 	Short: "DNS resolution probe (single-vantage, GSLB-compare, or workspace-driven)",
-	Long: `roksbnkctl test dns runs DNS probes against configured resolvers.
+	Long: `awsbnkctl test dns runs DNS probes against configured resolvers.
 
 Two modes:
 
   Workspace-driven (no flags) — resolves each host listed under
   test.connectivity.extra_hosts via the std-lib resolver. Same as
   Sprint 0–4 behaviour; preserves CI invocations using the legacy
-  ` + "`roksbnkctl.v1`" + ` schema.
+  ` + "`awsbnkctl.v1`" + ` schema.
 
   Flag-driven (any of --target/--type/--server/--gslb-compare set) —
   uses the embedded miekg/dns probe (no external dig install needed).
-  Single-vantage emits ` + "`roksbnkctl.dns.v1.vantage`" + `; --gslb-compare
-  emits ` + "`roksbnkctl.dns.v1`" + ` with a gslb_divergence boolean across
+  Single-vantage emits ` + "`awsbnkctl.dns.v1.vantage`" + `; --gslb-compare
+  emits ` + "`awsbnkctl.dns.v1`" + ` with a gslb_divergence boolean across
   all configured backends (local + k8s + ssh:<targets>).
 
 Use --backend local|k8s|ssh:<target> to pick a single vantage point;
@@ -95,7 +95,7 @@ var testThroughputCmd = &cobra.Command{
 	Use:   "throughput",
 	Short: "iperf3 throughput; deploys server pod automatically (v1.x)",
 	Long: `Deploys an iperf3 server in the test namespace and runs the client
-either from the roksbnkctl host (--mode north-south, default) or from a second
+either from the awsbnkctl host (--mode north-south, default) or from a second
 in-cluster pod (--mode east-west).
 
 Not yet implemented — landing in v1.x once the internal/k8s client-go
@@ -118,7 +118,7 @@ func init() {
 
 	// DNS probe flag surface (PRD 03 §"DNS probe (GSLB-aware)" §"CLI surface").
 	// Setting any one of these (or --gslb-compare) activates the new
-	// flag-driven path; otherwise `roksbnkctl test dns` keeps the legacy
+	// flag-driven path; otherwise `awsbnkctl test dns` keeps the legacy
 	// workspace-extra_hosts probe behaviour for backwards compatibility.
 	testDNSCmd.Flags().StringVar(&flagDNSTarget, "target", "", "DNS name to query (overrides workspace test.dns.default_target)")
 	testDNSCmd.Flags().StringVar(&flagDNSType, "type", "A", "record type: A | AAAA | CNAME | MX | NS | TXT | SRV | SOA | PTR | CAA | DS | DNSKEY | ANY")
@@ -132,7 +132,7 @@ func init() {
 	rootCmd.AddCommand(testCmd)
 }
 
-// runTestDispatch handles `roksbnkctl test [suite]` — dispatches the bare
+// runTestDispatch handles `awsbnkctl test [suite]` — dispatches the bare
 // suite name to the corresponding subcommand impl.
 func runTestDispatch(cmd *cobra.Command, args []string) error {
 	suite := "all"
@@ -216,7 +216,7 @@ func runTestDNSProbe(cmd *cobra.Command) error {
 		return err
 	}
 	// Workspace is optional for the DNS probe — bare-flag invocations
-	// like `roksbnkctl test dns --target www.cloudflare.com` should
+	// like `awsbnkctl test dns --target www.cloudflare.com` should
 	// just-work without a workspace.
 	var ws *config.Workspace
 	if cctx != nil {
@@ -263,7 +263,7 @@ func runTestDNSProbe(cmd *cobra.Command) error {
 // runDNSSingleVantage runs the probe on a single backend (default
 // local) and emits the per-vantage result document. The shape matches
 // PRD 03 §"DNS probe" §"JSON output schema" — a single
-// `roksbnkctl.dns.v1.vantage` document, not the multi-vantage
+// `awsbnkctl.dns.v1.vantage` document, not the multi-vantage
 // comparison wrapper.
 func runDNSSingleVantage(ctx context.Context, cctx *config.Context, target string, qtype uint16, server string, iterations int, timeout time.Duration) error {
 	backendSpec := flagBackend
@@ -374,9 +374,9 @@ func runDNSGSLBCompare(ctx context.Context, cctx *config.Context, target string,
 //
 //   - "local" runs in-process via Probe.Run.
 //   - "k8s" runs in-cluster as a one-shot Job that re-execs the
-//     `roksbnkctl` binary with the same probe args + `-o json`. The
+//     `awsbnkctl` binary with the same probe args + `-o json`. The
 //     binary lives inside the ops pod's image (the bundled tools
-//     image ships with `/usr/local/bin/roksbnkctl` alongside
+//     image ships with `/usr/local/bin/awsbnkctl` alongside
 //     `ibmcloud`). The Job's stdout is parsed back into a
 //     DNSProbeResult.
 //   - "ssh:<target>" runs the binary on the named SSH target.
@@ -405,9 +405,9 @@ func dispatchDNSProbe(ctx context.Context, cctx *config.Context, spec, target st
 }
 
 // runDNSProbeK8s executes the DNS probe inside the cluster as a
-// one-shot Job that self-execs `roksbnkctl test dns ...` against the
+// one-shot Job that self-execs `awsbnkctl test dns ...` against the
 // same flags. The Job's image is the bundled ops pod image (which
-// carries the `roksbnkctl` binary alongside `ibmcloud`).
+// carries the `awsbnkctl` binary alongside `ibmcloud`).
 //
 // PRD 03 §"DNS probe" §"K8s shape": the binary itself runs in-cluster;
 // no separate image needed.
@@ -423,10 +423,10 @@ func runDNSProbeK8s(ctx context.Context, cctx *config.Context, target string, qt
 	if srv == "" || strings.EqualFold(srv, "system") || strings.EqualFold(srv, "cluster") {
 		srv = "system"
 	}
-	// argv[0] = "roksbnkctl" — the k8s backend's runAsJob path looks
+	// argv[0] = "awsbnkctl" — the k8s backend's runAsJob path looks
 	// up an image for this name. We add it to toolImages just below.
 	argv := []string{
-		"roksbnkctl", "test", "dns",
+		"awsbnkctl", "test", "dns",
 		"--target", target,
 		"--type", dnsTypeName(qtype),
 		"--server", srv,
@@ -458,7 +458,7 @@ func runDNSProbeK8s(ctx context.Context, cctx *config.Context, target string, qt
 }
 
 // runDNSProbeSSH runs the binary on the named SSH target. Mirrors the
-// k8s path: re-exec `roksbnkctl test dns ... -o json` over SSH; parse
+// k8s path: re-exec `awsbnkctl test dns ... -o json` over SSH; parse
 // the JSON back. Requires the binary to be on the target's PATH (or
 // scp'd in by a future bootstrap path — out of scope for v0.9).
 func runDNSProbeSSH(ctx context.Context, cctx *config.Context, spec, target string, qtype uint16, server string, iterations int, timeout time.Duration) (*test.DNSProbeResult, error) {
@@ -481,7 +481,7 @@ func runDNSProbeSSH(ctx context.Context, cctx *config.Context, spec, target stri
 		srv = "system"
 	}
 	argv := []string{
-		"roksbnkctl", "test", "dns",
+		"awsbnkctl", "test", "dns",
 		"--target", target,
 		"--type", dnsTypeName(qtype),
 		"--server", srv,
@@ -516,7 +516,7 @@ func runTestThroughputCmd(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if cctx.Workspace == nil {
-		return fmt.Errorf("workspace %q is not initialised; run `roksbnkctl init` first", cctx.WorkspaceName)
+		return fmt.Errorf("workspace %q is not initialised; run `awsbnkctl init` first", cctx.WorkspaceName)
 	}
 
 	// Resolve the iperf3 client backend. Sprint 4 default is "k8s" per
@@ -792,7 +792,7 @@ func loadHosts() (*config.Context, []string, error) {
 		return nil, nil, err
 	}
 	if cctx.Workspace == nil {
-		return nil, nil, fmt.Errorf("workspace %q is not initialised; run `roksbnkctl init` first", cctx.WorkspaceName)
+		return nil, nil, fmt.Errorf("workspace %q is not initialised; run `awsbnkctl init` first", cctx.WorkspaceName)
 	}
 	hosts := test.HostsFromConfig(cctx.Workspace)
 	if len(hosts) == 0 {
@@ -850,7 +850,7 @@ var dnsTypeStringTable = map[uint16]string{
 }
 
 // decodeDNSProbeJSON parses a per-vantage JSON document emitted by a
-// child `roksbnkctl test dns ... -o json` invocation (k8s Job or SSH
+// child `awsbnkctl test dns ... -o json` invocation (k8s Job or SSH
 // re-exec). The output may have stderr noise prepended (image-pull
 // progress for k8s, ssh banner for ssh) — we scan for the first '{'
 // and parse from there.

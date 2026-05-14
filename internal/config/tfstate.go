@@ -12,7 +12,7 @@ import (
 // WorkspaceShape captures the on-disk provisioning shape of a workspace
 // so the lifecycle / phase commands can route to the correct dispatch
 // path. Derived purely from artifacts under
-// ~/.roksbnkctl/<workspace>/state[-cluster]/terraform.tfstate — no
+// ~/.awsbnkctl/<workspace>/state[-cluster]/terraform.tfstate — no
 // terraform calls, no IBM Cloud calls.
 //
 // See docs/prd/06-CLUSTER-TRIAL-PHASE-SPLIT.md §"Design" for the
@@ -42,7 +42,7 @@ const (
 	ShapeSplit
 
 	// ShapeLegacySingle — the trial-phase state contains cluster-phase
-	// modules from a pre-split v1.0.x `roksbnkctl up` run. The cluster
+	// modules from a pre-split v1.0.x `awsbnkctl up` run. The cluster
 	// phase state directory is typically empty / absent in this shape.
 	// Triggers refusals on `cluster up/down` and `bnk up/down` — the
 	// only safe command surface is the monolithic `up`/`down`.

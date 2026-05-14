@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
-	"github.com/jgruberf5/roksbnkctl/internal/tf"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/tf"
 )
 
 var (
@@ -21,7 +21,7 @@ var tfvarsCmd = &cobra.Command{
 	Short: "Emit the upstream TF's terraform.tfvars.example for editing",
 	Long: `Resolves the workspace's pinned TF source (downloading the tarball
 if not yet cached) and writes its terraform.tfvars.example as a
-starting point you can edit and pass to roksbnkctl up.
+starting point you can edit and pass to awsbnkctl up.
 
 Default writes to ./terraform.tfvars in the current directory.
 Pass -o <path> to write elsewhere, or -o - to print to stdout.
@@ -29,10 +29,10 @@ Pass -o <path> to write elsewhere, or -o - to print to stdout.
 Refuses to overwrite an existing destination unless --force is set.
 
 Workflow:
-  roksbnkctl init            # pins a TF source
-  roksbnkctl tfvars          # writes ./terraform.tfvars from the upstream example
+  awsbnkctl init            # pins a TF source
+  awsbnkctl tfvars          # writes ./terraform.tfvars from the upstream example
   $EDITOR ./terraform.tfvars
-  roksbnkctl up --var-file ./terraform.tfvars`,
+  awsbnkctl up --var-file ./terraform.tfvars`,
 	RunE: runTFVars,
 }
 
@@ -48,7 +48,7 @@ func runTFVars(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if cctx.Workspace == nil {
-		return fmt.Errorf("workspace %q is not initialised; run `roksbnkctl init` first", cctx.WorkspaceName)
+		return fmt.Errorf("workspace %q is not initialised; run `awsbnkctl init` first", cctx.WorkspaceName)
 	}
 
 	stateDir, err := config.WorkspaceStateDir(cctx.WorkspaceName)
@@ -94,6 +94,6 @@ func runTFVars(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stderr, "✓ Wrote %s (%d bytes)\n", flagTFVarsOutput, len(body))
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Next: edit the file, then deploy with")
-	fmt.Fprintf(os.Stderr, "  roksbnkctl up --var-file %s\n", flagTFVarsOutput)
+	fmt.Fprintf(os.Stderr, "  awsbnkctl up --var-file %s\n", flagTFVarsOutput)
 	return nil
 }

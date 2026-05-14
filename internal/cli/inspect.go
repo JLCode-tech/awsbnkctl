@@ -15,8 +15,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
-	"github.com/jgruberf5/roksbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 var (
@@ -31,7 +31,7 @@ var (
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Summary of the workspace: cluster, components, last apply",
-	Long: `roksbnkctl status reports a quick read of the workspace:
+	Long: `awsbnkctl status reports a quick read of the workspace:
 
   - workspace name + region
   - configured cluster name
@@ -51,13 +51,13 @@ var logsCmd = &cobra.Command{
 	Long: `Looks up the named BNK component, finds its pod(s) by label, and
 streams logs to stdout. With --follow, streams live. With multiple
 matching pods, tails the first and prints a hint about using
-roksbnkctl kubectl for per-pod selection.
+awsbnkctl kubectl for per-pod selection.
 
 The component → namespace/selector map is hardcoded for v1 against the
 upstream TF chart's default labels; if your install renamed namespaces
 or relabelled, fall back to:
 
-  roksbnkctl kubectl logs -n <ns> <pod>`,
+  awsbnkctl kubectl logs -n <ns> <pod>`,
 	Args: cobra.ExactArgs(1),
 	RunE: runLogs,
 }
@@ -87,7 +87,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(tw, "Workspace:\t%s\n", cctx.WorkspaceName)
 	if cctx.Workspace == nil {
-		fmt.Fprintln(tw, "Status:\t(not initialised — run `roksbnkctl init`)")
+		fmt.Fprintln(tw, "Status:\t(not initialised — run `awsbnkctl init`)")
 		return nil
 	}
 
@@ -103,13 +103,13 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		age := time.Since(info.ModTime()).Round(time.Second)
 		fmt.Fprintf(tw, "Last apply:\t%s\t(%s ago)\n", info.ModTime().Format("2006-01-02 15:04:05 MST"), age)
 	} else {
-		fmt.Fprintln(tw, "Last apply:\t(no state — run `roksbnkctl up`)")
+		fmt.Fprintln(tw, "Last apply:\t(no state — run `awsbnkctl up`)")
 	}
 
 	// Kubeconfig + cluster reachability.
 	kcPath := k8s.DefaultKubeconfigPath()
 	if kcPath == "" {
-		fmt.Fprintln(tw, "Kubeconfig:\t(none — run `roksbnkctl kubeconfig --download`)")
+		fmt.Fprintln(tw, "Kubeconfig:\t(none — run `awsbnkctl kubeconfig --download`)")
 		return nil
 	}
 	fmt.Fprintf(tw, "Kubeconfig:\t%s\n", kcPath)
@@ -208,8 +208,8 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	comp := lookupComponent(component)
 	if comp == nil {
 		// Not a known component. Fall through to the raw pod-name path
-		// (kubectl-style) — same as `roksbnkctl k logs <pod>`. This
-		// is the v0.8 shortcut so `roksbnkctl logs my-pod` works
+		// (kubectl-style) — same as `awsbnkctl k logs <pod>`. This
+		// is the v0.8 shortcut so `awsbnkctl logs my-pod` works
 		// without users having to know the `k` prefix.
 		since, err := k8s.ParseSinceDuration(flagLogsSince)
 		if err != nil {
@@ -261,12 +261,12 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("listing %s pods in %s: %w", component, ns, err)
 	}
 	if len(pods.Items) == 0 {
-		return fmt.Errorf("no %s pods found in namespace %s with selector %s — chart label may have changed; try `roksbnkctl k get pods -A | grep <name>`",
+		return fmt.Errorf("no %s pods found in namespace %s with selector %s — chart label may have changed; try `awsbnkctl k get pods -A | grep <name>`",
 			component, ns, comp.Selector)
 	}
 	pod := &pods.Items[0]
 	if len(pods.Items) > 1 {
-		fmt.Fprintf(os.Stderr, "→ %d %s pods found; tailing %s (use `roksbnkctl k logs -n %s <pod>` for a specific one)\n",
+		fmt.Fprintf(os.Stderr, "→ %d %s pods found; tailing %s (use `awsbnkctl k logs -n %s <pod>` for a specific one)\n",
 			len(pods.Items), component, pod.Name, pod.Namespace)
 	} else {
 		fmt.Fprintf(os.Stderr, "→ Tailing logs from %s/%s\n", pod.Namespace, pod.Name)

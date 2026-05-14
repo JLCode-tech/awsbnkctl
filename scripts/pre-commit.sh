@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit hook for roksbnkctl.
+# Pre-commit hook for awsbnkctl.
 #
 # Runs gofmt, go vet, and the short unit tests. Designed to stay well
 # under 30s on a clean tree — it's the difference between developers

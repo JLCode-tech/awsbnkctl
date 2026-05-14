@@ -1,13 +1,18 @@
 name: Build tools images
 
 # Builds and publishes the per-tool docker images that PRD 03's docker
-# backend pulls at runtime:
+# backend pulls at runtime. Sprint 0 retarget: the ibmcloud-flavoured
+# tools image was deleted alongside `tools/docker/ibmcloud/` (staff
+# Sprint 0 IBM-strip). Only the cloud-agnostic iperf3 image survives
+# here; Sprint 1 will author the AWS-flavoured replacement image
+# (working name: `tools-aws`) carrying `aws` CLI + `kubectl` + `eksctl`
+# for the docker exec-backend's AWS code paths.
 #
-#   - ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud
-#   - ghcr.io/jgruberf5/roksbnkctl-tools-iperf3
+# Current matrix:
+#   - ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3
 #
 # Triggered on tag pushes (e.g. v0.9-rc1), on push to `main` (publishes a
-# `:dev` tag so `go install ./cmd/roksbnkctl@main` works on a fresh host
+# `:dev` tag so `go install ./cmd/awsbnkctl@main` works on a fresh host
 # without a local `tools/docker/Makefile build` step), and on manual
 # dispatch — never on every PR.
 #
@@ -30,7 +35,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [ibmcloud, iperf3]
+        # Sprint 0 strip: `ibmcloud` matrix entry removed (the underlying
+        # `tools/docker/ibmcloud/Dockerfile` is being deleted by the
+        # staff agent's IBM strip). Sprint 1 will add the AWS-flavoured
+        # entry once `tools/docker/aws/` lands.
+        image: [iperf3]
     steps:
       - uses: actions/checkout@v4
 
@@ -42,16 +51,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Tag-push: publish :<tagname> + :latest. The first matrix job
-      # also publishes :latest; the workflow doesn't dedupe across
-      # matrix runs because each tools-* image has its own :latest.
-      #
-      # Context is the REPO ROOT (not tools/docker/<image>/) because
-      # the ibmcloud image's Stage 1 Go build needs ./cmd, ./internal,
-      # go.mod/go.sum, embedded.go, and ./terraform/. The iperf3
-      # Dockerfile doesn't reference repo-root paths and ignores the
-      # broader context. The build-args below are ibmcloud-specific
-      # and harmlessly ignored by iperf3.
+      # Tag-push: publish :<tagname> + :latest. The iperf3 Dockerfile
+      # is self-contained (no repo-root build context required) — the
+      # build-args below are harmlessly ignored.
       - name: Build and push (tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/build-push-action@v5
@@ -59,16 +61,16 @@ jobs:
           context: .
           file: ./tools/docker/${{ matrix.image }}/Dockerfile
           build-args: |
-            ROKSBNKCTL_VERSION=${{ github.ref_name }}
-            ROKSBNKCTL_COMMIT=${{ github.sha }}
+            AWSBNKCTL_VERSION=${{ github.ref_name }}
+            AWSBNKCTL_COMMIT=${{ github.sha }}
           push: true
           tags: |
-            ghcr.io/jgruberf5/roksbnkctl-tools-${{ matrix.image }}:${{ github.ref_name }}
-            ghcr.io/jgruberf5/roksbnkctl-tools-${{ matrix.image }}:latest
+            ghcr.io/JLCode-tech/awsbnkctl-tools-${{ matrix.image }}:${{ github.ref_name }}
+            ghcr.io/JLCode-tech/awsbnkctl-tools-${{ matrix.image }}:latest
 
       # Main-push: publish :dev. internal/exec/docker.go's toolImageTag()
       # falls back to ":dev" for binaries that report Version=="dev"
-      # (i.e., a `go install ./cmd/roksbnkctl@main` build); having :dev
+      # (i.e., a `go install ./cmd/awsbnkctl@main` build); having :dev
       # in GHCR closes the gap so the docker backend doesn't fail to
       # pull on a fresh dev box.
       - name: Build and push (main → :dev)
@@ -78,11 +80,11 @@ jobs:
           context: .
           file: ./tools/docker/${{ matrix.image }}/Dockerfile
           build-args: |
-            ROKSBNKCTL_VERSION=dev
-            ROKSBNKCTL_COMMIT=${{ github.sha }}
+            AWSBNKCTL_VERSION=dev
+            AWSBNKCTL_COMMIT=${{ github.sha }}
           push: true
           tags: |
-            ghcr.io/jgruberf5/roksbnkctl-tools-${{ matrix.image }}:dev
+            ghcr.io/JLCode-tech/awsbnkctl-tools-${{ matrix.image }}:dev
 
       # workflow_dispatch: build + push both forms so a manual run from
       # any branch can publish a :dev tag for testing.
@@ -93,8 +95,8 @@ jobs:
           context: .
           file: ./tools/docker/${{ matrix.image }}/Dockerfile
           build-args: |
-            ROKSBNKCTL_VERSION=dev
-            ROKSBNKCTL_COMMIT=${{ github.sha }}
+            AWSBNKCTL_VERSION=dev
+            AWSBNKCTL_COMMIT=${{ github.sha }}
           push: true
           tags: |
-            ghcr.io/jgruberf5/roksbnkctl-tools-${{ matrix.image }}:dev
+            ghcr.io/JLCode-tech/awsbnkctl-tools-${{ matrix.image }}:dev

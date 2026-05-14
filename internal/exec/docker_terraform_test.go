@@ -7,7 +7,7 @@ package exec
 // terraform that the existing ibmcloud + iperf3 paths don't share:
 //
 //  1. The state directory bind-mount must be read-write (the others are
-//     read-only); the workspace's ~/.roksbnkctl/<ws>/state/ mount lands
+//     read-only); the workspace's ~/.awsbnkctl/<ws>/state/ mount lands
 //     at /state/ inside the container via RunOpts.HostMounts.
 //
 //  2. The container runs as `--user $(id -u):$(id -g)` so terraform
@@ -120,7 +120,7 @@ func TestRunOpts_TFVarsEnvPassthrough(t *testing.T) {
 
 // TestTerraformImagePin asserts the resolved terraform image is the
 // upstream literal pin (`hashicorp/terraform:<v>`), NOT the
-// per-roksbnkctl-version pattern that ibmcloud + iperf3 use. PRD 03
+// per-awsbnkctl-version pattern that ibmcloud + iperf3 use. PRD 03
 // §"Image versioning" closed this as "tied to release version", except
 // terraform which is the upstream image.
 func TestTerraformImagePin(t *testing.T) {

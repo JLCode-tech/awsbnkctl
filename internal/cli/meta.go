@@ -9,26 +9,26 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
-	"github.com/jgruberf5/roksbnkctl/internal/doctor"
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/doctor"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 )
 
-// DocsURL is the canonical user documentation surface for roksbnkctl —
+// DocsURL is the canonical user documentation surface for awsbnkctl —
 // the published mdBook at GitHub Pages. Single source of truth so the
 // `version` subcommand, the cobra-wired `--version` flag, and the
 // `self update` flow all surface the same URL.
-const DocsURL = "https://jgruberf5.github.io/roksbnkctl/book/"
+const DocsURL = "https://JLCode-tech.github.io/awsbnkctl/book/"
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version, commit, and build date",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		// Keep the first line byte-identical to the pre-v1.0 shape so
-		// any scripts that grep `roksbnkctl version` output for the
+		// any scripts that grep `awsbnkctl version` output for the
 		// "(commit X, built Y)" tail continue to parse. Append the
 		// docs URL on its own second line.
-		fmt.Fprintf(cmd.OutOrStdout(), "roksbnkctl %s (commit %s, built %s)\nDocs: %s\n",
+		fmt.Fprintf(cmd.OutOrStdout(), "awsbnkctl %s (commit %s, built %s)\nDocs: %s\n",
 			Version, Commit, BuildDate, DocsURL)
 		return nil
 	},
@@ -36,18 +36,18 @@ var versionCmd = &cobra.Command{
 
 var selfCmd = &cobra.Command{
 	Use:   "self",
-	Short: "Manage the roksbnkctl binary itself",
+	Short: "Manage the awsbnkctl binary itself",
 }
 
 var selfUpdateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Pull the latest roksbnkctl release matching the host arch",
+	Short: "Pull the latest awsbnkctl release matching the host arch",
 	Long: `Downloads the latest GitHub release tarball for this platform,
 verifies its SHA256 against the release's checksums.txt, and replaces
 the running binary in place.
 
 Linux/macOS only — Windows can't replace a running .exe in place; use
-` + "`scoop update roksbnkctl`" + ` instead.
+` + "`scoop update awsbnkctl`" + ` instead.
 
 Requires write permission on the binary's directory (typical install
 under /usr/local/bin needs sudo; brew/scoop should use their own
@@ -70,14 +70,14 @@ var flagDoctorBackend string
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check prerequisites and report missing pieces",
-	Long: `Verifies the host has what roksbnkctl needs.
+	Long: `Verifies the host has what awsbnkctl needs.
 
 Required (hard fail on missing):
-  - terraform on PATH (the local backend's workhorse for ` + "`roksbnkctl up`" + `)
+  - terraform on PATH (the local backend's workhorse for ` + "`awsbnkctl up`" + `)
 
 Informational (the binary internalises each surface; missing → no warning):
-  - kubectl / oc — internalised via client-go (` + "`roksbnkctl k *`" + `)
-  - ibmcloud     — bundled image, run via --backend docker / --backend ssh:<target>
+  - kubectl / oc — internalised via client-go (` + "`awsbnkctl k *`" + `)
+  - aws          — direct SDK use only; no CLI passthrough planned (PRD 00 §"Inheritance map")
   - iperf3       — bundled image, run via --backend k8s
   - dig          — DNS probe internalised via miekg/dns
 
@@ -158,7 +158,7 @@ func runTargetCheck(ctx context.Context, cctx *config.Context, name string) doct
 	if err != nil {
 		c.Status = doctor.StatusError
 		if errors.Is(err, remote.ErrTargetNotFound) {
-			c.Detail = "not in targets: (try `roksbnkctl targets list`)"
+			c.Detail = "not in targets: (try `awsbnkctl targets list`)"
 		} else {
 			c.Detail = err.Error()
 		}

@@ -39,7 +39,7 @@ import (
 type DockerBackend struct {
 	// clientOnce + clientErr lazy-init the docker API client. We don't
 	// connect at registration time because that would force every
-	// `roksbnkctl --help` invocation to dial the docker socket.
+	// `awsbnkctl --help` invocation to dial the docker socket.
 	clientOnce sync.Once
 	client     *dockerclient.Client
 	clientErr  error
@@ -52,7 +52,7 @@ type DockerBackend struct {
 //
 // PRD 03 §"Docker (internal/exec/docker.go)" §"Tool migration plan" +
 // Sprint 3 tech-writer Issue 8 carry-over (the :dev hard-code broke
-// `go install ./cmd/roksbnkctl` on a fresh host because CI doesn't
+// `go install ./cmd/awsbnkctl` on a fresh host because CI doesn't
 // publish :dev). Sprint 4 fixes this by pinning to the binary's version.
 //
 // Populated lazily via the tool-image accessor below; the var keeps
@@ -61,9 +61,9 @@ type DockerBackend struct {
 var toolImages = func() map[string]string {
 	tag := toolImageTag()
 	return map[string]string{
-		"ibmcloud": "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:" + tag,
+		"ibmcloud": "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud:" + tag,
 		// iperf3: use the public networkstatic/iperf3 image instead of the
-		// bundled one. The bundled image at ghcr.io/jgruberf5/roksbnkctl-
+		// bundled one. The bundled image at ghcr.io/JLCode-tech/awsbnkctl-
 		// tools-iperf3 is private (no public-read on the GitHub Container
 		// Registry package) so ROKS workers can't pull it without an
 		// image-pull-secret. networkstatic/iperf3 is the same image the
@@ -73,9 +73,9 @@ var toolImages = func() map[string]string {
 		// v1.x can switch back to a bundled image once we either flip
 		// the ghcr package to public or wire an image-pull-secret per
 		// PRD 03 §"K8s backend image pull".
-		"iperf3":     "networkstatic/iperf3:latest",
-		"terraform":  "hashicorp/terraform:1.5.7",
-		"roksbnkctl": "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:" + tag,
+		"iperf3":    "networkstatic/iperf3:latest",
+		"terraform": "hashicorp/terraform:1.5.7",
+		"awsbnkctl": "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud:" + tag,
 	}
 }()
 
@@ -115,9 +115,9 @@ func SetToolImageTag(fn func() string) {
 	// Recompute the toolImages map with the new tag.
 	tag := toolImageTag()
 	toolImages = map[string]string{
-		"ibmcloud": "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:" + tag,
+		"ibmcloud": "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud:" + tag,
 		// iperf3: use the public networkstatic/iperf3 image instead of the
-		// bundled one. The bundled image at ghcr.io/jgruberf5/roksbnkctl-
+		// bundled one. The bundled image at ghcr.io/JLCode-tech/awsbnkctl-
 		// tools-iperf3 is private (no public-read on the GitHub Container
 		// Registry package) so ROKS workers can't pull it without an
 		// image-pull-secret. networkstatic/iperf3 is the same image the
@@ -127,9 +127,9 @@ func SetToolImageTag(fn func() string) {
 		// v1.x can switch back to a bundled image once we either flip
 		// the ghcr package to public or wire an image-pull-secret per
 		// PRD 03 §"K8s backend image pull".
-		"iperf3":     "networkstatic/iperf3:latest",
-		"terraform":  "hashicorp/terraform:1.5.7",
-		"roksbnkctl": "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:" + tag,
+		"iperf3":    "networkstatic/iperf3:latest",
+		"terraform": "hashicorp/terraform:1.5.7",
+		"awsbnkctl": "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud:" + tag,
 	}
 }
 
@@ -170,7 +170,7 @@ func (b *DockerBackend) Run(ctx context.Context, argv []string, opts RunOpts) (i
 	// key from the bind-mounted file (credShimScript) and then exec's
 	// the image's terraform ENTRYPOINT with the user's argv.
 	//
-	// ibmcloud + roksbnkctl are NOT wrapped here — dockerImageBinary
+	// ibmcloud + awsbnkctl are NOT wrapped here — dockerImageBinary
 	// already shim-wraps them. iperf3 + literal-image-ref shapes
 	// (busybox in tests) don't need the API key.
 	if needsCredShim(argv) && opts.Credentials != nil && opts.Credentials.IBMCloudAPIKey != "" {
@@ -178,7 +178,7 @@ func (b *DockerBackend) Run(ctx context.Context, argv []string, opts RunOpts) (i
 	}
 
 	// Materialise creds + Files into a per-run tempdir.
-	tempDir, err := os.MkdirTemp("", "roksbnkctl-docker-")
+	tempDir, err := os.MkdirTemp("", "awsbnkctl-docker-")
 	if err != nil {
 		return 0, fmt.Errorf("creating tempdir: %w", err)
 	}
@@ -365,7 +365,7 @@ func (b *DockerBackend) dockerClient() (*dockerclient.Client, error) {
 
 // ensureImage pulls image if it isn't already present in the daemon's
 // image cache. A missing image is the most common new-user failure
-// mode; pulling lazily means `roksbnkctl ibmcloud --backend docker ...`
+// mode; pulling lazily means `awsbnkctl ibmcloud --backend docker ...`
 // just-works on first run instead of producing an opaque "no such
 // image" error.
 //
@@ -586,8 +586,8 @@ func buildContainerEnv(env []string) []string {
 // `tools/docker/iperf3/Dockerfile`); prepending the binary name in
 // those cases would double-invoke (`iperf3 iperf3 --version`).
 //
-// The ibmcloud image's `roksbnkctl` alias maps to `/usr/local/bin/
-// roksbnkctl` so a `--backend docker` invocation of roksbnkctl-as-tool
+// The ibmcloud image's `awsbnkctl` alias maps to `/usr/local/bin/
+// awsbnkctl` so a `--backend docker` invocation of awsbnkctl-as-tool
 // (the dns-probe re-exec path, etc.) lands on the right binary.
 // credShimPrefix is the POSIX sh -c shim that sources the IBM Cloud
 // API key from the bind-mounted tempfile and exports it (plus the
@@ -637,8 +637,8 @@ const credShimScript = `if [ -n "$IBMCLOUD_API_KEY_FILE" ] && [ -r "$IBMCLOUD_AP
 //
 // `login` and `logout` skip the wrap (caller's explicit intent).
 var dockerImageBinary = map[string][]string{
-	"ibmcloud":   {"sh", "-c", credShimScript + `ibmcloud login -a https://cloud.ibm.com -r "${IBMCLOUD_REGION:-us-south}" --apikey "$IBMCLOUD_API_KEY" --quiet > /dev/null 2>&1 && exec ibmcloud "$@"`, "--"},
-	"roksbnkctl": {"/usr/local/bin/roksbnkctl"},
+	"ibmcloud":  {"sh", "-c", credShimScript + `ibmcloud login -a https://cloud.ibm.com -r "${IBMCLOUD_REGION:-us-south}" --apikey "$IBMCLOUD_API_KEY" --quiet > /dev/null 2>&1 && exec ibmcloud "$@"`, "--"},
+	"awsbnkctl": {"/usr/local/bin/awsbnkctl"},
 }
 
 // resolveDockerImageAndArgv picks the docker image and the in-container

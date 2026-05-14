@@ -12,12 +12,12 @@ import (
 )
 
 // DNSSchemaVersion is the schema string emitted by the new
-// `roksbnkctl test dns` flag-driven path. Distinct from SchemaVersion
-// (the umbrella `roksbnkctl.v1`) because PRD 03 §"DNS probe" specifies
+// `awsbnkctl test dns` flag-driven path. Distinct from SchemaVersion
+// (the umbrella `awsbnkctl.v1`) because PRD 03 §"DNS probe" specifies
 // a richer per-vantage shape with RTT distribution + GSLB divergence.
 const (
-	DNSSchemaVersion        = "roksbnkctl.dns.v1"
-	DNSVantageSchemaVersion = "roksbnkctl.dns.v1.vantage"
+	DNSSchemaVersion        = "awsbnkctl.dns.v1"
+	DNSVantageSchemaVersion = "awsbnkctl.dns.v1.vantage"
 )
 
 // Probe is a single-vantage DNS probe (PRD 03 §"DNS probe (GSLB-aware)"
@@ -111,7 +111,7 @@ type DNSAnswer struct {
 }
 
 // DNSCompareResult is the multi-vantage comparison document
-// (`--gslb-compare`). Schema is `roksbnkctl.dns.v1`.
+// (`--gslb-compare`). Schema is `awsbnkctl.dns.v1`.
 type DNSCompareResult struct {
 	Schema                string           `json:"schema"`
 	Target                string           `json:"target"`
@@ -468,8 +468,8 @@ func summariseDivergence(vantages []DNSProbeResult) string {
 
 // ── legacy connectivity-suite path (kept verbatim) ──────────────────
 
-// RunDNS is the workspace-config-driven path used by `roksbnkctl test`
-// (the umbrella command) and `roksbnkctl test dns` when no flags are
+// RunDNS is the workspace-config-driven path used by `awsbnkctl test`
+// (the umbrella command) and `awsbnkctl test dns` when no flags are
 // passed. Probes each `extra_hosts` entry with the std-lib resolver —
 // preserving Sprint 0/1/2/3 behaviour byte-for-byte.
 //

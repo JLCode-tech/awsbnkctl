@@ -146,7 +146,7 @@ jobs:
     # Linux-only kind-based integration job for the K8s backend (Sprint 4
     # / PRD 03 second half). Uses helm/kind-action to spin an ephemeral
     # kind cluster, then runs the integration-tagged tests under
-    # internal/exec and internal/cli (the latter exercises `roksbnkctl
+    # internal/exec and internal/cli (the latter exercises `awsbnkctl
     # ops install/show/uninstall` end-to-end).
     #
     # Skipped on PRs from forks for the same reasons as the `integration`

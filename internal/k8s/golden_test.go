@@ -1,10 +1,10 @@
 //go:build live
 // +build live
 
-// Golden-file byte-equivalence tests for `roksbnkctl k get -o yaml`.
+// Golden-file byte-equivalence tests for `awsbnkctl k get -o yaml`.
 //
 // These tests run against a real Kubernetes cluster (KUBECONFIG must be
-// set). They compare the output of `roksbnkctl k get <resource> -o yaml`
+// set). They compare the output of `awsbnkctl k get <resource> -o yaml`
 // against `kubectl get <resource> -o yaml` and assert byte equivalence
 // modulo timestamp + version fields that are necessarily transient.
 //
@@ -61,7 +61,7 @@ func goldenSetup(t *testing.T) string {
 func runRoksbnkctl(ctx context.Context, args ...string) (string, error) {
 	bin := os.Getenv("ROKSBNKCTL")
 	if bin == "" {
-		bin = "roksbnkctl"
+		bin = "awsbnkctl"
 	}
 	out, err := exec.CommandContext(ctx, bin, args...).Output()
 	if err != nil {
@@ -143,7 +143,7 @@ func assertGoldenEqual(t *testing.T, label, kubectlOut, roksOut string) {
 		t.Errorf("%s: byte-equivalence diff (volatile fields stripped)", label)
 		// Surface a small diff hint — full streams to the test log.
 		t.Logf("kubectl output (first 800 bytes):\n%s", truncate(a, 800))
-		t.Logf("roksbnkctl output (first 800 bytes):\n%s", truncate(b, 800))
+		t.Logf("awsbnkctl output (first 800 bytes):\n%s", truncate(b, 800))
 	}
 }
 
@@ -166,7 +166,7 @@ func TestGolden_GetNodes_YAML(t *testing.T) {
 	}
 	rok, err := runRoksbnkctl(ctx, "k", "get", "nodes", "-o", "yaml")
 	if err != nil {
-		t.Fatalf("roksbnkctl k get nodes failed: %v", err)
+		t.Fatalf("awsbnkctl k get nodes failed: %v", err)
 	}
 	assertGoldenEqual(t, "nodes -o yaml", kub, rok)
 }
@@ -185,7 +185,7 @@ func TestGolden_GetPods_YAML(t *testing.T) {
 	}
 	rok, err := runRoksbnkctl(ctx, "k", "get", "pods", "-n", "kube-system", "-o", "yaml")
 	if err != nil {
-		t.Fatalf("roksbnkctl k get pods failed: %v", err)
+		t.Fatalf("awsbnkctl k get pods failed: %v", err)
 	}
 	assertGoldenEqual(t, "pods -n kube-system -o yaml", kub, rok)
 }
@@ -202,7 +202,7 @@ func TestGolden_GetServices_YAML(t *testing.T) {
 	}
 	rok, err := runRoksbnkctl(ctx, "k", "get", "services", "-n", "default", "-o", "yaml")
 	if err != nil {
-		t.Fatalf("roksbnkctl k get services failed: %v", err)
+		t.Fatalf("awsbnkctl k get services failed: %v", err)
 	}
 	assertGoldenEqual(t, "services -n default -o yaml", kub, rok)
 }
@@ -219,7 +219,7 @@ func TestGolden_GetConfigMaps_YAML(t *testing.T) {
 	}
 	rok, err := runRoksbnkctl(ctx, "k", "get", "configmaps", "-n", "kube-system", "-o", "yaml")
 	if err != nil {
-		t.Fatalf("roksbnkctl k get configmaps failed: %v", err)
+		t.Fatalf("awsbnkctl k get configmaps failed: %v", err)
 	}
 	assertGoldenEqual(t, "configmaps -n kube-system -o yaml", kub, rok)
 }
@@ -237,9 +237,9 @@ func TestGolden_GetNodes_Name(t *testing.T) {
 	}
 	rok, err := runRoksbnkctl(ctx, "k", "get", "nodes", "-o", "name")
 	if err != nil {
-		t.Fatalf("roksbnkctl k get nodes -o name failed: %v", err)
+		t.Fatalf("awsbnkctl k get nodes -o name failed: %v", err)
 	}
 	if strings.TrimSpace(kub) != strings.TrimSpace(rok) {
-		t.Errorf("nodes -o name diff:\nkubectl:\n%s\nroksbnkctl:\n%s", kub, rok)
+		t.Errorf("nodes -o name diff:\nkubectl:\n%s\nawsbnkctl:\n%s", kub, rok)
 	}
 }

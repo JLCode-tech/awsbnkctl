@@ -36,7 +36,7 @@ import (
 	"time"
 )
 
-const auditSecret = "test-key-roksbnkctl-audit-NEVER-LOG-ME"
+const auditSecret = "test-key-awsbnkctl-audit-NEVER-LOG-ME"
 
 // argvCapture is a Backend wrapper that records every argv it sees, then
 // dispatches to an inner Backend so the run still completes. Tests use it to
@@ -106,7 +106,7 @@ func TestCredAudit_NoLeakInArgv(t *testing.T) {
 // child process via cmd.Env (a per-child slice), never via os.Setenv.
 //
 // A regression here leaks the cred into anything else the parent
-// roksbnkctl process spawns later in its lifetime (e.g., the next
+// awsbnkctl process spawns later in its lifetime (e.g., the next
 // Backend.Run call against a different backend), defeating the
 // per-child isolation PRD 04 §"In-process surface" specifies.
 //
@@ -215,7 +215,7 @@ func TestCredAudit_K8s_NoLeakInJobSpec(t *testing.T) {
 		t.Skipf("k8s backend not registered: %v", err)
 	}
 
-	const secret = "test-key-roksbnkctl-k8s-audit-NEVER-LOG-ME"
+	const secret = "test-key-awsbnkctl-k8s-audit-NEVER-LOG-ME"
 
 	opts := RunOpts{
 		Credentials: &Credentials{IBMCloudAPIKey: secret},
@@ -225,7 +225,7 @@ func TestCredAudit_K8s_NoLeakInJobSpec(t *testing.T) {
 	// We use the same buildJobSpec helper the K8sBackend uses internally.
 	// This checks the spec at construction time without needing a fake
 	// clientset round-trip.
-	job := buildJobSpec("roksbnkctl-ibmcloud-audit", "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:dev", argv, opts, false, "")
+	job := buildJobSpec("awsbnkctl-ibmcloud-audit", "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud:dev", argv, opts, false, "")
 
 	// 1. argv (container Command) — never the secret.
 	for _, a := range job.Spec.Template.Spec.Containers[0].Command {
@@ -289,13 +289,13 @@ func TestCredAudit_K8s_NoLeakInJobSpec(t *testing.T) {
 // caller passes a kubeconfig via RunOpts.Files, the per-Job files Secret
 // holds the kubeconfig bytes (base64 in the wire-format Secret payload),
 // but the IBM API key NEVER lands in this Secret — that lives in the
-// roksbnkctl-ibm-creds Secret (the long-lived ops-namespace Secret) only.
+// awsbnkctl-ibm-creds Secret (the long-lived ops-namespace Secret) only.
 func TestCredAudit_K8s_FilesSecretCarriesKubeconfigOnly(t *testing.T) {
 	if _, err := ResolveBackend("k8s"); err != nil {
 		t.Skipf("k8s backend not registered: %v", err)
 	}
 
-	const secret = "test-key-roksbnkctl-k8s-files-audit"
+	const secret = "test-key-awsbnkctl-k8s-files-audit"
 
 	opts := RunOpts{
 		Credentials: &Credentials{IBMCloudAPIKey: secret},
@@ -303,7 +303,7 @@ func TestCredAudit_K8s_FilesSecretCarriesKubeconfigOnly(t *testing.T) {
 			"kubeconfig": []byte("apiVersion: v1\nkind: Config\nclusters: []\n"),
 		},
 	}
-	job := buildJobSpec("roksbnkctl-iperf3-files-audit", "ghcr.io/jgruberf5/roksbnkctl-tools-iperf3:dev", []string{"iperf3", "-c", "server"}, opts, true, "roksbnkctl-iperf3-files-audit-files")
+	job := buildJobSpec("awsbnkctl-iperf3-files-audit", "ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3:dev", []string{"iperf3", "-c", "server"}, opts, true, "awsbnkctl-iperf3-files-audit-files")
 
 	// The files secret reference is the only place a kubeconfig lives.
 	// Assert that the volume's secret reference name doesn't contain the
@@ -339,7 +339,7 @@ func TestCredAudit_SSH_NoLeakInArgvOrWrapper(t *testing.T) {
 		t.Skipf("SSH backend not registered: %v", err)
 	}
 
-	const secret = "test-key-roksbnkctl-ssh-audit"
+	const secret = "test-key-awsbnkctl-ssh-audit"
 
 	var stdout, stderr bytes.Buffer
 	creds := &Credentials{IBMCloudAPIKey: secret}
@@ -376,7 +376,7 @@ func TestCredAudit_K8s_NoLeakInProcessEnvAfterRun(t *testing.T) {
 		t.Skipf("k8s backend not registered: %v", err)
 	}
 
-	const secret = "test-key-roksbnkctl-k8s-procenv-audit"
+	const secret = "test-key-awsbnkctl-k8s-procenv-audit"
 
 	// Build the spec; we don't actually need to run it through a Job
 	// lifecycle for the os.Environ() invariant — the k8s backend

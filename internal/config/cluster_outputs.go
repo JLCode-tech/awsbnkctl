@@ -10,13 +10,13 @@ import (
 )
 
 // ClusterOutputs is the persisted identity of a ROKS cluster that
-// roksbnkctl is tracking — written by `roksbnkctl cluster up` (after a fresh
-// create) or `roksbnkctl cluster register` (after discovering an
-// already-existing cluster), and read by `roksbnkctl up` to deploy BNK
+// awsbnkctl is tracking — written by `awsbnkctl cluster up` (after a fresh
+// create) or `awsbnkctl cluster register` (after discovering an
+// already-existing cluster), and read by `awsbnkctl up` to deploy BNK
 // trials onto an existing cluster without re-specifying everything in
 // each trial's tfvars.
 //
-// Stored at ~/.roksbnkctl/<workspace>/cluster-outputs.json. Treated as
+// Stored at ~/.awsbnkctl/<workspace>/cluster-outputs.json. Treated as
 // authoritative for downstream commands that need to reference the
 // cluster — but explicit tfvars values always win over these.
 type ClusterOutputs struct {
@@ -39,7 +39,7 @@ type ClusterOutputs struct {
 // ErrClusterOutputsMissing — workspace has no cluster-outputs.json yet.
 // Sentinel so callers can distinguish "not yet registered" from a real
 // I/O error.
-var ErrClusterOutputsMissing = errors.New("workspace has no cluster-outputs.json — run `roksbnkctl cluster up` or `roksbnkctl cluster register` first")
+var ErrClusterOutputsMissing = errors.New("workspace has no cluster-outputs.json — run `awsbnkctl cluster up` or `awsbnkctl cluster register` first")
 
 // ReadClusterOutputs loads the JSON for `workspace`. Returns
 // ErrClusterOutputsMissing if the file does not exist.

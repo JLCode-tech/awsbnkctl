@@ -15,9 +15,9 @@ import (
 // Defaults for the iperf3 fixture. Pod and service share a name so the
 // teardown logic can find them with a fixed label selector.
 const (
-	Iperf3Namespace    = "roksbnkctl-test"
-	Iperf3PodName      = "roksbnkctl-iperf3"
-	Iperf3SvcName      = "roksbnkctl-iperf3"
+	Iperf3Namespace    = "awsbnkctl-test"
+	Iperf3PodName      = "awsbnkctl-iperf3"
+	Iperf3SvcName      = "awsbnkctl-iperf3"
 	Iperf3Port         = 5201
 	Iperf3DefaultImage = "networkstatic/iperf3:latest"
 
@@ -28,7 +28,7 @@ const (
 
 // Iperf3Options configures the in-cluster fixture.
 type Iperf3Options struct {
-	Namespace   string             // default: "roksbnkctl-test"
+	Namespace   string             // default: "awsbnkctl-test"
 	Image       string             // default: networkstatic/iperf3:latest
 	ServiceType corev1.ServiceType // ClusterIP for east-west, LoadBalancer for north-south
 }
@@ -60,20 +60,20 @@ func (c *Client) DeployIperf3(ctx context.Context, opts Iperf3Options) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      Iperf3PodName,
 			Namespace: opts.Namespace,
-			Labels:    map[string]string{"app": Iperf3PodName, "roksbnkctl.io/test": "iperf3"},
+			Labels:    map[string]string{"app": Iperf3PodName, "awsbnkctl.io/test": "iperf3"},
 		},
 		Spec: corev1.PodSpec{
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot: ptr.To(true),
 				// OpenShift's SCC admission overrides RunAsUser with a
 				// project-allocated uid; on plain k8s (kind, minikube)
-				// the bundled roksbnkctl-tools-iperf3 image must respect
+				// the bundled awsbnkctl-tools-iperf3 image must respect
 				// uid 1000 (see tools/docker/iperf3/Dockerfile USER
 				// directive). The networkstatic/iperf3 default image
 				// runs as root and will fail admission with RunAsNonRoot
 				// — users on plain k8s should switch to the bundled
 				// image (set test.throughput.image to
-				// ghcr.io/jgruberf5/roksbnkctl-tools-iperf3:<v>).
+				// ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3:<v>).
 				RunAsUser: ptr.To(int64(1000)),
 				SeccompProfile: &corev1.SeccompProfile{
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
@@ -100,7 +100,7 @@ func (c *Client) DeployIperf3(ctx context.Context, opts Iperf3Options) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      Iperf3SvcName,
 			Namespace: opts.Namespace,
-			Labels:    map[string]string{"app": Iperf3PodName, "roksbnkctl.io/test": "iperf3"},
+			Labels:    map[string]string{"app": Iperf3PodName, "awsbnkctl.io/test": "iperf3"},
 		},
 		Spec: corev1.ServiceSpec{
 			Type:     opts.ServiceType,
@@ -135,7 +135,7 @@ func (c *Client) ensureNamespace(ctx context.Context, name string) error {
 	if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("checking namespace %s: %w", name, err)
 	}
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"roksbnkctl.io/test": "true"}}}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"awsbnkctl.io/test": "true"}}}
 	if _, err := c.clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("creating namespace %s: %w", name, err)

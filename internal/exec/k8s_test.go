@@ -179,7 +179,7 @@ func TestBuildJobSpec_DefaultShape(t *testing.T) {
 	resolveK8s(t)
 
 	opts := RunOpts{}
-	job := buildJobSpec("roksbnkctl-test-abcdef", "busybox:latest", []string{"echo", "hello"}, opts, false, "")
+	job := buildJobSpec("awsbnkctl-test-abcdef", "busybox:latest", []string{"echo", "hello"}, opts, false, "")
 
 	if job.Namespace != K8sTestNamespace {
 		t.Errorf("Namespace: got %q, want %q", job.Namespace, K8sTestNamespace)
@@ -233,7 +233,7 @@ func TestBuildJobSpec_FilesProjectedSecret(t *testing.T) {
 			"kubeconfig": []byte("apiVersion: v1\nkind: Config\n"),
 		},
 	}
-	job := buildJobSpec("roksbnkctl-iperf3-xxxxxx", "busybox:latest", []string{"true"}, opts, true, "roksbnkctl-iperf3-xxxxxx-files")
+	job := buildJobSpec("awsbnkctl-iperf3-xxxxxx", "busybox:latest", []string{"true"}, opts, true, "awsbnkctl-iperf3-xxxxxx-files")
 	pod := job.Spec.Template.Spec
 
 	// Volumes: one named "files" referencing the per-Job secret.
@@ -244,8 +244,8 @@ func TestBuildJobSpec_FilesProjectedSecret(t *testing.T) {
 	if v.Secret == nil {
 		t.Fatalf("Volume should reference a Secret, got %+v", v.VolumeSource)
 	}
-	if v.Secret.SecretName != "roksbnkctl-iperf3-xxxxxx-files" {
-		t.Errorf("Secret.SecretName: got %q, want roksbnkctl-iperf3-xxxxxx-files", v.Secret.SecretName)
+	if v.Secret.SecretName != "awsbnkctl-iperf3-xxxxxx-files" {
+		t.Errorf("Secret.SecretName: got %q, want awsbnkctl-iperf3-xxxxxx-files", v.Secret.SecretName)
 	}
 
 	// Container mount: /work, ro.
@@ -280,7 +280,7 @@ func TestBuildJobSpec_CredsViaEnv(t *testing.T) {
 		Credentials: &Credentials{IBMCloudAPIKey: secret},
 	}
 	argv := []string{"ibmcloud", "iam", "oauth-tokens"}
-	job := buildJobSpec("roksbnkctl-ibmcloud-xxxxxx", "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:dev", argv, opts, false, "")
+	job := buildJobSpec("awsbnkctl-ibmcloud-xxxxxx", "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud:dev", argv, opts, false, "")
 
 	c := job.Spec.Template.Spec.Containers[0]
 	for _, a := range c.Command {
@@ -291,7 +291,7 @@ func TestBuildJobSpec_CredsViaEnv(t *testing.T) {
 
 	// Verify the cred reaches the container via env. (Jobs path inlines
 	// the value via Credentials.EnvVars(); the long-lived ops-pod path
-	// uses envFrom secretRef on roksbnkctl-ibm-creds. Sprint 4 ships the
+	// uses envFrom secretRef on awsbnkctl-ibm-creds. Sprint 4 ships the
 	// inline-value Job path; deferring secretRef wiring to a polish pass
 	// per the buildJobSpec doc comment.)
 	got := map[string]string{}
@@ -364,7 +364,7 @@ func runJobAndAwaitCreate(t *testing.T, b *K8sBackend, cs *fake.Clientset, argv 
 
 // TestK8sBackend_Run_Job_CreatesJob pins the first single invariant
 // from the original combined test: a Job is created in K8sTestNamespace
-// with a roksbnkctl- prefix.
+// with a awsbnkctl- prefix.
 //
 // Sprint 5 polish (Sprint 4 tech-writer Issue 14 carry-over): split out
 // from TestK8sBackend_Run_Job_CreatesJobAndSecret_TTL so a green/red
@@ -381,8 +381,8 @@ func TestK8sBackend_Run_Job_CreatesJob(t *testing.T) {
 			Files: map[string][]byte{"kubeconfig": []byte("apiVersion: v1\nkind: Config\n")}},
 		1500*time.Millisecond)
 
-	if !strings.HasPrefix(job.Name, "roksbnkctl-") {
-		t.Errorf("Job name should start with roksbnkctl-: got %q", job.Name)
+	if !strings.HasPrefix(job.Name, "awsbnkctl-") {
+		t.Errorf("Job name should start with awsbnkctl-: got %q", job.Name)
 	}
 	if job.Namespace != K8sTestNamespace {
 		t.Errorf("Job Namespace: got %q, want %q", job.Namespace, K8sTestNamespace)

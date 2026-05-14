@@ -14,7 +14,7 @@ import (
 
 // InClusterKubeconfigSentinel is the magic value for kubeconfigPath that
 // triggers rest.InClusterConfig() lookup. Used by Phase 3's K8s execution
-// backend (PRD 03) when roksbnkctl runs inside an ops Pod and gets its
+// backend (PRD 03) when awsbnkctl runs inside an ops Pod and gets its
 // credentials from the projected service account.
 const InClusterKubeconfigSentinel = "in-cluster"
 
@@ -26,7 +26,7 @@ type Client struct {
 }
 
 // NewFromKubeconfigBytes builds a Client from raw kubeconfig YAML.
-// Used in v1.x when roksbnkctl fetches the kubeconfig itself via the IBM
+// Used in v1.x when awsbnkctl fetches the kubeconfig itself via the IBM
 // container service SDK.
 func NewFromKubeconfigBytes(b []byte) (*Client, error) {
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(b)
@@ -119,7 +119,7 @@ func BuildRESTConfig(kubeconfigPath string) (*rest.Config, error) {
 		kubeconfigPath = DefaultKubeconfigPath()
 	}
 	if kubeconfigPath == "" {
-		return nil, errors.New("no kubeconfig found: set $KUBECONFIG or run `roksbnkctl kubeconfig --download`")
+		return nil, errors.New("no kubeconfig found: set $KUBECONFIG or run `awsbnkctl kubeconfig --download`")
 	}
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -130,7 +130,7 @@ func BuildRESTConfig(kubeconfigPath string) (*rest.Config, error) {
 
 // BuildClientset returns a typed client for core + apps + batch + etc.
 // kubeconfigPath: empty string → workspace default at
-// ~/.roksbnkctl/<ws>/state/kubeconfig (or whatever DefaultKubeconfigPath
+// ~/.awsbnkctl/<ws>/state/kubeconfig (or whatever DefaultKubeconfigPath
 // resolves);
 // "in-cluster" sentinel → use rest.InClusterConfig() (used by the K8s
 // execution backend in Phase 3, PRD 03).

@@ -8,7 +8,7 @@ import (
 )
 
 // All tests redirect $ROKSBNKCTL_HOME via t.Setenv so they never touch the
-// real ~/.roksbnkctl. t.TempDir auto-cleans on failure.
+// real ~/.awsbnkctl. t.TempDir auto-cleans on failure.
 
 func TestNew_DefaultWorkspace_NoState(t *testing.T) {
 	t.Setenv(ROKSBNKCTLHomeEnv, t.TempDir())
@@ -61,7 +61,7 @@ func TestSaveAndLoadWorkspace_Roundtrip(t *testing.T) {
 	in := &Workspace{
 		IBMCloud: IBMCloudCfg{Region: "us-south", ResourceGroup: "default", APIKeySource: APIKeySourceEnv},
 		Cluster:  ClusterCfg{Create: true, Name: "bnk-demo", OpenShiftVersion: "4.18", WorkersPerZone: 1},
-		TFSource: TFSourceCfg{Type: "github", Repo: "jgruberf5/ibmcloud_terraform_bigip_next_for_kubernetes_2_3", Ref: "v0.6.7"},
+		TFSource: TFSourceCfg{Type: "github", Repo: "JLCode-tech/awsbnkctl-tf", Ref: "v0.6.7"},
 	}
 	if err := SaveWorkspace("demo", in); err != nil {
 		t.Fatalf("SaveWorkspace: %v", err)
@@ -151,7 +151,7 @@ cluster:
   name: bnk-demo
 tf_source:
   type: github
-  repo: jgruberf5/ibmcloud_terraform_bigip_next_for_kubernetes_2_3
+  repo: JLCode-tech/awsbnkctl-tf
   ref: v0.6.7
 `
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {

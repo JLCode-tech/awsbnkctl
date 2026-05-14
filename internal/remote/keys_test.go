@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/jgruberf5/roksbnkctl/internal/remote"
+	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 )
 
 // genEd25519PEM returns an OpenSSH-format ED25519 private key as PEM

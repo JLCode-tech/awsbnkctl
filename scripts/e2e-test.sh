@@ -1,17 +1,27 @@
 #!/usr/bin/env bash
-# scripts/e2e-test.sh — full end-to-end shake-out of roksbnkctl against
-# a live IBM Cloud account. Designed to be runnable both manually and
-# unattended (the loop runner that babysits this for hours).
+# scripts/e2e-test.sh — end-to-end shake-out driver for awsbnkctl.
 #
-# Phases match docs/E2E_TEST.md.
+# ▶ Sprint 0 status: skip-stub. The inherited driver was IBM-Cloud-shaped
+#   (phases A-H drove ROKS cluster lifecycle, COS object CRUD, oc/ibmcloud
+#   passthroughs). Per docs/PLAN.md Sprint 0 ("identity rewrite + IBM
+#   strip + AWS stub"), every phase below is a header-echo + early-return
+#   citing the sprint that retargets it:
 #
-# Usage:
-#   IBMCLOUD_API_KEY=... ./scripts/e2e-test.sh                 # full pass from scratch
-#   IBMCLOUD_API_KEY=... PHASE_FROM=D ./scripts/e2e-test.sh    # resume from phase D
-#   IBMCLOUD_API_KEY=... DRY_RUN=1 ./scripts/e2e-test.sh       # print steps without executing
+#     Phases A-H (cluster bring-up)  →  Sprint 3
+#     Phases I-N (backend matrix)    →  Sprint 4
+#     Phase L-DNS                    →  Sprint 4
+#     v1.0 sign-off run              →  Sprint 6
 #
-# Exits 0 on a clean pass, non-zero on the first assertion failure with
-# the phase + step number in the error message.
+#   The script preserves the inherited public surface (env vars,
+#   --dry-run flag via DRY_RUN=1, exit code) so downstream consumers
+#   (scripts/e2e-test-full.sh, .github/workflows/e2e-full.yml, the
+#   integrator's babysit loop) keep working — they just see "all phases
+#   skipped" instead of a real run.
+#
+# Usage (when Sprint 3+ rehydrates this driver):
+#   AWS_PROFILE=... ./scripts/e2e-test.sh
+#   AWS_PROFILE=... PHASE_FROM=D ./scripts/e2e-test.sh
+#   AWS_PROFILE=... DRY_RUN=1 ./scripts/e2e-test.sh
 
 set -e
 set -u
@@ -19,11 +29,10 @@ set -o pipefail
 
 # ── config ──────────────────────────────────────────────────────────
 WORKSPACE=${WORKSPACE:-e2e}
-TFVARS=${TFVARS:-$HOME/bnkfun/terraform.tfvars}
 PHASE_FROM=${PHASE_FROM:-A}
 DRY_RUN=${DRY_RUN:-0}
-LOG_DIR=${LOG_DIR:-/tmp/roksbnkctl-e2e}
-ROKSBNKCTL=${ROKSBNKCTL:-roksbnkctl}
+LOG_DIR=${LOG_DIR:-/tmp/awsbnkctl-e2e}
+AWSBNKCTL=${AWSBNKCTL:-awsbnkctl}
 
 mkdir -p "$LOG_DIR"
 RUN_TS=$(date +%Y%m%d-%H%M%S)
@@ -37,89 +46,6 @@ bold()   { printf '\033[1m%s\033[0m\n'  "$*" >&2; }
 
 log()    { echo "[$(date +%H:%M:%S)] $*" | tee -a "$RUN_LOG" >&2; }
 
-# Run a command, stream + capture output, fail the script if it returns
-# non-zero. Pass description as $1, the command as the rest.
-step() {
-    local desc="$1"; shift
-    log "→ $desc"
-    log "  cmd: $*"
-    if [[ "$DRY_RUN" == "1" ]]; then
-        log "  (dry-run; skipping execution)"
-        return 0
-    fi
-    if "$@" 2>&1 | tee -a "$RUN_LOG"; then
-        green "  ✓ $desc"
-        return 0
-    else
-        local rc=${PIPESTATUS[0]}
-        red "  ✗ $desc (exit $rc)"
-        red "  full log: $RUN_LOG"
-        exit "$rc"
-    fi
-}
-
-# Like `step`, but captures stdout for downstream comparison instead of
-# only logging. Echoes the captured output to stdout; assertions in the
-# caller can pipe it into grep/awk.
-capture() {
-    local desc="$1"; shift
-    log "→ $desc"
-    log "  cmd: $*"
-    if [[ "$DRY_RUN" == "1" ]]; then
-        echo ""
-        return 0
-    fi
-    local out
-    out=$("$@" 2>&1) || {
-        red "  ✗ $desc (exit $?)"
-        echo "$out" >> "$RUN_LOG"
-        exit 1
-    }
-    echo "$out" | tee -a "$RUN_LOG"
-}
-
-# Assert that a command's output (passed via stdin) contains a substring.
-# Usage:  echo "$out" | assert_contains "expected substring" "step name"
-#
-# In dry-run mode, drains stdin and returns success — there's nothing
-# to assert when no command actually ran.
-assert_contains() {
-    local needle="$1"
-    local label="$2"
-    if [[ "$DRY_RUN" == "1" ]]; then
-        cat >/dev/null
-        log "  (dry-run; skipping assertion: $label)"
-        return 0
-    fi
-    if grep -qF "$needle" -; then
-        green "  ✓ $label"
-    else
-        red "  ✗ $label — expected substring not found: $needle"
-        exit 2
-    fi
-}
-
-# assert_matches is the regex variant of assert_contains. Use it when
-# more than one legitimate output shape exists — e.g. `oc whoami`
-# returns `admin/<hash>` on vanilla OpenShift, `KubeCert#IBMid-<id>`
-# on ROKS cert-auth, or `IAM#<email>` on ROKS OAuth, and all three
-# represent a privileged identity for cluster-admin assertions.
-assert_matches() {
-    local pattern="$1"
-    local label="$2"
-    if [[ "$DRY_RUN" == "1" ]]; then
-        cat >/dev/null
-        log "  (dry-run; skipping assertion: $label)"
-        return 0
-    fi
-    if grep -qE "$pattern" -; then
-        green "  ✓ $label"
-    else
-        red "  ✗ $label — expected regex not matched: $pattern"
-        exit 2
-    fi
-}
-
 phase_header() {
     echo "" >&2
     bold "════════════════════════════════════════════════════════════"
@@ -127,448 +53,77 @@ phase_header() {
     bold "════════════════════════════════════════════════════════════"
 }
 
-# Compare current phase letter against PHASE_FROM. Skip phases that come
-# before PHASE_FROM. Used so the driver can resume at, say, phase D
-# without re-running the cheap A/B/C phases.
+# skip_phase emits a uniform "skipped pending Sprint N retarget" banner
+# and returns 0 so the driver keeps walking forward through remaining
+# phase stubs. Pass: phase letter, original description, retarget sprint.
+skip_phase() {
+    local letter="$1"
+    local desc="$2"
+    local sprint="$3"
+    phase_header "$letter" "$desc"
+    yellow "  ⊘ Phase $letter skipped — pending $sprint retarget (see docs/PLAN.md)"
+}
+
+# ── phases ──────────────────────────────────────────────────────────
+#
+# Each phase below is a skip-stub. The descriptions preserve the
+# original IBM-shaped intent so the Sprint-3/4 author has a brief
+# pointer to the canonical phase contract — see git history (and the
+# upstream `jgruberf5/roksbnkctl` repo's `scripts/e2e-test.sh`) for the
+# full inherited shape.
+
+phase_A() { skip_phase A "sanity (version + doctor + init + tfvars)"     "Sprint 3"; }
+phase_B() { skip_phase B "cluster up + show + kubectl get nodes"         "Sprint 3"; }
+phase_C() { skip_phase C "register an existing cluster + down"           "Sprint 3"; }
+phase_D() { skip_phase D "full lifecycle: cluster + BNK + test verbs"    "Sprint 3"; }
+phase_E() { skip_phase E "workspace ops (during D's idle window)"        "Sprint 3"; }
+phase_F() { skip_phase F "S3 object CRUD (replaces COS in Sprint 2)"     "Sprint 3"; }
+phase_G() { skip_phase G "passthrough commands (aws / kubectl / exec)"   "Sprint 3"; }
+phase_H() { skip_phase H "final cleanup (workspace teardown)"            "Sprint 3"; }
+phase_I() { skip_phase I "backend matrix — local execution backend"     "Sprint 4"; }
+phase_J() { skip_phase J "backend matrix — docker execution backend"    "Sprint 4"; }
+phase_K() { skip_phase K "backend matrix — multi-tool docker phase"     "Sprint 4"; }
+phase_L() { skip_phase L "backend matrix — k8s execution backend"       "Sprint 4"; }
+phase_M() { skip_phase M "backend matrix — ssh execution backend"       "Sprint 4"; }
+phase_N() { skip_phase N "backend matrix — mixed-mode integration"      "Sprint 4"; }
+phase_L_DNS() { skip_phase L-DNS "AWS-hosted GSLB DNS probe"            "Sprint 4"; }
+
+# should_run compares the current phase letter against PHASE_FROM so
+# resume-at-phase semantics (PHASE_FROM=D) keep working even while every
+# phase is a skip-stub.
 should_run() {
     [[ "$1" > "$PHASE_FROM" || "$1" == "$PHASE_FROM" ]]
 }
 
-# ── preflight ───────────────────────────────────────────────────────
-preflight() {
-    bold "preflight"
-    if [[ -z "${IBMCLOUD_API_KEY:-}" ]]; then
-        # Try to extract the key from the tfvars file. The lifecycle
-        # commands also need it as TF_VAR_ibmcloud_api_key, but
-        # roksbnkctl itself reads IBMCLOUD_API_KEY first.
-        local key
-        key=$(grep -E '^ibmcloud_api_key' "$TFVARS" 2>/dev/null \
-              | sed -E 's/.*"([^"]+)".*/\1/')
-        if [[ -n "$key" ]]; then
-            export IBMCLOUD_API_KEY="$key"
-            log "Pulled IBMCLOUD_API_KEY from $TFVARS"
-        else
-            red "IBMCLOUD_API_KEY is unset and not found in $TFVARS"
-            exit 3
-        fi
-    fi
-    if [[ ! -f "$TFVARS" ]]; then
-        red "TFVARS file not found: $TFVARS"
-        exit 3
-    fi
-    if ! command -v "$ROKSBNKCTL" >/dev/null 2>&1; then
-        red "$ROKSBNKCTL not on PATH (set ROKSBNKCTL=/path/to/binary)"
-        exit 3
-    fi
-    log "preflight OK — workspace=$WORKSPACE tfvars=$TFVARS log=$RUN_LOG"
-}
-
-# ── phases ──────────────────────────────────────────────────────────
-
-phase_A() {
-    phase_header A "sanity (no cloud cost)"
-
-    step "A1 version" "$ROKSBNKCTL" version
-
-    # doctor may flag warnings (e.g., iperf3 missing) but should
-    # complete the credential check. We treat exit 0 as pass.
-    step "A2 doctor" "$ROKSBNKCTL" doctor
-
-    # init non-interactively — close stdin so isTTY() returns false
-    # and prompts default. Workspace defaults from existing config or
-    # hardcoded fallbacks; --var-file overrides land at apply time.
-    log "A3 init -w $WORKSPACE (non-TTY mode)"
-    if [[ "$DRY_RUN" != "1" ]]; then
-        if ! "$ROKSBNKCTL" init -w "$WORKSPACE" </dev/null >>"$RUN_LOG" 2>&1; then
-            red "  ✗ A3 init failed — see $RUN_LOG"
-            exit 1
-        fi
-        green "  ✓ A3 init"
-    fi
-
-    capture "A4 ws list" "$ROKSBNKCTL" ws list \
-        | assert_contains "$WORKSPACE" "A4 ws list contains $WORKSPACE"
-
-    rm -f /tmp/e2e-tfvars.tf
-    step "A5 tfvars dump" "$ROKSBNKCTL" -w "$WORKSPACE" tfvars -o /tmp/e2e-tfvars.tf
-    if [[ "$DRY_RUN" != "1" ]]; then
-        grep -q "openshift_cluster_name" /tmp/e2e-tfvars.tf \
-            && green "  ✓ A5 tfvars contains openshift_cluster_name" \
-            || { red "  ✗ A5 tfvars dump missing expected variable"; exit 1; }
-    fi
-}
-
-phase_B() {
-    phase_header B "cluster-only lifecycle (~50 minutes)"
-
-    step "B1 cluster up" "$ROKSBNKCTL" cluster up --auto -w "$WORKSPACE" --var-file "$TFVARS"
-
-    capture "B2 cluster show" "$ROKSBNKCTL" cluster show -w "$WORKSPACE" \
-        | assert_contains "cluster_name:     canada-roks" "B2 cluster_name correct"
-
-    capture "B3 ibmcloud ks cluster get" "$ROKSBNKCTL" ibmcloud ks cluster get --cluster canada-roks \
-        | assert_contains "normal" "B3 cluster state normal"
-
-    capture "B4 kubectl get nodes" "$ROKSBNKCTL" kubectl get nodes \
-        | assert_contains "Ready" "B4 nodes Ready"
-
-    # `oc whoami` returns one of three legitimate privileged-identity
-    # shapes depending on how the kubeconfig was minted:
-    #   - vanilla OpenShift admin-cert: `admin/<cluster-id>`
-    #   - IBM Cloud ROKS cert-auth:     `KubeCert#IBMid-<user-id>`
-    #   - IBM Cloud ROKS OAuth:         `IAM#<email>`
-    # `roksbnkctl cluster up` against ROKS produces the cert-auth
-    # form; the vanilla shape is what self-managed OpenShift returns.
-    # Either is a valid pass — assert the alternation rather than
-    # pinning a single shape.
-    capture "B5 oc whoami" "$ROKSBNKCTL" oc whoami \
-        | assert_matches '^(admin/|KubeCert#|IAM#)' "B5 oc whoami returns admin identity"
-
-    log "B6 cluster stays up — Phase C will use it"
-
-    # B7-B9: --on jumphost smoke tests (Sprint 1, PRD 01).
-    #
-    # Auto-population from Phase B1's `cluster up` writes a `targets:`
-    # block into ~/.roksbnkctl/<ws>/config.yaml ONLY if the upstream HCL
-    # provisioned the TGW jumphost (testing_create_tgw_jumphost=true,
-    # default). When users disable it via tfvars, runUp skips the
-    # SetTarget call and we have nothing to talk to — log a yellow ⊘
-    # rather than fail the whole phase.
-    local cfg="$HOME/.roksbnkctl/$WORKSPACE/config.yaml"
-    if [[ "$DRY_RUN" != "1" ]] && [[ -f "$cfg" ]] && grep -q "^targets:" "$cfg"; then
-        capture "B7 targets list" "$ROKSBNKCTL" -w "$WORKSPACE" targets list \
-            | assert_contains "jumphost" "B7 jumphost target auto-populated"
-
-        capture "B8 exec --on jumphost -- whoami" \
-            "$ROKSBNKCTL" -w "$WORKSPACE" exec --on jumphost -- whoami \
-            | assert_contains "root" "B8 jumphost user is root"
-
-        # B9 propagates IBMCLOUD_API_KEY to the remote shell, then exercises
-        # `ibmcloud iam oauth-tokens` over SSH. The expected stdout includes
-        # an "IAM token" line; presence confirms both the env propagation
-        # and that ibmcloud CLI is available on the jumphost (the upstream
-        # HCL pre-installs it).
-        capture "B9 ibmcloud --on jumphost iam oauth-tokens" \
-            "$ROKSBNKCTL" -w "$WORKSPACE" ibmcloud --on jumphost iam oauth-tokens \
-            | assert_contains "IAM token" "B9 IAM token returned via SSH"
-    elif [[ "$DRY_RUN" == "1" ]]; then
-        # Dry-run: render the steps so the operator sees the intended
-        # commands without needing the workspace config to exist.
-        log "→ B7 targets list (dry-run)"
-        log "  cmd: $ROKSBNKCTL -w $WORKSPACE targets list"
-        log "→ B8 exec --on jumphost -- whoami (dry-run)"
-        log "  cmd: $ROKSBNKCTL -w $WORKSPACE exec --on jumphost -- whoami"
-        log "→ B9 ibmcloud --on jumphost iam oauth-tokens (dry-run)"
-        log "  cmd: $ROKSBNKCTL -w $WORKSPACE ibmcloud --on jumphost iam oauth-tokens"
-    else
-        yellow "  ⊘ B7-B9 skipped — no jumphost target configured (testing_create_tgw_jumphost=false?)"
-    fi
-
-    # B10 — docker backend prelim (Sprint 3 / PRD 03 first half).
-    #
-    # Validates that `--backend docker` propagates IBMCLOUD_API_KEY into a
-    # disposable container without leaking it into `docker inspect`. The
-    # full Phase K (the canonical multi-tool docker backend phase) is
-    # scoped for Sprint 6 per docs/PLAN.md; Sprint 3 lands this minimal
-    # precursor so the docker plumbing is exercised end-to-end on a real
-    # cluster as soon as it ships.
-    #
-    # Skipped cleanly when:
-    #   - the docker CLI isn't installed (no `docker` on PATH)
-    #   - the docker daemon isn't reachable (`docker info` fails)
-    # Either case → yellow ⊘ rather than a hard fail; the test is gated
-    # by the host's docker availability, not by anything roksbnkctl owns.
-    if [[ "$DRY_RUN" == "1" ]]; then
-        log "→ B10 docker backend ibmcloud iam (dry-run)"
-        log "  cmd: $ROKSBNKCTL -w $WORKSPACE ibmcloud --backend docker iam oauth-tokens"
-    elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-        capture "B10 docker backend ibmcloud iam" \
-            "$ROKSBNKCTL" -w "$WORKSPACE" ibmcloud --backend docker iam oauth-tokens \
-            | assert_contains "IAM token" "B10 docker backend produces token"
-    else
-        yellow "  ⊘ B10 skipped — Docker daemon not reachable"
-    fi
-}
-
-phase_C() {
-    phase_header C "register an existing cluster (~30 seconds)"
-
-    local outputs="$HOME/.roksbnkctl/$WORKSPACE/cluster-outputs.json"
-    log "C1 simulate externally-created cluster"
-    [[ "$DRY_RUN" == "1" ]] || rm -f "$outputs"
-
-    step "C2 cluster register canada-roks" \
-        "$ROKSBNKCTL" cluster register canada-roks \
-        --registry-cos-name canada-roks-cos-instance \
-        -w "$WORKSPACE"
-
-    capture "C3 cluster show post-register" "$ROKSBNKCTL" cluster show -w "$WORKSPACE" \
-        | assert_contains "cluster_name:     canada-roks" "C3 show matches"
-
-    step "C4 cluster down" "$ROKSBNKCTL" cluster down --auto -w "$WORKSPACE" --var-file "$TFVARS"
-
-    log "C5 cluster show should now error"
-    if [[ "$DRY_RUN" != "1" ]]; then
-        if "$ROKSBNKCTL" cluster show -w "$WORKSPACE" >/dev/null 2>&1; then
-            red "  ✗ C5 cluster show unexpectedly succeeded after down"
-            exit 1
-        fi
-        green "  ✓ C5 cluster show errors after down (expected)"
-    fi
-}
-
-phase_D() {
-    phase_header D "full lifecycle: cluster + BNK (~70 minutes)"
-
-    step "D1 up" "$ROKSBNKCTL" up --auto -w "$WORKSPACE" --var-file "$TFVARS"
-
-    # `roksbnkctl status` prints the *workspace's config.yaml* cluster
-    # name — which is whatever roksbnkctl init defaulted to (bnk-demo),
-    # not the actual deployed cluster from --var-file. So we only assert
-    # status exits 0; the deployed cluster identity is verified
-    # separately via cluster show + ibmcloud ks cluster get.
-    step "D2 status" "$ROKSBNKCTL" status -w "$WORKSPACE"
-
-    # D3 — native internalised verb (Sprint 2 / PRD 02). Replaces the
-    # earlier passthrough form that shelled out to host kubectl. The
-    # in-process path uses client-go directly; equivalent behaviour, no
-    # host kubectl install required.
-    step "D3 k get pods -n f5-bnk" "$ROKSBNKCTL" k get pods -n f5-bnk
-
-    # D3b — PATH-strip check. Validates the v0.8 "no kubectl required"
-    # claim by removing every PATH entry that looks like it could host a
-    # kubectl binary, then running roksbnkctl k get nodes against the
-    # stripped PATH. If the in-process implementation accidentally shells
-    # out to kubectl, this step fails. We use env PATH=… so the
-    # mutation is per-command — never moves or renames the host binary.
-    #
-    # Assertion via `-o jsonpath`: `roksbnkctl k get`'s default
-    # printer currently emits only NAME+AGE columns (the rich
-    # STATUS/ROLES/VERSION columns come from server-side TablePrinter
-    # which the v1.0 binary doesn't request — tracked as a v1.x
-    # bug to fix in internal/k8s/get.go). Until that lands, query
-    # the Ready condition explicitly via jsonpath so the assertion
-    # validates the actual condition (not the default-printer table).
-    if [[ "$DRY_RUN" != "1" ]]; then
-        local stripped_path
-        stripped_path=$(echo "$PATH" | tr ':' '\n' \
-            | while IFS= read -r d; do
-                  [[ -n "$d" ]] || continue
-                  [[ -x "$d/kubectl" ]] && continue
-                  [[ -x "$d/oc" ]] && continue
-                  echo "$d"
-              done | paste -sd:)
-        capture "D3b k get nodes (PATH-stripped)" \
-            env PATH="$stripped_path" "$ROKSBNKCTL" k get nodes \
-                -o "jsonpath={range .items[*]}{.metadata.name}{'='}{.status.conditions[?(@.type=='Ready')].status}{'\n'}{end}" \
-            | assert_matches '=True$' "D3b nodes Ready (no host kubectl)"
-    else
-        log "→ D3b k get nodes (PATH-stripped) (dry-run)"
-        log "  cmd: env PATH=<stripped> $ROKSBNKCTL k get nodes -o jsonpath=…"
-    fi
-
-    # logs may produce many lines or be empty if FLO hasn't logged
-    # recently — just confirm the command exits 0.
-    log "D4 logs flo (10s sample)"
-    if [[ "$DRY_RUN" != "1" ]]; then
-        timeout 10 "$ROKSBNKCTL" logs flo >>"$RUN_LOG" 2>&1
-        local rc=$?
-        # timeout returns 124 when it kills the process; that's expected
-        # for `logs` without -f cap. Either 0 or 124 is fine here.
-        if [[ "$rc" == "0" || "$rc" == "124" ]]; then
-            green "  ✓ D4 logs flo"
-        else
-            red "  ✗ D4 logs flo (exit $rc)"
-            exit "$rc"
-        fi
-    fi
-
-    # Phase G + E + F run here — during the cluster's "up but not torn
-    # down yet" window — to amortize wall time.
-    phase_G_during_D
-    phase_E_during_D
-    phase_F_during_D
-
-    # `roksbnkctl test connectivity` and `test dns` need a non-empty
-    # host list in workspace config (test.connectivity.extra_hosts).
-    # `roksbnkctl init` doesn't seed any defaults, so add a couple of
-    # public hosts for the test runner. Idempotent — only appends if no
-    # `test:` block exists already.
-    log "D-pre injecting test.connectivity.extra_hosts into workspace config"
-    if [[ "$DRY_RUN" != "1" ]]; then
-        local cfg="$HOME/.roksbnkctl/$WORKSPACE/config.yaml"
-        if ! grep -q "^test:" "$cfg"; then
-            cat >> "$cfg" <<'YAML'
-
-test:
-    connectivity:
-        extra_hosts:
-            - https://www.google.com
-            - https://www.cloudflare.com
-YAML
-            log "  → appended test.connectivity.extra_hosts"
-        else
-            log "  → test: section already present, leaving as-is"
-        fi
-    fi
-
-    step "D5 test connectivity" "$ROKSBNKCTL" test connectivity -o json -w "$WORKSPACE"
-    step "D6 test dns"          "$ROKSBNKCTL" test dns -o json -w "$WORKSPACE"
-
-    # `roksbnkctl test throughput` runs the iperf3 client locally
-    # against the iperf3 server it deploys into the cluster. If iperf3
-    # isn't installed on this host, the binary's pod-deploy path still
-    # works (verified up to "iperf3 endpoint:" in the JSON output) but
-    # the client invocation fails. Skip cleanly rather than mark the
-    # whole run failed — the throughput-test path is gated by host
-    # tooling, not by anything roksbnkctl owns.
-    if command -v iperf3 >/dev/null 2>&1; then
-        step "D7 test throughput" "$ROKSBNKCTL" test throughput -o json -w "$WORKSPACE"
-    else
-        yellow "  ⊘ D7 skipped — iperf3 not on PATH (install iperf3 to enable throughput test)"
-    fi
-
-    # SKIP_PHASE_D_DOWN=1 lets the e2e-test-full.sh wrapper keep the
-    # cluster alive after Phase D so the backends driver (Phase L
-    # ops install, L-DNS LD5-LD8, N1 mixed-mode up) sees a running
-    # cluster. Default behaviour (unset or 0) is unchanged.
-    if [[ "${SKIP_PHASE_D_DOWN:-0}" != "1" ]]; then
-        step "D8 down" "$ROKSBNKCTL" down --auto -w "$WORKSPACE" --var-file "$TFVARS"
-    else
-        yellow "  ⊘ D8 skipped (SKIP_PHASE_D_DOWN=1 — wrapper will keep the cluster alive)"
-    fi
-}
-
-phase_E_during_D() {
-    phase_header E "workspace ops (during D's idle window)"
-
-    step "E1 ws new e2e-second" "$ROKSBNKCTL" ws new e2e-second
-    capture "E2 ws list" "$ROKSBNKCTL" ws list \
-        | assert_contains "e2e-second" "E2 ws list contains e2e-second"
-
-    capture "E3 ws current" "$ROKSBNKCTL" ws current \
-        | assert_contains "$WORKSPACE" "E3 ws current is $WORKSPACE"
-
-    step    "E4a ws use e2e-second" "$ROKSBNKCTL" ws use e2e-second
-    capture "E4b ws current after use" "$ROKSBNKCTL" ws current \
-        | assert_contains "e2e-second" "E4b ws current switched"
-
-    step "E5 ws use $WORKSPACE" "$ROKSBNKCTL" ws use "$WORKSPACE"
-    step "E6 ws delete e2e-second" "$ROKSBNKCTL" ws delete e2e-second --force
-}
-
-phase_F_during_D() {
-    phase_header F "COS object CRUD (during D's idle window)"
-
-    # Per-run scratch bucket — avoids writing into the user's prod
-    # buckets and dodges global-name collisions. IBM Cloud bucket names
-    # are globally unique, so include $RANDOM and the run timestamp.
-    local bucket="roksbnkctl-e2e-${RUN_TS}-${RANDOM}"
-    bucket=$(echo "$bucket" | tr 'A-Z' 'a-z')  # IBM bucket names must be lowercase
-    log "F bucket: $bucket on instance bnk-orchestration"
-
-    capture "F1 cos instance list" "$ROKSBNKCTL" cos instance list \
-        | assert_contains "bnk-orchestration" "F1 lists bnk-orchestration"
-
-    step "F2 cos bucket list" "$ROKSBNKCTL" cos bucket list --instance bnk-orchestration
-
-    step "F3 cos bucket create $bucket" \
-        "$ROKSBNKCTL" cos bucket create "$bucket" --instance bnk-orchestration
-
-    if [[ "$DRY_RUN" != "1" ]]; then
-        dd if=/dev/urandom of=/tmp/e2e-cos-blob bs=1M count=4 status=none
-    fi
-
-    step "F4 cos object put" \
-        "$ROKSBNKCTL" cos object put "$bucket/blob" /tmp/e2e-cos-blob \
-        --instance bnk-orchestration
-
-    step "F5 cos object get" \
-        "$ROKSBNKCTL" cos object get "$bucket/blob" /tmp/e2e-cos-blob.out \
-        --instance bnk-orchestration
-
-    if [[ "$DRY_RUN" != "1" ]]; then
-        if cmp -s /tmp/e2e-cos-blob /tmp/e2e-cos-blob.out; then
-            green "  ✓ F5b roundtrip bytes match"
-        else
-            red "  ✗ F5b roundtrip bytes differ"
-            exit 1
-        fi
-    fi
-
-    step "F6 cos object delete" \
-        "$ROKSBNKCTL" cos object delete "$bucket/blob" \
-        --instance bnk-orchestration
-
-    step "F7 cos bucket delete" \
-        "$ROKSBNKCTL" cos bucket delete "$bucket" --instance bnk-orchestration
-}
-
-phase_G_during_D() {
-    phase_header G "passthrough commands (during D's idle window)"
-
-    step "G1 ibmcloud account show" "$ROKSBNKCTL" ibmcloud account show
-    step "G2 kubectl version --client" "$ROKSBNKCTL" kubectl version --client
-    step "G3 oc version --client" "$ROKSBNKCTL" oc version --client
-
-    if [[ "$DRY_RUN" != "1" ]]; then
-        capture "G4 exec env contains KUBECONFIG" "$ROKSBNKCTL" exec env \
-            | grep -q "^KUBECONFIG=" \
-            && green "  ✓ G4 KUBECONFIG exported" \
-            || { red "  ✗ G4 KUBECONFIG missing in exec env"; exit 1; }
-    else
-        log "(dry-run; skipping G4 KUBECONFIG check)"
-    fi
-}
-
-phase_H() {
-    phase_header H "final cleanup"
-
-    # `ws delete` refuses to drop the current workspace — create a
-    # parking-lot workspace first and switch to it. Idempotent: if
-    # `e2e-cleanup` already exists from a previous run, ws new will
-    # error out and we just use it. Either way, the ws use afterward
-    # makes it current so the e2e delete is allowed.
-    if [[ "$DRY_RUN" != "1" ]]; then
-        "$ROKSBNKCTL" ws new e2e-cleanup >/dev/null 2>&1 || true
-    fi
-    step "H0 ws use e2e-cleanup (parking lot)" "$ROKSBNKCTL" ws use e2e-cleanup
-
-    step "H1 ws delete $WORKSPACE" "$ROKSBNKCTL" ws delete "$WORKSPACE" --force
-
-    if [[ "$DRY_RUN" != "1" ]]; then
-        if [[ ! -d "$HOME/.roksbnkctl/$WORKSPACE" ]]; then
-            green "  ✓ H2 workspace dir removed"
-        else
-            red "  ✗ H2 workspace dir still exists at $HOME/.roksbnkctl/$WORKSPACE"
-            exit 1
-        fi
-    fi
-}
-
 # ── main ────────────────────────────────────────────────────────────
 main() {
-    bold "roksbnkctl E2E test — run-id $RUN_TS"
+    bold "awsbnkctl E2E test — run-id $RUN_TS"
     log "log: $RUN_LOG"
+    log "Sprint 0 stub: every phase is a skip-marker pending retarget."
 
-    preflight
-
-    should_run A && phase_A
-    should_run B && phase_B
-    should_run C && phase_C
-    should_run D && phase_D
-    # SKIP_PHASE_H=1 lets the e2e-test-full.sh wrapper run the baseline
-    # A-G without removing the workspace, so the backends driver can
-    # still see workspace-resolved creds when it dispatches. Default
-    # behaviour (SKIP_PHASE_H unset or 0) is unchanged.
-    if [[ "${SKIP_PHASE_H:-0}" != "1" ]]; then
-        should_run H && phase_H
-    fi
+    should_run A     && phase_A
+    should_run B     && phase_B
+    should_run C     && phase_C
+    should_run D     && phase_D
+    should_run E     && phase_E
+    should_run F     && phase_F
+    should_run G     && phase_G
+    should_run H     && phase_H
+    should_run I     && phase_I
+    should_run J     && phase_J
+    should_run K     && phase_K
+    should_run L     && phase_L
+    should_run M     && phase_M
+    should_run N     && phase_N
+    # L-DNS is a sub-phase of L in the inherited driver; keep it
+    # adjacent so the skip banner mirrors the canonical sequence.
+    should_run L     && phase_L_DNS
 
     echo "" >&2
-    green "════════════════════════════════════════════════════════════"
-    green "All phases passed. run-id $RUN_TS"
-    green "════════════════════════════════════════════════════════════"
+    yellow "════════════════════════════════════════════════════════════"
+    yellow "Sprint 0 stub: all e2e phases skipped pending sprint retargets"
+    yellow "(see docs/PLAN.md for the retarget plan)."
+    yellow "════════════════════════════════════════════════════════════"
 }
 
 main "$@"

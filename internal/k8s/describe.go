@@ -10,7 +10,7 @@ import (
 	"k8s.io/kubectl/pkg/describe"
 )
 
-// DescribeOptions captures the flag-parsed inputs to `roksbnkctl k describe`.
+// DescribeOptions captures the flag-parsed inputs to `awsbnkctl k describe`.
 //
 // We delegate to k8s.io/kubectl/pkg/describe for the heavy lifting —
 // that's the same library kubectl/oc themselves use internally, so

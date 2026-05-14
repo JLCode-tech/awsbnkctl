@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
 func TestFetchSource_Local_OK(t *testing.T) {
@@ -34,7 +34,7 @@ func TestFetchSource_Local_NotADir(t *testing.T) {
 }
 
 func TestFetchSource_Local_Missing(t *testing.T) {
-	cfg := config.TFSourceCfg{Type: "local", Path: "/this/path/should/not/exist/roksbnkctl-test"}
+	cfg := config.TFSourceCfg{Type: "local", Path: "/this/path/should/not/exist/awsbnkctl-test"}
 	if _, err := FetchSource(context.Background(), cfg, ""); err == nil {
 		t.Error("expected error for missing path")
 	}

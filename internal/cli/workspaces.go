@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jgruberf5/roksbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
 var flagWSForce bool
@@ -16,9 +16,9 @@ var flagWSForce bool
 var workspacesCmd = &cobra.Command{
 	Use:     "workspaces",
 	Aliases: []string{"ws"},
-	Short:   "Manage roksbnkctl workspaces (per-environment config + state bundles)",
-	Long: `Each workspace lives under ~/.roksbnkctl/<name>/ with its own config.yaml
-and state. The current_workspace pointer in ~/.roksbnkctl/config.yaml decides
+	Short:   "Manage awsbnkctl workspaces (per-environment config + state bundles)",
+	Long: `Each workspace lives under ~/.awsbnkctl/<name>/ with its own config.yaml
+and state. The current_workspace pointer in ~/.awsbnkctl/config.yaml decides
 which one commands run against; -w/--workspace overrides for one invocation.`,
 }
 
@@ -43,7 +43,7 @@ var wsUseCmd = &cobra.Command{
 
 var wsNewCmd = &cobra.Command{
 	Use:   "new <name>",
-	Short: "Create a new (empty) workspace skeleton — run `roksbnkctl init -w <name>` to populate",
+	Short: "Create a new (empty) workspace skeleton — run `awsbnkctl init -w <name>` to populate",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runWSNew,
 }
@@ -74,7 +74,7 @@ func runWSList(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	if len(names) == 0 {
-		fmt.Fprintln(os.Stderr, "(no workspaces yet — run `roksbnkctl init` to create one)")
+		fmt.Fprintln(os.Stderr, "(no workspaces yet — run `awsbnkctl init` to create one)")
 		return nil
 	}
 
@@ -103,14 +103,14 @@ func runWSList(_ *cobra.Command, _ []string) error {
 
 // runWSCurrent prints the current_workspace pointer. Returns "(none)" on
 // stderr (and nothing on stdout) when no pointer is set yet, so scripts
-// using `$(roksbnkctl ws current)` get an empty string they can detect.
+// using `$(awsbnkctl ws current)` get an empty string they can detect.
 func runWSCurrent(_ *cobra.Command, _ []string) error {
 	g, err := config.LoadGlobal()
 	if err != nil {
 		return err
 	}
 	if g.CurrentWorkspace == "" {
-		fmt.Fprintln(os.Stderr, "(no current workspace; run `roksbnkctl ws use <name>` or `roksbnkctl init`)")
+		fmt.Fprintln(os.Stderr, "(no current workspace; run `awsbnkctl ws use <name>` or `awsbnkctl init`)")
 		return nil
 	}
 	fmt.Println(g.CurrentWorkspace)
@@ -128,8 +128,8 @@ func runWSUse(_ *cobra.Command, args []string) error {
 }
 
 // runWSNew creates an empty workspace. Useful when you want the directory
-// to exist (so `ws use` works) before going through `roksbnkctl init`.
-// Most users will skip this and just run `roksbnkctl init -w <name>` directly.
+// to exist (so `ws use` works) before going through `awsbnkctl init`.
+// Most users will skip this and just run `awsbnkctl init -w <name>` directly.
 func runWSNew(_ *cobra.Command, args []string) error {
 	name := args[0]
 	if err := config.ValidateName(name); err != nil {
@@ -141,7 +141,7 @@ func runWSNew(_ *cobra.Command, args []string) error {
 	if err := config.SaveWorkspace(name, &config.Workspace{}); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "✓ Created workspace %q (run `roksbnkctl init -w %s` to configure)\n", name, name)
+	fmt.Fprintf(os.Stderr, "✓ Created workspace %q (run `awsbnkctl init -w %s` to configure)\n", name, name)
 	return nil
 }
 
@@ -155,7 +155,7 @@ func runWSDelete(_ *cobra.Command, args []string) error {
 		return err
 	}
 	if g.CurrentWorkspace == name {
-		return fmt.Errorf("cannot delete current workspace %q; switch first: `roksbnkctl ws use <other>`", name)
+		return fmt.Errorf("cannot delete current workspace %q; switch first: `awsbnkctl ws use <other>`", name)
 	}
 
 	if !flagWSForce {

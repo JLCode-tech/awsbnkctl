@@ -26,10 +26,10 @@ import (
 // FieldManager is the field-manager string used for server-side apply
 // operations. Distinct from kubectl's "kubectl-client-side-apply" /
 // "kubectl-server-side-apply" so an SSA conflict tells the user
-// roksbnkctl owns the field.
-const FieldManager = "roksbnkctl"
+// awsbnkctl owns the field.
+const FieldManager = "awsbnkctl"
 
-// ApplyOptions captures the flag-parsed inputs to `roksbnkctl k apply`.
+// ApplyOptions captures the flag-parsed inputs to `awsbnkctl k apply`.
 //
 // Filename can be a YAML file, a directory (recursive *.yaml; or
 // kustomization.yaml-detected and built via krusty), or "-" for stdin.
