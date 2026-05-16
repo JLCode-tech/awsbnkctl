@@ -223,3 +223,375 @@ landing surface: `seccompProfile`, `RuntimeDefault`, `kubectl-exec`,
 
 **Files affected**: `cspell.json`
 **Resolution**: shipped.
+
+---
+
+# Sprint 4 — validator issues (second pass)
+
+The Sprint 4 validator brief
+(`prompts/sprint4/validator.md`) re-dispatched the validator with a
+narrowed scope after the K8s + SSH backend work above had already
+landed. This pass covers the **test surface refresh** + **AWS E2E
+phase marker refresh**: the `test-dryrun` CI job (`./bin/awsbnkctl
+test {connectivity,dns,throughput} --dry-run`), the cspell vocabulary
+for architect's chapters 20-23, the Sprint 4 phase markers in
+`scripts/e2e-test{,-backends}.sh`, and the Sprint 4 status banner in
+`.github/workflows/e2e-full.yml`. SPIKE DEFERRAL still in force — no
+live AWS this sprint. Findings below pick up at Issue 9 to preserve
+the audit trail above.
+
+## Issue 9: `test-dryrun` CI job will fail until staff wires `--dry-run` on test verbs
+
+**Severity**: high
+**Status**: ✅ resolved at validator second-run time (staff landed
+`--dry-run` on `testCmd.PersistentFlags()` mid-dispatch — verified at
+`internal/cli/test.go:130` + `internal/cli/test_dryrun.go` planning
+helpers)
+
+**Description**: At validator-run time, the existing binary
+(`./bin/awsbnkctl` built from the working tree, sha-equivalent to the
+HEAD I read against) does **not** accept a `--dry-run` flag on the
+`test` subcommands. Probing each one:
+
+```
+$ ./bin/awsbnkctl test connectivity --dry-run
+Error: unknown flag: --dry-run
+$ ./bin/awsbnkctl test dns --dry-run
+Error: unknown flag: --dry-run
+$ ./bin/awsbnkctl test throughput --dry-run
+Error: unknown flag: --dry-run
+```
+
+`internal/cli/test.go` declares no `--dry-run` flag on any of
+`testCmd`, `testConnectivityCmd`, `testDNSCmd`, or `testThroughputCmd`
+in this working tree. Staff's parallel task list confirms "Add
+--dry-run flag to test subcommands" as a pending / in-flight item; it
+ships in this same Sprint 4 dispatch.
+
+The new `test-dryrun` job in `.github/workflows/ci.yml` (this commit)
+exercises the three subcommand flags exactly as the brief mandates
+(`./bin/awsbnkctl test connectivity --dry-run`, `… dns --dry-run`,
+`… throughput --dry-run`), materialises a fake workspace under the
+runner's `HOME`, asserts exit-0, and greps each log for a
+"would probe X / would deploy X / dry-run / plan" marker plus the
+fake workspace's configured host or target name. Until staff lands
+the `--dry-run` flag, every step will fail with
+`unknown flag: --dry-run` and the job goes red.
+
+This is the **intended canary** posture — same shape as the Sprint 3
+`full-up-dryrun` canary that ships ready and flips green once staff's
+matching deliverable lands. Documented inline in both the job comment
+block and this issue so the integrator doesn't mistake the first-run
+red for a validator bug.
+
+If staff's eventual `--dry-run` text deviates from the assertion
+patterns above (the greps allow any of `would probe|would check|
+would query|would deploy|dry[- ]run|plan` to match), drop the
+mismatched word from the regex in the same edit; the assertion is
+designed to be permissive on the exact verb so staff has authoring
+latitude on the wording.
+
+**Files affected**: `internal/cli/test.go` (staff scope) — needs
+`--dry-run` BoolVar plumbed onto each of the three subcommand FlagSets
++ a planning-path that enumerates probes without making network /
+k8s-API calls.
+
+**Proposed fix**: staff lands the `--dry-run` flag + planning path per
+their Sprint 4 brief; integrator confirms `test-dryrun` goes green
+on the post-merge CI run. If the plan-text format is fully different
+(e.g., a JSON-only emission instead of human-readable lines), the
+validator updates the assertion patterns in
+`.github/workflows/ci.yml::test-dryrun` to match.
+
+## Issue 10: cspell additions — chapters 20-23 covered; pre-existing British-spelling + chapter-specific vocabulary remain
+
+**Severity**: low
+**Status**: ✅ resolved for brief-mandated additions; pre-existing
+drift noted
+
+**Description**: Per the Sprint 4 validator brief's cspell scope, added
+the following to `cspell.json` after verifying which were absent and
+needed by architect's chapters 20-23:
+
+- `Route53`, `route53` — needed for future Route 53 GSLB content in
+  chapter 21 (architect's brief: "AWS Route 53 specifics where they
+  matter"). Not yet referenced in chapters 20-23 but added
+  defensively per the brief.
+- `iperf3` — referenced 30+ times in chapter 22 (throughput); was
+  tripping cspell as an unknown word.
+- `PSA` — chapter 22 acronym for Pod Security Admission (the
+  EKS 1.25+ default that replaces the older PodSecurityPolicy).
+- `seccomp` — chapter 22 references `seccompProfile`; the base word
+  `seccomp` tripped cspell while the camelCase variant was already
+  on the allowlist.
+- `divergence` — chapter 21 + 23 use `gslb_divergence` and the prose
+  word `divergence` repeatedly; was an unknown word.
+
+Verified already present (no edit needed): `SCC`, `vantage`,
+`vantages`, `gslb`, `Gslb`, `GSLB`.
+
+Note on "Pod Security Admission": cspell tokenises on word
+boundaries, so the multi-word phrase doesn't get stored as a single
+allowlist entry — the individual words `Pod`, `Security`,
+`Admission` are valid English and pass without an allowlist entry,
+and the acronym form `PSA` is the only token that needs an explicit
+add. Brief asked for the phrase; I covered it by adding the acronym
+form, which is the only token cspell would have flagged.
+
+Post-edit verification: `npx cspell --config cspell.json
+book/src/22-throughput-testing.md book/src/23-e2e-test-plan.md`
+produces no findings for any of the brief-listed terms.
+
+Remaining cspell findings across `book/src/**/*.md` (~393 total):
+pre-existing British-spelling drift (`behaviour`, `materialisation`,
+`organised`, `optimised`, `defence`, etc.) — same surface as Sprint 3
+validator Issue 4 carry-over; intentionally left as a tech-writer
+call rather than allowlist-masking US/British mixing. Plus chapter-
+specific terms (`hostnames`, `omitempty`, `resolv`, `prereq`,
+`scps`, `resolvconf`, `runnability`, `tunables`, `Gbps`, `Mbps`,
+`networkstatic`, `publickey`, `iperf` (non-3 variant), DNS record-
+type acronyms `SVCB`/`TLSA`/`SSHFP`/`NAPTR`/`RRSIG`/`NSEC`/`DNSSEC`)
+— these are chapter-author calls for the tech-writer's Sprint 5
+book retarget pass, not Sprint 4 regressions.
+
+`.github/workflows/spellcheck.yml` is still `continue-on-error: true`
+so even the pre-existing 393 findings don't block PR merges; the
+Sprint 4 additions are defensive coverage for when the spellcheck
+posture eventually tightens (Sprint 5+ tech-writer call per Sprint 3
+validator Issue 5).
+
+**Files affected**: `cspell.json` (edited this sprint, +6 words:
+`Route53`, `route53`, `iperf3`, `PSA`, `seccomp`, `divergence`).
+
+**Resolution**: shipped. Tech-writer revisits British-spelling +
+chapter-specific vocabulary in Sprint 5.
+
+## Issue 11: e2e marker refresh — Sprint 4 status now reflects backend + DNS dry-run tier
+
+**Severity**: informational
+**Status**: ✅ resolved (validator scope; landed this sprint)
+
+**Description**: Refreshed the per-phase markers in three places to
+reflect the Sprint 4 status — backend matrix (I-N) and AWS Route 53
+GSLB DNS probe (L-DNS) joining the cluster-bring-up phases (A-H) at
+the dry-run tier; live-apply tier still gates on the operator-run
+PRD 07 spike (SPIKE DEFERRAL).
+
+1. **`scripts/e2e-test.sh`** — refreshed the file-header narrative,
+   the per-phase markers for I, J, K, L, M, N, L-DNS (was bare
+   "Sprint 4", now "Sprint 4 implements dry-run; live apply gates on
+   PRD 07 spike"), the main-banner status text, and the start-of-run
+   log line.
+
+2. **`scripts/e2e-test-backends.sh`** — promoted the file header from
+   "Sprint 0 skip-stub" wording to "Sprint 4 status" with the same
+   dry-run + spike split; extended the `skip_phase` helper to handle
+   both bare "Sprint N" markers (auto-suffixed " retarget" for
+   back-compat) and fully-formed sentence markers (no suffix);
+   refreshed every phase's marker text to the Sprint 4 split shape;
+   refreshed the start-of-run log line + the closing banner.
+
+3. **`.github/workflows/e2e-full.yml`** — promoted the job name from
+   "Sprint 3 stub" to "Sprint 4 stub"; refreshed the file-header
+   narrative to mention both the Sprint 3 `full-up-dryrun` and the
+   Sprint 4 `test-dryrun` CI jobs as the dry-run regression surface;
+   refreshed the in-step skip-banner echo to enumerate per-phase
+   status with the dry-run + spike split + L-DNS as the AWS Route 53
+   probe phase.
+
+Sprint 3 validator Issue 7 (`cluster_region` → `aws_region` input
+rename + `IBMCLOUD_API_KEY` → `AWS_*` secret thread) remains
+deferred to Sprint 6 per its own resolution note — the
+workflow_dispatch input contract surface still bookmark-stable until
+this workflow transitions from skip-stub to a real driver. Re-noted
+here for visibility; no Sprint 4 change.
+
+DRY_RUN smoke against both edited shell scripts is green (every
+phase emits the new marker; exit 0; banner reads cleanly). YAML
+validation passes for both edited workflows.
+
+**Files affected**:
+- `scripts/e2e-test.sh` (this sprint)
+- `scripts/e2e-test-backends.sh` (this sprint)
+- `.github/workflows/e2e-full.yml` (this sprint)
+
+**Resolution**: shipped.
+
+## Issue 12: `test-dryrun` workspace materialisation aligned to actual workspace schema
+
+**Severity**: medium
+**Status**: ✅ resolved (validator re-aligned the YAML on the second
+pass against the actual `internal/config/workspace.go::Workspace`
+shape staff shipped)
+
+**Description**: The first pass of the `test-dryrun` CI job
+materialised a fake workspace under
+`$HOME/.awsbnkctl/workspaces/ci-dryrun/config.yaml` with a guessed
+schema (top-level `workspace:` plus `aws.cluster_name`) — both wrong.
+The actual shape staff ships in `internal/config/workspace.go`:
+
+- On-disk layout is `~/.awsbnkctl/<workspace>/config.yaml` (no
+  `workspaces/` prefix), with `~/.awsbnkctl/config.yaml` carrying the
+  global `current_workspace:` pointer.
+- The cluster name lives under a top-level `cluster:` block
+  (`cluster.name`, `cluster.create`), **not** under `aws:`.
+- `aws:` carries `region` + `profile` only (no `cluster_name`).
+- `tf_source:` is the YAML tag for the TFSourceCfg block; included
+  with a github stub so the loader doesn't trip over a missing
+  source ref if any plan-path code consults it.
+
+The validator's second-pass edit fixes all three drift points:
+
+1. Materialises the config at `~/.awsbnkctl/ci-dryrun/config.yaml`
+   (correct per-workspace path).
+2. Uses the correct schema (`cluster.name` + `aws.region` +
+   `tf_source.{type,repo,ref}` + the test block).
+3. Passes `-w ci-dryrun` on every `./bin/awsbnkctl ... test ...
+   --dry-run` invocation, so the workflow doesn't need to also
+   materialise the global `~/.awsbnkctl/config.yaml` pointer file.
+
+Verified at edit time: the YAML parses (`python3 -c 'yaml.safe_load
+(open(...))'`); `cluster:` and `aws:` are the only blocks staff's
+loader requires; `LoadWorkspace` silently ignores any unknown fields
+(yaml.v3 default), so a small forward-compatible drift in the schema
+won't red-fail the CI job. `ValidateName("ci-dryrun")` accepts the
+hyphen (regex `[A-Za-z0-9_.-]`).
+
+**Files affected**: `.github/workflows/ci.yml::test-dryrun`
+(validator scope, edited this pass).
+
+**Resolution**: shipped. If a future Sprint extends the workspace
+schema with required fields, the CI YAML needs a matching update;
+re-noted as a forward watch-item for Sprint 5+ validator.
+
+## Issue 13: spike-mode banner in `scripts/e2e-test.sh` retains the Sprint 3 wording
+
+**Severity**: low
+**Status**: open (informational; defer to Sprint 6)
+
+**Description**: `scripts/e2e-test.sh::spike_mode_banner` still emits
+"Sprint 3 stub: this flag emits the protocol pointer only." even
+though Sprint 4 has now extended the dry-run tier to backend phases.
+The banner's payload is still correct (the spike protocol body
+references PRD 07's day 1-3 sequence verbatim), but the prefix line
+reads as if Sprint 4 hadn't shipped. Sprint 6 owns the spike-mode
+wire-up (the operator-run live exercise that gates v1.0); a
+text-only refresh now would be churn without functional value, but
+catching it for Sprint 6's natural revisit.
+
+**Files affected**: `scripts/e2e-test.sh::spike_mode_banner`
+**Proposed fix**: defer to Sprint 6 spike-mode implementation; refresh
+the prefix to "Sprint 6: spike protocol live-run wrapper" (or
+whatever Sprint 6 brief settles on) at that time.
+
+## Issue 15: third-pass workspace YAML alignment (this run)
+
+**Severity**: medium
+**Status**: ✅ resolved (third validator pass)
+
+**Description**: A late-sprint validator re-dispatch caught that the
+second-pass `test-dryrun` CI job materialised the fake workspace
+config under the wrong on-disk path (`~/.awsbnkctl/workspaces/
+<name>/config.yaml`) and with the wrong field names
+(`aws.cluster_name` instead of `cluster.name`) — both inferred from
+the brief rather than from `internal/config/workspace.go`. The third
+pass cross-checks against the loader's actual reads:
+
+- `internal/config/paths.go::WorkspaceDir` returns
+  `<base>/<name>/`, not `<base>/workspaces/<name>/`. Fixed.
+- `internal/config/workspace.go::Workspace` has a top-level
+  `Cluster ClusterCfg` (yaml tag `cluster`) with `Name string`
+  (yaml tag `name`). The brief's `aws.cluster_name` was a misread.
+  Fixed.
+- `internal/config/global.go::LoadGlobal` returns a zero-valued
+  `Global` on missing-file (line 33-34 — `errors.Is(err,
+  os.ErrNotExist)`), so the CI job doesn't need to materialise a
+  global pointer file as long as it passes `-w ci-dryrun` on every
+  invocation. Reworked the step bodies to do exactly that, removing
+  the wrong `echo "ci-dryrun" > "$HOME/.awsbnkctl/current-workspace"`
+  step entirely.
+- Added a stub `tf_source:` block (github/JLCode-tech/awsbnkctl-tf@
+  main) so any plan-path code that consults TFSource doesn't
+  panic-on-nil-deref. Empty TFSource is also acceptable
+  (`LoadWorkspace` doesn't validate the field), but a stub keeps
+  the YAML readable as a canonical fixture.
+
+The change is contained to
+`.github/workflows/ci.yml::test-dryrun::Materialise fake workspace`
++ the three `awsbnkctl test ... --dry-run` step bodies (added
+`-w ci-dryrun` before each verb). YAML validation passes.
+
+**Files affected**: `.github/workflows/ci.yml::test-dryrun` (third
+pass — same step block touched by Issue 12 second pass).
+
+**Resolution**: shipped. The CI job should go green on the first
+post-merge run, given staff's `--dry-run` flag is already on disk
+(Issue 9 resolution).
+
+## Issue 14: `tools-images.yml` PR-time build trigger gap (carry-over from Sprint 2/3 Issue 6/8)
+
+**Severity**: roadmap
+**Status**: open (re-noted from Sprint 3)
+
+**Description**: Carry-over from Sprint 3 validator Issue 8 (itself
+a carry-over from Sprint 2 validator Issue 6). The
+`tools-images.yml` workflow triggers on tag pushes only, not on PRs
+that modify `tools/docker/<image>/Dockerfile`. Sprint 4 didn't touch
+the tools-images surface, so no new shape; re-noting so the roadmap
+entry doesn't get lost in the sprint roll-over. PLAN.md Sprint 5
+(image versioning + release infrastructure) remains the natural fit.
+
+**Files affected**: `.github/workflows/tools-images.yml`.
+**Proposed fix**: defer to Sprint 5 per Sprint 2/3 issues' resolution.
+
+---
+
+## Regression-gate verdict (second pass)
+
+- `bash -n` on both edited scripts: ✓ clean (`scripts/e2e-test.sh`,
+  `scripts/e2e-test-backends.sh`)
+- `python3 -c 'yaml.safe_load(...)'` on both edited workflows: ✓
+  clean (`.github/workflows/ci.yml`, `.github/workflows/e2e-full.yml`)
+- `python3 -c 'json.load(...)'` on `cspell.json`: ✓ clean
+- `DRY_RUN=1 bash ./scripts/e2e-test.sh`: ✓ exit-0; every phase
+  marker reads cleanly with the Sprint 4 split text ("Sprint 4
+  implements dry-run; live apply gates on PRD 07 spike" for
+  phases I-N + L-DNS)
+- `DRY_RUN=1 bash ./scripts/e2e-test-backends.sh`: ✓ exit-0; every
+  phase emits the Sprint 4 marker
+- `cspell --config cspell.json book/src/2[0-3]*.md` filtered for
+  brief-listed terms (`iperf3|seccomp|divergence|Route ?53|PSA`):
+  ✓ zero findings post-edit
+- `cspell --config cspell.json book/src/**/*.md`: 393 findings —
+  100% pre-existing British-spelling drift + chapter-specific
+  vocabulary noted in Issue 10; not a Sprint 4 regression
+  (spellcheck workflow is `continue-on-error: true`)
+- Existing `ci.yml::full-up-dryrun` job: untouched; Sprint 3 wiring
+  preserved
+- `gh pr status` / live CI run on this branch: deferred to integrator
+  (validator doesn't commit)
+
+**Blockers preventing the integrator from cutting v0.4-pre tag**:
+none from the validator scope. Issue 9 (staff `--dry-run` flag) is
+resolved — staff landed `testCmd.PersistentFlags().BoolVar(...,
+"dry-run", ...)` plus the `planConnectivity` / `planDNS` /
+`planThroughput` helpers in `internal/cli/test_dryrun.go`
+mid-dispatch (same in-flight pattern as Issue 5 in this file). Issue
+12 (fake-workspace schema) is resolved — validator second pass
+re-aligned the CI YAML to the actual `internal/config/workspace.go::
+Workspace` schema (top-level `cluster.name`; correct on-disk path
+`~/.awsbnkctl/<workspace>/config.yaml`; `-w ci-dryrun` on each
+invocation so the workflow doesn't depend on a global pointer file).
+
+PLAN.md Sprint 4 end-of-sprint gate (`awsbnkctl test
+{dns,connectivity,throughput}` runs against a workspace config;
+mocked end-to-end at sprint dispatch; live AWS in operator-run spike)
+is achieved at the **validator surface** by the now-correctly-shaped
+`test-dryrun` job and the e2e phase-marker refresh. Both surfaces
+should go green on the first post-merge CI run.
+
+If the test verbs' rendered plan text diverges from the permissive
+greps (`would probe|would check|would query|would deploy|dry[- ]run|
+plan` + literal `dry-run.example.invalid` and `iperf3|throughput`),
+the validator's next-pass fix is a one-line regex update in the
+matching step; no schema or wiring rework needed.

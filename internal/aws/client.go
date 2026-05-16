@@ -54,6 +54,12 @@ type Clients struct {
 	// invoking the consumer method.
 	s3  S3API
 	iam IAMAPI
+
+	// serviceQuotas is the Sprint 4 optional probe surface — lazily
+	// constructed via EnsureServiceQuotas. Only the doctor's
+	// feature-flagged Service Quotas row touches this, so the SDK's
+	// import cost is kept off every other verb.
+	serviceQuotas ServiceQuotasAPI
 }
 
 // SetS3ForTest lets tests inject a fake S3API. Production callers go

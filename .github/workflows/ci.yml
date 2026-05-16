@@ -359,6 +359,159 @@ jobs:
           path: artifacts/up-dryrun.log
           if-no-files-found: warn
 
+  test-dryrun:
+    name: test-dryrun (awsbnkctl test {connectivity,dns,throughput} --dry-run)
+    needs: test
+    # Sprint 4 (PLAN.md § "Sprint 4"): the test-surface refresh gate
+    # that asserts `awsbnkctl test {connectivity,dns,throughput}
+    # --dry-run` resolves a workspace config and emits a sensible
+    # "would probe X" plan against fake hosts without panicking and
+    # without making real network calls. No live network egress — a
+    # fake workspace is materialised under $HOME/.awsbnkctl with
+    # entries pointing at non-resolving names; the dry-run path is
+    # expected to enumerate the would-be probes and exit-0.
+    #
+    # SPIKE DEFERRAL still in force (PRD 07 § "Spike protocol"): this
+    # job is the offline regression surface for the test verbs; the
+    # live-AWS exercise of the same surface happens in the operator-
+    # run spike, gating v0.2 outside the agent dispatch lane.
+    #
+    # Canary posture (same shape as Sprint 3's full-up-dryrun gate):
+    # if staff has not yet wired `--dry-run` onto the test
+    # subcommands at the time this job first runs, every step will
+    # fail with `unknown flag: --dry-run` and the job goes red. That
+    # is the **intended** signal; it flips green when staff lands the
+    # flag per the Sprint 4 staff brief
+    # ("plumb workspace region + cluster outputs into test commands;
+    # add --dry-run to the test verbs").
+    #
+    # See issues/issue_sprint4_validator.md Issue 1 for the audit
+    # trail and the proposed surface contract this job asserts.
+    runs-on: ubuntu-latest
+    env:
+      # Mirror of aws-mocked / full-up-dryrun: fake creds so any
+      # SDK signer construction succeeds; AWS calls (if any leak past
+      # the dry-run gate) will 403 rather than time out.
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_SESSION_TOKEN: testing
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build awsbnkctl
+        # Same path the Sprint 3 full-up-dryrun job uses
+        # (./bin/awsbnkctl), matching what the brief's command lines
+        # exercise verbatim.
+        run: |
+          mkdir -p bin
+          go build -o bin/awsbnkctl ./cmd/awsbnkctl
+
+      - name: Materialise fake workspace
+        # Build a minimal workspace config the test verbs can load
+        # without needing a real AWS context. The DNS + connectivity
+        # suites read `test.connectivity.extra_hosts` and
+        # `test.dns.default_target`; throughput reads
+        # `test.throughput.{image,duration,streams}` plus the
+        # cluster.name workspace field. A fresh HOME isolates the run
+        # from any local awsbnkctl state on the runner.
+        #
+        # Schema reference: `internal/config/workspace.go::Workspace`
+        # uses a top-level `cluster:` block (Name/Create) and an
+        # `aws:` block (Region/Profile). The on-disk layout is
+        # `~/.awsbnkctl/<workspace>/config.yaml` (per-workspace) and
+        # `~/.awsbnkctl/config.yaml` (global, with
+        # `current_workspace:` pointer). We pass -w ci-dryrun on the
+        # command line so the test verbs pick up the workspace
+        # directly — no global-config materialisation needed.
+        run: |
+          set -eo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME/.awsbnkctl/ci-dryrun"
+          cat > "$HOME/.awsbnkctl/ci-dryrun/config.yaml" <<'YAML'
+          cluster:
+            create: false
+            name: ci-dryrun-cluster
+          aws:
+            region: us-east-1
+          tf_source:
+            type: github
+            repo: JLCode-tech/awsbnkctl-tf
+            ref: main
+          test:
+            connectivity:
+              extra_hosts:
+                - https://dry-run.example.invalid/health
+                - https://gslb.dry-run.example.invalid/
+            dns:
+              default_target: dry-run.example.invalid
+            throughput:
+              duration: 5
+              streams: 1
+          YAML
+
+      - name: awsbnkctl test connectivity --dry-run
+        # Asserts (a) exit-0, (b) the would-probe planning output names
+        # the configured hosts. The dry-run path must NOT make real
+        # HTTP calls — the .invalid TLD guarantees a network resolution
+        # failure if the dry-run gate leaks past plan-only mode.
+        run: |
+          set -eo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p artifacts
+          ./bin/awsbnkctl -w ci-dryrun test connectivity --dry-run \
+            2>&1 | tee artifacts/test-connectivity-dryrun.log
+          grep -qiE 'would probe|would check|dry[- ]run|plan' \
+            artifacts/test-connectivity-dryrun.log
+          grep -q 'dry-run.example.invalid' \
+            artifacts/test-connectivity-dryrun.log
+
+      - name: awsbnkctl test dns --dry-run
+        # Asserts the DNS suite enumerates the configured target
+        # (default_target) and resolver vantages without sending
+        # an actual query.
+        run: |
+          set -eo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          ./bin/awsbnkctl -w ci-dryrun test dns --dry-run \
+            2>&1 | tee artifacts/test-dns-dryrun.log
+          grep -qiE 'would probe|would query|dry[- ]run|plan' \
+            artifacts/test-dns-dryrun.log
+          grep -q 'dry-run.example.invalid' \
+            artifacts/test-dns-dryrun.log
+
+      - name: awsbnkctl test throughput --dry-run
+        # Asserts the iperf3 suite enumerates the would-deploy
+        # fixture (namespace + image + mode) without actually
+        # creating the in-cluster Pod or contacting the k8s
+        # API. The "would deploy" planning text is the visible
+        # marker.
+        run: |
+          set -eo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          ./bin/awsbnkctl -w ci-dryrun test throughput --dry-run \
+            2>&1 | tee artifacts/test-throughput-dryrun.log
+          grep -qiE 'would deploy|would probe|dry[- ]run|plan' \
+            artifacts/test-throughput-dryrun.log
+          grep -qiE 'iperf3|throughput' \
+            artifacts/test-throughput-dryrun.log
+
+      - name: Upload dry-run logs
+        # Always upload so a red run leaves debug context behind.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-dryrun-logs
+          path: artifacts/
+          if-no-files-found: warn
+
   windows-build:
     name: windows build
     runs-on: windows-latest

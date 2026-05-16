@@ -42,6 +42,14 @@ var (
 	flagDNSTimeout           time.Duration
 	flagDNSGSLBCompare       bool
 	flagDNSRequireDivergence bool
+
+	// flagTestDryRun gates `awsbnkctl test {connectivity,dns,throughput,all}`
+	// — when set, the verb resolves the workspace-derived targets
+	// (region, cluster, namespace, host list, DNS resolvers) and prints
+	// the resulting plan to stderr without executing any probe. Lets
+	// operators see "what would I be measuring" without paying for the
+	// LB / DNS / iperf3 setup cost. Sprint 4 staff brief §3 + §"Verification".
+	flagTestDryRun bool
 )
 
 var testCmd = &cobra.Command{
@@ -112,6 +120,15 @@ var testListCmd = &cobra.Command{
 func init() {
 	testCmd.Flags().BoolVar(&flagInsecureTLS, "insecure", false, "skip TLS certificate validation (connectivity only)")
 
+	// --dry-run is a persistent flag on the `test` parent so every
+	// subcommand inherits it. The Sprint 4 contract: --dry-run prints
+	// the resolved workspace-derived targets to stderr (region,
+	// cluster, namespace, host list, DNS resolvers, iperf3 mode) and
+	// returns 0 without executing the probe. Pinned by
+	// TestTestSubcommands_DryRun_PlansWithoutExecuting in
+	// internal/cli/test_test.go.
+	testCmd.PersistentFlags().BoolVar(&flagTestDryRun, "dry-run", false, "resolve and print the probe plan without executing it (workspace-derived defaults)")
+
 	testThroughputCmd.Flags().StringVar(&flagThroughputMode, "mode", "north-south", "throughput mode: north-south | east-west")
 	testThroughputCmd.Flags().BoolVar(&flagThroughputCrossNode, "cross-node", false, "force east-west client and server onto different nodes")
 	testThroughputCmd.Flags().BoolVar(&flagKeepFixtures, "keep", false, "leave the iperf3 server pod running after the test")
@@ -156,6 +173,15 @@ func runTestDispatch(cmd *cobra.Command, args []string) error {
 }
 
 func runTestAllCmd(cmd *cobra.Command, _ []string) error {
+	if flagTestDryRun {
+		// Best-effort workspace load. A failing workspace lookup
+		// shouldn't block the dry-run — we surface the unset bits in
+		// the rendered plan instead. Mirrors `awsbnkctl up --dry-run`
+		// resilience to a missing workspace (which renders with
+		// embedded defaults).
+		cctx, _ := config.New(flagWorkspace)
+		return printTestPlans(os.Stdout, os.Stderr, planAll(cctx))
+	}
 	cctx, hosts, err := loadHosts()
 	if err != nil {
 		return err
@@ -166,6 +192,10 @@ func runTestAllCmd(cmd *cobra.Command, _ []string) error {
 }
 
 func runTestConnectivityCmd(cmd *cobra.Command, _ []string) error {
+	if flagTestDryRun {
+		cctx, _ := config.New(flagWorkspace)
+		return printTestPlan(os.Stdout, os.Stderr, planConnectivity(cctx))
+	}
 	_, hosts, err := loadHosts()
 	if err != nil {
 		return err
@@ -175,6 +205,10 @@ func runTestConnectivityCmd(cmd *cobra.Command, _ []string) error {
 }
 
 func runTestDNSCmd(cmd *cobra.Command, _ []string) error {
+	if flagTestDryRun {
+		cctx, _ := config.New(flagWorkspace)
+		return printTestPlan(os.Stdout, os.Stderr, planDNS(cctx, dnsFlagDriven(cmd)))
+	}
 	// New flag-driven path activates when any of --target / --type
 	// (when set to anything other than the default "A" — handled via
 	// the cmd.Flags().Changed check) / --server / --gslb-compare is
@@ -511,6 +545,10 @@ func runDNSProbeSSH(ctx context.Context, cctx *config.Context, spec, target stri
 }
 
 func runTestThroughputCmd(cmd *cobra.Command, _ []string) error {
+	if flagTestDryRun {
+		cctx, _ := config.New(flagWorkspace)
+		return printTestPlan(os.Stdout, os.Stderr, planThroughput(cctx))
+	}
 	cctx, err := config.New(flagWorkspace)
 	if err != nil {
 		return err

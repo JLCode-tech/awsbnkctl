@@ -314,6 +314,28 @@ Sibling agent surfaces (staff terraform module ports, validator CI matrix, tech-
 
 - OpenShift's SCC-based pod security (which roksbnkctl's tools image accommodates) doesn't apply on EKS; instead, EKS 1.25+ enforces Pod Security Admission. Verify the tools image runs unprivileged under `restricted` PSS.
 
+### Sprint 4 close (actual)
+
+What shipped (architect surface — confirmed at this commit):
+
+- **PRD 04 wording fix** (Sprint 3 tech-writer Issue 1, HIGH carry-over). § "Where the AWS chain lives in the tree" now describes the as-shipped two-package split: `internal/aws/` houses the AWS standard chain (`NewClients` wraps `config.LoadDefaultConfig`; `CredentialsConfigured` returns the resolved provider Source string; `Clients.CallerIdentity` wraps `sts:GetCallerIdentity`); `internal/cred/` retains the IBM IBMCloud-shaped resolver as deprecated for back-compat-naming-only, no production caller materialises a non-empty value; in-cluster IRSA is auto-injected by the EKS-managed pod-identity webhook (not awsbnkctl code). Sprint 5 deletes the dormant `internal/cred/` package alongside the docker tmpfile-bind-mount path and the SSH wrapper-script env propagation, per Sprint 3 tech-writer Issue 2's per-file breakdown.
+- **Chapter 20 (connectivity testing)** — `book/src/20-connectivity-testing.md`. The `awsbnkctl test connectivity` surface: HTTPS-only probe, 10-second timeout, 2xx/3xx pass criterion, no retries, no expected-body, no L4-only mode. Documents `extra_hosts` workspace-config schema, the `--insecure` flag for pre-production self-signed certs, the JSON output envelope (`awsbnkctl.v1`), the failure-mode reading guide (`dial tcp: i/o timeout`, `x509: certificate signed by unknown authority`, `no such host`, SERVFAIL, 502/503/504), the post-`up` NLB / ALB shape recognition, and the cross-references to chapters 21 / 22 / 26.
+- **Chapter 21 (DNS testing for GSLB)** — `book/src/21-dns-testing-gslb.md`. The `awsbnkctl test dns` surface, with emphasis on the GSLB-aware multi-vantage `--gslb-compare` workflow: probe library (`miekg/dns`), server resolution (literal IP, `system`, `cluster`, named-from-config), AWS-specific resolver shapes (Route 53 Resolver `.2` address, public hosted zones, Route 53 weighted/latency/geo routing), JSON schemas (`awsbnkctl.dns.v1.vantage`, `awsbnkctl.dns.v1`), the divergence detector's fingerprint logic (sorted `{type, rdata}` tuples, TTL excluded), and a worked us-west-2/us-east-1/eu-west-1 example. The `--backend docker` rejection rationale is included.
+- **Chapter 22 (throughput testing)** — `book/src/22-throughput-testing.md`. The `awsbnkctl test throughput` surface: TCP throughput between iperf3 endpoints (`end.sum_received.bits_per_second` is the headline), the two modes (`north-south` via NLB LoadBalancer Service, `east-west` via ClusterIP), the EKS 1.25+ Pod Security Admission compliance contract (the bundled image's `USER 1000`, the `awsbnkctl-test` namespace's `pod-security.kubernetes.io/enforce: restricted` label, the failure shapes for PSA admission rejections), what "normal" looks like on `c5n.4xlarge` (9-15 Gbps north-south, 12-18 Gbps east-west same-node, 20-24 Gbps with SR-IOV VF), the workspace tuning knobs, and the `--keep` debug path.
+- **Chapter 23 (E2E test plan)** — `book/src/23-e2e-test-plan.md`. The user-facing guide to the layered E2E suite: phase-letter system (baseline A-H, backends I-N + L-DNS, manual J), the SPIKE DEFERRAL gate, dry-run vs. live-tier semantics, per-phase coverage, cost and time budgeting ($5-8 per live run), resuming via `PHASE_FROM=`, and how CI (`.github/workflows/ci.yml`) runs the dry-run tier on every PR while the live tier gates on the operator-run PRD 07 spike.
+- **PLAN.md Sprint 4 close** — this section.
+
+What was deferred (carries into Sprint 5 or later):
+
+- **Operator-run spike** (PRD 07 § Spike status) still gates `v0.2`; Sprint 4 closes the offline test surface, but the live tier of the E2E plan documented in chapter 23 will not exercise against real AWS until the spike clears.
+- **`internal/cred/` package deletion** + cred-shim retirement across docker.go, ssh.go, k8s.go (Sprint 3 staff Issue 1, Sprint 3 tech-writer Issue 2). Sprint 5 work; the surface area is mechanically deletable but pulls in test-fixture retargeting on the way out.
+- **Chapter 14 deep rewrite** (current chapter still targets `IBMCLOUD_API_KEY`; the AWS-shaped chain section in PRD 04 is now the design surface that rewrite draws from).
+- **Chapter 25 filename rename** (`25-cos-supply-chain.md` → `25-s3-supply-chain.md`) — Sprint 5 architect, per Sprint 2 architect Issue 2 cascade plan.
+- **Chapter 18 §"Per-tool default backends"** consistency check vs. iperf3-default-backend wiring — Sprint 5 architect or earlier (Sprint 4 staff is wiring iperf3 default = k8s into `internal/cli/test.go::resolveBackendSpecWith`'s `perToolDefaultBackend` map; once that lands, chapter 18 is accurate).
+- **Service Quotas check in doctor** (Sprint 4 staff carry; feature-flagged off by default). Documented in PRD 04's doctor surface as the v1.x quota row.
+
+Sibling agent surfaces (staff test-surface refresh + PSA verification + Service-Quotas wiring + up --dry-run first-run UX, validator CI extension + e2e marker refresh, tech-writer read-only pass) report independently; see the per-agent issue files at `issues/issue_sprint4_{staff,validator,tech-writer}.md` for what landed on those surfaces. The integrator reconciles at sprint close.
+
 ---
 
 ## Sprint 5 — book retarget (weeks 9-10)
