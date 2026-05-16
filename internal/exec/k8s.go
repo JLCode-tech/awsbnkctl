@@ -54,8 +54,8 @@ const (
 var jobNameSanitizer = strings.NewReplacer(":", "-", "/", "-", "@", "-")
 
 // K8sBackend executes argv either by exec'ing into a long-lived ops pod
-// (for ibmcloud + ad-hoc shells) or by spawning a one-shot Job (for
-// iperf3 client + terraform).
+// (for ad-hoc shells) or by spawning a one-shot Job (for iperf3 client
+// + terraform).
 //
 // PRD 03 §"K8s" is the design spec. The two paths share a single Run
 // entrypoint and dispatch on RunOpts.LongLivedExec — true for the
@@ -170,8 +170,9 @@ func SetK8sInit(fn func() (kubernetes.Interface, *rest.Config, error)) {
 // runOnOpsPod kubectl-execs argv into the ops pod via SPDY.
 //
 // The wrapped tool's stdout/stderr stream live through opts; we wrap
-// both with the redactor as defense-in-depth (the ibmcloud CLI in
-// --debug mode is the obvious leak risk).
+// both with the redactor as defense-in-depth so secrets surfaced in
+// verbose tool output (kubectl --v=10, terraform TF_LOG=trace, etc.)
+// don't leak to the caller.
 func (b *K8sBackend) runOnOpsPod(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config, argv []string, opts RunOpts) (int, error) {
 	// Verify the ops pod exists + is ready. A clear error here is much
 	// better than an opaque SPDY upgrade failure.
@@ -191,37 +192,15 @@ func (b *K8sBackend) runOnOpsPod(ctx context.Context, cs kubernetes.Interface, c
 	// image's ENTRYPOINT does NOT prepend (that only applies at
 	// container start, and the ops pod's `command:` already overrides
 	// it to `sleep infinity` per k8s_install.yaml). So argv flows
-	// through verbatim — `["ibmcloud", "iam", "oauth-tokens"]` runs
-	// `ibmcloud iam oauth-tokens` in the pod, no entrypoint double-up.
+	// through verbatim — `["kubectl", "get", "pods"]` runs
+	// `kubectl get pods` in the pod, no entrypoint double-up.
 	//
-	// Sprint 4 validator Issue 7 carry-over (interim resolution):
-	// the original concern was that argv[0] would double up against
-	// the image's ENTRYPOINT. Verified that exec doesn't prepend
-	// ENTRYPOINT, so this is a no-op risk for the long-lived path.
 	// For the one-shot Job path (runAsJob), where Container.Command
 	// DOES override Docker ENTRYPOINT, we use the
-	// `jobToolCmdOverride` map for tools (like `awsbnkctl`) that
-	// need to bypass the bundled tools-image's `ibmcloud`
-	// entrypoint. See `buildJobSpecWithArgs` for the Args plumbing.
+	// `jobToolCmdOverride` map for tools (like `awsbnkctl`) that need
+	// to bypass the tools image's ENTRYPOINT. See `buildJobSpecWithArgs`
+	// for the Args plumbing.
 	cmd := argv
-
-	// v1.0.2: ibmcloud needs `ibmcloud login` before stateful subcommands
-	// (iam, ks, account, target, …) — the ops pod's container starts
-	// cold with no $HOME/.bluemix session. Wrap argv with a sh -c
-	// login-then-exec dance so any ibmcloud invocation gets primed.
-	// Same shape as docker.go's dockerImageBinary["ibmcloud"] wrap.
-	// Skip if argv[0] != "ibmcloud" or if the user is explicitly running
-	// `ibmcloud login`/`logout` (no double-login).
-	if len(cmd) >= 1 && cmd[0] == "ibmcloud" {
-		if len(cmd) < 2 || (cmd[1] != "login" && cmd[1] != "logout") {
-			wrap := []string{
-				"sh", "-c",
-				`ibmcloud login -a https://cloud.ibm.com -r "${IBMCLOUD_REGION:-us-south}" --apikey "$IBMCLOUD_API_KEY" --quiet > /dev/null 2>&1 && exec ibmcloud "$@"`,
-				"--",
-			}
-			cmd = append(wrap, cmd[1:]...)
-		}
-	}
 
 	req := cs.CoreV1().RESTClient().Post().
 		Resource("pods").
@@ -288,22 +267,10 @@ func (b *K8sBackend) runOnOpsPod(ctx context.Context, cs kubernetes.Interface, c
 // so the k8s Job path and the docker container path resolve the same
 // tool→binary mapping.
 //
-// Two situations make an entry necessary:
-//
-//  1. The tool's image has NO ENTRYPOINT (e.g. the bundled tools-
-//     ibmcloud image post-Sprint 6 — see `issues/resolved_sprint5_staff.md`
-//     Issue 1). Without an override, `Container.Command = argv[1:]`
-//     would run with no binary name and the kube node would surface
-//     ErrPullBackOff-shaped failures pointing at a nonexistent
-//     command.
-//  2. The tool's image HAS an ENTRYPOINT but the caller wants a
-//     different binary inside the same image (e.g. awsbnkctl is
-//     bundled into the tools-ibmcloud image; the dns-probe re-exec
-//     path needs `awsbnkctl`, not whatever the image's ENTRYPOINT
-//     used to be).
-//
-// runAsJob picks the entry up, sets `Container.Command` to the
-// override, and `Container.Args` to argv[1:].
+// The entry is necessary when the tool's image has an ENTRYPOINT the
+// caller needs to bypass (e.g. the awsbnkctl tools image's ENTRYPOINT
+// doesn't match the dns-probe re-exec path that needs the awsbnkctl
+// binary directly).
 //
 // Tools NOT in this map keep the legacy shape
 // (`Container.Command = argv[1:]`, image's ENTRYPOINT picks the
@@ -311,7 +278,6 @@ func (b *K8sBackend) runOnOpsPod(ctx context.Context, cs kubernetes.Interface, c
 // (upstream `hashicorp/terraform` image's ENTRYPOINT="terraform")
 // continue to work without an entry.
 var jobToolCmdOverride = map[string][]string{
-	"ibmcloud":  {"ibmcloud"},
 	"awsbnkctl": {"/usr/local/bin/awsbnkctl"},
 }
 
@@ -462,10 +428,11 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 // Secret only from the ops pod (long-lived path) and using a fresh
 // envFrom-style projection out of a per-Job Secret for the Job path.
 //
-// For Sprint 4 simplicity, the Job path env-injects IBMCLOUD_API_KEY
-// from RunOpts.Credentials (via opts.Credentials.EnvVars()). The shape
-// matches the docker / local backends — the cred is materialised by the
-// caller, not pre-staged in a cluster-wide Secret.
+// AWS retarget: the Job path no longer env-injects long-lived secrets
+// from Credentials; AWS credentials reach in-cluster terraform via
+// IRSA, and ad-hoc tool runs inherit env vars the caller passes
+// through RunOpts.Env. The Credentials struct keeps only the
+// kubeconfig surface (see internal/exec/creds.go).
 //
 // buildJobSpec is preserved for the legacy single-argv shape (image
 // ENTRYPOINT picks the binary; cmd is argv[1:]). The Sprint 5 shim
@@ -482,10 +449,10 @@ func buildJobSpec(jobName, image string, cmd []string, opts RunOpts, hasFilesSec
 // keep the legacy "image ENTRYPOINT picks the binary" shape, pass
 // args=nil.
 //
-// Sprint 4 validator Issue 7 carry-over: the dns-probe Job sets
+// Example: the dns-probe Job sets
 // `cmd=["/usr/local/bin/awsbnkctl"]` + `args=["test","dns",...]` so
-// the tools image's `ibmcloud` ENTRYPOINT doesn't override the binary
-// the dns probe wants to run. PRD 03 §"DNS probe" §"K8s shape".
+// the tools image's ENTRYPOINT doesn't override the binary the dns
+// probe wants to run. PRD 03 §"DNS probe" §"K8s shape".
 func buildJobSpecWithArgs(jobName, image string, cmd, args []string, opts RunOpts, hasFilesSecret bool, filesSecretName string) *batchv1.Job {
 	envVars := buildJobEnv(opts)
 	var volumes []corev1.Volume

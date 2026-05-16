@@ -6,7 +6,7 @@ For *building* the binary, see [Chapter 31 — Building from source](./31-buildi
 
 ## Adding a new execution backend
 
-A backend is anything implementing the `Backend` interface in [`internal/exec/backend.go`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/exec). The four backends shipped at v1.0 — `local`, `docker`, `k8s`, `ssh:<target>` — are each a single file under that package.
+A backend is anything implementing the `Backend` interface in [`internal/exec/backend.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec). The four backends shipped at v1.0 — `local`, `docker`, `k8s`, `ssh:<target>` — are each a single file under that package.
 
 The end-to-end shape:
 
@@ -14,15 +14,15 @@ The end-to-end shape:
 
 2. **Register it.** Call `exec.Register(name string, b Backend)` from the package's `init()` block. The `ResolveBackend(spec string)` function in `internal/exec/backend.go` dispatches `--backend <name>` to the registered backend.
 
-3. **Handle credentials safely.** Read [PRD 04](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/04-CREDENTIALS.md) before touching `opts.Credentials`. The cardinal rule: **never pass credential values via argv** — they end up in `ps` output, container metadata, and process accounting. Pass by reference (env var by name, projected Secret, SSH `SetEnv`) and let the runtime do the value plumbing.
+3. **Handle credentials safely.** Read [PRD 04](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/04-CREDENTIALS.md) before touching `opts.Credentials`. The cardinal rule: **never pass credential values via argv** — they end up in `ps` output, container metadata, and process accounting. Pass by reference (env var by name, projected Secret, SSH `SetEnv`) and let the runtime do the value plumbing.
 
-4. **Wire the redactor.** Wrap `opts.Stdout` and `opts.Stderr` with [`internal/exec.NewRedactor`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/exec/redact.go) before handing them to the subprocess. The redactor masks any credential value that leaks into the tool's stdout/stderr. The `local` and `docker` backends do this in their wrappers; copy the pattern.
+4. **Wire the redactor.** Wrap `opts.Stdout` and `opts.Stderr` with [`internal/exec.NewRedactor`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec/redact.go) before handing them to the subprocess. The redactor masks any credential value that leaks into the tool's stdout/stderr. The `local` and `docker` backends do this in their wrappers; copy the pattern.
 
 5. **Add a doctor check.** Doctor's per-backend availability check needs to recognise your backend. Add an entry under `internal/cli/doctor_backend.go` reporting whether your backend's prerequisites are satisfied (e.g., "is the daemon running", "is the SDK reachable"). Green-by-default on a stock dev box is the goal — yellow-skip rather than red-fail when prerequisites are missing.
 
-6. **Add per-backend cred-audit assertions.** The cred-leak audit at [`internal/exec/audit_test.go`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/exec) (and Phase M of the e2e plan) needs to know what surfaces your backend produces — container inspection, process listing, log files. Add a `TestCredAudit_<YourBackend>` subtest asserting the API key value never appears in any of them.
+6. **Add per-backend cred-audit assertions.** The cred-leak audit at [`internal/exec/audit_test.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec) (and Phase M of the e2e plan) needs to know what surfaces your backend produces — container inspection, process listing, log files. Add a `TestCredAudit_<YourBackend>` subtest asserting the API key value never appears in any of them.
 
-7. **E2E phase.** Add a new phase to `scripts/e2e-test-backends.sh` with concrete pass/fail criteria. Cross-link from [PRD 05](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/05-E2E-TEST-PLAN.md) so the test plan stays the source of truth.
+7. **E2E phase.** Add a new phase to `scripts/e2e-test-backends.sh` with concrete pass/fail criteria. Cross-link from [PRD 05](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/05-E2E-TEST-PLAN.md) so the test plan stays the source of truth.
 
 8. **Documentation.** Add a deep-dive subsection to [Chapter 17 — Execution backends](./17-execution-backends.md) and a decision-tree entry to [Chapter 18 — Choosing a backend per tool](./18-choosing-backend.md). Without docs the backend doesn't exist for users.
 
@@ -30,21 +30,21 @@ A backend PR that lands all eight steps is a complete contribution; one that lan
 
 ## Adding a new test suite
 
-The test subtree (`roksbnkctl test <suite>`) holds three suites at v1.0: `connectivity`, `dns`, `throughput`. Adding a fourth (e.g., `tls-handshake`, `latency`, `tcp-flowstate`) follows a five-step recipe:
+The test subtree (`awsbnkctl test <suite>`) holds three suites at v1.0: `connectivity`, `dns`, `throughput`. Adding a fourth (e.g., `tls-handshake`, `latency`, `tcp-flowstate`) follows a five-step recipe:
 
-1. **Implement the runner.** Create `internal/test/<suite>.go`. The suite produces results in the `roksbnkctl.<suite>.v1` JSON schema — pick a top-level shape consistent with the existing suites (`ProbeResult` for single-probe, `ProbeSuiteResult` for an aggregate with `results[]`).
+1. **Implement the runner.** Create `internal/test/<suite>.go`. The suite produces results in the `awsbnkctl.<suite>.v1` JSON schema — pick a top-level shape consistent with the existing suites (`ProbeResult` for single-probe, `ProbeSuiteResult` for an aggregate with `results[]`).
 
 2. **Wire a subcommand.** Add `internal/cli/test_<suite>.go` with a cobra command under `test`. The flag surface should mirror the existing suites' patterns — `--target`, `--iterations`, `-o json`, `--backend` (when the suite is backend-aware).
 
 3. **Pick the backends.** Most test suites are backend-aware (the suite runs from a network vantage that the backend selects). DNS and throughput accept `local` / `k8s` / `ssh:<target>` and reject `docker`; connectivity is currently `local`-only. Decide which backends make sense for your suite — the deciding question is "does the vantage change the answer?".
 
-4. **Wire the JSON schema constant.** Add `roksbnkctl.<suite>.v1` to your suite's output. CI assertions diff against this — bumping the version is a breaking change, document it in CHANGELOG.
+4. **Wire the JSON schema constant.** Add `awsbnkctl.<suite>.v1` to your suite's output. CI assertions diff against this — bumping the version is a breaking change, document it in CHANGELOG.
 
-5. **Add an E2E phase.** New phase under [PRD 05](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/05-E2E-TEST-PLAN.md) and corresponding script section in `scripts/e2e-test-backends.sh`.
+5. **Add an E2E phase.** New phase under [PRD 05](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/05-E2E-TEST-PLAN.md) and corresponding script section in `scripts/e2e-test-backends.sh`.
 
 6. **Documentation.** New chapter or major section in Part VI of the book (currently chapters 20-23). Cross-link from [Chapter 23 — The E2E test plan](./23-e2e-test-plan.md) and [Chapter 18 — Choosing a backend per tool](./18-choosing-backend.md).
 
-The DNS probe is the canonical worked example — read [`internal/test/dns.go`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/test/dns.go) + [`internal/cli/test.go`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/cli/test.go) to see all six steps in their landed form, plus the [Sprint 5 architect prompt](https://github.com/jgruberf5/roksbnkctl/blob/main/prompts/sprint5/architect.md) for the design framing.
+The DNS probe is the canonical worked example — read [`internal/test/dns.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/test/dns.go) + [`internal/cli/test.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/cli/test.go) to see all six steps in their landed form, plus the [Sprint 5 architect prompt](https://github.com/JLCode-tech/awsbnkctl/blob/main/prompts/sprint5/architect.md) for the design framing.
 
 ## Adding a new tool to an existing backend
 
@@ -52,12 +52,12 @@ The `docker`, `k8s`, and `ssh` backends each maintain a map of tool-name → ima
 
 ### Docker backend
 
-[`internal/exec/docker.go::toolImages`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/exec/docker.go) maps tool names to image specs:
+[`internal/exec/docker.go::toolImages`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec/docker.go) maps tool names to image specs:
 
 ```go
 var toolImages = map[string]string{
-    "ibmcloud":  "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud",
-    "iperf3":    "ghcr.io/jgruberf5/roksbnkctl-tools-iperf3",
+    "ibmcloud":  "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud",
+    "iperf3":    "ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3",
     "terraform": "hashicorp/terraform:1.5.7",
     "<your>":    "<your-image-ref>",
 }
@@ -67,14 +67,14 @@ Tag resolution is handled by `SetToolImageTag` (set in `internal/cli/root.go::in
 
 ### K8s backend
 
-[`internal/exec/k8s.go`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/exec/k8s.go) holds two patterns — long-lived ops pod (for tools that share state, like `ibmcloud`) and one-shot Job (for tools that produce a single output, like `iperf3` or DNS probes). New tools pick one pattern:
+[`internal/exec/k8s.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec/k8s.go) holds two patterns — long-lived ops pod (for tools that share state, like `ibmcloud`) and one-shot Job (for tools that produce a single output, like `iperf3` or DNS probes). New tools pick one pattern:
 
 - **Ops pod**: add the tool's image to the ops pod's container spec at install time, or `kubectl exec` into the existing ops pod and run the host-installed binary.
 - **One-shot Job**: build a Pod template using the same image conventions as iperf3, run, stream logs, capture exit code, delete. The Job pattern is the right call for tools where the result is the only thing that matters.
 
 ### SSH backend
 
-[`internal/exec/ssh.go`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/exec/ssh.go) maintains a map of tool names to apt-package names for the `--bootstrap` auto-install:
+[`internal/exec/ssh.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec/ssh.go) maintains a map of tool names to apt-package names for the `--bootstrap` auto-install:
 
 ```go
 // toolPackage carries apt-repo metadata + package name; see the
@@ -93,13 +93,13 @@ For each backend, the implementation work is small (one map entry). The doctor c
 
 ## Adding a new chapter to the book
 
-The book is mdBook with markdown source under [`book/src/`](https://github.com/jgruberf5/roksbnkctl/tree/main/book/src). Adding a chapter:
+The book is mdBook with markdown source under [`book/src/`](https://github.com/JLCode-tech/awsbnkctl/tree/main/book/src). Adding a chapter:
 
 1. Create `book/src/<NN>-<slug>.md` — the file. Numbered prefix for sort order.
-2. Add the chapter to [`book/src/SUMMARY.md`](https://github.com/jgruberf5/roksbnkctl/blob/main/book/src/SUMMARY.md) — the TOC. Use the existing parts (Concepts, Getting Started, Cluster Lifecycle, …) or add a new part if it doesn't fit.
+2. Add the chapter to [`book/src/SUMMARY.md`](https://github.com/JLCode-tech/awsbnkctl/blob/main/book/src/SUMMARY.md) — the TOC. Use the existing parts (Concepts, Getting Started, Cluster Lifecycle, …) or add a new part if it doesn't fit.
 3. Run `make book-serve` to live-preview at `http://localhost:3000` with auto-reload.
 4. Cross-link from related chapters at the bottom (the "Cross-references" section every chapter ends with).
-5. Push. [`.github/workflows/book.yml`](https://github.com/jgruberf5/roksbnkctl/blob/main/.github/workflows/book.yml) re-deploys to `gh-pages` on every merge to `main`.
+5. Push. [`.github/workflows/book.yml`](https://github.com/JLCode-tech/awsbnkctl/blob/main/.github/workflows/book.yml) re-deploys to `gh-pages` on every merge to `main`.
 
 The book follows a consistent style:
 
@@ -107,11 +107,11 @@ The book follows a consistent style:
 - Code blocks for any command, inline `code` for filenames and identifiers.
 - Short paragraphs, one idea each.
 - Examples should be runnable as written.
-- PRD references use the full GitHub URL (`https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/03-EXECUTION-BACKENDS.md`) to avoid the published-book 404 issue surfaced in Sprint 1.
+- PRD references use the full GitHub URL (`https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/03-EXECUTION-BACKENDS.md`) to avoid the published-book 404 issue surfaced in Sprint 1.
 
 ## The PRD process
 
-The project uses numbered **Product Requirements Documents** under [`docs/prd/`](https://github.com/jgruberf5/roksbnkctl/tree/main/docs/prd) for larger feature work — anything that touches multiple files, spans more than one sprint, or has open design questions that need to be settled before code lands.
+The project uses numbered **Product Requirements Documents** under [`docs/prd/`](https://github.com/JLCode-tech/awsbnkctl/tree/main/docs/prd) for larger feature work — anything that touches multiple files, spans more than one sprint, or has open design questions that need to be settled before code lands.
 
 When a feature warrants a PRD vs. a direct PR:
 
@@ -125,9 +125,9 @@ When a feature warrants a PRD vs. a direct PR:
 
 The PRD lifecycle:
 
-1. **Draft**: open as a markdown file under `docs/prd/NN-<TITLE>.md`. The structure should follow the existing PRDs ([00-OVERVIEW](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/00-OVERVIEW.md), [01-SSH](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/01-SSH-AND-ON-FLAG.md), [02-KUBECTL](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/02-KUBECTL-INTERNAL.md), [03-BACKENDS](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/03-EXECUTION-BACKENDS.md), [04-CREDS](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/04-CREDENTIALS.md), [05-E2E](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/05-E2E-TEST-PLAN.md)): goal, approach, file-by-file plan, test plan, acceptance criteria, open questions.
+1. **Draft**: open as a markdown file under `docs/prd/NN-<TITLE>.md`. The structure should follow the existing PRDs ([00-OVERVIEW](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/00-OVERVIEW.md), [01-SSH](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/01-SSH-AND-ON-FLAG.md), [02-KUBECTL](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/02-KUBECTL-INTERNAL.md), [03-BACKENDS](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/03-EXECUTION-BACKENDS.md), [04-CREDS](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/04-CREDENTIALS.md), [05-E2E](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/05-E2E-TEST-PLAN.md)): goal, approach, file-by-file plan, test plan, acceptance criteria, open questions.
 2. **Review**: open a PR adding the PRD. Discuss in the PR. Open questions get resolved by edit or by punting to a follow-up issue.
-3. **Implement**: the PRD becomes the implementation plan. Per-sprint tasks land in [`docs/PLAN.md`](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/PLAN.md) referencing the PRD by number.
+3. **Implement**: the PRD becomes the implementation plan. Per-sprint tasks land in [`docs/PLAN.md`](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/PLAN.md) referencing the PRD by number.
 4. **Land**: code PRs reference the PRD; the PRD itself is the *spec*, code is the *implementation*. When the implementation diverges from the PRD, the PRD gets updated to match — never the other way around (the binary's behaviour is the source of truth).
 
 The PLAN.md per-sprint planning rhythm interleaves code + tests + docs per sprint. Each sprint's prompts (under `prompts/sprint<N>/`) translate the PLAN into concrete agent tasks.
@@ -237,6 +237,6 @@ The same pattern applies to a new test suite, a new tool on an existing backend,
 - [Chapter 20-22](./20-connectivity-testing.md) — the three existing test suites your new suite would join.
 - [Chapter 23 — The E2E test plan](./23-e2e-test-plan.md) — where your new phase belongs.
 - [Chapter 31 — Building from source](./31-building-from-source.md) — the build-side counterpart to the hacking side.
-- [PRD 00 — Overview](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/00-OVERVIEW.md) — the PRD index.
-- [`docs/PLAN.md`](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/PLAN.md) — the per-sprint planning rhythm.
-- [`prompts/README.md`](https://github.com/jgruberf5/roksbnkctl/blob/main/prompts/README.md) — the four-agent dispatch pattern.
+- [PRD 00 — Overview](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/00-OVERVIEW.md) — the PRD index.
+- [`docs/PLAN.md`](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/PLAN.md) — the per-sprint planning rhythm.
+- [`prompts/README.md`](https://github.com/JLCode-tech/awsbnkctl/blob/main/prompts/README.md) — the four-agent dispatch pattern.

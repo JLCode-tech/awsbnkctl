@@ -17,15 +17,14 @@ import (
 // this struct. Plaintext keys in the YAML are rejected at load time by
 // rejectPlaintextSecrets.
 //
-// Sprint 3 (PRD 04 cred/exec retarget) drops the inherited `IBMCloud`
-// block outright. AWS is the only first-class shape; AWS credentials
-// resolve via the SDK chain (env / shared config / profile / instance
-// role / SSO) — never written to the workspace file. Legacy on-disk
-// workspaces with an `ibmcloud:` block load cleanly because YAML
-// ignores unknown keys at unmarshal time; the region/profile/etc
-// values formerly carried under that block are no longer consulted.
-// Operators upgrading from a v0.1 workspace must re-run `awsbnkctl init`
-// to populate the `aws:` block.
+// AWS retarget (PRD 04): the `aws:` block is the only first-class
+// shape. AWS credentials resolve via the SDK chain (env / shared
+// config / profile / instance role / SSO) — never written to the
+// workspace file. Legacy on-disk workspaces with a v0.x cloud-cred
+// block load cleanly because YAML ignores unknown keys at unmarshal
+// time; the region/profile/etc values formerly carried under that
+// block are no longer consulted. Operators upgrading from a v0.1
+// workspace must re-run `awsbnkctl init` to populate the `aws:` block.
 type Workspace struct {
 	// AWS is the only first-class cloud block; new workspaces written
 	// by `awsbnkctl init` populate this. Doctor + tf vars renderer
@@ -41,15 +40,14 @@ type Workspace struct {
 	Targets  map[string]TargetCfg `yaml:"targets,omitempty"`
 
 	// Exec is the per-tool execution-backend config block introduced
-	// in Sprint 3 (PRD 03). Maps a tool name (`ibmcloud`, `iperf3`,
-	// `terraform`) to its preferred backend (`local`, `docker`,
-	// `k8s`, or `ssh:<target>`). Per-invocation `--backend` flag wins
-	// over the workspace config; missing entries default to `local`.
+	// in Sprint 3 (PRD 03). Maps a tool name (`iperf3`, `terraform`,
+	// `kubectl`) to its preferred backend (`local`, `docker`, `k8s`,
+	// or `ssh:<target>`). Per-invocation `--backend` flag wins over
+	// the workspace config; missing entries default to `local`.
 	//
 	// Example:
 	//
 	//   exec:
-	//     ibmcloud:  { backend: docker }
 	//     iperf3:    { backend: k8s }
 	//     terraform: { backend: local }
 	Exec map[string]ExecToolCfg `yaml:"exec,omitempty"`
@@ -373,12 +371,13 @@ func DeleteWorkspace(name string, force bool) error {
 
 // plaintextSecretsRE matches lines that look like a credential value being
 // set in YAML. Heuristic — catches the common shapes (api_key, password,
-// token) without false-positiving on commented-out examples or empty values.
-var plaintextSecretsRE = regexp.MustCompile(`(?m)^[\t ]*(api_key|apikey|ibmcloud_api_key|ic_api_key|password|token|secret_access_key|hmac_secret)[\t ]*:[\t ]+[^\s#\n][^\n]*`)
+// token, AWS secret_access_key) without false-positiving on commented-out
+// examples or empty values.
+var plaintextSecretsRE = regexp.MustCompile(`(?m)^[\t ]*(api_key|apikey|password|token|secret_access_key|aws_secret_access_key|hmac_secret)[\t ]*:[\t ]+[^\s#\n][^\n]*`)
 
 func rejectPlaintextSecrets(b []byte) error {
 	if loc := plaintextSecretsRE.FindIndex(b); loc != nil {
-		return fmt.Errorf("plaintext secret detected (offset %d): workspace config.yaml must not contain credentials — use IBMCLOUD_API_KEY env var or the OS keychain (see `awsbnkctl init`)", loc[0])
+		return fmt.Errorf("plaintext secret detected (offset %d): workspace config.yaml must not contain credentials — use AWS SDK chain env vars (AWS_PROFILE / AWS_ACCESS_KEY_ID) or the OS keychain", loc[0])
 	}
 	return nil
 }

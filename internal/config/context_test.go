@@ -119,7 +119,7 @@ func TestRejectPlaintextSecrets(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "ibmcloud:\n  region: us-south\n  api_key: hunter2\n"
+	body := "aws:\n  region: us-east-1\n  api_key: hunter2\n"
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -141,10 +141,9 @@ func TestRejectPlaintextSecrets_AllowsCommentedExamples(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Commented + empty-value forms must not trip the rejection.
-	body := `ibmcloud:
-  region: us-south
-  resource_group: default
-  api_key_source: env
+	body := `aws:
+  region: us-east-1
+  profile: default
   # api_key: this-would-be-bad-but-it-is-commented
 cluster:
   create: true
@@ -196,31 +195,5 @@ func TestSetCurrent_RejectsMissingWorkspace(t *testing.T) {
 
 	if err := SetCurrent("phantom"); err == nil {
 		t.Fatal("expected SetCurrent to reject missing workspace")
-	}
-}
-
-// TestAPIKeyFromConfig_RetiredInSprint3 documents the Sprint 3 PRD 04
-// retarget: the workspace-config api_key_b64 path is no longer a
-// production cred source. ResolveAPIKey(..., APIKeySourceConfig) now
-// returns an empty result with an error (the explicit-config path was
-// dropped); the default chain (source=="") falls through to env →
-// keychain → prompt and surfaces the canonical "no key" error when
-// every source is empty.
-func TestAPIKeyFromConfig_RetiredInSprint3(t *testing.T) {
-	t.Setenv(ROKSBNKCTLHomeEnv, t.TempDir())
-	for _, v := range []string{"IBMCLOUD_API_KEY", "IC_API_KEY", "TF_VAR_ibmcloud_api_key", "TF_VAR_IBMCLOUD_API_KEY", "TF_VAR_IC_API_KEY"} {
-		t.Setenv(v, "")
-	}
-
-	if err := SaveWorkspace("retired", &Workspace{
-		AWS:      AWSCfg{Region: "us-east-1"},
-		Cluster:  ClusterCfg{Create: true, Name: "demo"},
-		TFSource: TFSourceCfg{Type: "github", Repo: "x/y", Ref: "v0.0.1"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := ResolveAPIKey("retired", APIKeySourceConfig); err == nil {
-		t.Error("expected an error from the retired config-source path")
 	}
 }

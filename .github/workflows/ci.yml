@@ -541,3 +541,57 @@ jobs:
           # `check` validates .goreleaser.yml without producing artefacts.
           # Catches typos and template breaks before tag time.
           args: check
+
+  book-build:
+    name: book build + cspell
+    # Sprint 5 (PLAN.md § "Sprint 5" — book retarget): every PR runs
+    # `mdbook build book/` plus cspell over `book/src/**/*.md` so a
+    # broken chapter or unknown-word regression surfaces at PR-review
+    # time, not at integrator-tag time. The existing book.yml workflow
+    # only runs on `book/**` path changes; this job runs on every PR
+    # so a cspell.json edit (or a workflow YAML edit) also gets
+    # validated against the chapter set without needing a chapter edit
+    # to trigger book.yml.
+    #
+    # PDF rendering stays out of CI — the multi-GB pandoc + XeLaTeX +
+    # mermaid-cli toolchain is the integrator's local-driven
+    # responsibility (see `make release` / `make release-publish` in
+    # the Makefile). HTML build catches every chapter-shape regression
+    # (broken markdown, dead anchor, malformed code fence) that
+    # affects the published web book at
+    # https://JLCode-tech.github.io/awsbnkctl/book/.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup mdBook
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: 'latest'
+
+      - name: Install mdbook-mermaid
+        # mdbook-mermaid is a separate preprocessor binary; the
+        # peaceiris/actions-mdbook action only ships mdbook itself.
+        # Cached across runs by baptiste0928/cargo-install.
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: mdbook-mermaid
+
+      - name: mdbook build (HTML)
+        # Pandoc backend is `optional = true` in book/book.toml, so
+        # this builds HTML cleanly without needing pandoc/XeLaTeX on
+        # the runner. Fails the job on broken markdown, dead links,
+        # malformed code fences.
+        run: mdbook build book/
+
+      - name: cspell (book/src/**/*.md)
+        # Hard-fail on any unknown-word finding. Sprint 5 validator
+        # closed the cspell.json vocabulary to zero findings against
+        # the rewritten chapter set; this job ensures future chapter
+        # edits keep that posture. New domain words land via a
+        # cspell.json edit on the same PR.
+        uses: streetsidesoftware/cspell-action@v6
+        with:
+          config: cspell.json
+          files: |
+            book/src/**/*.md

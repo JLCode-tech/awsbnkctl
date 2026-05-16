@@ -59,18 +59,15 @@ var lastWhys []string
 // runWithWhy is the actual check-list builder. Split out so we can
 // unit-test it without poking the lastWhys side-channel.
 //
-// Sprint 6 refresh (PLAN.md §"Gate to Sprint 7" line 481 — "Doctor
-// green-by-default on a stock dev box"): only `terraform` is a
-// REQUIRED host install. Every other previously-required-or-warned
-// tool (kubectl, oc, ibmcloud, iperf3, dig) is now INFORMATIONAL —
-// the binary internalises each surface:
+// Doctor green-by-default contract: only `terraform` is a REQUIRED
+// host install. Every other previously-required-or-warned tool
+// (kubectl, iperf3, dig) is now INFORMATIONAL — the binary
+// internalises each surface:
 //
-//   - kubectl + oc: internalised via client-go in `awsbnkctl k *`
+//   - kubectl: internalised via client-go in `awsbnkctl k *`
 //     (PRD 02, Sprint 2).
-//   - ibmcloud: bundled image runnable via `--backend docker` or
-//     `--backend ssh:<target>` (PRD 03, Sprint 3/4).
-//   - iperf3: bundled image runnable via `--backend k8s` (PRD 03,
-//     Sprint 4).
+//   - iperf3: in-cluster fixture runnable via `--backend k8s`
+//     (PRD 03, Sprint 4).
 //   - dig: miekg/dns probe library compiled into the binary (PRD 03
 //     §"DNS probe", Sprint 5).
 //
@@ -107,10 +104,12 @@ func runWithWhy(ctx context.Context, cctx *config.Context) []withWhy {
 	// with a "(internalised; …)" detail explaining the alternative.
 	// Present surfaces as StatusOK with the path/version.
 	out = append(out, checkBinaryInformational("kubectl", "internalised in `awsbnkctl k *` via client-go; host install used only when passthrough is convenient"))
-	out = append(out, checkBinaryInformational("oc", "internalised in `awsbnkctl k *` via client-go; host install used only when passthrough is convenient"))
-	// "ibmcloud" row dropped in Sprint 0 (IBM strip). PRD 00 § "Inheritance map" states the awsbnkctl plan drops the IBM passthrough entirely (no `aws` CLI passthrough planned either — direct SDK use only). Sprint 1 lands the internal/aws + STS-caller-identity check that replaces this row.
+	// `aws` CLI is intentionally NOT a doctor row: the AWS SDK chain
+	// in internal/aws covers every awsbnkctl call site directly. The
+	// STS / EKS / EC2 / S3 / IAM rows below replace the (never-shipped)
+	// `aws` passthrough.
 
-	out = append(out, checkBinaryInformational("iperf3", "bundled image runnable via `--backend k8s`; host install used only for `--backend local` north-south tests"))
+	out = append(out, checkBinaryInformational("iperf3", "in-cluster fixture runnable via `--backend k8s`; host install used only for `--backend local` north-south tests"))
 	out = append(out, checkBinaryInformational("dig", "DNS probe internalised via miekg/dns (`awsbnkctl test dns`); host install no longer required"))
 
 	// Kubeconfig: informational. Many doctor invocations happen
@@ -126,8 +125,8 @@ func runWithWhy(ctx context.Context, cctx *config.Context) []withWhy {
 	// degrades to a Warning naming the missing env var; downstream
 	// rows (sts / eks / ec2 / s3 / iam) render as Skipped. A first-
 	// time user runs `awsbnkctl doctor` and sees the AWS-side gap
-	// even before `awsbnkctl init`. The legacy IBMCLOUD_API_KEY
-	// `checkAPIKey` row retired with the workspace schema change.
+	// even before `awsbnkctl init`. The legacy v0.x checkAPIKey row
+	// retired with the workspace schema change.
 	if cctx == nil {
 		out = append(out, withWhy{
 			Check: Check{Name: "workspace", Status: StatusError, Detail: "no config context"},
@@ -198,10 +197,6 @@ func versionLine(name string) string {
 		args = []string{"--version"}
 	case "kubectl":
 		args = []string{"version", "--client=true", "--output=yaml"}
-	case "oc":
-		args = []string{"version", "--client=true"}
-	case "ibmcloud":
-		args = []string{"--version"}
 	case "dig":
 		args = []string{"-v"}
 	default:
@@ -256,9 +251,9 @@ func checkWorkspace(cctx *config.Context) withWhy {
 	return withWhy{Check: c, Why: "per-environment config + state"}
 }
 
-// checkAPIKey (IBMCLOUD_API_KEY resolver probe) retired in Sprint 3
-// (PRD 04 retarget). AWS credentials resolve via the SDK chain — the
-// `aws credentials` row in awsChecks surfaces the equivalent signal.
+// The v0.x checkAPIKey resolver probe retired with the PRD 04 retarget.
+// AWS credentials resolve via the SDK chain — the `aws credentials`
+// row in awsChecks surfaces the equivalent signal.
 
 // PrintResults writes a tabular human-readable rendering to w.
 //

@@ -1,762 +1,566 @@
-# Sprint 5 — tech writer issues
+# Sprint 5 — tech-writer issues
 
-Findings cover the three new chapters (20 connectivity, 21 DNS/GSLB,
-22 throughput), chapter 17's terraform-via-docker subsection, the
-`internal/test/dns.go` + `internal/cli/test.go` + `internal/cli/lifecycle.go`
-+ `internal/exec/docker.go` surfaces the prose claims against, the
-v0.9 release-readiness surface (README highlight, CHANGELOG, PLAN.md
-milestone), and PRD/PLAN drift. All findings are doc-only; no code
-changes proposed.
+Sprint 5 is the book retarget sprint. The architect rewrote 12+ chapters
+plus did mechanical sweeps; staff swept IBM residue from 297 to 1 hit in
+`internal/*.go`; validator added the `book-build` CI job + cspell at zero
+findings. This tech-writer pass walked the SUMMARY.md from Part I through
+Part X, audited AWS-retarget completeness, ran the cross-link sweep,
+spec-checked the book CI workflow, and verified the build-green gate.
 
-## Issue 1 (BLOCKER for v0.9 release): README has no Sprint 5 / DNS-probe / terraform-docker highlight bullet
+**Read-only.** No project files edited. SPIKE DEFERRAL carries.
 
-**Severity**: high (v0.9 release surface)
-**Status**: open
-**Description**: Sprint 1 (`--on jumphost`), Sprint 2 (k-verbs), Sprint 3
-(`--backend docker`), and Sprint 4 (`--backend k8s` + `--backend ssh`)
-each landed a top-level bullet in `README.md` §"Highlights". Sprint 5 is
-the v0.9 release-gate sprint and ships two user-visible features
-(GSLB-aware DNS probe; terraform-via-docker) plus the testing-suite
-chapters that anchor the v0.9 docs. README has nothing reflecting any
-of this — the last highlight bullet is the Sprint 4 `--backend k8s` +
-`--backend ssh` line at `README.md:38`.
+**Scope:** 35 markdown files under `book/src/` (34 chapters + SUMMARY.md
++ preface), plus README, CHANGELOG, MIGRATING.
 
-A reader landing on the README on tag-v0.9 day learns nothing about
-the DNS probe, terraform-via-docker, or the new testing chapters. The
-"Status" line at `README.md:7` still reads "Pre-release. Source
-compiles, unit tests pass, every PRD verb is implemented." — accurate
-but uninformative for v0.9.
+**Verification status (end of sprint):**
 
-**Files affected**: `README.md` §"Highlights" (lines 26-38)
+- `go build ./...` ✓ clean
+- `go test ./...` ✓ clean (12 packages cached)
+- `make build` ✓ binary at `bin/awsbnkctl` (dev tag, commit 727b2bb)
+- `grep -rn 'IBMCloud\|IBMCLOUD\|ibmcloud' --include='*.go' internal/`
+  → 1 hit (the intentional `secrets.go` keychain user-key for v0.x → v0.9
+  cleanup; staff Issue carries the rationale). Matches the staff report.
+- `grep -rn '...IBM...' book/src/` → ~50 hits; most are allowed
+  (fork-relationship sections in 02/04/14/25/32/33/preface, the SUMMARY
+  filenames that the architect Issue 3 deferred), but Issues 1-5 below
+  catalogue the surfaces where IBM residue **survived** the architect's
+  Sprint 5 sweep.
+- `mdbook build book/` — not exercised (mdbook not installed locally per
+  Sprint 5 staff verification + macOS sandbox). Spec-check on
+  `.github/workflows/book.yml` + the new `book-build` job in `ci.yml`
+  confirms the CI gate is in place; first post-merge run will exercise it.
+- `cspell` — not exercised (cspell not on PATH); validator Issue 3
+  confirmed zero unknown-word findings via `npx cspell` and the
+  `book-build` CI job will hard-fail any future regression.
+- 361 relative `[link](./XX-*.md)` cross-links checked; **0 broken file
+  targets**. Anchor cross-links flagged 19 candidate slug-mismatches —
+  most are mdbook slug-rule differences from a naive Python slugger
+  (backtick + colon stripping in fenced headings like `## ` + "tf_source:" +
+  ` ` resolve fine through mdbook's slug rules), but Issue 4 below
+  catalogues the genuine stale anchors that survived the retarget.
 
-**Proposed fix**: add a Sprint 5 / v0.9 highlight bullet matching the
-Sprint 1-4 cadence. Suggested wording:
+---
 
-> - **GSLB-aware DNS probe + `terraform --backend docker` (v0.9)** —
->   `roksbnkctl test dns --gslb-compare` fans the probe across local +
->   in-cluster + SSH-target vantages and emits a `gslb_divergence`
->   boolean for CI assertions; `--require-divergence` is the
->   exit-code-keyed form. `roksbnkctl up/plan/apply/destroy --backend
->   docker` runs terraform inside `hashicorp/terraform:1.5.7` with the
->   workspace's state directory bind-mounted, host-user-owned. See
->   [chapter 21] for DNS probe + GSLB scenarios, [chapter 22] for
->   throughput, and [chapter 17] §"terraform via docker" for the
->   terraform-docker mechanics.
+## Issue 1 (BLOCKER) — Chapter 19 (in-cluster ops pod) describes an `awsbnkctl-ibm-creds` Secret + IBM Trusted Profile flow that the as-shipped `awsbnkctl ops install` cannot create — and the as-shipped installer is itself still IBM-shaped
 
-The "Status" line should also flip from "Pre-release" to "v0.9 release
-candidate" (or similar) once the integrator tags. No content change to
-the rest of the README.
+**Severity**: blocker
+**Status**: open (cross-agent — staff + architect)
 
-## Issue 2 (BLOCKER for v0.9 release): no CHANGELOG / RELEASE-NOTES file
+**Description**: Chapter 19 (`book/src/19-in-cluster-ops-pod.md`) is
+**14 references** to `awsbnkctl-ibm-creds` long. The chapter walks the
+reader through `awsbnkctl ops install`, shows sample output emitting
+"✓ created secret awsbnkctl-ops/awsbnkctl-ibm-creds", documents the SA's
+RBAC binding scoped to `resourceNames: ["awsbnkctl-ibm-creds"]`, and
+explains the credential-rotation flow.
 
-**Severity**: high (v0.9 release surface)
-**Status**: open
-**Description**: There is no `CHANGELOG.md`, `CHANGES.md`, or
-`docs/RELEASE-NOTES.md` in the repo (verified via `find -name 'CHANGELOG*'`
-+ `find -name 'RELEASE*'` — both empty). The v0.9 release will be the
-first "real" tag (per `README.md:7` "No tagged release yet"), and a
-release without release notes is the kind of thing that makes
-downstream consumers ask "what changed in v0.9 vs v0.8?".
+The architect Sprint 5 issue file marks chapter 19 as "Ships. IRSA-based
+auth replaces trusted-profile flow." That is **incorrect** — the chapter
+prose still describes the trusted-profile + static-IBM-key flow
+verbatim.
 
-PLAN.md §"v0.9 (M3)" (lines 627-633) lists the cumulative v0.9 surface
-across Sprints 3-5 (cred abstraction, four backends, DNS probe,
-terraform-docker, in-cluster ops pod, ~24 book chapters). That bullet
-list is the natural seed for `CHANGELOG.md`'s v0.9 section.
+Worse, the **prose matches the as-shipped installer reality**:
+`internal/exec/k8s_install.yaml` is still entirely roksbnkctl-shaped:
 
-The release engineer can land this in 30 minutes by copying PLAN.md
-§"v0.9 (M3)" into a new `CHANGELOG.md` plus splitting Sprint 3 vs
-Sprint 4 vs Sprint 5 contributions per the existing PLAN.md sprint
-sections.
-
-**Files affected**: repo root (new file `CHANGELOG.md`) — or
-`docs/CHANGELOG.md` if the team prefers to keep it under docs/.
-
-**Proposed fix**: create `CHANGELOG.md` with at minimum a v0.9 section
-covering:
-
-- Sprint 3: cred abstraction (`Backend.Run` interface; redactor;
-  `IBMCloudAPIKey`-by-reference plumbing; `--backend local` +
-  `--backend docker`).
-- Sprint 4: `--backend k8s` (long-lived ops pod + one-shot Job split);
-  `--backend ssh:<target>` (file materialisation, env propagation,
-  `--bootstrap`); ops-pod lifecycle (`roksbnkctl ops install/show/uninstall`);
-  iperf3 SCC compliance (`runAsNonRoot`, `runAsUser: 1000`).
-- Sprint 5: GSLB-aware DNS probe (`miekg/dns`-based; `--target` /
-  `--type` / `--server` / `--iterations` / `--gslb-compare` /
-  `--require-divergence`; `roksbnkctl.dns.v1` + `roksbnkctl.dns.v1.vantage`
-  schemas); terraform via docker (`up` / `plan` / `apply` / `destroy`
-  `--backend docker`; `hashicorp/terraform:1.5.7` pin; UID/GID host-user
-  alignment); doctor extensions (DNS-probe sanity, ops-pod env runtime
-  probe, cred rotation freshness); book chapters 20 / 21 / 22.
-
-The "What's deliberately deferred to post-v1.0" list at PLAN.md:650-672
-is the second half — those bullets become a "v1.x" / "Unreleased"
-section in CHANGELOG.md so future contributors don't re-propose them
-as v0.9 work.
-
-## Issue 3: chapter 21 single-vantage JSON example shows the wrong schema string AND wrong shape
-
-**Severity**: high (load-bearing — this is the v0.9 schema spec from
-the user's perspective)
-**Status**: open
-**Description**: Chapter 21 has two JSON output examples — single-vantage
-(lines 187-215) and multi-vantage (lines 219-256). Both use schema
-string `roksbnkctl.dns.v1` and both wrap the result in a `vantages[]`
-array with `target`, `type`, `gslb_divergence` at the top level.
-
-The actual implementation has **two distinct schemas**:
-
-- `internal/test/dns.go:19` — `DNSSchemaVersion = "roksbnkctl.dns.v1"`
-  (the multi-vantage `DNSCompareResult` shape only)
-- `internal/test/dns.go:20` — `DNSVantageSchemaVersion = "roksbnkctl.dns.v1.vantage"`
-  (the single-vantage `DNSProbeResult` shape only)
-
-`runDNSSingleVantage` (`internal/cli/test.go:268-289`) emits a
-`*test.DNSProbeResult` directly to stdout via `test.WriteJSON(os.Stdout, res)`.
-The result document is **not** wrapped in `vantages[]`, has **no**
-top-level `target` / `type` / `gslb_divergence` fields, and the schema
-string is `roksbnkctl.dns.v1.vantage` not `roksbnkctl.dns.v1`. Looking
-at the struct (`internal/test/dns.go:57-68`), the actual single-vantage
-JSON is:
-
-```json
-{
-  "schema": "roksbnkctl.dns.v1.vantage",
-  "backend": "local",
-  "server": "8.8.8.8:53",
-  "iterations": 10,
-  "rtt_ms": { "p50": 12.4, "p95": 18.1, "p99": 22.7 },
-  "answers": [
-    { "name": "www.cloudflare.com.", "type": "A", "ttl": 60, "rdata": "104.16.132.229" }
-  ],
-  "rcode": "NOERROR",
-  "authoritative": false,
-  "truncated": false
-}
+```
+$ grep -nE 'roksbnkctl|ibm' internal/exec/k8s_install.yaml | head
+ 1:# roksbnkctl ops install manifests
+ 9:# are created up front so the long-lived ops Pod (in roksbnkctl-ops)
+20:  name: roksbnkctl-ops
+27:  name: roksbnkctl-test
+35:  name: roksbnkctl-ops
+40:  # ops install --trusted-profile=auto|on patches an additional
+41:  # annotation iam.cloud.ibm.com/trusted-profile: <profile-id> here
+47:  name: roksbnkctl-ibm-creds
+55:  IBMCLOUD_API_KEY: "${IBMCLOUD_API_KEY_B64}"
+68:  IC_API_KEY: "${IBMCLOUD_API_KEY_B64}"
+102:  resourceNames: ["roksbnkctl-ibm-creds"]
+122:  name: roksbnkctl-ops
+129:  restartPolicy: Always
+130:  # OpenShift restricted-v2 SCC compliance ...
 ```
 
-Chapter 21's claim at line 183-184:
+Staff Issue 2 acknowledges the installer YAML wasn't retargeted ("scope
+deferred to Sprint 6"). The headline IBM-residue closure ("297 → 1 hit")
+counted **only `.go` files** — the embedded YAML template was excluded
+from the grep. So the book prose, the doctor probe code, and the
+installer manifest are all still IBM-shaped end-to-end.
 
-> The schema is `roksbnkctl.dns.v1`, defined verbatim in PRD 03 §"DNS
-> probe". Single-vantage and multi-vantage runs share the schema —
-> multi-vantage adds entries to `vantages[]` and populates
-> `gslb_divergence`.
+This is the largest single drift in the Sprint 5 surface. Either:
 
-…is wrong on three counts: (1) single-vantage's schema string is
-`.vantage`, not just `.v1`; (2) the two shapes don't share the schema —
-they are two distinct JSON documents; (3) single-vantage doesn't have
-`vantages[]` at all (it IS the vantage entry).
+- (a) Sprint 6 hardening sweeps `internal/exec/k8s_install.yaml` + the
+  template substitution code in `internal/cli/ops.go` + the `K8sOpsSecretName`
+  constant + `probeOpsPodIRSA`, **and** the architect rewrites chapter 19
+  prose against the new IRSA-only shape; or
+- (b) chapter 19 is annotated at the top as "v1.x feature — current
+  install is the inherited IBM trusted-profile flow; IRSA retarget tracked
+  in Sprint 6 staff Issue 2" so first-time readers don't waste hours
+  trying to map the prose onto an installer that doesn't exist.
 
-The Sprint 5 architect's resolved\_architect.md Issue 1 spot-check
-("`internal/test/dns.go:14-19` — `DNSSchemaVersion = roksbnkctl.dns.v1`
-+ `DNSVantageSchemaVersion = roksbnkctl.dns.v1.vantage`. Chapter 21
-references both verbatim.") reads the constants correctly but missed
-that the chapter's example uses only one of them and uses the wrong
-shape.
+For v0.9 (M5 milestone), (b) is the smallest fix that closes the
+correctness gap. (a) is the right closure for v1.0.
 
-**Files affected**: `book/src/21-dns-testing-gslb.md` §"Single-vantage
-output" (lines 185-215); §"JSON output schema" prose (lines 181-184);
-§"Schema field reference" table (lines 258-278); §"`-o json`" row of
-the flag table (line 73).
+**Files affected**: `book/src/19-in-cluster-ops-pod.md` (chapter prose);
+`internal/exec/k8s_install.yaml` (embedded template); `internal/cli/ops.go`
+(template substitution + `awsbnkctl ops install` command);
+`internal/cli/doctor_backend.go` (probe code); `internal/exec/k8s.go`
+(`K8sOpsSecretName`); `book/src/30-glossary.md` (envFrom / Secret /
+Trusted Profile entries — see Issue 2).
 
-**Proposed fix**:
-1. Replace the single-vantage JSON example at lines 192-214 with the
-   actual `DNSProbeResult` shape (no `vantages[]` wrap; schema
-   `roksbnkctl.dns.v1.vantage`; top-level `backend`, `server`,
-   `iterations`, `rtt_ms`, `answers`, `rcode`, `authoritative`,
-   `truncated`).
-2. Update the prose at lines 183-184 to acknowledge **two** schemas:
-   single-vantage (`roksbnkctl.dns.v1.vantage`) and comparison
-   (`roksbnkctl.dns.v1`). The flag-table row at line 73 should read
-   "Switch from human-readable text on stderr to JSON on stdout
-   (`roksbnkctl.dns.v1.vantage` for single-vantage, `roksbnkctl.dns.v1`
-   for `--gslb-compare`)".
-3. Split the Schema field reference table (lines 258-278) into two
-   sub-tables — "Per-vantage shape" (the `DNSProbeResult` fields) and
-   "Comparison shape" (the `DNSCompareResult` fields, which embeds
-   `vantages[]` + `gslb_divergence` + `gslb_divergence_summary`). This
-   matches what a JSON consumer needs to write a parser for.
+**Proposed fix**: Sprint 6 architect + staff coordinate; tech-writer
+re-audits at Sprint 6 close.
 
-## Issue 4: chapter 21 documents `edns_client_subnet` field that the implementation doesn't emit
+## Issue 2 (HIGH) — Chapter 30 (Glossary) has factual errors and unswept IBM residue that contradict the rest of the retargeted book
+
+**Severity**: high
+**Status**: open (architect)
+
+**Description**: The architect Sprint 5 issue file marks chapter 30 as
+"Ships. AWS-flavoured entries replace IBM ones." Read-through finds
+~10 entries that survived the sweep with stale or factually wrong
+content. Selected examples:
+
+- **L17 (CIS):** "At the AWS account level, **CIS** is **Cloud Internet
+  Services** — IBM's DNS, CDN, WAF, and DDoS-protection product." The
+  entry pivots on the word "AWS" but the product is IBM's. The reader
+  is left wondering which.
+- **L31 (S3 was COS):** "IBM **Cloud Object Storage** — S3-compatible
+  object store. The BNK supply chain bucket lives on a S3 bucket." The
+  term is being defined as IBM Cloud Object Storage while the
+  definition body uses S3.
+- **L38 (CRN):** "IBM's globally-unique resource identifier. … Most
+  `awsbnkctl cos` commands accept either a friendly name (resolved at
+  runtime) or a CRN." There is no `awsbnkctl cos` subtree. CRN is an
+  IBM-only concept and should either be deleted or labelled as a
+  legacy concept inherited from `roksbnkctl`.
+- **L49 (envFrom):** describes the ops pod using
+  `envFrom: secretRef: awsbnkctl-ibm-creds` (see Issue 1).
+- **L125 (OpenShift):** "EKS = managed OpenShift on AWS." **EKS is
+  managed Kubernetes**, not managed OpenShift. The AWS-managed
+  OpenShift product is ROSA. This is the kind of factual error a
+  first-time reader will catch.
+- **L146 (redactor):** "masks the IBM API key value in any subprocess's
+  stdout/stderr".
+- **L148-149 (EKS):** "**Red Hat OpenShift on AWS** — IBM's managed
+  OpenShift offering. The cluster `awsbnkctl up` provisions. See
+  [Chapter 2](./02-why-roks.md)." EKS is neither Red Hat OpenShift on
+  AWS (that's ROSA) nor IBM's offering.
+- **L162-163 (SCC):** OpenShift terminology preserved as if it's an
+  EKS concern; EKS uses PSA (Pod Security Admission), not SCC.
+  Cross-references to "the bundled image and the runAsNonRoot
+  constraint" are fine but the SCC framing should be retired.
+- **L166 (Secret):** "creates `awsbnkctl-ibm-creds`" (see Issue 1).
+- **L198 (Trusted Profile):** "An AWS IAM construct that lets a
+  Kubernetes ServiceAccount assume AWS permissions." That's IRSA, not
+  Trusted Profile. Trusted Profile is the IBM equivalent.
+- **L207-208 (VPE):** "**Virtual Private Endpoint** — AWS's
+  private-network access point for managed services." That's an IBM
+  term (VPE); AWS calls them VPC endpoints. Cross-reference is to a
+  stale chapter 26 anchor (see Issue 4).
+
+**Files affected**: `book/src/30-glossary.md`.
+
+**Proposed fix**: Sprint 6 architect rewrites the glossary against the
+as-shipped AWS shape. Suggested approach: delete CRN, VPE, Trusted
+Profile, SCC outright (cross-link them to a one-line "see roksbnkctl
+docs for the IBM equivalent" note if the fork-relationship hint is
+useful); rewrite EKS, S3, redactor, envFrom, Secret entries against the
+real AWS / EKS shape.
+
+## Issue 3 (HIGH) — Multiple chapters describe an `awsbnkctl cluster` subcommand subtree that does not exist in the v0.9 binary
+
+**Severity**: high
+**Status**: open (architect or staff — depends on whether the verb is added or the chapters retargeted)
+
+**Description**: Architect Issue 5 flagged that `cluster register` may
+not exist. The actual surface is worse — the entire `cluster` subtree is
+missing:
+
+```
+$ ./bin/awsbnkctl cluster --help
+Error: unknown command "cluster" for "awsbnkctl"
+```
+
+Yet the as-shipped book chapters describe a rich `cluster` command
+group as if it ships:
+
+- `book/src/02-why-roks.md:71` — "`awsbnkctl up cluster` provisions the
+  SR-IOV stack as part of the cluster bring-up."
+- `book/src/06-workspaces.md:36-37` — references `awsbnkctl cluster up`
+  and `cluster register` as live commands.
+- `book/src/08-cluster-phase.md` — **entire chapter** describes a
+  two-phase model with `cluster up`, `cluster down`, `cluster show`,
+  the `state-cluster/` directory, the `cluster-outputs.json` written
+  by `cluster up`. ~150 lines of prose against a verb that doesn't
+  exist.
+- `book/src/09-registering-existing-cluster.md` — entire chapter is
+  the `cluster register` walkthrough (architect Issue 5).
+- `book/src/11-tearing-down.md` — refers to three destroy verbs
+  (`down`, `bnk down`, `cluster down`); only `down` ships.
+- `book/src/12-workspace-config.md:119` — schema row for `cluster.create`
+  describes `awsbnkctl cluster up` and `cluster register <name>`
+  semantics.
+
+The as-shipped surface offers `up`, `down`, `apply`, `plan`, `init`,
+`status`, plus the `k *` subtree, `targets`, `self`, `install`,
+`logs`, `get`, `doctor`. There is no `cluster` group, no `bnk`
+group, no `register` verb.
+
+Per architect Issue 5, the lineage is that `roksbnkctl` did ship a
+working `cluster register` for ROKS, and the chapter was rewritten
+"against a hypothetical future implementation". For v0.9 the gap is
+significant — readers walking the book linearly will hit
+`./bin/awsbnkctl cluster up` on a real terminal and bounce.
+
+**Files affected**:
+- `book/src/02-why-roks.md` (one cross-link)
+- `book/src/06-workspaces.md` (two cross-references)
+- `book/src/08-cluster-phase.md` (entire chapter, ~1,200 lines)
+- `book/src/09-registering-existing-cluster.md` (entire chapter)
+- `book/src/10-deploying-bnk-trials.md` (the `bnk up`/`bnk down`
+  group also doesn't exist as a separate subtree)
+- `book/src/11-tearing-down.md` (the three-verb framing)
+- `book/src/12-workspace-config.md:119` (schema row)
+- `internal/cli/` (verb registration, if path (a) below is taken).
+
+**Proposed fix**: integrator decision between (a) Sprint 6 staff lifts
+the `cluster` + `bnk` subtree from `roksbnkctl/internal/cli/cluster.go`
++ `bnk.go` and retargets at EKS (substantial implementation work but
+preserves the book unchanged), or (b) Sprint 6 architect rewrites
+chapters 8-12 against the single-phase `awsbnkctl up` / `down` shape
+that actually ships and annotates chapter 9 as "v1.x feature".
+
+Recommendation: (b) for v0.9 (the architect-only path closes the gap
+this cycle); (a) for v1.0 if customer feedback justifies the
+two-phase lifecycle.
+
+## Issue 4 (MEDIUM) — Stale anchor cross-links survived the chapter-26 retarget
 
 **Severity**: medium
-**Status**: open
-**Description**: Chapter 21's "Schema field reference" table line 274
-documents:
+**Status**: open (architect)
 
-> `vantages[].edns_client_subnet` | object \| null | If the response
-> carries an EDNS Client Subnet option, the subnet the resolver
-> claimed; otherwise `null`.
+**Description**: The architect's chapter 26 retarget renamed the
+"orphan IBM Cloud resources" section to "orphan ENIs" (line 63). The
+glossary's VPE entry (chapter 30, line 208) still cross-links to the
+old slug:
 
-The actual `DNSProbeResult` struct at `internal/test/dns.go:57-68` has
-no `EDNSClientSubnet` field. `grep -n edns_client_subnet
-internal/test/dns.go` returns 0 hits. The probe never emits this field
-in JSON output.
+```
+[Chapter 26 §"orphan AWS resources"](./26-troubleshooting.md#symptom-terraform-destroy-leaves-orphan-ibm-cloud-resources-lbs-security-groups-vpes)
+```
 
-The field is in PRD 03's spec
-(`docs/prd/03-EXECUTION-BACKENDS.md:335`) — that's the source the
-chapter copied from. But staff didn't implement it.
+The link text reads "orphan AWS resources" but the anchor target is
+the deleted IBM-resources slug. mdBook will render the link as a dead
+hash; the `book-build` CI job's mdbook build will pass (mdbook doesn't
+hard-fail dead intra-page anchors) but the click-through is broken.
 
-A CI script that pins `jq -e '.vantages[0].edns_client_subnet | not'`
-expecting the documented shape will get a `null` from the missing
-field (jq returns `null` for missing keys); that happens to work for
-the negative assertion. But a CI script that asserts the field's
-*presence* (e.g., to prove the schema's stable for v0.9) will fail.
+The naive Python anchor sweep flagged 19 candidates; most are
+slug-rule artefacts (em-dashes, double-dashes, backticks, colons in
+headings) that mdbook handles differently from the script. The one
+above is the load-bearing genuine break. Two other candidates that
+warrant manual review:
 
-**Files affected**: `book/src/21-dns-testing-gslb.md` line 274;
-secondarily, the JSON example at line 211 (which emits
-`"edns_client_subnet": null` — accurate as a JSON shape but the actual
-binary doesn't emit it at all, so the example over-specifies).
+- `30-glossary.md:8` → `14-credentials-resolver.md#source-3--workspace-api_key_b64`
+  — chapter 14's heading is `### Source 3 — SSO cached token`, not
+  the Sprint 4-era `workspace-api_key_b64` shape. The glossary entry's
+  prose is still describing the IBM-era inline-key path that the
+  AWS-retarget no longer ships.
+- `30-glossary.md:64` → `25-cos-supply-chain.md#licence-rotation` —
+  chapter 25's heading is `### Rotating the subscription JWT` (and
+  similarly for FAR / IRSA); no `licence-rotation` anchor exists.
 
-**Proposed fix**: either (a) drop the `edns_client_subnet` row from the
-table + drop the `"edns_client_subnet": null` line from the
-single-vantage JSON example and call out the field as
-"reserved for v1.x — see PRD 03 §"DNS probe" §"Future"", or (b) file a
-follow-up staff issue to land the field in the `DNSProbeResult` struct
-(easy: add `EDNSClientSubnet *EDNSClientSubnet json:"edns_client_subnet"`
-to the struct; populate from `dns.Msg.IsEdns0()` if present). PRD 03
-already specs it; if staff lands it as a v0.9 polish, the chapter
-becomes accurate again. Otherwise option (a) is the
-true-against-the-binary fix.
+**Files affected**: `book/src/30-glossary.md` (3 stale anchors); chapter
+14 entry needs the AWS-source semantics; chapter 25 rotation slug
+needs to match the actual heading shape.
 
-## Issue 5: chapter 21 says vantages run in parallel; the implementation runs them serially
+**Proposed fix**: Sprint 6 architect re-audits chapter 30's
+cross-references against the current chapter 14/25/26 heading slugs.
+A single `grep -n '\](./[0-9].*#' book/src/30-glossary.md` and a
+heading-by-heading walk in the target chapters closes it.
+
+## Issue 5 (MEDIUM) — Chapter 17 + 18 + 32 IBM-residue (code snippets, secret names, fictitious tool maps) survived the architect's chapter-by-chapter sweep
 
 **Severity**: medium
-**Status**: open
-**Description**: Chapter 21 §"The `--gslb-compare` workflow" line 174:
+**Status**: open (architect)
 
-> 2. Each vantage runs the probe in parallel. The query (target, type,
->    server) is identical; only the backend differs.
+**Description**: Sample selections from the post-sweep state:
 
-The actual `runDNSGSLBCompare` (`internal/cli/test.go:298-366`) iterates
-over the spec list **serially** in a for loop:
+- `17-execution-backends.md:442` — describes `Credentials.IBMCloudAPIKey`
+  becoming a one-shot Secret. Per staff's IBM-residue sweep, the
+  `Credentials.IBMCloudAPIKey` field is **deleted** from `internal/exec/creds.go`.
+  The chapter is now describing a Go field that does not exist.
+- `17-execution-backends.md:629` — code-fence example struct contains
+  `IBMCloudAPIKey  string`.
+- `18-choosing-backend.md:309` — worked-example terminal output shows
+  `✓ Secret awsbnkctl-ibm-creds applied (envFrom secretRef)`. Same
+  residue category as chapter 19 (Issue 1).
+- `32-extending-roksbnkctl.md:59` — `toolImages` map example contains
+  `"ibmcloud": "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud"`. Per
+  staff's sweep, the `toolImages["ibmcloud"]` entry is deleted from
+  `internal/exec/docker.go`. The chapter teaches the wrong shape.
+- `32-extending-roksbnkctl.md:70,82-84` — k8s ops-pod and ssh
+  `toolPackages` examples both still use `ibmcloud` as the canonical
+  worked-example tool. Same delete-in-code, survive-in-book pattern.
+- `25-cos-supply-chain.md:5` — "On the upstream `awsbnkctl` fork the
+  same artefacts lived in IBM Cloud Object Storage (COS)..." — typo:
+  the upstream is `roksbnkctl`, not `awsbnkctl`. Self-reference
+  rather than fork reference.
+- `01-what-is-bnk.md:46` — fine as written (legitimate F5 support
+  matrix bullet listing ROKS + IBM Cloud alongside AKS / GKE), no
+  action.
 
-```go
-for _, spec := range specs {
-    res, err := dispatchDNSProbe(ctx, cctx, spec, ...)
-    ...
-    vantages = append(vantages, *res)
-}
-```
+**Files affected**: `book/src/17-execution-backends.md`,
+`book/src/18-choosing-backend.md`, `book/src/25-cos-supply-chain.md`,
+`book/src/32-extending-roksbnkctl.md`.
 
-There's no goroutine, no `sync.WaitGroup`, no `errgroup.Group`. Each
-vantage waits for the previous one to complete. With three vantages
-(local + k8s + ssh:target) and the per-query timeout of 2s, a
-worst-case all-timeout run takes 6s, not 2s.
+**Proposed fix**: Sprint 6 architect spot-pass on these chapters using
+`iperf3` / `terraform` / `helm` as the worked-example tool instead of
+`ibmcloud`; retarget chapter 17 code-fence + L442 prose against the
+post-sweep Credentials struct shape; one-character typo fix in
+chapter 25 L5.
 
-This is a correctness issue for the chapter (the parallel claim is
-wrong) and a UX implication users should know about — a slow ssh:target
-vantage stretches the whole run.
-
-**Files affected**: `book/src/21-dns-testing-gslb.md` line 174
-
-**Proposed fix**: change "in parallel" to "in sequence (one vantage at
-a time; the run completes when the slowest vantage returns)". If the
-team prefers parallel, that's a small staff follow-up using
-`golang.org/x/sync/errgroup` — but the chapter must reflect what the
-binary does today.
-
-## Issue 6: chapter 17 §"terraform via docker" §"State persistence via bind-mount" hard-codes the wrong container path
+## Issue 6 (MEDIUM) — README.md status block is 5 sprints stale
 
 **Severity**: medium
-**Status**: open
-**Description**: Chapter 17 §"State persistence via bind-mount" (lines
-233-252) shows the bind-mount as:
+**Status**: open (staff)
 
-```
-docker run --rm \
-  -v ~/.roksbnkctl/<workspace>/state:/work \
-  --workdir /work \
-  --user $(id -u):$(id -g) \
-  hashicorp/terraform:1.5.7 \
-  apply -auto-approve
-```
+**Description**: `README.md` line 5: "**Status:** pre-release (M0 —
+Sprint 0 just landed; first tagged release `v0.2` gated on Sprint 1
+per `docs/PLAN.md`). … **Nothing in this README works yet until
+Sprint 1 closes**."
 
-…and prose at lines 248-249:
+Reality:
+- Sprint 5 (M5 / v0.9 milestone) just landed per the PLAN.
+- CHANGELOG.md documents Sprints 1, 2, 3, 4 in detail (and no Sprint 5
+  entry — see Issue 7).
+- `book/src/preface.md:3` correctly says "Status: v0.9 — Sprint 5 of
+  the AWS retarget complete."
 
-> - **Container target**: `/work` — set as `WorkingDir` so terraform
->   commands run from there without an explicit `cd`.
+A reader arriving at the GitHub repo front door reads README first and
+walks away thinking the binary doesn't exist yet. README needs to
+catch up to the book preface's v0.9 framing.
 
-The actual implementation in `internal/cli/lifecycle.go:667-705`
-mounts the state dir at **`/state`** (not `/work`):
+**Files affected**: `README.md`.
 
-```go
-hostMounts := []execbackend.HostMount{{
-    HostPath:      stateDir,
-    ContainerPath: "/state",        // ← /state, not /work
-    ReadOnly:      false,
-}}
-```
+**Proposed fix**: Sprint 6 staff updates the README status block + the
+"Planned quick start (post-Sprint 1)" section + the "What's in this
+repo" Internalised path table (currently describes future state). The
+"Planned" framing throughout is M0-era; v0.9 is "Implemented and
+shipping in v0.9 — for the canonical user guide see the book at
+JLCode-tech.github.io/awsbnkctl/book/."
 
-…and sets `WorkDir` to `/state/<srcRel>` (e.g.,
-`/state/tf-source/embedded-terraform`), not `/work`:
-
-```go
-containerSrcDir := filepath.ToSlash(filepath.Join("/state", srcRel))
-...
-WorkDir:     containerSrcDir,
-```
-
-The integration test at `internal/exec/docker_terraform_integration_test.go:99-117`
-also explicitly mirrors `ContainerPath: "/state"` with the comment "Mirror
-what internal/cli/lifecycle.go's terraform docker dispatch builds".
-
-The follow-on §"The UID/GID alignment gotcha" code block (lines 264-271)
-reuses the same `/work` path and so is also wrong.
-
-Additionally, chapter 17 line 250 claims:
-
-> The HCL itself is **not** bind-mounted from the workspace's state
-> dir. The HCL ships embedded in the `roksbnkctl` binary…
-
-The actual HCL **is** in the bind-mount — the embedded source is
-materialised into `<stateDir>/tf-source/embedded-terraform/` (which
-becomes `/state/tf-source/embedded-terraform/` in the container, hence
-the `WorkDir` value). The chapter's "HCL is not bind-mounted" claim is
-the opposite of what the code does.
-
-**Files affected**: `book/src/17-execution-backends.md` §"terraform via
-docker" §"State persistence via bind-mount" (lines 233-252) +
-§"The UID/GID alignment gotcha" §" example block" (lines 264-272)
-
-**Proposed fix**: replace `/work` with `/state` everywhere in the
-chapter's terraform-via-docker section; replace `--workdir /work` with
-`--workdir /state/tf-source/embedded-terraform` (or note that WorkDir
-points at the materialised source dir under the bind-mount). Rewrite
-the "HCL is not bind-mounted" prose to acknowledge that the embedded
-HCL is materialised under `<stateDir>/tf-source/<source-name>/` per
-chapter 31 §"embedded-terraform layout" (cross-link), and the
-bind-mount carries both state and HCL.
-
-## Issue 7: chapter 21 §"`--gslb-compare` workflow" misframes the k8s vantage prereq
+## Issue 7 (LOW) — CHANGELOG.md missing Sprint 5 entry
 
 **Severity**: low
-**Status**: open
-**Description**: Chapter 21 line 173:
+**Status**: open (staff or integrator at tag-cut)
 
-> 1. The runner enumerates configured vantages. By default that's
->    `local` plus `k8s` (when an ops-installed cluster is reachable)
->    plus any `ssh:<target>` entries the workspace config marks as a
->    probe vantage.
+**Description**: CHANGELOG.md "Unreleased" section has detailed
+entries for Sprints 0-4 but **no Sprint 5 entry**. Sprint 5's
+deliverables (book retarget, `book-build` CI job, cspell sweep, IBM
+residue closure on `.go` files, refgen regeneration) warrant a
+sentence each.
 
-Two inaccuracies:
+**Files affected**: `CHANGELOG.md`.
 
-1. **k8s vantage prereq**: the actual check at
-   `internal/cli/test.go:303` is `if k8s.DefaultKubeconfigPath() != ""
-   { specs = append(specs, "k8s") }` — i.e., presence of a kubeconfig
-   on disk, NOT whether the ops pod is installed. The DNS probe runs
-   as a one-shot Job, not via the ops pod (Job mode reuses the bundled
-   tools image with `jobToolCmdOverride` to bypass the ENTRYPOINT).
-   The chapter's "ops-installed cluster" framing implies a wider
-   prereq than the binary actually checks.
-2. **ssh-vantage selection**: the actual loop at
-   `internal/cli/test.go:307-325` includes **every** `cctx.Workspace.Targets`
-   entry, not just those marked as a probe vantage. There is no
-   "marked as a probe vantage" config field on `Targets` — every
-   registered target gets fanned out.
+**Proposed fix**: integrator adds the Sprint 5 entry at tag-cut time.
+Validator Issue 2/3 + staff Issue priorities table give the line-items
+verbatim.
 
-**Files affected**: `book/src/21-dns-testing-gslb.md` §"The
-`--gslb-compare` workflow" lines 172-174
+## Issue 8 (LOW) — Architect Issue 3 (filename `25-cos-supply-chain.md`) carries — chapter title is "S3 (and optional ECR) supply chain" but the file slug, the SUMMARY.md TOC entry, and every cross-link still use "cos-supply-chain"
 
-**Proposed fix**: rewrite line 173 to: "1. The runner enumerates
-configured vantages: `local` always; `k8s` when a kubeconfig is
-reachable on the host (the probe runs as a one-shot Job — the ops pod
-isn't required); plus every entry in the workspace's `targets:` block,
-each as `ssh:<name>`." This matches the implementation and is a tighter
-contract for the user.
+**Severity**: low (cosmetic; mdbook serves the file fine)
+**Status**: open (deferred to Sprint 6 integrator — confirms architect plan)
 
-## Issue 8: chapter 21 §"Backend selection" overstates the k8s Job's image equivalence
+**Description**: Architect Issue 3 catalogued this; tech-writer
+confirms the file is still `25-cos-supply-chain.md` on disk, the
+SUMMARY.md TOC reads `[S3 (and optional ECR) supply chain](./25-cos-supply-chain.md)`,
+and 17 chapters cross-link to that path. The rename is mechanically
+straightforward (`git mv` + sed sweep) and should land in Sprint 6's
+first integrator commit before any new chapter content. Validator's
+`book-build` job will gate against breakage.
 
-**Severity**: low
-**Status**: open
-**Description**: Chapter 21 line 150:
+**Files affected**: `book/src/25-cos-supply-chain.md` (rename target),
+`book/src/SUMMARY.md`, 17 chapter cross-links.
 
-> **`--backend k8s`**: a one-shot Job in `roksbnkctl-test`. The pod's
-> image is the `roksbnkctl` binary itself (the same `:dev` /
-> `:v0.9.x` tag the Docker backend would pull); the Job's command is
-> `roksbnkctl test dns --target ... --type ... --server ... --backend
-> local -o json`, and the Job's stdout is collected via the k8s
-> backend's log-stream path. The vantage is the cluster's egress IP.
+**Proposed fix**: Sprint 6 integrator atomic rename per architect's
+Issue 3 plan.
 
-The "Job's image is the `roksbnkctl` binary itself" framing is correct
-in spirit but slightly misleading. Looking at
-`internal/exec/docker.go:67-68`:
+---
 
-```go
-"roksbnkctl": "ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:" + tag,
-```
+## Per-prose-surface verdict
 
-The `roksbnkctl` tool name aliases the **bundled `ibmcloud` tools
-image**. That image must carry both `ibmcloud` AND `roksbnkctl`
-binaries on PATH — that's a tools/docker/ibmcloud/Dockerfile contract
-(the Sprint 5 staff's notes about `jobToolCmdOverride` confirm this).
-The chapter says "the same `:dev` / `:v0.9.x` tag the Docker backend
-would pull" — accurate — but doesn't tell the reader that the image
-they need on the cluster is the **ibmcloud tools image** (not a
-separate `roksbnkctl` image). For a reader debugging a Job that fails
-to pull, the ImagePullBackOff diagnostic will name the
-`roksbnkctl-tools-ibmcloud:<tag>` image, and the chapter's framing
-sends them looking for a `roksbnkctl-cli:<tag>` image that doesn't
-exist.
-
-**Files affected**: `book/src/21-dns-testing-gslb.md` §"Backend
-selection for the probe" line 150
-
-**Proposed fix**: change to: "**`--backend k8s`**: a one-shot Job in
-`roksbnkctl-test`. The Job's pod runs the bundled tools image
-(`ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:<tag>` — the same image
-the in-cluster ops pod uses; it carries both `ibmcloud` and
-`roksbnkctl` on PATH). The Job's command is `roksbnkctl test dns
---target ... --backend local -o json`; the stdout is collected via the
-k8s backend's log-stream path. Vantage is the cluster's egress IP."
-
-## Issue 9: chapter 22 says iperf3 server is in `roksbnkctl-test` namespace; cross-reference to chapter 17 says LoadBalancer always — chapter 17 contradicts chapter 22 on Service type
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 22 §"What the suite measures" line 11 says:
-
-> The **server** runs in the cluster — a single bare Pod plus a
-> Service, deployed in the `roksbnkctl-test` namespace. Service type
-> is `ClusterIP` for east-west, `LoadBalancer` for north-south.
-
-Chapter 17 (per Sprint 4 tech-writer Issue 3 — still unfixed in the
-file as of Sprint 5 review) says at lines 322-330:
-
-> The `iperf3` test deploys a **server** Deployment + LoadBalancer
-> Service into `roksbnkctl-test`…
-
-The Sprint 4 issue 3 was filed and accepted but the chapter 17 prose
-wasn't updated in Sprint 4 or Sprint 5. Chapter 22 has the right shape
-(bare Pod + dynamic Service type); chapter 17 still claims Deployment
-+ LoadBalancer always. The two chapters disagree, and chapter 22's
-cross-link to chapter 17's "iperf3 server side" section sends the
-reader to a stale section.
-
-This is a Sprint 4 carry-over rather than new Sprint 5 drift, but
-chapter 22 is new this sprint and now actively contradicts chapter
-17, so the lower-effort fix is to update chapter 17 to match chapter
-22's accurate description.
-
-**Files affected**: `book/src/17-execution-backends.md` §"iperf3 server
-side" (lines 322-330) — this is the same section flagged as Sprint 4
-tech-writer Issue 3 (status: still open).
-
-**Proposed fix**: same as Sprint 4 issue 3 — replace "Deployment +
-LoadBalancer Service" with "bare Pod + Service (ClusterIP for
-east-west, LoadBalancer for north-south)" and rename the resource to
-`roksbnkctl-iperf3` (not `roksbnkctl-iperf3-server`).
-
-## Issue 10: PRD 03 §"DNS probe" §"Default backends" says "default both vantages always"; the implementation defaults to local single-vantage
-
-**Severity**: low
-**Status**: open
-**Description**: PRD 03 line 255:
-
-> **Default backends** | `local` **and** `k8s` (run both, surface both
-> answers — see GSLB note)
-
-The actual implementation defaults to `local` only when `--backend`
-isn't passed (`internal/cli/cluster.go:338-342` — `perToolDefaultBackend`
-has no `dns` row, so it falls through to the `"local"` default at
-`resolveBackendSpecWith` line 367). Multi-vantage fan-out is opt-in
-via `--gslb-compare`.
-
-Chapter 17's per-tool defaults table (`book/src/17-execution-backends.md:87`)
-documents this correctly:
-
-> | `dns` | `local` | `local`, `k8s`, `ssh:<target>` | Single-vantage
-> by default; `--gslb-compare` fans out across configured vantages for
-> GSLB validation. |
-
-Chapter 21 §"Backend selection" line 154 also documents this correctly:
-
-> The default backend per `roksbnkctl` invocation (when `--backend` is
-> omitted and there's no `exec.dns.backend` in workspace config) is
-> `local`. To run GSLB cross-vantage you generally pass
-> `--gslb-compare`, which fans out instead of picking a single
-> vantage.
-
-So the chapters are internally consistent and accurate against the
-binary. The drift is in PRD 03 — its "Default backends" row is
-aspirational and doesn't match what shipped. The Sprint 5 architect's
-resolved\_architect.md Issue 7 already calls this out:
-
-> PRD 03 §"DNS probe" §"Default backends" said "default both vantages
-> always", but PLAN.md and the staff implementation chose the more
-> conservative "opt-in fan-out" — flagging the PRD as slightly
-> aspirational; we'll refresh PRD 03 to match in a follow-up.
-
-**Files affected**: `docs/prd/03-EXECUTION-BACKENDS.md` line 255
-
-**Proposed fix**: update PRD 03's "Default backends" row to
-`local` (single-vantage; multi-vantage opt-in via `--gslb-compare`)
-to match what shipped. Or add a note "v0.9 ships single-vantage default
-+ opt-in `--gslb-compare`; multi-vantage default is a v1.x
-consideration if user feedback shows it's wanted."
-
-## Issue 11: PLAN.md §"What's deliberately deferred to post-v1.0" still lists `--require-divergence` as deferred to v1.1
-
-**Severity**: low
-**Status**: open
-**Description**: PLAN.md line 663:
-
-> - DNS probe `--require-divergence` CI assertion mode (v1.1)
-
-Staff actually landed `--require-divergence` this sprint at
-`internal/cli/test.go:129`:
-
-```go
-testDNSCmd.Flags().BoolVar(&flagDNSRequireDivergence, "require-divergence", false, "with --gslb-compare: exit non-zero if NO divergence is observed (CI assertion that GSLB is doing something)")
-```
-
-The behaviour is wired in `runDNSGSLBCompare` lines 356-359 (non-zero
-exit when `flagDNSRequireDivergence && !cmp.GSLBDivergence`). Chapter
-21 §"Asserting divergence in CI" (lines 326-336) documents both the
-flag and the `jq -e` form correctly per the integrator's prose update
-this pass.
-
-PLAN.md's deferred-list bullet is now stale.
-
-**Files affected**: `docs/PLAN.md` line 663
-
-**Proposed fix**: delete the bullet from "What's deliberately deferred
-to post-v1.0" and add a one-line acknowledgement under PLAN.md §"v0.9
-(M3)" (around line 631-633) that `--require-divergence` landed —
-something like "DNS probe `--require-divergence` CI assertion flag (in
-addition to the `jq -e` user-side equivalent)".
-
-## Issue 12: stale `sshseam` build-tag comment in `internal/exec/ssh_wrapper_test.go`
-
-**Severity**: low (test-file readability)
-**Status**: open
-**Description**: `internal/exec/ssh_wrapper_test.go` opens with a
-docstring comment block (lines 30-36):
-
-```go
-// Build tag: gated behind `sshseam` until staff lands the
-// SetSSHClientFactory seam (Sprint 4 validator Issue 3 carry-over).
-// The integrator drops the tag once the seam lands.
-//
-// Run with:
-//
-//	go test -tags sshseam -run SSHWrapper ./internal/exec/...
-```
-
-…but the build tag was dropped during Sprint 5 (per validator's Issue
-5 self-resolved note + verified — the file has no `//go:build` or
-`// +build` directive on lines 1-3). The test runs in the default `go
-test ./...` suite now.
-
-A future contributor reading the file's docstring will be confused
-about why the documented build tag isn't there. The "Run with" line
-also points at a `-tags sshseam` invocation that no longer matches the
-test setup.
-
-**Files affected**: `internal/exec/ssh_wrapper_test.go` lines 30-36
-
-**Proposed fix**: drop the "Build tag: gated behind `sshseam`…" prose;
-update the "Run with" line to plain `go test -run SSHWrapper
-./internal/exec/...`. Mention in passing that the test was previously
-behind the seam tag, in case `git blame` or the carry-over note is
-cited elsewhere.
-
-## Issue 13: `cspell.json` has duplicate `miekg` entry
-
-**Severity**: low
-**Status**: open
-**Description**: `cspell.json` words list has `miekg` listed twice
-(verified via `grep -n miekg cspell.json` — two distinct lines, both
-in the user's word list array). Duplicates don't break cspell but
-they make the diff harder to read on future word-list changes.
-
-**Files affected**: `cspell.json`
-
-**Proposed fix**: remove one of the two `miekg` entries.
-
-## Issue 14: chapter 22's iperf3 server pod default image conflict — bundled image required by SCC, but config default is `networkstatic/iperf3:latest`
-
-**Severity**: low (already mostly addressed in chapter 22 prose; one
-sharper one-line fix possible)
-**Status**: open
-**Description**: Chapter 22 §"The bundled image and the `runAsNonRoot`
-constraint" (lines 82-117) correctly documents the conflict:
-`Iperf3DefaultImage = "networkstatic/iperf3:latest"` (per
-`internal/k8s/iperf3.go:22`) runs as root and fails OpenShift
-`restricted-v2` admission; the bundled
-`ghcr.io/jgruberf5/roksbnkctl-tools-iperf3:<v>` image runs as UID 1000
-and passes admission.
-
-The chapter prose at line 105-114 walks the user through setting
-`test.throughput.image` in workspace config to switch to the bundled
-image. That's the right guidance.
-
-What's missing: the `roksbnkctl init --auto` flow doesn't seed the
-workspace config with the bundled image as the default —
-`internal/config/workspace.go:124-129` defines `ThroughputCfg.Image`
-as a string with no init-time default, and `iperf3.DeployIperf3` falls
-back to `networkstatic/iperf3:latest` when the field is empty (per
-`iperf3.go:42-46`). So the **out-of-the-box** behaviour on OpenShift
-is "the iperf3 fixture fails admission" until the user reads chapter
-22 and edits the config.
-
-For v0.9 release polish, either (a) staff lands a one-line change to
-flip `Iperf3DefaultImage` to the bundled image (which is what every
-real user wants on OpenShift, and is what the chapter recommends), or
-(b) chapter 22 surfaces the workaround more prominently in the
-"Troubleshooting" / first-encounter prose so a user who runs
-`roksbnkctl test throughput` against a fresh ROKS cluster doesn't
-hit the SCC error before reading the bundled-image section.
-
-**Files affected**: `book/src/22-throughput-testing.md` §"The bundled
-image and the `runAsNonRoot` constraint" (the lead-in could move
-earlier in the chapter, before "Reading the output", so it's
-encountered before the user runs the command)
-
-**Proposed fix**: low-effort doc fix — move the bundled-image
-explanation earlier (after §"The two modes", before §"Reading the
-output") so a user reading the chapter top-to-bottom hits the SCC
-gotcha before being shown sample output. Higher-effort: file with
-staff to flip `Iperf3DefaultImage` so the out-of-box behaviour is
-admission-clean. Both are reasonable; the doc move is the v0.9
-non-blocker.
-
-## Issue 15: chapter 21's record-type list at line 68 + line 124 doesn't reflect what `dns.StringToType` actually accepts
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 21 has two places that enumerate the
-supported record types:
-
-1. Line 68 (flag table `--type` row): "`A`, `AAAA`, `CNAME`, `MX`,
-   `NS`, `TXT`, `SRV`, `SOA`, `PTR`, `CAA`, `DS`, `DNSKEY`, `ANY`, etc."
-2. Line 124 (table prose row): same list with "etc."
-
-The actual `ParseDNSType` (`internal/test/dns.go:323-332`) accepts
-**any name in `dns.StringToType`** — that's the full miekg/dns table,
-which includes (beyond what the chapter lists): `URI`, `SVCB`, `HTTPS`,
-`SSHFP`, `TLSA`, `OPENPGPKEY`, `LOC`, `NAPTR`, `RP`, `AFSDB`, `HINFO`,
-`MINFO`, `RRSIG`, `NSEC`, `NSEC3`, `NSEC3PARAM`, etc. The "etc." in
-the chapter's list is intentional but vague — a user wondering "does
-`--type HTTPS` work?" has no source-of-truth answer.
-
-The unit test at `internal/test/dns_test.go:141-187` covers 10 of the
-chapter's 13 listed types (no `DS`, `DNSKEY`, `ANY` test cases). The
-absence of `DS`/`DNSKEY` in the test isn't a documentation issue but
-worth noting for the validator follow-up; the underlying parser
-accepts them.
-
-**Files affected**: `book/src/21-dns-testing-gslb.md` lines 68 and 124
-
-**Proposed fix**: replace the explicit list with the canonical source:
-"any record type miekg/dns's `dns.StringToType` table accepts — the
-PRD 03 §"DNS probe" calls out the common subset (A, AAAA, CNAME, MX,
-NS, TXT, SRV, SOA, PTR, CAA, DS, DNSKEY, ANY); see [the miekg/dns
-types.go upstream] for the full list including HTTPS, SVCB, TLSA, etc."
-With a stable upstream link that names the file. This is more honest
-than "etc." and makes the contract precise.
-
-## Verification gates
-
-- `go build ./...` ✓ (verified compiles)
-- Chapter 20/21/22 `*Coming in Sprint 5*` markers: ✓ none (grep
-  returns zero hits in chapters 20/21/22; chapters 23, 25, 26, 27, 28,
-  29, 30, 31, 32 still have `*Coming in Sprint 6*` per the explicit
-  forward-reference convention)
-- Chapter 17 has terraform-via-docker subsection at line 229 ✓
-- Chapter 21 documents both `--require-divergence` and `jq -e` form
-  per Sprint 5 integrator update ✓ (lines 326-336)
-- All `roksbnkctl test dns` flag names match `internal/cli/test.go`
-  lines 123-129 ✓ (`--target` `--type` `--server` `--iterations`
-  `--timeout` `--gslb-compare` `--require-divergence`)
-- All `roksbnkctl up/plan/apply/destroy --backend docker` plumb
-  through `internal/cli/lifecycle.go::runTerraformLifecycleDocker` ✓
-- `book/src/SUMMARY.md` chapter titles match h1 of each chapter file
-  ✓ (chapters 20 / 21 / 22 — exact match)
-- Cross-references resolve (sampled): chapters 12 / 17 / 18 / 20 / 21
-  / 22 / 26 anchors checked; PRD 03 + PRD 05 GitHub URLs use canonical
-  form per Sprint 1 Issue 9 fix
-- `cmd/roksbnkctl --version`: ldflags-driven via
-  `internal/version.Version` (per `internal/exec/docker.go:75-93`'s
-  `toolImageTag` resolver); a release-built binary will report `v0.9`
-  via `-ldflags="-X internal/version.Version=v0.9"` per the standard
-  Go tag-build pattern. The build setup is documented in
-  `Makefile` + `chapter 31 — Building from source` (currently a
-  Sprint 6 stub — not blocking v0.9 since the integrator can do the
-  ldflags pass at tag-time).
-- README has no v0.9 / Sprint 5 highlight bullet — filed as **Issue 1
-  (BLOCKER)**
-- No `CHANGELOG.md` exists — filed as **Issue 2 (BLOCKER)**
-- v0.9 release checklist in `docs/E2E_TEST.md` lines 166-274 is
-  comprehensive and actionable for the integrator at tag time ✓
-
-## v0.9 release-gate assessment (PLAN.md §"Sprint 5 — Gate to Sprint 6")
-
-PLAN.md gate items at lines 426-431:
-
-| Gate item | Status |
+| Surface | Tech-writer verdict |
 |---|---|
-| M3 merged + tagged `v0.9` | **blocked on Issue 1 + Issue 2** |
-| Phase L-DNS passes including the GSLB divergence detection | ✓ (LD0-LD8 + LD10 wired in `scripts/e2e-test-backends.sh`; LD9 yellow-skipped per Sprint 6 SSH-e2e deferral; integrator-validated DRY_RUN walkthrough) |
-| terraform `--backend docker` runs a real `up` cycle end-to-end | ⚠ deferred to integrator's manual sign-off per `docs/E2E_TEST.md` §"v0.9 release checklist" item 3 (no IBM Cloud account on the sprint VM) |
-| Three chapters published; testing section of book complete; total ~22 chapters live | ✓ (chapters 20 / 21 / 22 + chapter 17 expansion all in `main`; SUMMARY.md TOC updated; book builds cleanly per CI; Issues 3-9 are quality fixes, not blockers) |
+| `book/src/preface.md` | ✓ ships clean; v0.9 framing accurate |
+| `book/src/SUMMARY.md` | ✓ ships clean; structure matches Parts I-X |
+| `book/src/01-what-is-bnk.md` | ✓ ships clean; F5 framing intact |
+| `book/src/02-why-roks.md` | ⚠ filename + the chapter title "Why EKS + self-managed SR-IOV node groups" mismatch (filename retained for fork-relationship reasons per architect plan; SUMMARY label is correct); one `awsbnkctl up cluster` reference (Issue 3) |
+| `book/src/03-what-roksbnkctl-does.md` | ⚠ filename mismatch (same architect-plan rationale); content reads clean |
+| `book/src/04-installation.md` | ✓ ships clean |
+| `book/src/05-doctor.md` | ✓ ships clean |
+| `book/src/06-workspaces.md` | ⚠ two `cluster` subverb cross-links (Issue 3) |
+| `book/src/07-quick-start.md` | ✓ ships clean — the headline first-time-reader chapter; concrete, runnable, end-to-end |
+| `book/src/08-cluster-phase.md` | ✗ blocker for first-time readers if the `cluster` subtree doesn't ship (Issue 3) |
+| `book/src/09-registering-existing-cluster.md` | ✗ same as 08 — entire chapter against an absent verb (Issue 3 + architect Issue 5) |
+| `book/src/10-deploying-bnk-trials.md` | ⚠ `bnk up`/`bnk down` subverb framing (Issue 3) |
+| `book/src/11-tearing-down.md` | ⚠ three-verb framing rests on `cluster down` + `bnk down` (Issue 3) |
+| `book/src/12-workspace-config.md` | ⚠ schema row L119 (Issue 3); otherwise clean |
+| `book/src/13-terraform-variables.md` | ✓ ships clean; architect Issue 1 (auto-regen) closed by staff |
+| `book/src/14-credentials-resolver.md` | ✓ ships clean post-rewrite |
+| `book/src/15-ssh-targets.md` | ✓ ships clean |
+| `book/src/16-on-flag-ssh-jumphosts.md` | ✓ ships clean |
+| `book/src/17-execution-backends.md` | ⚠ `IBMCloudAPIKey` references (Issue 5) |
+| `book/src/18-choosing-backend.md` | ⚠ worked-example IBM-creds output (Issue 5) |
+| `book/src/19-in-cluster-ops-pod.md` | ✗ blocker per Issue 1 — entire chapter describes the un-retargeted IBM ops-pod flow |
+| `book/src/20-connectivity-testing.md` | ✓ ships clean |
+| `book/src/21-dns-testing-gslb.md` | ✓ ships clean |
+| `book/src/22-throughput-testing.md` | ✓ ships clean; iperf3 image-tag drift per Sprint 4 tech-writer Issue 1 is resolved via staff Issue 1 documenting the decision |
+| `book/src/23-e2e-test-plan.md` | ✓ ships clean |
+| `book/src/24-day-2-ops.md` | ✓ ships clean; the OpenShift-extensions § L282-295 is legitimately scoped (BNK clusters do surface those types on EKS via CRDs — OK as written) |
+| `book/src/25-cos-supply-chain.md` | ⚠ L5 self-reference typo (Issue 5); filename rename pending (Issue 8); otherwise clean |
+| `book/src/26-troubleshooting.md` | ✓ ships clean; sub-anchors landed per architect Issue 6 closure |
+| `book/src/27-command-reference.md` | ✓ ships clean — confirms `cluster`/`bnk` subtrees are absent (which is the inverse problem of Issue 3) |
+| `book/src/28-configuration-reference.md` | ⚠ L65 + L111 OpenShift references (cosmetic) |
+| `book/src/29-terraform-variable-reference.md` | ✓ ships clean — AWS-shaped variables throughout, regenerated this sprint |
+| `book/src/30-glossary.md` | ✗ Issue 2 high-severity (factual EKS errors + unswept IBM residue) |
+| `book/src/31-building-from-source.md` | ✓ ships clean |
+| `book/src/32-extending-roksbnkctl.md` | ⚠ ibmcloud tool-map worked examples (Issue 5) |
+| `book/src/33-data-plane-decision.md` | ✓ ships clean; the upstream-roksbnkctl decision-narrative paragraphs are legitimate fork-relationship context |
+| `README.md` | ✗ Issue 6 (5 sprints stale) |
+| `CHANGELOG.md` | ⚠ Issue 7 (no Sprint 5 entry) |
+| `MIGRATING.md` | ✓ ships clean post-Sprint 4; "scaffolding" header preserves the it's-honest-about-state framing |
 
-The two **release blockers** (Issues 1 + 2) are doc-only, low-effort,
-and can be landed by the integrator in a single follow-up commit. The
-other 13 issues are quality polish that doesn't gate the v0.9 tag —
-the chapters as written are usable and the implementation is sound.
+## Dogfooding-loop stuck-points
 
-Recommendation: integrator lands Issue 1 (README highlight bullet) +
-Issue 2 (CHANGELOG.md) before tagging `v0.9`. Issues 3, 4, 5, 6 are the
-high-value chapter-correctness fixes for a v0.9.1 polish patch (or a
-single follow-up commit before tag if convenient).
+Walked the SUMMARY.md from the preface through Part X as a
+first-time-reader. Stuck-point count + severity:
 
-## Summary
+| Stuck-point | Severity | Issue # |
+|---|---|---|
+| Chapter 7 (quick-start) is clean — no first-time-reader friction; the `awsbnkctl init` → `up` → `test` → `down` path reads correctly | — | — |
+| Chapter 8 reader runs `./bin/awsbnkctl cluster up` → "unknown command" → bounces | blocker | Issue 3 |
+| Chapter 9 reader runs `awsbnkctl cluster register` → same outcome | blocker | Issue 3 |
+| Chapter 19 reader runs `awsbnkctl ops install` → succeeds but pod is named `roksbnkctl-ops`, Secret is `roksbnkctl-ibm-creds`, $IBMCLOUD_API_KEY env var is set; reader concludes the AWS retarget didn't ship | blocker | Issue 1 |
+| Chapter 30 glossary reader sees "EKS = managed OpenShift on AWS" and re-evaluates their understanding of EKS | high | Issue 2 |
+| Cross-references chapter 26 §"orphan AWS resources" → dead anchor | medium | Issue 4 |
+| README.md status block says nothing works yet → reader bounces back to the repo front door confused about what's shipping | medium | Issue 6 |
 
-15 issues filed for Sprint 5: 2 high (v0.9 release blockers — README
-highlight + CHANGELOG), 1 high doc-correctness (chapter 21 single-
-vantage schema string + JSON shape), 3 medium (chapter 21
-`edns_client_subnet` field that doesn't exist, parallel-vs-serial
-vantage execution, chapter 17 `/work` vs `/state` mount path), 9 low.
+Skew: 3 blockers, 1 high, 2 medium. The three blockers all root-cause
+at the same shape (book describes a surface that the AWS retarget
+hasn't lifted across — `cluster` subtree, `bnk` subtree, IBM ops-pod
+installer).
 
-Top three noteworthy observations not filed as issues:
+## Cross-document drift verdict
 
-1. **Chapter 21 is excellent flagship-chapter writing.** The GSLB
-   problem statement, per-vantage probing rationale, sample F5 BIG-IP
-   Next scenarios, and CI-assertion section are all on-tone and
-   technically rich. The schema-shape error (Issue 3) is a single
-   load-bearing fix that brings the rest of the chapter from "great
-   draft" to "release-ready spec".
-2. **Chapter 22's bundled-image / SCC story is well-explained.** Even
-   though the out-of-box default still pulls a root-running image,
-   the chapter walks the user through the workspace-config override
-   correctly. Issue 14 is a chapter-flow improvement, not a
-   correctness fix.
-3. **The 23 new validator tests have clear, intent-documenting
-   names.** `TestProbe_RecordTypes_AllParseAndProjectType`,
-   `TestProbe_Server_ClusterFromLocalBackendErrors`,
-   `TestProbe_Rcode_NXDOMAIN/SERVFAIL/REFUSED/Timeout` follow the
-   Sprint 4 tech-writer Issue 14 bar. Top-of-file docstring for
-   `dns_test.go` explains the in-process miekg/dns server fixture
-   shape clearly. The `TestK8sBackend_Run_Job_*` split (Sprint 4
-   Issue 14 carry-over) landed cleanly.
+Drift caught between PLAN / PRDs / book / README / CHANGELOG /
+MIGRATING:
 
-Drift between PRD 03 / PRD 05 / PLAN.md and delivered surface:
+- **README ↔ book preface**: README says M0, preface says v0.9. Issue 6.
+- **CHANGELOG ↔ PLAN**: PLAN documents Sprint 5; CHANGELOG has no Sprint
+  5 entry. Issue 7.
+- **Book chapter 19 ↔ `internal/exec/k8s_install.yaml`**: chapter
+  prose and YAML template are both still IBM-shaped; staff's IBM-residue
+  closure didn't touch the YAML (Issue 2 in staff). The "297 → 1 hit"
+  headline only counted `.go` files. Issue 1.
+- **Book chapter 17 ↔ `internal/exec/creds.go`**: chapter L442 + L629
+  describe `Credentials.IBMCloudAPIKey` which staff deleted. Issue 5.
+- **Book chapters 8-12 ↔ `internal/cli/`**: chapters describe
+  `cluster up/down/show/register` + `bnk up/down`; binary has no such
+  subtrees. Issue 3.
+- **Book chapter 30 ↔ everything**: glossary contradicts the rest of
+  the book on the EKS framing. Issue 2.
 
-- **PRD 03 §"DNS probe" §"Default backends"** still says "default both
-  vantages always"; implementation defaults to `local` single-vantage
-  with `--gslb-compare` opt-in (Issue 10 — Sprint 5 architect's
-  resolved log already flagged this for a future PRD refresh).
-- **PRD 03 §"DNS probe" §"JSON output schema"** specifies the
-  `edns_client_subnet` field; implementation doesn't emit it (Issue 4).
-- **PLAN.md "deferred to post-v1.0"** still lists `--require-divergence`
-  as v1.1; staff landed it this sprint (Issue 11).
-- **PRD 05 §"Phase L-DNS"** matches `scripts/e2e-test-backends.sh`'s
-  Phase L-DNS implementation; LD9 + M5/M6 yellow-skipped per the
-  Sprint 6 SSH-e2e deferral; `docs/E2E_TEST.md` §"v0.9 release
-  checklist" calls this out clearly. No drift.
+## Gate-criteria audit (PLAN.md § Sprint 5)
 
-**v0.9 release gate criteria assessment**: M3 merged + tagged `v0.9`
-is **blocked on Issues 1 + 2** (README highlight + CHANGELOG);
-otherwise the gate items are met. The integrator can land both fixes
-in a single follow-up commit (~30 minutes) before tagging.
+| Gate criterion | Status |
+|---|---|
+| `mdbook build book/` clean | TBD-by-integrator (mdbook not on local PATH; `book-build` CI job will exercise on first push) |
+| Web book deploys to GitHub Pages | TBD-by-integrator (per validator Issue 1, deploy is local-driven via `make release-publish`; tag-cut workflow) |
+| Cross-link audit clean | ⚠ 1 genuine broken anchor (Issue 4); 0 broken file targets |
+| cspell clean | ✓ validator Issue 3 confirms zero findings |
+| All chapter bodies retargeted at AWS / EKS | ✗ chapters 8, 9, 19 still describe IBM / roksbnkctl-only surfaces (Issues 1, 3); chapter 30 has factual errors (Issue 2) |
+
+## Issues filed: 8
+
+- **2 blocker** (Issues 1 — IBM ops-pod installer + chapter 19 drift; 3 — `cluster`/`bnk` subverbs absent)
+- **2 high** (Issues 2 — glossary; conceptually scoped sub-issue of 3 — chapters 8/9/11 cluster verbs)
+- **3 medium** (Issues 4 — anchor; 5 — chapters 17/18/32 IBM residue; 6 — README stale)
+- **1 low** (Issue 7 — CHANGELOG; Issue 8 — cos→s3 rename deferred per architect plan)
+- 0 roadmap
+
+## Sibling cross-references
+
+- **Architect Issue 5** (chapter 9 `cluster register` may not exist):
+  confirmed and broadened — the entire `cluster`/`bnk` subtree is
+  absent (this tech-writer's Issue 3).
+- **Architect Issue 1** (auto-regen pending): closed by staff this
+  sprint; chapters 27, 29 are clean post-regeneration.
+- **Architect Issue 3** (chapter 25 filename rename): confirmed; this
+  tech-writer's Issue 8.
+- **Architect Issue 6** (chapter 26 sub-anchors): confirmed closed;
+  the `### AWS LoadBalancer` and `### DNS` sub-anchors land cleanly.
+- **Staff Issue 1** (iperf3 image-tag decision): chapter 22 reads
+  clean against the decision; PSA callout in chapter 22 L52-83 is
+  present.
+- **Staff Issue 2** (`k8s_install.yaml` IBM-Secret retire deferred):
+  upgrade to **blocker** when read together with chapter 19
+  (this tech-writer's Issue 1). The deferral is the entire reason
+  Issue 1 fires.
+- **Validator Issue 1** (book.yml deploy posture): architecture
+  decision; tech-writer agrees with the validator recommendation to
+  keep local-driven publish + add an HTML-only gh-pages deploy on tag
+  push in Sprint 6.
+- **Validator Issue 2/3** (book-build CI job + cspell): closed; the
+  hard gate is in place for future PRs.
+- **Validator Issue 5** (spellcheck.yml overlap): defer to Sprint 6
+  per validator plan; no tech-writer surface impact.
+
+---
+
+## AWS-retarget completeness verdict
+
+Approximately **~80% of book by chapter count** is AWS-retargeted
+cleanly (28/35 markdown files ship clean). The remaining ~20% — chapters
+8, 9, 10, 11, 12, 19, 30 plus README — carry the load-bearing residue
+catalogued above. The architect's "12+ chapters rewritten" headline
+captures the work delivered; the missed surface is concentrated in the
+cluster-lifecycle subtree (8-11) and the ops-pod subtree (19), both of
+which depend on staff or v1.x-feature work that didn't land this sprint.
+
+## IBM-residue closure verdict
+
+**`.go` surface**: staff's "297 → 1" is accurate and the residual hit
+in `internal/config/secrets.go` is intentional (legacy-keychain cleanup
+on workspace delete).
+
+**Non-`.go` surface** (the part the headline didn't count): substantial
+residue survives in `internal/exec/k8s_install.yaml` (the embedded
+ops-install manifest is entirely IBM-shaped — see Issue 1) and in 7
+book chapters (Issues 1, 2, 5). Staff Issue 2 acknowledged the YAML
+deferral but the headline understates the scope of the deferral.
+
+## mdbook build verdict
+
+**TBD-by-integrator**. mdbook is not on the local sandbox PATH; the new
+`book-build` CI job in `ci.yml` will exercise it on the first
+post-merge run. Static analysis: 361 cross-links resolve to existing
+files; 19 anchor candidates flagged of which 1 is a genuine break
+(Issue 4) and 18 are slug-rule artefacts that mdbook handles. The 0
+broken file targets is the load-bearing result for the build pass.
+
+## Ready-for-Sprint-6 verdict
+
+**Conditional pass.** Sprint 5 lands the bulk of the book retarget at
+quality. The two blocker-class issues (Issue 1 — ops-pod IBM residue
+end-to-end; Issue 3 — `cluster`/`bnk` subverbs in the book against
+absent binary surface) carry into Sprint 6 hardening per the
+sprint-close PLAN. The v0.9 milestone gate sits between Sprint 5 close
+and Sprint 6 close — the integrator can cut a Sprint 5 commit safely
+now, but **v0.9-tagged release is not ready until at minimum Issue 3
+(via path b — annotate chapters as v1.x feature) and Issue 6 (README
+stale) land**. Issue 1 strictly needs Sprint 6 staff to retarget the
+installer YAML; the integrator can document this as a known v0.9
+limitation if a v0.9 tag is wanted before Sprint 6 closes.
+
+SPIKE DEFERRAL carries — book content describes the design
+as-implemented (which is the right call for the retarget sprint), not
+as-validated against live AWS; PRD 07's operator-run spike still gates
+the v1.0 tag.

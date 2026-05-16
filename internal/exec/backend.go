@@ -123,7 +123,7 @@ type HostMount struct {
 // "backend not implemented yet" error pointing at PRD 03.
 //
 // Empty spec defaults to "local" — matches the per-tool default for
-// ibmcloud and terraform per PLAN.md Sprint 3.
+// terraform per PLAN.md Sprint 3.
 func ResolveBackend(spec string) (Backend, error) {
 	if spec == "" {
 		spec = "local"

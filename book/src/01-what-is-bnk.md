@@ -43,11 +43,11 @@ Deeper chapters reference these names; you don't need to memorise them now. The 
 
 BNK runs on a **conformant Kubernetes cluster**. F5 publishes a support matrix — read it for definitive answers — but in practice you'll see BNK deployed on:
 
-- **Managed Kubernetes**: ROKS (IBM Cloud's managed OpenShift), OpenShift Dedicated, EKS, AKS, GKE.
+- **Managed Kubernetes**: EKS (AWS), AKS (Azure), GKE (Google Cloud), ROKS (IBM Cloud), OpenShift Dedicated.
 - **Self-managed OpenShift** on bare metal or VMs.
 - **Upstream Kubernetes** in private clouds, with an LB provider that BNK can integrate with.
 
-This book targets **ROKS specifically**. The next chapter explains why. The decisions and patterns documented here will translate to other Kubernetes flavours, but the bundled Terraform that `roksbnkctl` ships only knows how to provision ROKS.
+This book targets **EKS specifically** — Amazon's managed Kubernetes service, with self-managed SR-IOV-capable node groups layered on top for BNK's data-plane requirement. The next chapter explains why. The decisions and patterns documented here translate to other Kubernetes flavours, but the bundled Terraform that `awsbnkctl` ships only knows how to provision EKS clusters with the SR-IOV node group BNK needs.
 
 ## North-south and east-west, in one install
 
@@ -62,6 +62,6 @@ A single BNK install can handle both at once. Customer architectures often start
 
 Everything in this chapter is intentionally a sketch — enough to make the rest of this book legible. For definitive and up-to-date product information, including the full CRD reference, version compatibility matrix, sizing guidance, and license model, see F5's official BNK documentation: <https://clouddocs.f5.com/bigip-next/latest/>.
 
-The rest of this book focuses on deploying BNK with `roksbnkctl` and validating that the deployment works end-to-end. It does not duplicate F5's product documentation; it complements it.
+The rest of this book focuses on deploying BNK with `awsbnkctl` and validating that the deployment works end-to-end. It does not duplicate F5's product documentation; it complements it.
 
-For an at-a-glance view of how `roksbnkctl`'s components fit together — the four execution backends, the cluster, the jumphost, the IBM Cloud control plane — see the architecture diagram at the top of [Chapter 17 — Execution backends](./17-execution-backends.md). For the happy-path lifecycle from one command to the next, see [Chapter 7 — Quick start](./07-quick-start.md).
+For an at-a-glance view of how `awsbnkctl`'s components fit together — the four execution backends, the EKS cluster, the EC2 bastion, the AWS control plane — see the architecture diagram at the top of [Chapter 17 — Execution backends](./17-execution-backends.md). For the happy-path lifecycle from one command to the next, see [Chapter 7 — Quick start](./07-quick-start.md).

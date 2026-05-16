@@ -66,6 +66,50 @@ When your symptom isn't on this page: re-run with `--verbose` (the verbose outpu
 
 **Fix**: `aws ec2 describe-network-interfaces --filters 'Name=status,Values=available' --query 'NetworkInterfaces[*].[NetworkInterfaceId,Description]'` lists the orphans; `aws ec2 delete-network-interface --network-interface-id <id>` deletes each. The orphans don't accrue cost by themselves (idle ENIs are free) but they hold subnet IP-space allocations that block a subsequent `up cluster` against the same VPC.
 
+## AWS LoadBalancer
+
+These are the failure shapes a `awsbnkctl test connectivity` reader or a "why doesn't my BNK service answer" investigator most often lands on. Cross-linked from [Chapter 20 §"AWS LoadBalancer shapes the suite recognises"](./20-connectivity-testing.md).
+
+### Symptom: connectivity probe times out against the freshly-created `bnk` Service hostname
+
+**Root cause**: the AWS Load Balancer Controller takes 60-180 seconds after the Service is created to provision the NLB / ALB and register target group members. The DNS A record for the LB hostname propagates a beat after that. A connectivity probe run too eagerly hits the gap and reports `dial tcp: i/o timeout`.
+
+**Fix**: wait. `awsbnkctl k get svc <name> -w` shows the EXTERNAL-IP transitioning from `<pending>` to a hostname; once the hostname appears, `dig <hostname>` confirms DNS resolves; once DNS resolves, the probe succeeds. For CI, `awsbnkctl k wait --for=condition=Ready svc/<name> --timeout=5m` is the canonical wait.
+
+### Symptom: NLB / ALB created but target group health-check is RED
+
+**Root cause**: the security group on the worker nodes doesn't allow the NLB / ALB to reach the NodePort the kube-proxy assigns to the Service. The AWS Load Balancer Controller manages the ingress rule for ALBs automatically but not always for NLBs (the rules are scoped to the cluster security group; if the Service landed in a non-default namespace with custom SG annotations, the propagation lags).
+
+**Fix**: `aws elbv2 describe-target-health --target-group-arn <arn>` shows the per-target health reason. If it's `Target.Timeout`, check the worker node security group (`aws ec2 describe-security-groups --group-ids <sg>`); the inbound rules must allow the NLB's source IPs (or `0.0.0.0/0` for an internet-facing NLB) on the NodePort range. The AWS LB Controller logs (`awsbnkctl k logs -n kube-system deploy/aws-load-balancer-controller`) name the SG mutation it attempted.
+
+### Symptom: connectivity probe returns 502 / 503 from the LB hostname
+
+**Root cause**: the LB is up but the backend pods aren't answering — either they're not running, not ready, or are crashing on the request shape. 502 specifically often means the pod returned a malformed HTTP response (TLS terminating at the LB but the pod expects raw TCP; or vice versa).
+
+**Fix**: `awsbnkctl k get pods -n <ns> -l <selector>` shows the pod status; `awsbnkctl k describe pod -n <ns> <name>` shows the ReadinessProbe results. If the pod is `Ready 1/1` but the LB still returns 502, the listener protocol → target protocol mismatch is the next thing to check (NLB TLS-passthrough vs target TLS-terminate vs target plain HTTP).
+
+## DNS
+
+These are the failure shapes a `awsbnkctl test dns` or `awsbnkctl test dns --gslb-compare` reader most often lands on. Cross-linked from [Chapter 21 §"Worked example"](./21-dns-testing-gslb.md).
+
+### Symptom: `awsbnkctl test dns` returns `no such host` for a Route 53 record that should exist
+
+**Root cause**: the record was created against a private hosted zone associated with a different VPC, or the local resolver doesn't see the private zone. The DNS probe walks the standard Go resolver chain by default (`/etc/resolv.conf` → system resolver); if your laptop isn't on a VPN or VPC peering into the zone's associated VPC, the lookup misses.
+
+**Fix**: `awsbnkctl test dns --server cluster --target <name>` forces the probe to use the EKS cluster's CoreDNS / kube-dns resolver, which has the VPC's Route 53 Resolver in-path. From outside the VPC, `dig @<your-vpc-resolver-ip> <name>` confirms the private-zone resolution; from inside (via `--on jumphost`), the lookup works against the standard `.2` resolver address.
+
+### Symptom: `--gslb-compare` reports identical answers from all vantages, no divergence
+
+**Root cause**: either GSLB is misconfigured (the policy isn't routing requests differently per vantage), or all three vantages happen to be in the same Route 53 region (Route 53 geo-routing keys on EDNS-Client-Subnet, and if the resolver doesn't pass ECS, all vantages look identical to the policy).
+
+**Fix**: check the GSLB policy first (`aws route53 list-resource-record-sets --hosted-zone-id <id>`); confirm there's a weighted / latency / geo policy on the record, not a simple A record. Then check ECS propagation: `dig +nsid +subnet=0.0.0.0/0 <name>` from each vantage shows whether the resolver in-path is sending ECS. If ECS is being stripped, the GSLB policy can't differentiate by client geography.
+
+### Symptom: `awsbnkctl test dns` returns `SERVFAIL` against a `cluster` server target
+
+**Root cause**: the kubeconfig context that `awsbnkctl test` is using resolves to a different cluster (or a stale endpoint). The DNS probe with `--server cluster` exec's into a one-shot Pod with `dnsPolicy: ClusterFirst`, so it inherits the cluster's CoreDNS; if the cluster is gone but the kubeconfig says it's still there, the Pod schedule fails and the probe surfaces `SERVFAIL` as the friendliest available error.
+
+**Fix**: `awsbnkctl k get nodes` to verify the kubeconfig context resolves a real cluster. If it doesn't, `aws eks update-kubeconfig --name <cluster> --region <region>` rewrites it.
+
 ## CI-specific
 
 ### Symptom: nightly e2e run fails on phase D with `Error: Provider configuration is missing`

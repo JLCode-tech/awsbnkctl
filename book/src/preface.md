@@ -1,6 +1,6 @@
 # Preface
 
-> **Status:** scaffolding — Sprint 0 of the AWS retarget. The chapters that follow were inherited verbatim from [`roksbnkctl`](https://github.com/jgruberf5/roksbnkctl) and still describe the IBM Cloud / ROKS / OpenShift workflow. Sprint 5 rewrites every chapter that references IBM-Cloud-specific behaviour against the AWS EKS surface. Until then, swap "ROKS" → "EKS", "IBM Cloud" → "AWS", and "COS" → "S3" mentally while reading.
+> **Status:** v0.9 — Sprint 5 of the AWS retarget complete. The book is now retargeted at the `awsbnkctl` AWS-EKS surface end-to-end. The fork-relationship paragraph in [Chapter 32](./32-extending-roksbnkctl.md) is the only place that intentionally references the upstream `roksbnkctl` codebase.
 
 ## Foreword
 

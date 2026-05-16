@@ -124,7 +124,7 @@ func runClusterPlan(ctx context.Context) error {
 		ws = &config.Workspace{TFSource: config.TFSourceCfg{Type: "embedded"}}
 	}
 
-	tfws, err := tf.Open(ctx, cctx.WorkspaceName, ws, stateDir, "", os.Stdout, os.Stderr)
+	tfws, err := tf.Open(ctx, cctx.WorkspaceName, ws, stateDir, os.Stdout, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func runFullLifecyclePlan(ctx context.Context) error {
 		ws = &config.Workspace{TFSource: config.TFSourceCfg{Type: "embedded"}}
 	}
 
-	tfws, err := tf.Open(ctx, cctx.WorkspaceName, ws, stateDir, "", os.Stdout, os.Stderr)
+	tfws, err := tf.Open(ctx, cctx.WorkspaceName, ws, stateDir, os.Stdout, os.Stderr)
 	if err != nil {
 		return err
 	}

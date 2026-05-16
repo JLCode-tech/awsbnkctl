@@ -55,14 +55,13 @@ func runBackendChecks(ctx context.Context, cctx *config.Context, spec string) []
 //   - apiserver reachable (clientset construction succeeds)
 //   - ops pod Ready
 //   - ServiceAccount + ClusterRole + ClusterRoleBinding present
-//   - Sprint 3 (PRD 04 retarget): the ops-pod IRSA shape probe replaces
-//     the v0.x IBMCLOUD_API_KEY Secret + env check. The ops SA must
-//     carry the `eks.amazonaws.com/role-arn` annotation (the EKS
-//     pod-identity webhook injects `AWS_ROLE_ARN` +
-//     `AWS_WEB_IDENTITY_TOKEN_FILE` into the pod env from there); we
-//     surface whether the annotation is set and whether the pod env
-//     carries the injected vars. No static AWS access key ever lands
-//     in any Secret under the IRSA model.
+//   - IRSA shape probe (PRD 04 retarget): the ops SA must carry the
+//     `eks.amazonaws.com/role-arn` annotation (the EKS pod-identity
+//     webhook injects `AWS_ROLE_ARN` + `AWS_WEB_IDENTITY_TOKEN_FILE`
+//     into the pod env from there); we surface whether the
+//     annotation is set and whether the pod env carries the injected
+//     vars. No static AWS access key ever lands in any Secret under
+//     the IRSA model.
 //   - RBAC negative check: ops SA can NOT delete pods cluster-wide
 //
 // PRD 03 §"K8s" §"doctor extensions"; PRD 08 § "Decision" §"IRSA".
@@ -131,8 +130,7 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 		add("ops clusterrolebinding", doctor.StatusOK, "awsbnkctl-ops")
 	}
 
-	// Sprint 3 (PRD 04 retarget): IRSA-shape ops-pod check replaces
-	// the v0.x IBMCLOUD_API_KEY Secret probe. The ops ServiceAccount
+	// IRSA-shape ops-pod check (PRD 04 retarget). The ops ServiceAccount
 	// must carry the `eks.amazonaws.com/role-arn` annotation; the
 	// EKS pod-identity webhook reads it and injects `AWS_ROLE_ARN`
 	// + `AWS_WEB_IDENTITY_TOKEN_FILE` env vars into the pod. Doctor
@@ -307,8 +305,8 @@ func runDNSProbeCheck(ctx context.Context, cctx *config.Context) (doctor.Check, 
 // secret) but we still discard it locally — only the present/empty
 // verdict surfaces via the boolean return.
 //
-// Sprint 3 (PRD 04 retarget): replaces the v0.x IBMCLOUD_API_KEY env
-// probe with the IRSA shape. Failure modes this catches: the SA
+// PRD 04 retarget: the IRSA-shape probe replaces the v0.x cred-env
+// probe. Failure modes this catches: the SA
 // annotation missed (webhook had nothing to read); the pod was created
 // before the annotation landed and needs deletion; the eks pod-identity
 // webhook isn't running in the cluster.

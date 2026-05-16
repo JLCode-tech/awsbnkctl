@@ -16,7 +16,7 @@ Once you accept "BNK runs in Kubernetes", the next question is *which* Kubernete
 
 Self-managed Kubernetes on EC2 — `kubeadm`, or one of the build-it-yourself distributions — is a multi-week lift before you have a cluster. You provision the underlying instances, bootstrap the control plane, configure etcd backups, stand up DNS and load balancers, integrate with whichever cloud's IAM and storage you're on, build your own upgrade story, chase CVE patches across the control-plane fleet. Every one of those is solvable; very few of them are the *interesting* problem when what you actually want to do is evaluate BNK.
 
-Managed Kubernetes compresses that to one Terraform apply. You hand the provider a cluster spec, you get back a kubeconfig that authenticates against a control plane somebody else patches and backs up, and you proceed directly to deploying workloads. For an evaluation, a sales engineering demo, or a customer proof-of-concept, that compression is the whole point. The sibling fork `roksbnkctl` made the same call for IBM Cloud: managed ROKS over self-managed OpenShift, with the same rationale.
+Managed Kubernetes compresses that to one Terraform apply. You hand the provider a cluster spec, you get back a kubeconfig that authenticates against a control plane somebody else patches and backs up, and you proceed directly to deploying workloads. For an evaluation, a sales engineering demo, or a customer proof-of-concept, that compression is the whole point. The upstream `roksbnkctl` made the same call on IBM Cloud (managed ROKS over self-managed OpenShift); awsbnkctl carries the rationale across to AWS EKS.
 
 awsbnkctl's analogous call is **managed EKS over kubeadm-on-EC2**. The cost — you give up some control of the control plane to AWS — is precisely the cost we want to pay. The data plane is where awsbnkctl spends its complexity budget; the control plane is somebody else's problem.
 
@@ -53,7 +53,7 @@ If your workload doesn't need any of that — if you'd be happy with managed nod
 
 The Kubernetes flavours this book does **not** cover:
 
-- **AKS / GKE** — BNK runs on these, but `awsbnkctl up` won't provision them. Forkable from this codebase the same way `awsbnkctl` was forked from `roksbnkctl`; not in scope for v1.0.
+- **AKS / GKE** — BNK runs on these, but `awsbnkctl up` won't provision them. Forkable from this codebase the same way `awsbnkctl` was forked from `awsbnkctl`; not in scope for v1.0.
 - **ROKS / OpenShift on IBM Cloud** — see the upstream [`roksbnkctl`](https://github.com/jgruberf5/roksbnkctl) project, which is what this fork inherits from.
 - **Self-managed Kubernetes or OpenShift on bare metal / VMs** — F5's general BNK install path covers these; awsbnkctl does not.
 

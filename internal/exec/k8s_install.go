@@ -8,25 +8,24 @@ import (
 // `awsbnkctl ops install`. Embedded at build time so the binary is
 // self-contained — no need to ship a separate manifests directory.
 //
-// Template placeholders substituted at apply-time:
+// Template placeholders substituted at apply-time. The manifest still
+// carries inherited IBM-shape placeholders; the AWS retarget of
+// `ops install` (Sprint 6 hardening) replaces these with IRSA-based
+// surface so the ops Pod consumes AWS via projected SA token rather
+// than a long-lived Secret.
 //
-//	${IBMCLOUD_API_KEY_B64} — base64-encoded IBM Cloud API key from the
-//	                          workspace's resolved cred (the Secret's
-//	                          data field expects b64).
-//	${ROTATED_AT}           — RFC3339 timestamp of the apply, stamped on
-//	                          the Secret as an annotation so `ops show`
-//	                          can render rotation.
-//	${OPS_IMAGE}            — the awsbnkctl-tools-ibmcloud image ref;
-//	                          version-pinned to internal/cli.Version per
-//	                          the toolImages migration (no more :dev hard-
-//	                          code on prod-tag builds).
+//	${ROTATED_AT}  — RFC3339 timestamp of the apply, stamped on the
+//	                 Secret as an annotation so `ops show` can render
+//	                 rotation.
+//	${OPS_IMAGE}   — the awsbnkctl tools image ref; version-pinned to
+//	                 internal/cli.Version.
 //
 //go:embed k8s_install.yaml
 var k8sInstallYAML string
 
 // K8sInstallYAML returns the embedded install manifest template. The
-// CLI layer (internal/cli/ops.go) substitutes ${IBMCLOUD_API_KEY_B64},
-// ${ROTATED_AT}, and ${OPS_IMAGE} before applying.
+// CLI layer (internal/cli/ops.go) substitutes ${ROTATED_AT} and
+// ${OPS_IMAGE} before applying.
 //
 // Exported as a function (not a var) so callers can't accidentally
 // mutate the embedded copy at runtime — the substitution happens on

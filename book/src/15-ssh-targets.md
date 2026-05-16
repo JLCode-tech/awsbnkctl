@@ -6,19 +6,19 @@ If you arrived here from Chapter 16 looking for "where do I learn the full surfa
 
 ## The `targets:` block schema
 
-Targets live under `targets:` in `~/.roksbnkctl/<workspace>/config.yaml`:
+Targets live under `targets:` in `~/.awsbnkctl/<workspace>/config.yaml`:
 
 ```yaml
 targets:
   jumphost:
-    host: 169.45.91.177
+    host: 52.45.91.177
     port: 22
-    user: ubuntu
-    key_source: tf-output:jumphost_shared_key
+    user: ec2-user
+    key_source: tf-output:bastion_shared_key
 
   bastion:
     host: ops.example.com
-    user: jgruber
+    user: ec2-user
     key_path: ~/.ssh/id_ed25519
 
   prod-jump:
@@ -50,13 +50,13 @@ type TargetCfg struct {
 Validation rules at load time:
 
 - Exactly **one** of `key_path` or `key_source` must be set. Setting neither, or both, fails the load with a clear error.
-- The target name (the YAML map key) must be non-empty and stable across YAML round-trips — `roksbnkctl targets show <name>` and `roksbnkctl targets remove <name>` look up by this name.
+- The target name (the YAML map key) must be non-empty and stable across YAML round-trips — `awsbnkctl targets show <name>` and `awsbnkctl targets remove <name>` look up by this name.
 
 The `TargetCfg` type lives in `internal/config` rather than `internal/remote` to avoid an import cycle: the YAML (de)serialiser needs the wire shape, and the SSH client (`internal/remote`) needs to consume it. Keeping the shape in `config` and the runtime `Target` (parsed key, dialer config, etc.) in `remote` keeps the dependency direction one-way.
 
 ## Key sources
 
-The three options for telling `roksbnkctl` how to find the SSH private key for a target.
+The three options for telling `awsbnkctl` how to find the SSH private key for a target.
 
 ### `key_path: <file>`
 
@@ -65,13 +65,13 @@ A PEM-encoded private key on disk:
 ```yaml
 bastion:
   host: ops.example.com
-  user: jgruber
+  user: ec2-user
   key_path: ~/.ssh/id_ed25519
 ```
 
 Standard OpenSSH formats are accepted: `id_rsa`, `id_ed25519`, `id_ecdsa`, `id_dsa` (deprecated but supported). Tilde expansion uses `os.UserHomeDir()` semantics — `~/` → user home, `~user/` is **not** supported (use an absolute path).
 
-The file is read at SSH-connect time, not at config-load time. A missing or unreadable file fails the connect, not the workspace load. This matters for ergonomics: you can edit a target into config.yaml referencing a key path that doesn't exist yet, then create the key separately, without `roksbnkctl init`/`use` failing in between.
+The file is read at SSH-connect time, not at config-load time. A missing or unreadable file fails the connect, not the workspace load. This matters for ergonomics: you can edit a target into config.yaml referencing a key path that doesn't exist yet, then create the key separately, without `awsbnkctl init`/`use` failing in between.
 
 Encrypted keys (passphrase-protected) are not currently supported in the SSH client — the agent path is the recommended workflow for keys that need a passphrase.
 
@@ -86,7 +86,7 @@ prod-jump:
   key_source: agent
 ```
 
-The agent presents whichever keys it currently holds; `roksbnkctl` tries each in turn against the target's `authorized_keys` (via SSH's standard publickey-authentication exchange). The first key the server accepts is the one that gets used.
+The agent presents whichever keys it currently holds; `awsbnkctl` tries each in turn against the target's `authorized_keys` (via SSH's standard publickey-authentication exchange). The first key the server accepts is the one that gets used.
 
 This is the right setting when:
 
@@ -102,12 +102,12 @@ Reads the key from the workspace's terraform state output of that name:
 
 ```yaml
 jumphost:
-  host: 169.45.91.177
-  user: ubuntu
-  key_source: tf-output:jumphost_shared_key
+  host: 52.45.91.177
+  user: ec2-user
+  key_source: tf-output:bastion_shared_key
 ```
 
-This is the auto-discovered jumphost path. The upstream HCL provisions a `tls_private_key` resource per cluster create, marks it `sensitive`, and surfaces it as a terraform output named `jumphost_shared_key`. `roksbnkctl` reads it via the equivalent of `terraform output -raw <name>` at SSH-connect time.
+This is the auto-discovered jumphost path. The upstream HCL provisions a `tls_private_key` resource per cluster create, marks it `sensitive`, and surfaces it as a terraform output named `bastion_shared_key`. `awsbnkctl` reads it via the equivalent of `terraform output -raw <name>` at SSH-connect time.
 
 What this gets you that `key_path` doesn't:
 
@@ -117,28 +117,28 @@ What this gets you that `key_path` doesn't:
 
 The terraform output must be a string-typed PEM-encoded private key. `terraform output -raw <name>` returns the value regardless of the `sensitive` flag (the flag just suppresses display; the data is still readable to anyone with state access).
 
-## Host-key TOFU and `~/.roksbnkctl/known_hosts`
+## Host-key TOFU and `~/.awsbnkctl/known_hosts`
 
-`roksbnkctl` keeps its own `known_hosts` file at `~/.roksbnkctl/known_hosts`. **It does not read or write `~/.ssh/known_hosts`.** The two files are independent.
+`awsbnkctl` keeps its own `known_hosts` file at `~/.awsbnkctl/known_hosts`. **It does not read or write `~/.ssh/known_hosts`.** The two files are independent.
 
 ### Why a separate file
 
 Three reasons:
 
-1. **Isolation.** `roksbnkctl`'s SSH client is a different program from `ssh(1)`; mixing host-key state between the two creates surprising behaviour (deleting a key from `~/.ssh/known_hosts` doesn't clear it from `roksbnkctl`'s view, or vice versa).
-2. **Audit.** A `roksbnkctl`-managed file lets the tool's behaviour be reasoned about without inspecting the user's broader SSH state.
-3. **Cleanup.** `roksbnkctl ws delete <name>` could theoretically scrub host-key entries on workspace destroy; mixing into `~/.ssh/known_hosts` would mean editing a file the tool didn't own.
+1. **Isolation.** `awsbnkctl`'s SSH client is a different program from `ssh(1)`; mixing host-key state between the two creates surprising behaviour (deleting a key from `~/.ssh/known_hosts` doesn't clear it from `awsbnkctl`'s view, or vice versa).
+2. **Audit.** A `awsbnkctl`-managed file lets the tool's behaviour be reasoned about without inspecting the user's broader SSH state.
+3. **Cleanup.** `awsbnkctl ws delete <name>` could theoretically scrub host-key entries on workspace destroy; mixing into `~/.ssh/known_hosts` would mean editing a file the tool didn't own.
 
 The format matches OpenSSH's `~/.ssh/known_hosts` exactly (so future cross-pollination is technically possible), but the filenames are deliberately separate.
 
 ### TOFU on first connect
 
-The first time you connect to a target, `roksbnkctl` shows the host key fingerprint and asks whether to trust it:
+The first time you connect to a target, `awsbnkctl` shows the host key fingerprint and asks whether to trust it:
 
 ```bash
-$ roksbnkctl exec --on jumphost -- whoami
-Add 169.45.91.177:22's key (SHA256:abc123def456ghi789jkl0mnopqrstuvwxyz/+=) to ~/.roksbnkctl/known_hosts? [y/N]: y
-ubuntu
+$ awsbnkctl exec --on jumphost -- whoami
+Add 52.45.91.177:22's key (SHA256:abc123def456ghi789jkl0mnopqrstuvwxyz/+=) to ~/.awsbnkctl/known_hosts? [y/N]: y
+ec2-user
 ```
 
 Answer `y` and the key is appended. Subsequent connects to the same `host:port` with the same server key trust silently.
@@ -147,20 +147,20 @@ Answer `n` and the connect aborts with exit code 126.
 
 ### Mismatch behaviour
 
-If the host key changes — re-provisioned VM, MITM attack, configuration drift — `roksbnkctl` refuses to connect:
+If the host key changes — re-provisioned VM, MITM attack, configuration drift — `awsbnkctl` refuses to connect:
 
 ```
-error: host key mismatch: 169.45.91.177:22 known with SHA256:abc123... but
+error: host key mismatch: 52.45.91.177:22 known with SHA256:abc123... but
        server presented SHA256:zyx987...; if the host was rebuilt, edit
-       ~/.roksbnkctl/known_hosts
+       ~/.awsbnkctl/known_hosts
 ```
 
 Same model OpenSSH uses. The fix is the same: edit (or `ssh-keygen -R`) the file to remove the stale entry, then re-connect to re-trigger the TOFU prompt.
 
-The default `ssh-keygen` binary works against `~/.roksbnkctl/known_hosts` — pass `-f`:
+The default `ssh-keygen` binary works against `~/.awsbnkctl/known_hosts` — pass `-f`:
 
 ```bash
-ssh-keygen -R 169.45.91.177 -f ~/.roksbnkctl/known_hosts
+ssh-keygen -R 52.45.91.177 -f ~/.awsbnkctl/known_hosts
 ```
 
 ## `--insecure-host-key` for CI
@@ -168,7 +168,7 @@ ssh-keygen -R 169.45.91.177 -f ~/.roksbnkctl/known_hosts
 Automation contexts can't answer a TOFU prompt. The `--insecure-host-key` flag skips host-key verification entirely:
 
 ```bash
-roksbnkctl exec --on jumphost --insecure-host-key -- whoami
+awsbnkctl exec --on jumphost --insecure-host-key -- whoami
 ```
 
 This is **insecure** — anyone in the network path can MITM the connection — and is intended only for short-lived CI runs against ephemeral test infrastructure. Don't use it where session content is sensitive.
@@ -187,16 +187,16 @@ When **not** to use it:
 - Customer environments where session integrity matters.
 - Anything where the SSH session carries secrets you can't afford to leak to a passive attacker.
 
-## `roksbnkctl targets` — full reference
+## `awsbnkctl targets` — full reference
 
 Four subcommands. Chapter 16 introduces them with worked examples; here's the complete flag surface.
 
-### `roksbnkctl targets list`
+### `awsbnkctl targets list`
 
 ```
 NAME       HOST                USER     KEY
-jumphost   169.45.91.177:22    ubuntu   tf-output:jumphost_shared_key
-bastion    ops.example.com:22  jgruber  file:~/.ssh/id_ed25519
+jumphost   52.45.91.177:22    ec2-user   tf-output:bastion_shared_key
+bastion    ops.example.com:22  ec2-user  file:~/.ssh/id_ed25519
 prod-jump  10.0.0.5:22         ec2-user agent
 ```
 
@@ -207,95 +207,95 @@ Flags:
 
 The `KEY` column shows the source descriptor — never the key material. File-backed sources are prefixed `file:` to distinguish them visually from `tf-output:` and `agent`.
 
-### `roksbnkctl targets show <name>`
+### `awsbnkctl targets show <name>`
 
 ```
 name:        jumphost
-host:        169.45.91.177
+host:        52.45.91.177
 port:        22
-user:        ubuntu
-key_source:  tf-output:jumphost_shared_key
+user:        ec2-user
+key_source:  tf-output:bastion_shared_key
 ```
 
 Same restriction: key material itself is never printed.
 
 `-o json` is supported for scripted callers.
 
-### `roksbnkctl targets add <name> ...`
+### `awsbnkctl targets add <name> ...`
 
 Required flags: `--host`, `--user`, and exactly one of `--key-path` / `--key-source`.
 
 ```bash
 # File-backed key
-roksbnkctl targets add bastion \
+awsbnkctl targets add bastion \
   --host ops.example.com \
-  --user jgruber \
+  --user ec2-user \
   --key-path ~/.ssh/id_ed25519
 
 # ssh-agent
-roksbnkctl targets add prod-jump \
+awsbnkctl targets add prod-jump \
   --host 10.0.0.5 \
   --user ec2-user \
   --key-source agent
 
 # Non-default port
-roksbnkctl targets add custom \
+awsbnkctl targets add custom \
   --host 10.0.0.5 \
   --user root \
   --key-path ~/.ssh/custom \
   --port 2222
 
 # tf-output (rare; usually auto-populated by `up`)
-roksbnkctl targets add backup-jump \
+awsbnkctl targets add backup-jump \
   --host 10.0.0.6 \
-  --user ubuntu \
+  --user ec2-user \
   --key-source tf-output:backup_jumphost_key
 ```
 
 Refuses to add a target whose name collides with an existing entry — use `targets remove <name>` first, or pick a different name.
 
-### `roksbnkctl targets remove <name>`
+### `awsbnkctl targets remove <name>`
 
 ```bash
-roksbnkctl targets remove bastion
+awsbnkctl targets remove bastion
 ```
 
-Removes the entry from `config.yaml`. **Does not** remove the corresponding host-key line from `~/.roksbnkctl/known_hosts` — re-adding the same target later doesn't re-trigger TOFU. This is deliberate; if you want to wipe the host key too, edit the known-hosts file by hand.
+Removes the entry from `config.yaml`. **Does not** remove the corresponding host-key line from `~/.awsbnkctl/known_hosts` — re-adding the same target later doesn't re-trigger TOFU. This is deliberate; if you want to wipe the host key too, edit the known-hosts file by hand.
 
 ## Auto-discovery from terraform outputs
 
-The single most-used target — `jumphost` — is auto-populated post-`roksbnkctl up`. The flow:
+The single most-used target — `jumphost` — is auto-populated post-`awsbnkctl up`. The flow:
 
-1. `roksbnkctl up` runs `terraform apply` against the workspace's HCL.
-2. After successful apply, `roksbnkctl` reads three outputs: `testing_tgw_jumphost_ip`, `testing_tgw_jumphost_user`, `jumphost_shared_key`.
-3. If `testing_tgw_jumphost_ip` is non-empty AND not the literal sentinel string `"TGW jumphost not created"` (which the upstream HCL emits when the testing module is disabled), `roksbnkctl` writes a `jumphost` target into `config.yaml`:
+1. `awsbnkctl up` runs `terraform apply` against the workspace's HCL.
+2. After successful apply, `awsbnkctl` reads three outputs: `testing_bastion_public_ip`, `testing_bastion_user`, `bastion_shared_key`.
+3. If `testing_bastion_public_ip` is non-empty AND not the literal sentinel string `"bastion not created"` (which the upstream HCL emits when the testing module is disabled), `awsbnkctl` writes a `jumphost` target into `config.yaml`:
 
    ```yaml
    targets:
      jumphost:
-       host: <testing_tgw_jumphost_ip>
-       user: <testing_tgw_jumphost_user || "ubuntu">
-       key_source: tf-output:jumphost_shared_key
+       host: <testing_bastion_public_ip>
+       user: <testing_bastion_user || "ec2-user">
+       key_source: tf-output:bastion_shared_key
    ```
 
 4. A confirmation line is printed:
 
    ```
-   ✓ Auto-registered target jumphost (169.45.91.177); use `roksbnkctl --on jumphost ...`
+   ✓ Auto-registered target jumphost (52.45.91.177); use `awsbnkctl --on jumphost ...`
    ```
 
 The auto-population is **idempotent** — re-running `up` against an already-jumphost-populated workspace re-writes the same fields. If you've manually customised the entry (changed the user, swapped to `key_path`), the auto-population overwrites your changes. There's no merge logic; the latest `up` wins.
 
-If `testing_create_tgw_jumphost = false` in tfvars, the upstream HCL skips creating the jumphost VM and emits the sentinel output. Auto-population is then a no-op, and you're free to create your own `jumphost` (or differently-named) entry via `targets add`.
+If `testing_create_bastion = false` in tfvars, the upstream HCL skips creating the jumphost VM and emits the sentinel output. Auto-population is then a no-op, and you're free to create your own `jumphost` (or differently-named) entry via `targets add`.
 
 ### Inspecting what the post-`up` flow saw
 
 When the auto-population doesn't happen and you expected it to, check:
 
 ```bash
-roksbnkctl tf output testing_tgw_jumphost_ip
-roksbnkctl tf output testing_tgw_jumphost_user
-roksbnkctl tf output -json jumphost_shared_key | head -c 50
+awsbnkctl tf output testing_bastion_public_ip
+awsbnkctl tf output testing_bastion_user
+awsbnkctl tf output -json bastion_shared_key | head -c 50
 ```
 
 (The third one returns a JSON-encoded string for a sensitive output; truncate to confirm it's non-empty without dumping the key.)
@@ -304,17 +304,17 @@ If all three are populated and the auto-write didn't fire, that's a bug — file
 
 ## What the SSH execution backend adds on top of `--on`
 
-The `--on <target>` flag is the lightweight remote-exec path — one SSH session, one command, no remote state. The `ssh:<target>` **execution backend** layers more on top, reusing the same `internal/remote.Client` under [`internal/exec/ssh.go`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/exec/ssh.go):
+The `--on <target>` flag is the lightweight remote-exec path — one SSH session, one command, no remote state. The `ssh:<target>` **execution backend** layers more on top, reusing the same `internal/remote.Client` under [`internal/exec/ssh.go`](https://github.com/ec2-userf5/awsbnkctl/blob/main/internal/exec/ssh.go):
 
 | Capability | What it gives you |
 |---|---|
-| **File materialisation** | `RunOpts.Files` map gets written to `/tmp/roksbnkctl.<rand>/<basename>` on the remote, available as the working directory for the command. Cleanup via `trap 'rm -rf' EXIT` in a wrapper. |
+| **File materialisation** | `RunOpts.Files` map gets written to `/tmp/awsbnkctl.<rand>/<basename>` on the remote, available as the working directory for the command. Cleanup via `trap 'rm -rf' EXIT` in a wrapper. |
 | **Env passing with fallback** | First tries `ssh -o SetEnv=KEY=VALUE` (requires remote sshd `AcceptEnv`). On failure, writes a 0700 wrapper script that exports the env and execs the command, with `trap 'rm -f $0' EXIT` to scrub. |
-| **Apt bootstrap** | If the remote target doesn't have a tool (`iperf3`, `ibmcloud`) installed, the backend can `sudo apt-get install` it on demand (Ubuntu only at v1.0). |
+| **Yum/apt bootstrap** | If the remote target doesn't have a tool (`iperf3`, `aws` CLI) installed, the backend can `sudo yum install` (Amazon Linux) or `sudo apt-get install` (Ubuntu) it on demand. |
 | **SCP-and-cleanup for kubeconfig** | The backend's recommended path for shipping a kubeconfig to the remote: SCP to a tempdir, run, `trap 'rm -rf' EXIT` to scrub. |
-| **Wrapper-script credential propagation** | Detailed in [PRD 04 § SSH](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/04-CREDENTIALS.md). Brief on-disk window with strict cleanup. |
+| **Wrapper-script credential propagation** | Detailed in [PRD 04 § SSH](https://github.com/ec2-userf5/awsbnkctl/blob/main/docs/prd/04-CREDENTIALS.md). Brief on-disk window with strict cleanup. |
 
-The `targets:` schema and the `roksbnkctl targets` commands are the same surface for both — the backend just uses each target in a heavier-weight way. Anything you set up for `--on` keeps working under `--backend ssh:<target>`.
+The `targets:` schema and the `awsbnkctl targets` commands are the same surface for both — the backend just uses each target in a heavier-weight way. Anything you set up for `--on` keeps working under `--backend ssh:<target>`.
 
 The split between the lightweight `--on` path and the full `ssh` backend is deliberate: `--on` stays simple — one SSH session, one command, no remote state. The backend handles the heavier lifting (file materialisation, package installation, multi-step orchestration).
 
@@ -324,6 +324,6 @@ The split between the lightweight `--on` path and the full `ssh` backend is deli
 - [Chapter 14 — Credentials and the resolver chain](./14-credentials-resolver.md) — the SSH-key sources from a credential-discipline perspective.
 - [Chapter 16 — The --on flag and SSH jumphosts](./16-on-flag-ssh-jumphosts.md) — the user-facing prose for "how do I use this".
 - [Chapter 17 — Execution backends](./17-execution-backends.md) — where the SSH backend sits in the broader backend matrix.
-- [PRD 01 — SSH client + --on flag](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/01-SSH-AND-ON-FLAG.md) — the design rationale for `targets:` and the SSH client.
-- `internal/remote/` package: <https://github.com/jgruberf5/roksbnkctl/tree/main/internal/remote>
-- `internal/cli/targets.go`: <https://github.com/jgruberf5/roksbnkctl/blob/main/internal/cli/targets.go>
+- [PRD 01 — SSH client + --on flag](https://github.com/ec2-userf5/awsbnkctl/blob/main/docs/prd/01-SSH-AND-ON-FLAG.md) — the design rationale for `targets:` and the SSH client.
+- `internal/remote/` package: <https://github.com/ec2-userf5/awsbnkctl/tree/main/internal/remote>
+- `internal/cli/targets.go`: <https://github.com/ec2-userf5/awsbnkctl/blob/main/internal/cli/targets.go>

@@ -30,12 +30,12 @@ func rejectOnFlag(cmdName string) error {
 // remotely, streams I/O, and exits awsbnkctl with the remote process's
 // exit code (or with 126/127 on auth/connect failures per PRD 01).
 //
-// envExtra is the workspace-derived KEY=VALUE list (IBMCLOUD_API_KEY,
+// envExtra is the workspace-derived KEY=VALUE list (AWS_PROFILE,
 // KUBECONFIG, etc.) that workspaceEnv() would have applied locally. The
 // remote sshd's AcceptEnv config decides which actually pass through;
-// users who hit "ibmcloud not logged in" on the remote should configure
-// AcceptEnv on the jumphost (see chapter 16, "Behaviour details" in
-// book/src/16-on-flag-ssh-jumphosts.md).
+// users hitting "credentials not available" on the remote should
+// configure AcceptEnv on the jumphost (see chapter 16, "Behaviour
+// details" in book/src/16-on-flag-ssh-jumphosts.md).
 //
 // On success this function does NOT return — it calls os.Exit. The
 // remote-side exit code is the only useful thing for scripts and CI.
@@ -151,7 +151,7 @@ func loadTFOutputsForTarget(ctx context.Context, cctx *config.Context, t *remote
 	if err != nil {
 		return nil, err
 	}
-	tfws, err := tf.Open(ctx, cctx.WorkspaceName, cctx.Workspace, stateDir, "", nil, nil)
+	tfws, err := tf.Open(ctx, cctx.WorkspaceName, cctx.Workspace, stateDir, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("opening tf workspace: %w", err)
 	}

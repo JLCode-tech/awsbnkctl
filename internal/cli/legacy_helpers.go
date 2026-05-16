@@ -64,9 +64,8 @@ func resolveBackendSpecWith(cctx *config.Context, tool, flagOverride string) str
 }
 
 // perToolDefaultBackend is the per-tool default backend table (PRD 03
-// §"Tool migration plan"). The IBM `ibmcloud` row retired with the
-// IBM cleanup; AWS doesn't ship a CLI passthrough (the binary uses
-// internal/aws SDK directly per PRD 00 § "Inheritance map").
+// §"Tool migration plan"). AWS doesn't ship a CLI passthrough — the
+// binary uses internal/aws SDK directly per PRD 00 § "Inheritance map".
 var perToolDefaultBackend = map[string]string{
 	"iperf3":    "k8s",
 	"terraform": "local",

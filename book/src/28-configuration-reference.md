@@ -1,6 +1,6 @@
 # Configuration reference
 
-Field-by-field schema reference for the workspace `config.yaml`. Source of truth is the [`Workspace` struct](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/config/workspace.go) in `internal/config/workspace.go`; this chapter is the human-readable rendering of those tags.
+Field-by-field schema reference for the workspace `config.yaml`. Source of truth is the [`Workspace` struct](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/config/workspace.go) in `internal/config/workspace.go`; this chapter is the human-readable rendering of those tags.
 
 [Chapter 12 — Workspace config](./12-workspace-config.md) is the *teaching* chapter; this one is the *lookup* chapter. Use chapter 12 to learn the shape, use this one to look up the type of a specific field.
 
@@ -8,19 +8,19 @@ Field-by-field schema reference for the workspace `config.yaml`. Source of truth
 
 | Property | Value |
 |---|---|
-| Path | `~/.roksbnkctl/<workspace>/config.yaml` |
+| Path | `~/.awsbnkctl/<workspace>/config.yaml` |
 | Default workspace | `default` (auto-created on first run) |
-| Overridable home | `ROKSBNKCTL_HOME` env var (defaults to `~/.roksbnkctl/`) |
+| Overridable home | `AWSBNKCTL_HOME` env var (defaults to `~/.awsbnkctl/`) |
 | Mode | `0644` |
-| Created by | `roksbnkctl init` |
-| Updated by | `roksbnkctl init --upgrade-tf`, `roksbnkctl kubeconfig --download`, hand-editing |
+| Created by | `awsbnkctl init` |
+| Updated by | `awsbnkctl init --upgrade-tf`, `awsbnkctl kubeconfig --download`, hand-editing |
 
-The file is hand-editable; YAML is parsed with [`gopkg.in/yaml.v3`](https://pkg.go.dev/gopkg.in/yaml.v3) so anchors and aliases work but are not idiomatic for this file. Plaintext credentials in any of the regex-matched secret fields (`api_key`, `apikey`, `password`, `token`, `secret_access_key`, `hmac_secret`) are rejected at load time — the file fails to parse with a clear error. Base64-encoded credentials in `ibmcloud.api_key_b64` are allowed (the field name doesn't match the rejection regex). See [Chapter 14](./14-credentials-resolver.md).
+The file is hand-editable; YAML is parsed with [`gopkg.in/yaml.v3`](https://pkg.go.dev/gopkg.in/yaml.v3) so anchors and aliases work but are not idiomatic for this file. Plaintext credentials in any of the regex-matched secret fields (`aws_access_key_id`, `apikey`, `password`, `token`, `secret_access_key`, `aws_secret_access_key`) are rejected at load time — the file fails to parse with a clear error. Base64-encoded credentials in `aws.api_key_b64` are allowed (the field name doesn't match the rejection regex). See [Chapter 14](./14-credentials-resolver.md).
 
 ## Top-level structure
 
 ```yaml
-ibmcloud:        # required
+aws:        # required
 cluster:         # required
 bnk:             # optional; populates upstream HCL bnk variables
 test:            # optional; populates test.* settings
@@ -30,13 +30,13 @@ targets:         # optional; populated automatically by up's post-apply hook
 exec:            # optional; per-tool default-backend map
 ```
 
-The order of the top-level keys in the file doesn't matter; YAML is a mapping. The order shown above is the canonical render order produced by `roksbnkctl init`.
+The order of the top-level keys in the file doesn't matter; YAML is a mapping. The order shown above is the canonical render order produced by `awsbnkctl init`.
 
-## `ibmcloud:` block
+## `aws:` block
 
 ```yaml
-ibmcloud:
-  region: ca-tor
+aws:
+  region: us-east-1
   resource_group: default
   api_key_source: keychain
   api_key_b64: <base64>
@@ -44,8 +44,8 @@ ibmcloud:
 
 | Field | Type | Default | Allowed | Notes |
 |---|---|---|---|---|
-| `region` | string | — (prompted by `init`) | any IBM Cloud region: `us-south`, `us-east`, `ca-tor`, `eu-de`, `eu-gb`, `jp-tok`, `au-syd`, etc. | The IBM Cloud region for all cluster + COS resources. Crosses module boundaries — must match the upstream HCL's `ibmcloud_cluster_region`. |
-| `resource_group` | string | `default` | any RG name in the account | The resource group cluster + COS resources are provisioned into. |
+| `region` | string | — (prompted by `init`) | any AWS region: `us-west-2`, `us-east`, `us-east-1`, `eu-west-1`, `eu-west-2`, `ap-northeast-1`, `ap-southeast-2`, etc. | The AWS region for all cluster + S3 resources. Crosses module boundaries — must match the upstream HCL's `aws_region`. |
+| `resource_group` | string | `default` | any RG name in the account | The resource group cluster + S3 resources are provisioned into. |
 | `api_key_source` | string | (resolver chain runs) | `env` \| `keychain` \| `config` \| `prompt` | Pins the resolver to a single source rather than walking the chain. Set explicitly when you want predictable behaviour in CI. See [Chapter 14 §"Pinning a single source"](./14-credentials-resolver.md#pinning-a-single-source). |
 | `api_key_b64` | string | — | base64-encoded API key | **Obfuscation, not encryption** — anyone with file-read access decodes instantly. For single-user dev only; never commit. The field name deliberately doesn't match the plaintext-secret rejection regex. |
 
@@ -61,9 +61,9 @@ cluster:
 
 | Field | Type | Default | Allowed | Notes |
 |---|---|---|---|---|
-| `create` | bool | `true` | `true` \| `false` | `true` provisions a new ROKS cluster; `false` attaches to an existing one (set `name` to the existing cluster's name or ID). |
+| `create` | bool | `true` | `true` \| `false` | `true` provisions a new EKS cluster; `false` attaches to an existing one (set `name` to the existing cluster's name or ID). |
 | `name` | string | — (prompted by `init`) | RFC 1123 DNS label | The cluster name. Used as the OpenShift cluster identity and as the resource group disambiguator. |
-| `openshift_version` | string | `4.18` | any version IBM Cloud's catalog accepts | Pinned to a minor (`4.18`) rather than patch — IBM ships continuous patch updates within a minor. Leave empty for "latest". |
+| `openshift_version` | string | `4.18` | any version AWS's catalog accepts | Pinned to a minor (`4.18`) rather than patch — IBM ships continuous patch updates within a minor. Leave empty for "latest". |
 | `workers_per_zone` | integer | `1` | 1+ | Worker nodes provisioned per availability zone. Multiply by the zone count (typically 3) for the total cluster size. BNK needs ≥1 worker; production deployments use 2-3 per zone. |
 
 ## `bnk:` block
@@ -88,7 +88,7 @@ All three fields are optional; omitting renders the HCL's own defaults. See [Cha
 ```yaml
 test:
   throughput:
-    image: ghcr.io/jgruberf5/roksbnkctl-tools-iperf3:v0.9.0
+    image: ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3:v0.9.0
     duration: 30
     streams: 8
     default_mode: north-south
@@ -108,7 +108,7 @@ test:
 
 | Field | Type | Default | Allowed | Notes |
 |---|---|---|---|---|
-| `image` | string | `networkstatic/iperf3:latest` | any iperf3 Docker image | The image used for both server pod and client Job. The default runs as root and fails on OpenShift's `restricted-v2`; use the bundled image `ghcr.io/jgruberf5/roksbnkctl-tools-iperf3:<v>` for SCC-clean installs. See [Chapter 22](./22-throughput-testing.md#the-bundled-image-and-the-runasnonroot-constraint). |
+| `image` | string | `networkstatic/iperf3:latest` | any iperf3 Docker image | The image used for both server pod and client Job. The default runs as root and fails on OpenShift's `restricted-v2`; use the bundled image `ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3:<v>` for SCC-clean installs. See [Chapter 22](./22-throughput-testing.md#the-bundled-image-and-the-runasnonroot-constraint). |
 | `duration` | integer | `30` | 1-300 (seconds) | The iperf3 `-t` flag — test duration in seconds. |
 | `streams` | integer | `8` | 1-128 | The iperf3 `-P` flag — parallel TCP streams. |
 | `default_mode` | string | `north-south` | `north-south` \| `east-west` | Default `--mode` when not passed on the command line. |
@@ -131,7 +131,7 @@ test:
 ```yaml
 tf_source:
   type: embedded         # or: github | local
-  repo: jgruberf5/roksbnkctl-tf
+  repo: JLCode-tech/awsbnkctl-tf
   ref: v1.0.0
   path: /path/to/checkout
 ```
@@ -160,11 +160,11 @@ cos:
 
 | Field | Type | Default | Allowed | Notes |
 |---|---|---|---|---|
-| `instance` | string | — | COS instance name or CRN | The instance the supply-chain bucket lives on. Names are resolved via Resource Controller at runtime. |
+| `instance` | string | — | S3 bucket name or CRN | The instance the supply-chain bucket lives on. Names are resolved via Resource Controller at runtime. |
 | `bucket` | string | — | S3 bucket name | The bucket within the instance. |
-| `upload` | list of `{source, key}` | (empty) | host path → bucket key | Pre-flight uploads run before `roksbnkctl up`. Idempotent — re-running overwrites the bucket objects. |
+| `upload` | list of `{source, key}` | (empty) | host path → bucket key | Pre-flight uploads run before `awsbnkctl up`. Idempotent — re-running overwrites the bucket objects. |
 
-See [Chapter 25 — COS supply chain management](./25-cos-supply-chain.md) for the full surface.
+See [Chapter 25 — S3 supply chain management](./25-cos-supply-chain.md) for the full surface.
 
 ## `targets:` block
 
@@ -188,13 +188,13 @@ The top-level value is a map; the key is the target name (`jumphost`, `eu-bastio
 | `key_path` | string | — | a path to a PEM file | One of `key_path` or `key_source` is required. Path to the PEM-encoded private key. |
 | `key_source` | string | — | `agent` \| `tf-output:<output-name>` | The other "key source" form. `agent` uses ssh-agent; `tf-output:<name>` reads the named terraform output as the PEM. |
 
-Auto-populated by `roksbnkctl up` post-apply for the upstream HCL's TGW jumphost when `testing_create_tgw_jumphost = true`. See [Chapter 15 — SSH targets](./15-ssh-targets.md) and [Chapter 16 — The `--on` flag](./16-on-flag-ssh-jumphosts.md).
+Auto-populated by `awsbnkctl up` post-apply for the upstream HCL's TGW jumphost when `testing_create_tgw_jumphost = true`. See [Chapter 15 — SSH targets](./15-ssh-targets.md) and [Chapter 16 — The `--on` flag](./16-on-flag-ssh-jumphosts.md).
 
 ## `exec:` block
 
 ```yaml
 exec:
-  ibmcloud:  { backend: local }
+  aws:  { backend: local }
   iperf3:    { backend: k8s }
   terraform: { backend: local }
 ```
@@ -210,7 +210,7 @@ The per-tool defaults at v1.0:
 | Tool | Default backend | Supported backends |
 |---|---|---|
 | `terraform` | `local` | `local`, `docker` (k8s and ssh deferred to v1.x) |
-| `ibmcloud` | `local` | `local`, `docker`, `k8s`, `ssh:<target>` |
+| `aws` | `local` | `local`, `docker`, `k8s`, `ssh:<target>` |
 | `iperf3` | `k8s` | `local`, `k8s`, `ssh:<target>` (docker rejected) |
 | `dns` | `local` | `local`, `k8s`, `ssh:<target>` (docker rejected) |
 
@@ -218,14 +218,14 @@ See [Chapter 17 — Execution backends](./17-execution-backends.md) and [Chapter
 
 ## Field-by-field reference table
 
-Sorted by top-level block. Lookup-friendly. Every field that appears in [`internal/config/workspace.go`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/config/workspace.go).
+Sorted by top-level block. Lookup-friendly. Every field that appears in [`internal/config/workspace.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/config/workspace.go).
 
 | Path | Type | Default | Notes |
 |---|---|---|---|
-| `ibmcloud.region` | string | (prompted) | IBM Cloud region (`ca-tor`, `us-south`, …). |
-| `ibmcloud.resource_group` | string | `default` | Resource group name. |
-| `ibmcloud.api_key_source` | string | (chain) | `env` \| `keychain` \| `config` \| `prompt`. |
-| `ibmcloud.api_key_b64` | string | (empty) | Base64-encoded API key. Obfuscation only. |
+| `aws.region` | string | (prompted) | AWS region (`us-east-1`, `us-west-2`, …). |
+| `aws.resource_group` | string | `default` | Resource group name. |
+| `aws.api_key_source` | string | (chain) | `env` \| `keychain` \| `config` \| `prompt`. |
+| `aws.api_key_b64` | string | (empty) | Base64-encoded API key. Obfuscation only. |
 | `cluster.create` | bool | `true` | Provision new vs attach existing. |
 | `cluster.name` | string | (prompted) | Cluster name. |
 | `cluster.openshift_version` | string | `4.18` | OpenShift minor version. |
@@ -244,7 +244,7 @@ Sorted by top-level block. Lookup-friendly. Every field that appears in [`intern
 | `tf_source.repo` | string | (empty) | GitHub `owner/name`; required for `github`. |
 | `tf_source.ref` | string | (empty) | Git ref; required for `github`. |
 | `tf_source.path` | string | (empty) | Local directory; required for `local`. |
-| `cos.instance` | string | (empty) | COS instance name or CRN. |
+| `cos.instance` | string | (empty) | S3 bucket name or CRN. |
 | `cos.bucket` | string | (empty) | Bucket name. |
 | `cos.upload[].source` | string | — | Local file path. |
 | `cos.upload[].key` | string | — | Bucket key. |
@@ -257,14 +257,14 @@ Sorted by top-level block. Lookup-friendly. Every field that appears in [`intern
 
 ## Behaviour when fields are missing
 
-`roksbnkctl` falls through three layers: **workspace config → upstream HCL default → fail**.
+`awsbnkctl` falls through three layers: **workspace config → upstream HCL default → fail**.
 
 | Missing field | Behaviour |
 |---|---|
-| `ibmcloud.region` | `roksbnkctl init` prompts; programmatic loads error with "region is empty". |
-| `ibmcloud.resource_group` | Defaults to `default`. |
-| `ibmcloud.api_key_source` | Resolver walks the full chain (env → keychain → config → prompt). |
-| `ibmcloud.api_key_b64` | Skipped in the resolver chain. |
+| `aws.region` | `awsbnkctl init` prompts; programmatic loads error with "region is empty". |
+| `aws.resource_group` | Defaults to `default`. |
+| `aws.api_key_source` | Resolver walks the full chain (env → keychain → config → prompt). |
+| `aws.api_key_b64` | Skipped in the resolver chain. |
 | `cluster.create` | Defaults to `true`. |
 | `cluster.name` | `init` prompts; programmatic loads error. |
 | `cluster.openshift_version` | Empty string passed to upstream HCL; the module picks the current default. |
@@ -276,20 +276,20 @@ Sorted by top-level block. Lookup-friendly. Every field that appears in [`intern
 | `test.dns.default_target` | `--target` becomes required on the command line. |
 | `tf_source` | Treated as `type: embedded` (legacy default). |
 | `cos` | Block omitted ⇒ no pre-flight uploads; FLO reads whatever's already in the configured bucket. |
-| `targets.*` | Block absent ⇒ `roksbnkctl --on jumphost` errors with "no target named jumphost"; auto-populated by `up` when terraform provisions a jumphost. |
+| `targets.*` | Block absent ⇒ `awsbnkctl --on jumphost` errors with "no target named jumphost"; auto-populated by `up` when terraform provisions a jumphost. |
 | `exec.*` | Each tool falls back to its built-in default (typically `local`; `iperf3` is `k8s`). |
 
 ## How `--var-file` interacts with `config.yaml`
 
-`roksbnkctl up --var-file <file>` layers user-supplied tfvars **after** the auto-rendered tfvars derived from `config.yaml`. Later wins, terraform-style. Multiple `--var-file` flags are accepted and stack in command-line order.
+`awsbnkctl up --var-file <file>` layers user-supplied tfvars **after** the auto-rendered tfvars derived from `config.yaml`. Later wins, terraform-style. Multiple `--var-file` flags are accepted and stack in command-line order.
 
-The auto-render path: `config.yaml` → typed `Workspace` struct → key/value tfvars → `~/.roksbnkctl/<ws>/state/terraform.tfvars`. The user's `--var-file` is appended to the terraform invocation as an additional `-var-file=<path>` argument. See [Chapter 13 — Terraform variables](./13-terraform-variables.md) for the layering rules.
+The auto-render path: `config.yaml` → typed `Workspace` struct → key/value tfvars → `~/.awsbnkctl/<ws>/state/terraform.tfvars`. The user's `--var-file` is appended to the terraform invocation as an additional `-var-file=<path>` argument. See [Chapter 13 — Terraform variables](./13-terraform-variables.md) for the layering rules.
 
-A workspace-persistent override file is `~/.roksbnkctl/<ws>/terraform.tfvars.user` — when present, it's auto-layered after the rendered tfvars and before any explicit `--var-file`. Useful for "always pass this `bigip_password` value when applying this workspace" without putting it in `config.yaml` (where the plaintext-secret rejection would reject it).
+A workspace-persistent override file is `~/.awsbnkctl/<ws>/terraform.tfvars.user` — when present, it's auto-layered after the rendered tfvars and before any explicit `--var-file`. Useful for "always pass this `bigip_password` value when applying this workspace" without putting it in `config.yaml` (where the plaintext-secret rejection would reject it).
 
 ## Cross-references
 
 - [Chapter 12 — Workspace config](./12-workspace-config.md) — the teaching counterpart to this lookup.
 - [Chapter 13 — Terraform variables](./13-terraform-variables.md) — how `config.yaml` fields render into tfvars.
-- [Chapter 14 — Credentials and the resolver chain](./14-credentials-resolver.md) — the `ibmcloud.api_key_*` semantics.
+- [Chapter 14 — Credentials and the resolver chain](./14-credentials-resolver.md) — the `aws.api_key_*` semantics.
 - [Chapter 29 — Terraform variable reference](./29-terraform-variable-reference.md) — the upstream HCL variable surface that `bnk.*` and `cluster.*` populate.

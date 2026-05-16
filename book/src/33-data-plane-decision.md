@@ -14,7 +14,7 @@ To hit line rate inside a Kubernetes pod, TMM needs a network interface that byp
 
 BNK 2.x is validated against clusters where worker nodes expose VFs as schedulable Kubernetes resources. The reconciler that brings a `CNEInstance` (BNK's umbrella resource) to a `Ready` state will assign a VF to TMM on whichever node TMM lands; without VFs in the allocatable resource list, that reconciliation fails and the data plane never comes up. So "what does a worker node look like in awsbnkctl's cluster?" decomposes to "how does a worker node expose SR-IOV VFs that the Kubernetes scheduler can hand out?"
 
-On bare-metal deployments of BNK — the `dpubnkctl` lineage that this fork's siblings target — the answer is straightforward: stock Mellanox NICs in SR-IOV mode, with the standard `sriov-network-device-plugin` advertising the VFs. On IBM Cloud, the sibling fork `roksbnkctl` has it equally easy: ROKS exposes a SR-IOV-capable worker pool that the cluster API can provision on request. **AWS EKS exposes neither.** That is the gap this chapter walks through.
+On bare-metal deployments of BNK — the `dpubnkctl` lineage that this fork's siblings target — the answer is straightforward: stock Mellanox NICs in SR-IOV mode, with the standard `sriov-network-device-plugin` advertising the VFs. On IBM Cloud, the upstream `roksbnkctl` had it equally easy: ROKS exposed a SR-IOV-capable worker pool that the cluster API provisioned on request. **AWS EKS exposes neither.** That is the gap this chapter walks through.
 
 ## The AWS networking primitives
 
@@ -36,7 +36,7 @@ Once the requirement and the primitives are settled, the design surface is "how 
 
 **Fargate.** Fargate is a managed-*pod* offering, not a managed-*node* one. There is no node to attach an SR-IOV VF to; pods run on AWS-managed compute that the cluster operator never sees. Fargate is the right answer for many EKS workloads; it's not the right answer for any workload that needs SR-IOV.
 
-**EC2 + kubeadm.** Spin up plain EC2 instances and bring up a vanilla Kubernetes cluster on top with `kubeadm`. This gives total control of the data plane, at the cost of losing every reason for picking EKS in the first place: no managed control plane, no IRSA, no EKS Console surface, no upgrade story. The complexity of running a production control plane outweighs the SR-IOV freedom. `roksbnkctl` made the same call for IBM Cloud (managed ROKS, not self-managed OpenShift) and the reasoning carries over.
+**EC2 + kubeadm.** Spin up plain EC2 instances and bring up a vanilla Kubernetes cluster on top with `kubeadm`. This gives total control of the data plane, at the cost of losing every reason for picking EKS in the first place: no managed control plane, no IRSA, no EKS Console surface, no upgrade story. The complexity of running a production control plane outweighs the SR-IOV freedom. The upstream `roksbnkctl` made the same call on IBM Cloud (managed ROKS, not self-managed OpenShift) and the reasoning carries across.
 
 **EKS Auto Mode.** Auto Mode is AWS's Karpenter-driven node provisioner — you describe pod requirements, AWS allocates instances. As of writing, Karpenter has no clean integration with SR-IOV device plugins (the VF discovery + scheduling happens after node boot, but Karpenter assumes a more conventional scheduling lifecycle). Revisit in v1.x.
 

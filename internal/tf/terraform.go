@@ -31,8 +31,11 @@ type Workspace struct {
 //   - Resolves the TF source via FetchSource (downloads if needed).
 //   - Constructs a terraform-exec handle with TF_DATA_DIR pointing at
 //     stateDir/terraform/, so .terraform/ doesn't pollute the source dir.
-//   - Exports apiKey as TF_VAR_ibmcloud_api_key in the env terraform sees.
-//     The key is never written to disk by awsbnkctl.
+//
+// AWS credentials reach the terraform child process via the standard
+// AWS provider env vars (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
+// AWS_REGION / AWS_PROFILE) inherited from the awsbnkctl process env;
+// resolution lives in internal/aws.
 //
 // stdout/stderr (if non-nil) get terraform's streamed output. Pass
 // os.Stdout / os.Stderr from CLI commands.
@@ -41,7 +44,6 @@ func Open(
 	name string,
 	wsCfg *config.Workspace,
 	stateDir string,
-	apiKey string,
 	stdout, stderr io.Writer,
 ) (*Workspace, error) {
 	if wsCfg == nil {
@@ -60,11 +62,11 @@ func Open(
 	if err := os.MkdirAll(srcRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("creating tf-source dir %s: %w", srcRoot, err)
 	}
-	// Pre-create the per-module kubeconfig subdirs that
-	// ibm_container_cluster_config writes into. The IBM provider does
-	// NOT MkdirAll, so a missing leaf surfaces at plan time as
-	// "Path: ..., to download the config doesn't exist". Doing this
-	// here keeps it idempotent across plan/apply/destroy.
+	// Pre-create the per-module kubeconfig subdirs that the cluster-
+	// config data sources write into. Some upstream providers don't
+	// MkdirAll, so a missing leaf surfaces at plan time as "Path: ...,
+	// to download the config doesn't exist". Doing this here keeps it
+	// idempotent across plan/apply/destroy.
 	kcDir := filepath.Join(stateDir, "kubeconfig")
 	for _, sub := range []string{"cert_manager", "cne_instance", "flo", "license"} {
 		if err := os.MkdirAll(filepath.Join(kcDir, sub), 0o755); err != nil {
@@ -126,19 +128,16 @@ terraform {
 	// terraform-exec inherits the awsbnkctl process env when SetEnv is
 	// NOT called. We deliberately don't call SetEnv: it explicitly
 	// rejects TF_VAR_* keys ("manual setting of env var TF_VAR_X
-	// detected"), and we want to pass apiKey as TF_VAR_ibmcloud_api_key
-	// rather than as a `tfexec.Var()` option (which would land the key
-	// in argv / `ps` output).
+	// detected"), and the env-inheritance path lets us thread AWS
+	// provider credentials (AWS_ACCESS_KEY_ID etc.) plus any optional
+	// TF_VAR_* overrides the caller already exported, without rewriting
+	// them inside this function.
 	//
-	// Setting on the awsbnkctl process env is acceptable because awsbnkctl
-	// runs one terraform operation per invocation and exits.
+	// Setting TF_DATA_DIR on the awsbnkctl process env is acceptable
+	// because awsbnkctl runs one terraform operation per invocation
+	// and exits.
 	if err := os.Setenv("TF_DATA_DIR", filepath.Join(stateDir, "terraform")); err != nil {
 		return nil, fmt.Errorf("setting TF_DATA_DIR: %w", err)
-	}
-	if apiKey != "" {
-		if err := os.Setenv("TF_VAR_ibmcloud_api_key", apiKey); err != nil {
-			return nil, fmt.Errorf("setting TF_VAR_ibmcloud_api_key: %w", err)
-		}
 	}
 
 	return &Workspace{

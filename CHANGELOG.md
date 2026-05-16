@@ -8,6 +8,22 @@ awsbnkctl began as a hard fork of [`jgruberf5/roksbnkctl`](https://github.com/jg
 
 ## Unreleased
 
+### Added — Sprint 5 (Book retarget + IBM-residue sweep + reference chapter regen)
+
+- **Book retarget (architect):** chapters 1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14 rewritten or substantially edited from IBM Cloud / ROKS / COS framing to AWS / EKS / S3 framing. Mechanical sweeps applied to chapters 2, 3, 13, 15-19, 24, 28, 30-33 (`roksbnkctl`→`awsbnkctl`, `ROKS`→`EKS`, `COS`→`S3`, `IBMCLOUD_API_KEY`→`AWS_ACCESS_KEY_ID`, `IBM Cloud`→`AWS`). Chapter 26 troubleshooting gained sub-anchors (`### AWS LoadBalancer`, `### DNS`) closing Sprint 4 tech-writer Issue 4.
+- **IBM-residue tech-debt sweep (staff):** `.go` surface from **297 → 1 hit**. Deleted `internal/cred/` package entirely; removed `Credentials.IBMCloudAPIKey` + per-backend cred-shim plumbing; deleted 9 obsolete IBM-shim test files; trimmed 214 lines of legacy API-key code from `internal/config/secrets.go`. The remaining hit is `/ibmcloud_api_key` keychain user-key in `DeleteAPIKeyFromKeychain` — intentional v0.x→v0.9 migration helper. Closes Sprint 3 tech-writer Issue 2.
+- **Reference chapter regeneration (staff):** `book/src/27-command-reference.md` (858 lines) regenerated via `tools/refgen/cobra-md` against current AWS-shaped CLI surface; `book/src/29-terraform-variable-reference.md` (206 lines) regenerated via `tools/refgen/tfvars-md` against current Terraform variables.
+- **CI book gate (validator):** `.github/workflows/ci.yml` gains a `book-build` job — `mdbook build book/` + `cspell` hard-fail on `book/src/**/*.md`. Runs on every PR.
+- **cspell dictionary (validator):** +136 entries across British spellings (`behaviour`, `customise`, `optimised`), cloud / k8s / AWS domain vocabulary (`batchv`, `corev`, `clientset`, `cneinstance`, `kustomization`, `resourcegroupstaggingapi`, `vcpu`, `Gbps`), and chapter-specific terms (`retargeted`, `tunables`, `unparseable`). Total: 366 words; zero unknown-word findings on `book/src/**/*.md`.
+
+### Carried into Sprint 6 (blockers per tech-writer review)
+
+- `internal/exec/k8s_install.yaml` still entirely roksbnkctl-shaped (ops-pod manifest the IBM-residue grep missed because it's YAML not Go). Sprint 6 staff retargets.
+- Chapters 8, 9, 11 reference `cluster` / `bnk` subverbs that don't exist on the binary surface today. Sprint 6 architect either retargets prose or annotates as v1.x roadmap.
+- Chapters 17, 18, 19, 32 carry secondary IBM-residue prose (cluster-lifecycle subtree). Sprint 6 architect sweep.
+- Glossary (chapter 30) has factual errors — Sprint 6 architect cleanup.
+- README.md sprint-count framing stale (says 5 remaining sprints; actually finishing Sprint 6 next).
+
 ### Added — Sprint 4 (Test surface refresh + doctor polish + AWS E2E phases)
 
 - `internal/cli/test.go` + `internal/cli/test_dryrun.go` — `awsbnkctl test {connectivity,dns,throughput,all}` plumbed with workspace-derived region + cluster + namespace defaults; `--dry-run` flag plans the probe without executing.

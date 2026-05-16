@@ -389,6 +389,44 @@ The book at `book/src/` reads as awsbnkctl's documentation, not roksbnkctl's. We
 
 - Book rewrites are scope-creep magnets. Stick to the chapter-by-chapter triage above; defer rewording to v1.x polish.
 
+### Sprint 5 close (actual)
+
+What shipped (architect surface — confirmed at this commit):
+
+- **Preface + chapter 1** — preface status banner updated to "v0.9 Sprint 5 complete"; chapter 1's F5 support-matrix bullet preserves multi-cloud reality (EKS, AKS, GKE, ROKS, OpenShift Dedicated) but targets the book at EKS; the cross-link to chapter 17 references the EC2 bastion (not the upstream TGW jumphost).
+- **Chapter 4 (Installation)** — full rewrite. IBM Cloud CLI / `oc` install steps removed; `aws` CLI install added as optional (production paths use the embedded aws-sdk-go-v2, not the CLI). `helm` still required (inherited modules' local-exec provisioners). Repo URL points at `JLCode-tech/awsbnkctl`. New `## Migrating from roksbnkctl (upstream fork)` section explains the coexistence story.
+- **Chapter 5 (Doctor)** — full rewrite. Six AWS rows documented (`aws creds`, `aws sts`, `aws region`, `aws eks perms`, `aws s3 perms`) + optional feature-flagged `aws quotas`. IBM IAM verify replaced by `sts:GetCallerIdentity`. The `--target` SSH probe carries.
+- **Chapter 6 (Workspaces)** — `~/.roksbnkctl/` → `~/.awsbnkctl/`; `ROKSBNKCTL_HOME` → `AWSBNKCTL_HOME`; cluster-outputs.json schema updated for EKS (cluster_arn, region, account_id, vpc_id, subnet_ids, oidc_provider_arn, supply_chain_bucket); workspace patterns table updated.
+- **Chapter 7 (Quick start)** — full rewrite. Mermaid diagram redrawn (IBM → AWS, ROKS → EKS, COS → S3, TGW jumphost → bastion). Worked example uses AWS-shaped outputs (~82 resources, ~30 min elapsed). The 4-command lifecycle is intact.
+- **Chapter 8 (Cluster phase)** — cluster-phase resources updated (EKS + VPC + SR-IOV node group + S3 + IRSA + bastion); deploy_bnk=false override carries; cluster-outputs.json schema matches chapter 6.
+- **Chapter 9 (Registering an existing cluster)** — full rewrite around `awsbnkctl cluster register <eks-cluster-name>`; required-input vs auto-discovery table updated for EKS (cluster_arn, OIDC provider, subnet AZs); supply-chain bucket naming convention. Carries forward Issue 5 (verb may not yet be implemented).
+- **Chapter 10 (Deploying BNK trials)** — trial-phase modules retargeted at AWS (S3, IRSA); `~80`-resource shape updated; AWS-shaped Terraform output names.
+- **Chapter 11 (Tearing down)** — destroy ordering, AWS-shaped destroy noise (ENIs, NLBs), refusal catalogue carries.
+- **Chapter 12 (Workspace config)** — full rewrite. New `aws:`, `cluster:`, `s3:` block schemas; `cos:` block removed; `exec:` defaults updated (terraform→local, iperf3→k8s).
+- **Chapter 13 (Terraform variables)** — IBM tfvars references replaced with AWS shapes; the `AWS_ACCESS_KEY_ID never on disk` exception preserved as the AWS-equivalent of the `ibmcloud_api_key` exception. Issue 1 caveat: refgen output pending.
+- **Chapter 14 (Credentials)** — full rewrite. AWS standard chain (env → shared-config → SSO → IMDS → container task role → web-identity) documented in detail; IRSA in-cluster path documented; redactor + per-backend cred propagation table updated.
+- **Chapter 15 (SSH targets)** — `jumphost_shared_key` → `bastion_shared_key`; ubuntu user → ec2-user; auto-discovery from `testing_bastion_public_ip`; yum/apt bootstrap.
+- **Chapter 16 (--on flag)** — AWS-shaped scenarios (private EKS endpoint, customer firewall to `*.amazonaws.com`); env passthrough updated (AWS_PROFILE, AWS_REGION); the bastion is an EC2 instance.
+- **Chapters 17 / 18 / 19 (Execution backends, choosing, in-cluster ops pod)** — `ibmcloud` exec adapter replaced by direct AWS SDK; IRSA-based ops pod auth replaces trusted-profile flow; per-tool defaults table updated.
+- **Chapter 24 (Day-2 ops)** — `oc` references removed (not OpenShift); EKS-shaped status output; the internalised `awsbnkctl k get/apply/...` verbs carry.
+- **Chapter 25 (S3 supply chain)** — already AWS-shaped from Sprint 2/3; this sprint adds the IRSA trust-chain anchor that chapters 20-22 cross-link to. Filename rename (`25-cos-supply-chain.md` → `25-s3-supply-chain.md`) is Issue 3, deferred to Sprint 6 integrator.
+- **Chapter 26 (Troubleshooting)** — added `### AWS LoadBalancer` (three failure shapes: timeout, target-group RED, 502/503) and `### DNS` (three failure shapes: no-such-host, no-divergence, SERVFAIL) sub-sections per Sprint 4 tech-writer Issue 4. Anchors `#aws-loadbalancer` and `#dns` resolve.
+- **Chapter 30 (Glossary)** — IBM-flavoured entries replaced with AWS (VPC Endpoint, EKS, S3, IRSA added).
+- **Chapter 31 (Building from source)** — build instructions retargeted at `cmd/awsbnkctl/`; the `internal/aws/` directory called out.
+- **Chapter 32 (Extending awsbnkctl)** — chapter content reads as "Extending awsbnkctl". The fork-relationship paragraph (roksbnkctl upstream) is the documented exception per the architect brief.
+- **PLAN.md Sprint 5 close** — this section.
+
+What was deferred (carries into Sprint 6 or later):
+
+- **Operator-run spike** (PRD 07 § Spike status) still gates `v0.2`; the book describes the design as-shipped, not as-validated against live AWS.
+- **`internal/cred/` package deletion** + cred-shim retirement (Sprint 4 architect Issue 4 carry-over). Sprint 5 staff fold; the architect surface assumes the deletion lands in the same Sprint 5 landing commit.
+- **Reference chapter regeneration** (27 command-ref, 28 config-ref, 29 tfvars-ref) — Sprint 5 staff regenerates via `tools/refgen/`; integrator commits the diff in the same Sprint 5 landing commit (Issue 1).
+- **Chapter 25 filename rename** (`25-cos-supply-chain.md` → `25-s3-supply-chain.md`) — Sprint 6 integrator (Issue 3).
+- **`cluster register` EKS verb implementation** — Sprint 5/6 staff verifies presence; if absent, lift from roksbnkctl's `cluster_register.go` and retarget at `internal/aws/eks.go` (Issue 5).
+- **Sprint 4 tech-writer Issue 1** (chapter 22 `Iperf3DefaultImage` flip after image publishes) — Sprint 6 hardening.
+
+Sibling agent surfaces (staff: chapter 22 image fix + IBM-residue sweep + refgen + chapter 26 sub-anchors; validator: book CI workflow + cspell + CHANGELOG + GitHub Pages deployment; tech-writer: first-time-reader dogfood + ready-for-v0.9 verdict) report independently; see the per-agent issue files at `issues/issue_sprint5_{staff,validator,tech-writer}.md` for what landed on those surfaces. The integrator reconciles at sprint close.
+
 ---
 
 ## Sprint 6 — hardening + v1.0 cut (weeks 11-12)

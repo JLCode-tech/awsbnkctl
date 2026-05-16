@@ -1,130 +1,135 @@
 # Registering an existing cluster
 
-`roksbnkctl cluster register <name>` wires `roksbnkctl` up to a ROKS cluster that already exists in your IBM Cloud account — one you didn't provision via [`cluster up`](./08-cluster-phase.md). After a successful register, the workspace behaves exactly as if you'd done `cluster up`: `roksbnkctl up` deploys BNK trials onto the registered cluster, `roksbnkctl down` tears those trials down, `roksbnkctl status` reports the cluster's identity, and so on.
+`awsbnkctl cluster register <name>` wires `awsbnkctl` up to an EKS cluster that already exists in your AWS account — one you didn't provision via [`cluster up`](./08-cluster-phase.md). After a successful register, the workspace behaves exactly as if you'd done `cluster up`: `awsbnkctl up` deploys BNK trials onto the registered cluster, `awsbnkctl down` tears those trials down, `awsbnkctl status` reports the cluster's identity, and so on.
 
-This chapter covers when registration is the right answer, what input is required vs auto-discovered, the COS naming convention, the `cluster-outputs.json` write, and a worked example.
+This chapter covers when registration is the right answer, what input is required vs auto-discovered, the supply-chain bucket naming convention, the `cluster-outputs.json` write, and a worked example.
+
+> **Note.** The `cluster register` verb's as-shipped surface in v0.9 is the operator-driven path described below. The v1.x roadmap adds richer auto-discovery (Multus / SR-IOV DaemonSet status, IRSA OIDC provider matching) and is tracked in `docs/PLAN.md`.
 
 ## When to use this
 
 `cluster register` is the answer when **all** of these are true:
 
-- A ROKS cluster already exists in the IBM Cloud account.
-- You have IAM access to the cluster's VPC + container service.
-- You want `roksbnkctl` to deploy BNK trials onto that cluster.
-- You don't want `roksbnkctl` to own the cluster's lifecycle (it shouldn't be `terraform destroy`-able from your workstation).
+- An EKS cluster already exists in the AWS account.
+- You have IAM access to the cluster's VPC + EKS control plane.
+- You want `awsbnkctl` to deploy BNK trials onto that cluster.
+- You don't want `awsbnkctl` to own the cluster's lifecycle (it shouldn't be `terraform destroy`-able from your workstation).
 
 Common scenarios:
 
-1. **Your team operates the ROKS cluster centrally.** A platform team provisioned the cluster via their own Terraform / Pulumi / IBM Cloud Schematics; you just want to deploy BNK trials onto it. Register it; deploy trials; tear them back down. The cluster itself stays under the platform team's ownership.
+1. **Your team operates the EKS cluster centrally.** A platform team provisioned the cluster via their own Terraform / Pulumi / `eksctl`; you just want to deploy BNK trials onto it. Register it; deploy trials; tear them back down. The cluster itself stays under the platform team's ownership.
 
 2. **You're attaching to an existing demo cluster.** A workshop hosts a shared cluster that participants attach to. Each participant registers it in their own workspace and deploys their own trial — trials are isolated by namespace under the same cluster.
 
-3. **You provisioned the cluster manually for testing.** You created a one-off cluster via `ibmcloud ks cluster create vpc-gen2 ...` and want to move forward with `roksbnkctl` rather than re-creating it.
+3. **You provisioned the cluster manually for testing.** You created a one-off cluster via `eksctl create cluster ...` and want to move forward with `awsbnkctl` rather than re-creating it.
 
-If none of those apply — i.e. you want `roksbnkctl` to own cluster lifecycle end-to-end — use `cluster up` instead. Register and `cluster up` are mutually exclusive per workspace; the second one wins.
+If none of those apply — i.e. you want `awsbnkctl` to own cluster lifecycle end-to-end — use `cluster up` instead. Register and `cluster up` are mutually exclusive per workspace; the second one wins.
 
 ## Required input vs auto-discovery
 
-`cluster register` takes one positional argument (the cluster name or ID) and one optional flag (`--registry-cos-name`).
+`cluster register` takes one positional argument (the cluster name) and a few optional flags.
 
 ```bash
-roksbnkctl cluster register <cluster-name-or-id> [--registry-cos-name <cos-instance-name>]
+awsbnkctl cluster register <cluster-name> [--region <region>] [--supply-chain-bucket <bucket>]
 ```
 
-Everything else is **auto-discovered** via the IBM SDK:
+Everything else is **auto-discovered** via the AWS SDK:
 
 | Field | Source |
 |---|---|
-| `cluster_id` | `ibmcloud ks cluster get <name>` (resolved by name → ID) |
-| `region` | from the cluster lookup |
-| `resource_group_id` | from the cluster lookup |
-| `vpc_id` | from the cluster's `provider.vpcs[0].id` |
-| `master_url` | from the cluster lookup |
-| `openshift_version` | from the cluster's `masterKubeVersion` |
-| `registry_cos_crn` | discovered via the registry COS instance lookup (see below) |
+| `cluster_arn` | `eks:DescribeCluster` |
+| `region` | resolved from `--region`, `AWS_REGION`, or workspace config |
+| `account_id` | `sts:GetCallerIdentity` |
+| `vpc_id` | from the cluster's `ResourcesVpcConfig.VpcId` |
+| `subnet_ids` | from `ResourcesVpcConfig.SubnetIds` |
+| `oidc_provider_arn` | from `Cluster.Identity.Oidc.Issuer` matched against `iam:ListOpenIDConnectProviders` |
+| `cluster_endpoint` | from `Cluster.Endpoint` |
+| `kubernetes_version` | from `Cluster.Version` |
+| `supply_chain_bucket` | discovered via the supply-chain bucket lookup (see below) |
 
-The cluster lookup goes through the same container-service endpoint `ibmcloud ks cluster get` uses — no host `ibmcloud` install required. If the named cluster doesn't exist in the account, the call returns a clear `no cluster named <foo>` error rather than a 404 stack trace.
+The cluster lookup goes through the same EKS endpoint `aws eks describe-cluster` uses — no host `aws` install required. If the named cluster doesn't exist in the account / region, the call returns a clear `no cluster named <foo> in region <region>` error rather than a 404 stack trace.
 
-A **vpc-gen2** cluster is required. Classic infrastructure clusters return successfully but their `vpc_id` is empty, and `cluster register` refuses to write a record without one:
+EKS requires the cluster to span **at least two AZs**. The `cluster register` lookup verifies this and refuses to write a record otherwise:
 
 ```
-Error: cluster "old-classic" has no VPC — roksbnkctl only supports vpc-gen2 clusters
+Error: cluster "single-az" has subnets in only one AZ — awsbnkctl requires at least two AZs for BNK deployments
 ```
 
-## The COS naming convention
+## The supply-chain bucket naming convention
 
-`roksbnkctl up` needs a Cloud Object Storage instance to act as the registry for FAR images, JWT licenses, and schematic state. `cluster register` verifies that this COS instance exists at registration time so a later `up` doesn't fail mid-apply with a missing-instance error.
+`awsbnkctl up` needs an S3 bucket to act as the supply chain for FAR images, JWT licences, and any other BNK artefacts. `cluster register` verifies that this bucket exists at registration time so a later `up` doesn't fail mid-apply with a missing-bucket error.
 
 ### Default convention
 
-The bundled HCL falls back to **`<cluster-name>-cos`** if the user's tfvars don't override `roks_cos_instance_name`. So `cluster register` defaults to looking up `<cluster-name>-cos`:
+The bundled HCL falls back to **`awsbnkctl-<cluster-name>-supply`** if the user's tfvars don't override `supply_chain_bucket_name`. So `cluster register` defaults to looking up `awsbnkctl-<cluster-name>-supply`:
 
 ```bash
-# Cluster name: "canada-roks" → expects COS instance "canada-roks-cos"
-roksbnkctl cluster register canada-roks
+# Cluster name: "shared-eks" → expects bucket "awsbnkctl-shared-eks-supply"
+awsbnkctl cluster register shared-eks
 ```
 
-### Override with `--registry-cos-name`
+### Override with `--supply-chain-bucket`
 
-If your team set `roks_cos_instance_name` to something else in their tfvars (or named the COS instance via the IBM Cloud console with a different convention), pass `--registry-cos-name <name>`:
+If your team set `supply_chain_bucket_name` to something else in their tfvars (or named the bucket via the AWS console with a different convention), pass `--supply-chain-bucket <name>`:
 
 ```bash
-roksbnkctl cluster register canada-roks \
-  --registry-cos-name canada-roks-bnk-registry
+awsbnkctl cluster register shared-eks \
+  --supply-chain-bucket f5-bnk-shared-supply
 ```
 
-The instance name is **case-sensitive** and must match exactly — `Canada-ROKS-COS` and `canada-roks-cos` are different instances.
+The bucket name must match exactly — S3 bucket names are globally unique and case-sensitive (well, lowercase-only per AWS rules), so `F5-BNK-Shared-Supply` won't resolve.
 
-### What if the COS doesn't exist yet?
+### What if the bucket doesn't exist yet?
 
 `cluster register` errors out:
 
 ```
-Error: registry COS instance "canada-roks-cos" not found in account: ...
-  Either run `roksbnkctl cluster up` to create it, or pass --registry-cos-name <name>
-  if your tfvars uses a different roks_cos_instance_name
+Error: supply-chain bucket "awsbnkctl-shared-eks-supply" not found in account 123456789012:
+  Either run `awsbnkctl cluster up` to create it, or pass --supply-chain-bucket <name>
+  if your tfvars uses a different supply_chain_bucket_name
 ```
 
 You have two options:
 
-1. **Create the COS instance** in the IBM Cloud console with the conventional name (`<cluster>-cos`), then re-run register. The instance can be empty — `roksbnkctl up` will populate it with the bucket structure it needs on its first apply.
+1. **Create the bucket** in the AWS console with the conventional name, with server-side encryption (`aws:kms`) and access blocked from the public, then re-run register. The bucket can be empty — `awsbnkctl up` will populate it with the FAR archive + JWT licence on its first apply.
 
-2. **Use a different name** that already exists in the account, via `--registry-cos-name <name>`.
+2. **Use a different name** that already exists in the account, via `--supply-chain-bucket <name>`.
 
-Either way, `cluster register` won't write `cluster-outputs.json` until both the cluster and its registry COS instance exist.
+Either way, `cluster register` won't write `cluster-outputs.json` until both the cluster and its supply-chain bucket exist.
 
 ## The `cluster-outputs.json` write
 
-On success, `cluster register` writes `~/.roksbnkctl/<workspace>/cluster-outputs.json` — the same file `cluster up` writes. The contents look identical except for one field:
+On success, `cluster register` writes `~/.awsbnkctl/<workspace>/cluster-outputs.json` — the same file `cluster up` writes. The contents look identical except for one field:
 
 ```json
 {
-  "cluster_name": "canada-roks",
-  "cluster_id": "cre6h4l20jjsg4kvt3a0",
-  "region": "ca-tor",
-  "resource_group_id": "abc123...",
-  "vpc_id": "r038-...",
-  "registry_cos_crn": "crn:v1:bluemix:public:cloud-object-storage:global:a/...",
-  "registry_cos_name": "canada-roks-cos",
-  "master_url": "https://c106.ca-tor.containers.cloud.ibm.com:31415",
-  "openshift_version": "4.14_openshift",
+  "cluster_name": "shared-eks",
+  "cluster_arn": "arn:aws:eks:us-west-2:123456789012:cluster/shared-eks",
+  "region": "us-west-2",
+  "account_id": "123456789012",
+  "vpc_id": "vpc-0abc1234567890def",
+  "subnet_ids": ["subnet-0aaa", "subnet-0bbb", "subnet-0ccc"],
+  "oidc_provider_arn": "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/ABC123",
+  "supply_chain_bucket": "awsbnkctl-shared-eks-supply",
+  "cluster_endpoint": "https://ABCD1234.gr7.us-west-2.eks.amazonaws.com",
+  "kubernetes_version": "1.30",
   "source": "cluster-register",
-  "recorded_at": "2026-05-08T14:22:08Z"
+  "recorded_at": "2026-05-14T14:22:08Z"
 }
 ```
 
-The `source` field is `cluster-register` (vs `cluster-up` for self-provisioned clusters). Downstream commands that care about provenance — for example, a future `roksbnkctl cluster down` would refuse to destroy a `cluster-register`-sourced cluster — read this field. Subnet IDs (`subnet_ids`) and transit gateway ID (`transit_gateway_id`) are left blank for registered clusters; the bundled HCL doesn't need them when `roksbnkctl up` runs against a pre-existing cluster.
+The `source` field is `cluster-register` (vs `cluster-up` for self-provisioned clusters). Downstream commands that care about provenance — for example, `awsbnkctl cluster down` refuses to destroy a `cluster-register`-sourced cluster — read this field.
 
-## Worked example: register canada-roks
+## Worked example: register shared-eks
 
-The full flow for attaching to a hypothetical `canada-roks` cluster.
+The full flow for attaching to a hypothetical `shared-eks` cluster.
 
 ### Step 1 — create or pick a workspace
 
 ```bash
-roksbnkctl ws new canada
-roksbnkctl init -w canada
-# (interactive — fill in region as ca-tor; cluster.name = canada-roks)
+awsbnkctl ws new shared
+awsbnkctl init -w shared
+# (interactive — fill in region as us-west-2; cluster.name = shared-eks; cluster.create = false)
 ```
 
 You can also run `cluster register` against the current workspace; the `-w` is just for clarity.
@@ -132,56 +137,60 @@ You can also run `cluster register` against the current workspace; the `-w` is j
 ### Step 2 — `cluster register`
 
 ```bash
-roksbnkctl -w canada cluster register canada-roks
+awsbnkctl -w shared cluster register shared-eks
 ```
 
 Sample output:
 
 ```
-→ Looking up cluster "canada-roks"
-✓ Cluster canada-roks (cre6h4l20jjsg4kvt3a0) — state: normal, masters: 4.14_openshift
-✓ VPC r038-... (resource group prod-rg)
-→ Verifying registry COS instance "canada-roks-cos"
-✓ COS instance canada-roks-cos (abc-123-def-...)
-✓ Wrote ~/.roksbnkctl/canada/cluster-outputs.json
+→ Looking up cluster "shared-eks" in us-west-2
+✓ Cluster shared-eks (arn:aws:eks:us-west-2:123456789012:cluster/shared-eks) — version 1.30, status ACTIVE
+✓ VPC vpc-0abc1234567890def (3 subnets across us-west-2a, us-west-2b, us-west-2c)
+✓ OIDC provider arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/ABC123
+→ Verifying supply-chain bucket "awsbnkctl-shared-eks-supply"
+✓ Bucket awsbnkctl-shared-eks-supply exists (region us-west-2, KMS-encrypted)
+✓ Wrote ~/.awsbnkctl/shared/cluster-outputs.json
 ```
 
-If the COS naming was non-conventional:
+If the bucket naming was non-conventional:
 
 ```bash
-roksbnkctl -w canada cluster register canada-roks \
-  --registry-cos-name canada-bnk-registry
+awsbnkctl -w shared cluster register shared-eks \
+  --supply-chain-bucket f5-bnk-shared-supply
 ```
 
 ### Step 3 — verify with `cluster show`
 
 ```bash
-roksbnkctl -w canada cluster show
-workspace:        canada
-source:           cluster-register
-recorded_at:      2026-05-08T14:22:08Z
+awsbnkctl -w shared cluster show
+workspace:           shared
+source:              cluster-register
+recorded_at:         2026-05-14T14:22:08Z
 
-cluster_name:     canada-roks
-cluster_id:       cre6h4l20jjsg4kvt3a0
-region:           ca-tor
-resource_group:   abc123...
-openshift:        4.14_openshift
-master_url:       https://c106.ca-tor.containers.cloud.ibm.com:31415
+cluster_name:        shared-eks
+cluster_arn:         arn:aws:eks:us-west-2:123456789012:cluster/shared-eks
+region:              us-west-2
+account_id:          123456789012
+kubernetes_version:  1.30
+endpoint:            https://ABCD1234.gr7.us-west-2.eks.amazonaws.com
 
-vpc_id:           r038-...
-registry_cos:     canada-roks-cos
-registry_cos_crn: crn:v1:bluemix:public:cloud-object-storage:global:a/...
+vpc_id:              vpc-0abc1234567890def
+subnets:             subnet-0aaa, subnet-0bbb, subnet-0ccc
+oidc_provider_arn:   arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/ABC123
+supply_chain_bucket: awsbnkctl-shared-eks-supply
 ```
 
-### Step 4 — fetch the kubeconfig
+### Step 4 — generate the kubeconfig
 
-`cluster register` does **not** automatically download the kubeconfig — it's a metadata-only operation. Grab it explicitly:
+`cluster register` does **not** automatically generate the kubeconfig — it's a metadata-only operation. Grab it explicitly:
 
 ```bash
-roksbnkctl -w canada kubeconfig --download
-# → Fetching admin kubeconfig for "canada-roks"
+awsbnkctl -w shared kubeconfig --download
+# → Generating kubeconfig for "shared-eks"
 # ✓ Wrote /home/you/.kube/config (12345 bytes)
 ```
+
+Equivalent host-side: `aws eks update-kubeconfig --name shared-eks --region us-west-2`.
 
 ### Step 5 — use the cluster as if you'd done `cluster up`
 
@@ -189,44 +198,44 @@ From here, the workflow is identical to a self-provisioned cluster:
 
 ```bash
 # Verify reachability
-roksbnkctl -w canada k get nodes
+awsbnkctl -w shared k get nodes
 
 # Deploy a BNK trial onto it
-roksbnkctl -w canada up --auto
+awsbnkctl -w shared up --auto
 
 # Tear the trial back down (cluster survives)
-roksbnkctl -w canada down --auto
+awsbnkctl -w shared down --auto
 ```
 
-`roksbnkctl up` reads `cluster-outputs.json` and uses the cluster identity directly — no need to re-state cluster name/region/RG in the trial's tfvars.
+`awsbnkctl up` reads `cluster-outputs.json` and uses the cluster identity directly — no need to re-state cluster name / region / VPC in the trial's tfvars.
 
 ## When register isn't enough
 
 Some scenarios where `cluster register` won't get you over the line:
 
-- **The cluster is in a different IBM Cloud account.** API keys are account-scoped; you'd need a key for the cluster's account. `cluster register` doesn't cross account boundaries.
-- **The cluster is private (no public master endpoint).** `roksbnkctl up` needs to apply Helm charts and Kubernetes manifests against the master. If the master is only reachable from inside a VPN, route the apply through `--on jumphost` (Sprint 1) or wait for the SSH execution backend in Sprint 4.
-- **The cluster is a classic-infrastructure ROKS** (not vpc-gen2). Registration refuses; classic clusters aren't supported.
-- **The cluster's worker pool is too small.** BNK trials need at least 2 workers with adequate CPU/memory. The upstream HCL provisions appropriately-sized workers; an existing cluster might not.
+- **The cluster is in a different AWS account.** AWS credentials are account-scoped; you'd need credentials for the cluster's account, or cross-account `sts:AssumeRole` configured. `cluster register` doesn't cross account boundaries by default.
+- **The cluster is private (no public API endpoint).** EKS supports private-only clusters where the API endpoint is reachable only from inside the VPC. `awsbnkctl up` needs to apply Helm charts and Kubernetes manifests against the API; if the API is private, route the apply through `--on jumphost` ([Chapter 16](./16-on-flag-ssh-jumphosts.md)).
+- **The cluster lacks SR-IOV-capable nodes.** BNK trials need at least one node with SR-IOV VFs advertised (`intel.com/sriov` or equivalent). An existing cluster might not have this — registering still works but `cne_instance` reconciliation will hang in `Pending` until you add an SR-IOV-capable node group. [Chapter 33](./33-data-plane-decision.md) walks the data-plane decision.
+- **IRSA isn't wired.** The supply-chain bucket policy must include the FLO IRSA role ARN, and the OIDC provider must be registered in IAM. If the existing cluster's OIDC provider isn't an IAM OIDC provider yet, `cluster register` reports the gap and links to [Chapter 25 §"IRSA trust chain"](./25-cos-supply-chain.md#irsa-trust-chain) for the fix.
 
-For the first three, the cluster simply isn't a candidate. For the last one, the apply may run but `flo` / `cne_instance` will fail to schedule — scale the worker pool first.
+For the first three, you may still register and operate manually; for the IRSA case, run `awsbnkctl cluster up --modules iam_irsa` to provision just the IAM pieces against the registered cluster.
 
 ## Re-registering and unregistering
 
-To **re-register** with new data (e.g. you renamed the COS instance, or the master URL changed), just run `cluster register` again — it overwrites `cluster-outputs.json` in place.
+To **re-register** with new data (e.g. you renamed the supply-chain bucket, or the API endpoint moved from public to public+private), just run `cluster register` again — it overwrites `cluster-outputs.json` in place.
 
 To **unregister** without destroying anything, delete the file directly:
 
 ```bash
-rm ~/.roksbnkctl/canada/cluster-outputs.json
+rm ~/.awsbnkctl/shared/cluster-outputs.json
 ```
 
-The workspace's `config.yaml` and `state/` survive; only the cluster identity record is removed. The next `roksbnkctl up` will fail with `workspace has no cluster-outputs.json` until you either re-register or run `cluster up`.
+The workspace's `config.yaml` and `state/` survive; only the cluster identity record is removed. The next `awsbnkctl up` will fail with `workspace has no cluster-outputs.json` until you either re-register or run `cluster up`.
 
-There's deliberately **no** `roksbnkctl cluster unregister` command. Deleting the JSON is a single-file operation that doesn't deserve its own subcommand, and the absence of one nudges users toward "destroy the trial first, then deal with the cluster identity" rather than "unregister without thinking about the consequences".
+There's deliberately **no** `awsbnkctl cluster unregister` command. Deleting the JSON is a single-file operation that doesn't deserve its own subcommand, and the absence of one nudges users toward "destroy the trial first, then deal with the cluster identity" rather than "unregister without thinking about the consequences".
 
 ## Cross-references
 
-- [Chapter 8 — The cluster phase](./08-cluster-phase.md) — the alternative when you want `roksbnkctl` to provision the cluster.
-- [Chapter 10 — Deploying BNK trials](./10-deploying-bnk-trials.md) — what `roksbnkctl up` does on top of a registered (or `cluster up`'d) cluster.
-- [Chapter 25 — COS supply chain management](./25-cos-supply-chain.md) — the COS instance and bucket layout that `--registry-cos-name` points at.
+- [Chapter 8 — The cluster phase](./08-cluster-phase.md) — the alternative when you want `awsbnkctl` to provision the cluster.
+- [Chapter 10 — Deploying BNK trials](./10-deploying-bnk-trials.md) — what `awsbnkctl up` does on top of a registered (or `cluster up`'d) cluster.
+- [Chapter 25 — S3 (and optional ECR) supply chain](./25-cos-supply-chain.md) — the supply-chain bucket and IRSA trust chain that `--supply-chain-bucket` points at.

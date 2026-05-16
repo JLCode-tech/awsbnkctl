@@ -1,17 +1,12 @@
 package doctor
 
-// Sprint 6 — Priority 2: green-by-default refresh of `awsbnkctl doctor`.
+// Doctor green-by-default refresh tests.
 //
-// PLAN.md §"Gate to Sprint 7" requires the doctor command to exit 0
-// with zero warnings on a stock dev box that has ONLY `terraform`
-// AND `helm` installed (helm was added to the required set in v1.0.2
-// after a live e2e Phase B1 run revealed terraform's null_resource +
-// local-exec provisioners shell out to host helm). Pre-Sprint-6, the
-// doctor hard-failed on missing `kubectl` / `oc` / `ibmcloud` /
-// `iperf3` and warned on missing `dig` + missing kubeconfig — all of
-// which are now internalised surfaces (kubectl/oc via client-go in
-// awsbnkctl k *; ibmcloud via --backend docker; iperf3 via --backend
-// k8s; dig via miekg/dns).
+// Contract: `awsbnkctl doctor` exits 0 with zero warnings on a stock
+// dev box that has ONLY `terraform` AND `helm` installed. Every
+// previously-required-or-warned tool (kubectl, iperf3, dig) is now
+// internalised in the binary (kubectl via client-go in awsbnkctl k *;
+// iperf3 via the in-cluster fixture; dig via miekg/dns).
 //
 // These tests pin the contract so a future refactor can't silently
 // regress.
@@ -26,20 +21,16 @@ import (
 )
 
 // TestRunWithWhy_StockDevBox_NoWorkspace asserts: on a host with
-// (potentially) no kubectl/oc/ibmcloud/iperf3/dig and no workspace
-// initialised, the doctor emits no StatusError rows. The only
-// "required" tools are terraform + helm; if either isn't on the
-// host, this test naturally returns an error row for it — those are
-// the intentional hard fails.
+// (potentially) no kubectl/iperf3/dig and no workspace initialised,
+// the doctor emits no StatusError rows. The only "required" tools
+// are terraform + helm; if either isn't on the host, this test
+// naturally returns an error row for it — those are the intentional
+// hard fails.
 //
-// Sprint 3 (closes Sprint 2 tech-writer Issue 4): the AWS-row block
-// now surfaces unconditionally — on a stock dev box without AWS
-// credentials configured, the `aws credentials` row is StatusWarning
+// AWS-row block (PRD 04): the `aws credentials` row is StatusWarning
 // (naming the missing AWS_PROFILE / AWS_ACCESS_KEY_ID env var) and
 // every downstream AWS row (sts / eks / ec2 / s3 / iam) is
-// StatusSkipped. The contract widens to allow that one warning row
-// and the cascade of skipped rows in addition to the unchanged
-// `workspace` warning.
+// StatusSkipped.
 //
 // The test passes a nil-Workspace config.Context so the workspace +
 // IAM-auth checks degrade to "no workspace" / "no credentials"
@@ -56,7 +47,7 @@ func TestRunWithWhy_StockDevBox_NoWorkspace(t *testing.T) {
 			// `helm` (both required), and only on a host that doesn't
 			// actually have the respective binary installed. Every
 			// other tool is informational — a StatusError row from
-			// kubectl/oc/ibmcloud/iperf3/dig indicates a Sprint 6
+			// kubectl/iperf3/dig indicates a green-by-default
 			// regression.
 			if p.Check.Name != "terraform" && p.Check.Name != "helm" {
 				t.Errorf("non-required check %q is StatusError: %s — Sprint 6 green-by-default contract violated",
@@ -87,17 +78,16 @@ func TestRunWithWhy_StockDevBox_NoWorkspace(t *testing.T) {
 }
 
 // TestRunWithWhy_InformationalTools_OK pins that every previously-
-// optional tool (kubectl / oc / ibmcloud / iperf3 / dig) renders as
-// StatusOK regardless of whether it's installed. A missing
-// informational tool produces StatusOK with an explanatory detail;
-// a present tool produces StatusOK with the path.
+// optional tool (kubectl / iperf3 / dig) renders as StatusOK
+// regardless of whether it's installed. A missing informational tool
+// produces StatusOK with an explanatory detail; a present tool
+// produces StatusOK with the path.
 func TestRunWithWhy_InformationalTools_OK(t *testing.T) {
 	cctx := &config.Context{WorkspaceName: "test-info"}
 	pairs := runWithWhy(context.Background(), cctx)
 
 	informationalNames := map[string]bool{
-		"kubectl": true, "oc": true, "ibmcloud": true,
-		"iperf3": true, "dig": true,
+		"kubectl": true, "iperf3": true, "dig": true,
 	}
 	for _, p := range pairs {
 		if !informationalNames[p.Check.Name] {

@@ -22,9 +22,8 @@ import (
 // The local backend never materialises Files into the parent host's
 // filesystem at arbitrary paths — that would surprise users. Instead,
 // when Files is non-empty, the backend writes them inside RunOpts.WorkDir
-// (or a tempdir if WorkDir is empty, returning that as cwd). Sprint 3
-// ibmcloud passthrough doesn't need Files for local; the path exists
-// for symmetry with docker / k8s / ssh backends.
+// (or a tempdir if WorkDir is empty, returning that as cwd). Symmetric
+// with the docker / k8s / ssh backends.
 type LocalBackend struct{}
 
 // Name implements Backend.
@@ -110,9 +109,10 @@ func (LocalBackend) Run(ctx context.Context, argv []string, opts RunOpts) (int, 
 	}
 
 	// Wrap stdout/stderr through the redactor so a wrapped tool that
-	// accidentally prints the IBM API key (e.g., `ibmcloud --debug`)
-	// gets caught before the bytes reach the caller. PRD 04 §"Cross-
-	// backend principles" #1 — defense-in-depth.
+	// accidentally prints a secret (verbose tool logging — kubectl
+	// --v=10, terraform TF_LOG=trace) gets caught before the bytes
+	// reach the caller. PRD 04 §"Cross-backend principles" #1 —
+	// defense-in-depth.
 	stdout, stdoutClose := wrapForRedaction(opts.Stdout, opts.Credentials)
 	stderr, stderrClose := wrapForRedaction(opts.Stderr, opts.Credentials)
 	defer func() {
@@ -149,25 +149,24 @@ func (LocalBackend) Run(ctx context.Context, argv []string, opts RunOpts) (int, 
 	return 0, runErr
 }
 
-// wrapForRedaction returns w wrapped through NewRedactor when the
-// secrets list is non-empty, plus a Close() function the caller defers
-// (nil if no wrap was applied or w is nil).
+// wrapForRedaction returns w (or io.Discard when w is nil) plus a
+// Close() the caller defers (nil if no wrap was applied).
 //
 // w == nil means "callee doesn't want this stream" — we pass io.Discard
 // through, so the wrapped child can still write without blocking on a
 // nil writer.
+//
+// AWS retarget: the Credentials struct no longer carries a long-lived
+// secret value to redact (AWS creds resolve via the SDK chain at call
+// time and don't sit in the struct). The redactor surface is preserved
+// for future cred-string additions and to keep the test surface
+// intact.
 func wrapForRedaction(w io.Writer, creds *Credentials) (io.Writer, func() error) {
 	if w == nil {
 		w = io.Discard
 	}
-	if creds == nil || creds.IBMCloudAPIKey == "" {
-		return w, nil
-	}
-	r := NewRedactor(w, []string{creds.IBMCloudAPIKey})
-	if c, ok := r.(io.Closer); ok {
-		return r, c.Close
-	}
-	return r, nil
+	_ = creds // reserved for future secret-string additions
+	return w, nil
 }
 
 func init() {
