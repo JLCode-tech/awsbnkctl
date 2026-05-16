@@ -2,7 +2,7 @@
 
 The load-bearing design decision for `awsbnkctl`: how to stand up an EKS cluster whose worker nodes can host BNK's data plane. BNK requires SR-IOV; AWS's managed Kubernetes surface doesn't expose SR-IOV cleanly through EKS managed node groups. This PRD specifies the alternative.
 
-> **Status:** draft — Sprint 1. Authored in parallel with the Sprint 1 spike; spike findings fold back into this document at sprint close. Until the spike validates the decision, treat this PRD as a hypothesis, not a contract.
+> **Status:** draft — authored Sprint 0; refined Sprint 1 against the implementation. The operator-run spike (see [Spike status](#spike-status)) validates the design hypothesis against live AWS; spike findings fold into the [Resolved-in-spike](#resolved-in-spike-placeholder) section. Until the spike completes, treat this PRD as a hypothesis, not a contract; the `v0.2` release tag is gated on spike validation.
 
 ## Background
 
@@ -150,9 +150,19 @@ A `ConfigMap/sriov-device-plugin-config` declares the VF pool by PCIe vendor/dev
 | `awsbnkctl k get nodes -o wide` | Inherited; should show `c5n.4xlarge` nodes with `intel.com/sriov: <N>` in their allocatable resources. |
 | `awsbnkctl doctor` | New AWS-aware checks (see PRD 04 inheritance edits). |
 
-## Spike protocol (Sprint 1, days 1-3)
+## Spike status
 
-Before writing the Terraform module, validate end-to-end by hand. Output of the spike folds back into this PRD's "Spike findings" section at sprint close.
+The spike protocol below is **operator-run, not agent-run**. The Sprint 1 agent dispatch (architect, staff, validator, tech-writer) authors the Terraform module, the `internal/aws/` Go helpers, the `awsbnkctl up cluster` verb, and the doctor refresh against the *design hypothesis* — i.e. against the option matrix, decision, and architecture described above. None of those agents executes `terraform apply` against live AWS.
+
+The spike runs separately, on a date the operator chooses, against a real AWS account. It costs roughly $5-15 for a few hours of EKS control plane plus two `c5n.4xlarge` instances. The operator follows the day-1/day-2/day-3 protocol below and writes findings into the [Resolved-in-spike](#resolved-in-spike-placeholder) placeholder at the bottom of this PRD.
+
+The `v0.2` release tag is gated on spike completion, not on the Sprint 1 agent dispatch landing on `main`. If the spike surfaces a hypothesis mismatch (e.g. ENA VFs not accepted by BNK's CNEInstance reconciler — see [Spike fail modes](#spike-fail-modes) below), Sprint 1.5 or Sprint 2 rework addresses it before the tag cuts.
+
+The Sprint 1 commit therefore lands the design-as-written, with this section as the explicit pointer to "what was deferred and how it folds back in".
+
+## Spike protocol (operator-run; not part of the Sprint 1 agent dispatch)
+
+Before tagging `v0.2`, validate end-to-end by hand. Output of the spike folds back into this PRD's [Resolved-in-spike](#resolved-in-spike-placeholder) section, replacing the placeholder.
 
 ### Day 1 — cluster + node group
 
@@ -181,7 +191,7 @@ Before writing the Terraform module, validate end-to-end by hand. Output of the 
   1. Tune the SR-IOV device plugin config — exhaust device-plugin-side knobs first.
   2. Patch FLO's pre-flight check (if F5 collaborates) to accept ENA-SR-IOV VFs.
   3. Fall back to **the multi-ENI shape** (no SR-IOV; BNK runs on standard ENIs with reduced performance). Document the trade-off; v1.0 ships in this mode if the spike fails.
-  4. Last resort: bare-metal EC2 instances (`*.metal` family) with passed-through Mellanox NICs (does AWS even offer this? Mostly no in standard EC2).
+  4. Last resort: bare-metal EC2 instances (`*.metal` family) with whatever NIC AWS exposes at the bare-metal layer. AWS does not generally surface customer-installable PCIe NICs on standard EC2; if this fall-back is the only path, the project re-scopes to a narrower instance set (e.g. `c5n.metal`) and re-validates SR-IOV semantics from scratch.
 - **Multus chaining breaks pod connectivity:** AWS VPC CNI + Multus chaining has known edge cases around pod IP allocation order. Tracked upstream; mitigation is to use `multus-cni`'s `clusterNetwork` field to make VPC CNI the explicit primary.
 
 ## Trade-offs accepted
@@ -191,7 +201,7 @@ Before writing the Terraform module, validate end-to-end by hand. Output of the 
 - **Single instance family per cluster (effectively).** SR-IOV device plugin configuration is per-vendor/device-ID; mixing `c5n` and `m5n` is possible but doubles the config matrix. v1.0 docs recommend single-family clusters.
 - **AWS-only.** This PRD doesn't extend to Azure or GCP. Azure has accelerated networking + SR-IOV via Mellanox NICs (closer to BNK's reference); GCP has gVNIC. Both deserve their own fork if pursued.
 
-## Open questions (resolved in Sprint 1)
+## Open questions (resolved in the spike)
 
 - **Does ENA SR-IOV match BNK's reference closely enough that CNEInstance reconciles cleanly?** → spike day 3.
 - **Which exact instance types maximise VF count per dollar?** → spike data, folded into the instance-type default list.
@@ -201,7 +211,14 @@ Before writing the Terraform module, validate end-to-end by hand. Output of the 
 
 ## Resolved-in-spike (placeholder)
 
-Sprint 1 sprint-close: replace this section with concrete findings from the spike. Each open question above gets a paragraph; trade-offs accepted get re-affirmed or re-thought.
+**Operator-fillable.** When the spike completes, the operator replaces this placeholder with concrete findings. Expected structure:
+
+- A short narrative paragraph: what was provisioned, what passed, what surprised.
+- One paragraph per [Open question](#open-questions-resolved-in-the-spike) above, with the answer.
+- Re-affirm or revise each entry in [Trade-offs accepted](#trade-offs-accepted) against what the spike actually saw.
+- If a [Spike fail mode](#spike-fail-modes) triggered, document which mitigation was applied and whether v0.2 still ships in the original shape or in the fall-back shape.
+
+Until this section is filled, [`docs/PLAN.md`](../PLAN.md) Sprint 1 close notes "spike deferred"; the `v0.2` tag is not cut.
 
 ## Cross-references
 

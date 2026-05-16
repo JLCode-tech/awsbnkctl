@@ -16,7 +16,7 @@ Four audiences:
 
 - **BNK evaluators** kicking the tires on F5 BIG-IP Next for Kubernetes who want a low-friction path to a working trial deployment.
 - **F5 sales engineers (SEs)** who need a repeatable demo and proof-of-concept toolchain for customer engagements.
-- **Customer engineers** standing up BNK in their own IBM Cloud account, either for evaluation or as the foundation of a production rollout.
+- **Customer engineers** standing up BNK in their own AWS account, either for evaluation or as the foundation of a production rollout.
 - **Contributors** who want to extend `awsbnkctl` — add a backend, add a test suite, ship a new chapter. See [Part IX — Contributing](./32-extending-roksbnkctl.md).
 
 ## How to read this book
@@ -26,7 +26,7 @@ The book is organised so it can be read either way.
 - **Linear**: Parts I-VII walk from concepts through your first deployment, day-2 operations, and the built-in test suite. New users should read in order.
 - **Reference**: Part VIII (Command reference, Configuration reference, Terraform variable reference, Glossary) is exhaustive and indexed for lookups during day-to-day work. Search at the top of every page also reaches into reference material.
 
-If you have 30 minutes and an IBM Cloud account, skip straight to [Chapter 7 — Quick start](./07-quick-start.md). It's the canonical "first cluster up" walkthrough and the rest of the book makes more sense after you've seen the happy path end-to-end.
+If you have 30 minutes and an AWS account, skip straight to [Chapter 7 — Quick start](./07-quick-start.md). It's the canonical "first cluster up" walkthrough and the rest of the book makes more sense after you've seen the happy path end-to-end.
 
 Part IX is for contributors who want to build `awsbnkctl` from source or extend it.
 
@@ -34,14 +34,14 @@ Part IX is for contributors who want to build `awsbnkctl` from source or extend 
 
 This book assumes:
 
-- Basic familiarity with **IBM Cloud** — you have an account, you know what an API key is, and you've used the IBM Cloud console at least once.
-- Basic familiarity with **Kubernetes** — you know what a pod, service, and namespace are; you've run `kubectl` (or `oc`) before.
+- Basic familiarity with **AWS** — you have an account, you know what an IAM principal is, and you've used the AWS Console or `aws` CLI at least once.
+- Basic familiarity with **Kubernetes** — you know what a pod, service, and namespace are; you've run `kubectl` before.
 - A working terminal on Linux or macOS. Windows is supported for `awsbnkctl` itself, with documented limitations around interactive SSH (see [Chapter 16](./16-on-flag-ssh-jumphosts.md)).
 
 You do **not** need prior experience with:
 
 - **Terraform** — `awsbnkctl` embeds a vetted HCL tree and drives `terraform` for you. You can ignore the underlying HCL until you want to customise it ([Chapter 13](./13-terraform-variables.md)).
-- **OpenShift specifics** — the tool treats ROKS as Kubernetes with a thin SCC + project overlay; the few OpenShift-specific gotchas are called out in [Chapter 22](./22-throughput-testing.md) and [Chapter 26](./26-troubleshooting.md).
+- **EKS or SR-IOV specifics** — the tool stands up the cluster with the self-managed SR-IOV node group BNK needs; [Chapter 33](./33-data-plane-decision.md) is the design rationale if you want it but is not required for normal use.
 - **F5 BIG-IP Next** — BNK is the thing the book deploys; you don't need to be a Big-IP engineer to evaluate it. [Chapter 1](./01-what-is-bnk.md) is the 5-minute "what is this product" primer.
 
 ## Book conventions

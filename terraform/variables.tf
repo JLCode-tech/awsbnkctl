@@ -1,12 +1,13 @@
 # ============================================================
-# Root Terraform Variables (Sprint 0)
+# Root Terraform Variables (Sprint 1)
 #
-# Sprint 0 strips the IBM-Cloud variables and seeds the AWS-shaped
-# inputs per PRD 07's input table
-# (docs/prd/07-EKS-CLUSTER-SRIOV.md § "Inputs"). Module-specific
-# variables (cert_manager_namespace, far_repo_url, etc.) stay
-# stripped until their respective sprints (Sprint 2 = supply chain,
-# Sprint 3 = module port).
+# Sprint 0 stripped the IBM-Cloud variables and seeded the AWS-shaped
+# inputs per PRD 07 § "Inputs" (docs/prd/07-EKS-CLUSTER-SRIOV.md).
+# Sprint 1 adds the Multus / SR-IOV gating + resource-name variables
+# matching the eks_cluster module surface. Module-specific variables
+# (cert_manager_namespace, far_repo_url, etc.) stay stripped until
+# their respective sprints (Sprint 2 = supply chain, Sprint 3 = module
+# port).
 # ============================================================
 
 
@@ -62,4 +63,22 @@ variable "node_desired_size" {
   description = "Node group initial size"
   type        = number
   default     = 3
+}
+
+variable "enable_multus" {
+  description = "Install upstream Multus CNI DaemonSet (default true). See PRD 07 §\"Multus + SR-IOV stack\"."
+  type        = bool
+  default     = true
+}
+
+variable "enable_sriov" {
+  description = "Install upstream SR-IOV CNI + device plugin DaemonSets (default true). See PRD 07 §\"Multus + SR-IOV stack\"."
+  type        = bool
+  default     = true
+}
+
+variable "sriov_resource_name" {
+  description = "Resource key the SR-IOV device plugin advertises VFs under (default intel.com/sriov per PRD 07)."
+  type        = string
+  default     = "intel.com/sriov"
 }

@@ -1,75 +1,74 @@
 # Why EKS + self-managed SR-IOV node groups
 
-This book and the `roksbnkctl` tool target **ROKS** — IBM Cloud's managed Red Hat OpenShift offering — specifically. Other Kubernetes flavours can run BNK, and most of the patterns you'll learn here translate, but the bundled Terraform that `roksbnkctl` ships only knows how to provision a ROKS cluster.
+This book and the `awsbnkctl` tool target **Amazon EKS** specifically. Other Kubernetes flavours can run BNK, and most of the patterns you'll learn here translate, but the bundled Terraform that `awsbnkctl` ships only knows how to provision an EKS cluster with the specific node-group shape BNK needs.
 
-This chapter explains the rationale behind that choice. If you're already using ROKS, you can skim this. If you're evaluating whether ROKS is the right substrate for your BNK trial, read in full.
+This chapter explains why. If you're already on EKS and you just want a BNK trial, you can skim it. If you're evaluating whether EKS is the right substrate, read in full. The chapter assumes a working familiarity with AWS — what an account is, what a region is, what IAM is — but does not assume any EKS-specific background.
 
-## What ROKS is
+## BNK is a data-plane workload
 
-**ROKS** is short for **R**ed Hat **O**penShift on IBM Cloud. It's IBM Cloud's managed-OpenShift service: you ask IBM for a cluster, IBM provisions the masters, etcd, the OpenShift control plane, and a pool of worker nodes; you get a kubeconfig and start deploying.
+The starting point for every decision in this book is what [Chapter 1](./01-what-is-bnk.md) lays out: BNK is F5's TMM data plane in a Kubernetes pod. It moves packets at line rate; it needs network primitives below the conventional pod-networking layer; it expects SR-IOV virtual functions advertised as schedulable resources on the worker nodes it lands on. Everything else in awsbnkctl's design is downstream of that.
 
-ROKS clusters are **real OpenShift**. They run the same Operator Lifecycle Manager (OLM), the same `oc` CLI, the same SecurityContextConstraints (SCC) model, the same routes-and-services machinery you'd find on any OpenShift install. The only thing IBM has done differently is take responsibility for keeping the control plane and the underlying infrastructure healthy.
+"It's a data-plane workload" is the framing that makes the rest of this chapter make sense. A control-plane operator with modest network needs would have very different requirements; for example, the choice of node group shape would mostly not matter, and the project would happily run on Fargate. BNK is not that workload. The cluster has to look the way the data plane needs.
 
-## What IBM manages, what you manage
+## Why managed Kubernetes over rolling your own
 
-The boundary between "IBM's responsibility" and "your responsibility" is the principal value proposition of any managed Kubernetes service. For ROKS the line falls roughly here:
+Once you accept "BNK runs in Kubernetes", the next question is *which* Kubernetes — managed or self-managed. The case for managed is straightforward and well-rehearsed across the industry, but worth stating explicitly because it sets the baseline against which the EKS-specific choices below are measured.
 
-| Concern | Owner |
-|---|---|
-| Master nodes (API server, scheduler, controllers) | IBM |
-| etcd (persistence + backups) | IBM |
-| OpenShift control plane (OLM, ingress operator, image registry) | IBM |
-| OpenShift version upgrades for the control plane | IBM (you opt in to a major-version bump) |
-| Worker node provisioning (VPC VSIs, subnets, security groups) | IBM, on your behalf via the cluster API |
-| Worker node OS patching and CVE remediation | IBM |
-| Worker pool sizing and lifecycle (`workers create/delete`) | You |
-| Pod workloads running on the cluster | You |
-| Application-level RBAC, network policy, TLS, service accounts | You |
-| BNK install + configuration | You — this is what `roksbnkctl` automates |
+Self-managed Kubernetes on EC2 — `kubeadm`, or one of the build-it-yourself distributions — is a multi-week lift before you have a cluster. You provision the underlying instances, bootstrap the control plane, configure etcd backups, stand up DNS and load balancers, integrate with whichever cloud's IAM and storage you're on, build your own upgrade story, chase CVE patches across the control-plane fleet. Every one of those is solvable; very few of them are the *interesting* problem when what you actually want to do is evaluate BNK.
 
-The thing to internalise: with ROKS you do **not** rack hardware, install RHEL, run `openshift-install`, manage etcd backups, or chase CVE patches across a worker fleet. IBM does all of that. You start at "I have an OpenShift cluster" and go from there.
+Managed Kubernetes compresses that to one Terraform apply. You hand the provider a cluster spec, you get back a kubeconfig that authenticates against a control plane somebody else patches and backs up, and you proceed directly to deploying workloads. For an evaluation, a sales engineering demo, or a customer proof-of-concept, that compression is the whole point. The sibling fork `roksbnkctl` made the same call for IBM Cloud: managed ROKS over self-managed OpenShift, with the same rationale.
 
-## Why managed-OpenShift over self-managed for BNK evaluation
+awsbnkctl's analogous call is **managed EKS over kubeadm-on-EC2**. The cost — you give up some control of the control plane to AWS — is precisely the cost we want to pay. The data plane is where awsbnkctl spends its complexity budget; the control plane is somebody else's problem.
 
-If you want to **evaluate BNK quickly**, the calculus is straightforward. Self-managed OpenShift is a multi-week lift before you have a cluster:
+## Why EKS specifically (vs. other AWS Kubernetes surfaces)
 
-- Provision the underlying VMs (OpenStack / vSphere / bare metal).
-- Run `openshift-install` and debug whatever doesn't go right.
-- Configure DNS, load balancers, container registry mirrors.
-- Stand up monitoring + logging + cert-manager.
-- Now you can start thinking about BNK.
+AWS offers more than one path to Kubernetes. The relevant ones, with the short version of why each was not picked:
 
-ROKS compresses that to one Terraform `apply` of `~50` minutes. You get back a kubeconfig that authenticates against a real OpenShift cluster, with cert-manager already installable via OLM, and a worker pool of the size and zone topology you specified. From there, the BNK install is the same set of CRDs and Helm charts it would be on any OpenShift cluster.
+- **EKS (managed control plane, customer-managed worker nodes)** — the selected option. The control plane is AWS's responsibility, the nodes are ours, and the boundary between the two is well-documented and stable. The two pieces that matter most for BNK's lifecycle on AWS — OIDC for IRSA, and a launch-template-controlled worker shape — are both first-class on EKS.
+- **EKS Fargate (managed control plane, managed pod compute)** — rejected for reasons [Chapter 33](./33-data-plane-decision.md) unpacks. The short version: Fargate doesn't expose a node, and you can't attach SR-IOV VFs to compute you don't see.
+- **ECS (Amazon's non-Kubernetes container service)** — not Kubernetes. BNK is shipped as Kubernetes operators and CRDs; the cost of porting it off Kubernetes is the whole project, not awsbnkctl.
+- **kubeadm on EC2** — rejected per the previous section. We pay too much in operational surface to gain too little.
+- **Karpenter-driven EKS Auto Mode** — deferred to v1.x. Karpenter doesn't currently integrate with the SR-IOV device plugin in the way BNK needs.
 
-For a sales-engineering demo or a customer proof-of-concept, "I have a cluster in 50 minutes" beats "I have a cluster in 2 weeks" every time. That trade-off is the reason this book exists in this shape.
+Three EKS-specific properties are doing real work in the decision:
 
-## Why OpenShift (not just any Kubernetes) for BNK
+**The control plane is managed.** AWS runs the API server, the scheduler, etcd. They roll Kubernetes minor versions on a published cadence; CVE patches happen without operator action. For a project whose value is "BNK on AWS, easily" rather than "we run a hardened Kubernetes control plane", this is exactly the right division of labour.
 
-BNK runs on conformant Kubernetes generally, but it integrates more cleanly with OpenShift specifically because:
+**OIDC and IRSA are first-class.** Every EKS cluster gets an OIDC issuer URL on creation; that issuer URL is what lets a Kubernetes ServiceAccount assume an IAM role via the standard IRSA pattern. PRD 08 (S3 supply chain + IRSA, landing in Sprint 2) builds on this: the FLO operator authenticates to AWS without any static credentials in the cluster, just by virtue of running under a ServiceAccount that's bound to an IAM role via the cluster's OIDC provider. This is the modern, secret-free way to do cross-cloud-and-cluster identity, and EKS has it built in.
 
-- **Operator-driven install** — BNK is shipped as a set of operators. OpenShift has Operator Lifecycle Manager (OLM) as a first-class citizen, so the install pattern is familiar to OpenShift admins.
-- **SecurityContextConstraints (SCC)** — TMM pods need elevated capabilities (notably `NET_ADMIN`, raw socket access, hugepages). OpenShift's SCC model formalises that grant; on upstream Kubernetes you'd be configuring PodSecurityAdmission policies by hand.
-- **Routes** — OpenShift's `Route` CRD predates and is more capable than `Ingress`. BNK can act as an alternate Route implementation, slotting into existing OpenShift application architectures without forcing teams to migrate.
-- **Image streams + the internal registry** — useful for the BNK supply chain (FAR images, license bundles) which can be mirrored once and consumed by many installs.
+**Self-managed node groups are a supported surface.** This is the most important property for BNK specifically: AWS officially supports clusters where the customer owns the worker-node launch template, the AMI, and the boot-time configuration. The customer gets back the kubeconfig and an IAM trust relationship that lets nodes join; everything below the kubelet-to-API-server seam is the customer's. That's exactly the surface area awsbnkctl needs to layer in the SR-IOV stack [Chapter 33](./33-data-plane-decision.md) describes.
 
-If you're already an OpenShift shop, BNK fits naturally. If you're not, BNK still works but you'll need to translate this book's OpenShift-specific examples (SCCs, `oc adm policy`, `Route`) to your platform's equivalents.
+You could imagine an alternate universe where AWS exposed SR-IOV through managed node groups directly. In that universe, awsbnkctl would be a thinner project. We don't live in that universe today, and self-managed node groups are the bridge.
 
-## What's out of scope for this book
+## What this book covers, and what it doesn't
 
-A short list of Kubernetes flavours this book does **not** cover:
+awsbnkctl is opinionated about the cluster shape it builds. It is *not* a general-purpose EKS Terraform module. The cluster it stands up:
 
-- **EKS / AKS / GKE** — BNK runs on these, but `roksbnkctl up` won't provision them. You'd use cloud-specific tooling, then deploy BNK on top with the standard Helm charts F5 publishes.
-- **Self-managed OpenShift** on bare metal or VMs — same: no `roksbnkctl up`. You'd use `openshift-install`, then deploy BNK.
-- **K3s, RKE2, microk8s** — BNK's not formally supported on these for production; useful for local dev work but outside this book's scope.
+- Runs on a fixed-size self-managed node group (configurable min/max, but no Karpenter autoscaling in v1.0).
+- Uses ENA-enabled instance types (`c5n.4xlarge` by default; `c5n.9xlarge`, `m5n.4xlarge`, and `m5dn.4xlarge` as alternates), single instance family per cluster.
+- Pins the EKS-optimised AL2023 AMI per awsbnkctl release.
+- Layers Multus + SR-IOV CNI + SR-IOV device plugin on top of the AWS VPC CNI.
 
-The patterns from later chapters — workspaces, the `--on` flag, the connectivity / DNS / throughput tests — would still be useful on any of these, but the lifecycle commands (`init`, `up`, `down`, `cluster register`) assume ROKS.
+If your workload doesn't need any of that — if you'd be happy with managed node groups on plain `t3.medium`s — then awsbnkctl is the wrong tool for your cluster. F5 publishes Helm charts for BNK that work on any conformant Kubernetes cluster, and "stand up an EKS cluster with `eksctl`, install BNK with Helm" is a perfectly good path. awsbnkctl exists for the case where you specifically want BNK's data-plane characteristics on AWS without doing the SR-IOV plumbing by hand.
+
+The Kubernetes flavours this book does **not** cover:
+
+- **AKS / GKE** — BNK runs on these, but `awsbnkctl up` won't provision them. Forkable from this codebase the same way `awsbnkctl` was forked from `roksbnkctl`; not in scope for v1.0.
+- **ROKS / OpenShift on IBM Cloud** — see the upstream [`roksbnkctl`](https://github.com/jgruberf5/roksbnkctl) project, which is what this fork inherits from.
+- **Self-managed Kubernetes or OpenShift on bare metal / VMs** — F5's general BNK install path covers these; awsbnkctl does not.
 
 ## What you need before continuing
 
-To follow this book end-to-end you need:
+To follow this book end-to-end, you need:
 
-- An **IBM Cloud account** with billing enabled. The free tier won't provision a worker pool; you'll need a Pay-As-You-Go or Subscription account.
-- An **IBM Cloud API key** with permission to create ROKS clusters in the target account.
-- A **resource group** to scope cluster resources to. The default `Default` group works fine for a single-user evaluation; production deployments tend to use a dedicated group per environment.
+- An **AWS account** with billing enabled. The EKS control plane is metered at roughly $0.10/hour; a small `c5n.4xlarge` node group adds a few more dollars per hour. A short evaluation is inexpensive; a left-running cluster is not.
+- **AWS credentials** available via the standard chain (environment variables, an AWS profile, an EC2 instance role, or AWS SSO). [Chapter 14](./14-credentials-resolver.md) walks through what awsbnkctl looks for and in what order.
+- **IAM permissions** sufficient to create EKS clusters, EC2 launch templates and instances, VPCs and subnets, IAM roles and OIDC providers, and S3 buckets in the target account. A user with the `AdministratorAccess` policy is overkill but easy; production deployments narrow this to a least-privilege role per environment.
 
-The next chapters walk through installation and the quick-start path. By the end of [Chapter 7](./07-quick-start.md) you'll have a deployed BNK trial on a fresh ROKS cluster.
+You do **not** need prior experience with:
+
+- **EKS itself** — awsbnkctl drives Terraform on your behalf; you can ignore the EKS API until you want to customise.
+- **SR-IOV or low-level networking** — `awsbnkctl up cluster` provisions the SR-IOV stack as part of the cluster bring-up. [Chapter 33](./33-data-plane-decision.md) is the design rationale if you want it; for normal use, it's a chapter you can skip.
+- **F5 BIG-IP Next** — BNK is the thing the book deploys; you don't need to be a Big-IP engineer to evaluate it. [Chapter 1](./01-what-is-bnk.md) is the 5-minute primer.
+
+The next chapters walk through installation and the quick-start path. By the end of [Chapter 7](./07-quick-start.md) you'll have a deployed BNK trial on a fresh EKS cluster with SR-IOV node groups, and the rest of the book will make more sense in retrospect.

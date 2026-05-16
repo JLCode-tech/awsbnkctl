@@ -1,13 +1,10 @@
 # ============================================================
-# Root outputs (Sprint 0)
+# Root outputs (Sprint 1)
 #
-# Sprint 0 strips the legacy ROKS outputs (roks_cluster_id /
-# transit_gateway_name / flo_trusted_profile_id / testing_*). The
-# AWS-shaped equivalents (eks_cluster_name, cluster_endpoint, OIDC
-# issuer URL, IRSA role ARNs, jumphost IPs against the new VPC) are
-# re-emitted in Sprint 1 (EKS), Sprint 2 (S3 + IRSA), and Sprint 3
-# (module port). Until then, only the eks_cluster stub outputs are
-# surfaced so root-level `terraform output` is non-empty.
+# Sprint 0 stripped the legacy ROKS outputs; Sprint 1 surfaces the
+# eks_cluster module's contract (cluster name + endpoint + CA data +
+# OIDC issuer + IRSA provider ARN). Sprint 2 layers s3_supply_chain
+# outputs on top; Sprint 3 adds the testing module's jumphost IPs.
 # ============================================================
 
 
@@ -25,6 +22,12 @@ output "cluster_endpoint" {
   value       = module.eks_cluster.cluster_endpoint
 }
 
+output "cluster_ca_data" {
+  description = "EKS cluster CA cert (base64-encoded)"
+  value       = module.eks_cluster.cluster_ca_data
+  sensitive   = true
+}
+
 output "cluster_oidc_issuer_url" {
   description = "OIDC issuer URL (Sprint 2 IRSA input)"
   value       = module.eks_cluster.cluster_oidc_issuer_url
@@ -33,4 +36,14 @@ output "cluster_oidc_issuer_url" {
 output "oidc_provider_arn" {
   description = "IAM OIDC provider ARN"
   value       = module.eks_cluster.oidc_provider_arn
+}
+
+output "node_group_role_arn" {
+  description = "IAM role ARN for the self-managed node group"
+  value       = module.eks_cluster.node_group_role_arn
+}
+
+output "cluster_ready_id" {
+  description = "Empty-resource ID for downstream depends_on (carries through the roksbnkctl convention)"
+  value       = module.eks_cluster.cluster_ready_id
 }

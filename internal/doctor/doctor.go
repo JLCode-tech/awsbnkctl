@@ -129,14 +129,16 @@ func runWithWhy(ctx context.Context, cctx *config.Context) []withWhy {
 	out = append(out, checkWorkspace(cctx))
 	if cctx.Workspace != nil {
 		out = append(out, checkAPIKey(cctx))
-		// Sprint 0 stub: the IBM IAM verify check was removed alongside
-		// internal/ibm. The AWS-shaped equivalent (STS GetCallerIdentity)
-		// lands in Sprint 1 once internal/aws is implemented; see
-		// docs/prd/00-OVERVIEW.md and docs/prd/07-EKS-CLUSTER-SRIOV.md.
-		out = append(out, withWhy{
-			Check: Check{Name: "cloud auth", Status: StatusWarning, Detail: "AWS support coming in Sprint 1 (see docs/prd/07-EKS-CLUSTER-SRIOV.md)"},
-			Why:   "verifies cloud credentials work",
-		})
+		// Sprint 1 AWS-shaped checks (credentials configured, STS caller-identity,
+		// EKS DescribeCluster permission probe). Gated on a workspace existing
+		// to honour the inherited "stock dev box = 0 warnings" contract
+		// (TestRunWithWhy_StockDevBox_NoWorkspace). The visibility trade-off
+		// is tracked as a Sprint 2 deliverable per tech-writer Issue 1 — when
+		// the workspace schema is retargeted at AWS per PRD 04, the test
+		// contract is revisited and AWS checks surface unconditionally.
+		// EC2 quota + S3 PutObject probes are deferred to Sprint 2 per
+		// PRD 07 + PRD 08.
+		out = append(out, awsChecks(ctx, cctx)...)
 	}
 
 	return out

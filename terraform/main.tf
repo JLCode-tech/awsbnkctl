@@ -1,12 +1,9 @@
 # ============================================================
-# F5 BIG-IP Next for Kubernetes — Root Module (Sprint 0)
+# F5 BIG-IP Next for Kubernetes — Root Module (Sprint 1)
 #
-# Sprint 0 strips the IBM-Cloud module wiring (roks_cluster +
-# cert_manager / flo / cne_instance / license / testing modules that
-# consumed IBM outputs) and replaces it with a single TODO marker per
-# downstream sprint. The four reusable modules (cert_manager, flo,
-# cne_instance, license, testing) survive on disk; their AWS-shaped
-# rewire is Sprint 3 work per docs/PLAN.md § "Sprint 3".
+# Sprint 1 lands `module "eks_cluster"` per PRD 07; downstream modules
+# (s3_supply_chain, iam_irsa, cert_manager, flo, cne_instance, license,
+# testing) stay TODO'd until their consuming sprint.
 #
 # Execution-order target (Sprint 3 deliverable):
 #
@@ -16,11 +13,6 @@
 #                              └─► cne_instance
 #                                     └─► license
 #                                     └─► testing
-#
-# Sprint 1 lands only `module "eks_cluster"` — the rest stay TODO'd
-# until their consuming sprints. Sprint 0 wiring intentionally
-# fail-stops at the eks_cluster apply (see modules/eks_cluster/main.tf)
-# rather than silently succeed with no infra.
 # ============================================================
 
 
@@ -41,6 +33,9 @@ module "eks_cluster" {
   node_min_size       = var.node_min_size
   node_max_size       = var.node_max_size
   node_desired_size   = var.node_desired_size
+  enable_multus       = var.enable_multus
+  enable_sriov        = var.enable_sriov
+  sriov_resource_name = var.sriov_resource_name
 }
 
 
@@ -74,7 +69,7 @@ module "eks_cluster" {
 # cne_instance, license, testing) and their bodies are mostly pure
 # k8s manifests — only the parameter boundary changes. Until then
 # the call sites are commented out so `terraform validate` against
-# the Sprint 0 tree doesn't fail on undefined wiring.
+# the Sprint 1 tree doesn't fail on undefined wiring.
 #
 #   module "cert_manager" {
 #     source = "./modules/cert_manager"

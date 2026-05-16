@@ -1,3 +1,11 @@
+# ============================================================
+# eks_cluster — provider requirements
+#
+# aws / kubernetes / null / time providers. The kubernetes provider is
+# only consumed by multus.tf + sriov.tf; declaring it here keeps the
+# root module's required_providers block free of CNI-specific deps.
+# ============================================================
+
 terraform {
   required_version = ">= 1.5"
 
@@ -9,10 +17,6 @@ terraform {
     kubernetes = {
       source  = "hashicorp/kubernetes"
       version = "~> 2.30"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.14"
     }
     null = {
       source  = "hashicorp/null"
