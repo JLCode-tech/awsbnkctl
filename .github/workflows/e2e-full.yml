@@ -3,26 +3,33 @@ name: Full E2E
 # Manual-trigger workflow for the combined A-H + I-N + L-DNS e2e
 # driver.
 #
-# Sprint 0 retarget: the inherited driver was IBM-Cloud-shaped. Per
-# docs/PLAN.md Sprint 0 ("identity rewrite + IBM strip + AWS stub"),
-# every e2e phase is currently a skip-stub citing the sprint that
-# retargets it (cluster-bring-up → Sprint 3; backend matrix → Sprint 4;
-# L-DNS → Sprint 4; v1.0 sign-off run → Sprint 6). This workflow stays
-# wired so the trigger surface (workflow_dispatch + release/** push)
-# survives, but it just echoes the skip-banner and exits 0 instead of
-# running the IBM-shaped driver against an AWS account it cannot reach.
+# Sprint 3 status: the dry-run tier of the cluster-bring-up phases
+# (A-H) has landed via the `full-up-dryrun` job in
+# .github/workflows/ci.yml (Sprint 3 staff wired the root-module
+# orchestrator end-to-end). The **live-apply** tier still gates on
+# the operator-run PRD 07 spike (docs/prd/07-EKS-CLUSTER-SRIOV.md §
+# "Spike protocol"), so this workflow stays a skip-stub for live-AWS
+# runs. The trigger surface (workflow_dispatch + release/** push)
+# survives so downstream automation (release branches, the
+# integrator's babysit loop) keeps parsing it; the body echoes the
+# updated skip-banner and exits 0.
 #
-# Sprint 4 will replace this stub with the AWS-flavoured full-e2e driver
-# (workflow inputs renamed: cluster_region → aws_region; secret renamed:
-# IBMCLOUD_API_KEY → AWS_*). Sprint 6 cuts v1.0 gated on this workflow
-# going green.
+# Sprint 4 will graduate the backend-matrix phases (I-N + L-DNS) and
+# bring this workflow closer to a real driver. Sprint 6 cuts v1.0
+# gated on the operator-run spike — at which point this workflow
+# transitions from skip-stub to actual e2e driver invocation
+# (renaming `cluster_region` → `aws_region` and threading AWS_*
+# secrets instead of IBMCLOUD_API_KEY).
 #
 # Triggers:
 #   - workflow_dispatch — manual run from the Actions tab.
-#   - push to release/** — the release-branch gate (no-op until Sprint 4).
+#   - push to release/** — the release-branch gate (no-op until Sprint 6).
 #
 # NOT triggered on PR / push to main / push to feature branches — the
-# fast unit + integration tiers in ci.yml cover those.
+# fast unit + integration tiers in ci.yml cover those. The Sprint 3
+# `full-up-dryrun` job in ci.yml runs on every PR and provides the
+# dry-run regression gate that this workflow's live-apply path will
+# eventually wrap.
 
 on:
   workflow_dispatch:
@@ -48,22 +55,33 @@ permissions:
 
 jobs:
   full-e2e:
-    name: Full E2E (Sprint 0 stub — skipped pending AWS retarget)
+    name: Full E2E (Sprint 3 stub — live apply gates on PRD 07 spike)
     runs-on: ubuntu-latest
-    # Gate to this fork so cross-repo PRs don't try to run it.
+    # Gate to this fork so cross-repo PRs don't try to run it. Sprint
+    # 3 brief: trigger surface still gated to JLCode-tech/awsbnkctl;
+    # body now references PRD 07 spike for the live-apply gate.
     if: github.repository == 'JLCode-tech/awsbnkctl'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sprint 0 skip banner
+      - name: Sprint 3 skip banner
         run: |
           echo "════════════════════════════════════════════════════════════"
-          echo "Full E2E — Sprint 0 stub"
+          echo "Full E2E — Sprint 3 stub"
           echo "════════════════════════════════════════════════════════════"
-          echo "All e2e phases are skip-marked pending AWS retarget."
-          echo "  Phases A-H (cluster bring-up):    Sprint 3"
+          echo "Dry-run tier of phases A-H is exercised by the"
+          echo "  full-up-dryrun job in .github/workflows/ci.yml (every PR)."
+          echo ""
+          echo "Live-apply tier still gates on the operator-run PRD 07 spike:"
+          echo "  docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\""
+          echo "  (provision EKS 1.30 + self-managed c5n.4xlarge node group;"
+          echo "   install Multus + SR-IOV CNI + device plugin DaemonSets;"
+          echo "   schedule a pod requesting intel.com/sriov:1)."
+          echo ""
+          echo "Remaining e2e phase status:"
+          echo "  Phases A-H (cluster bring-up):    Sprint 3 dry-run + PRD 07 spike for apply"
           echo "  Phases I-N (backend matrix):      Sprint 4"
           echo "  Phase L-DNS:                      Sprint 4"
-          echo "  Full v1.0 sign-off:               Sprint 6"
+          echo "  Full v1.0 sign-off:               Sprint 6 (gated on spike)"
           echo "See docs/PLAN.md for the retarget plan."
           exit 0

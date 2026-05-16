@@ -91,18 +91,12 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// PRD 04 fold (Sprint 2): prefer the AWS-shaped block; fall back
-	// to the inherited IBMCloud block for legacy workspaces until the
-	// cred + exec retarget (Sprint 3).
+	// Sprint 3 (PRD 04 retarget): AWS is the only first-class cloud
+	// block; the inherited IBMCloud fallback dropped.
 	region := cctx.Workspace.AWS.Region
-	if region == "" {
-		region = cctx.Workspace.IBMCloud.Region
-	}
 	fmt.Fprintf(tw, "Region:\t%s\n", or(region, "(unset)"))
 	if cctx.Workspace.AWS.Profile != "" {
 		fmt.Fprintf(tw, "AWS profile:\t%s\n", cctx.Workspace.AWS.Profile)
-	} else if cctx.Workspace.IBMCloud.ResourceGroup != "" {
-		fmt.Fprintf(tw, "Resource group:\t%s\n", cctx.Workspace.IBMCloud.ResourceGroup)
 	}
 	fmt.Fprintf(tw, "Cluster:\t%s\t%s\n", or(cctx.Workspace.Cluster.Name, "(unset)"), createOrAttach(cctx.Workspace.Cluster.Create))
 	fmt.Fprintf(tw, "TF source:\t%s\n", tfSourceDescription(cctx.Workspace.TFSource))

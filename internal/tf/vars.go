@@ -47,14 +47,9 @@ func RenderTFVars(w io.Writer, ws *config.Workspace, kubeconfigDir, scratchDir s
 	}
 	fmt.Fprintln(w)
 
-	// AWS — PRD 04 fold (Sprint 2). Back-compat: fall back to the
-	// inherited IBMCloud.Region if the AWS block is unset on a
-	// legacy workspace.
-	region := ws.AWS.Region
-	if region == "" {
-		region = ws.IBMCloud.Region
-	}
-	if region != "" {
+	// AWS — Sprint 3 (PRD 04 retarget) drops the legacy IBMCloud
+	// fallback; AWS is the only first-class cloud block.
+	if region := ws.AWS.Region; region != "" {
 		fmt.Fprintf(w, "region = %q\n", region)
 	}
 	if ws.AWS.VPCID != "" {

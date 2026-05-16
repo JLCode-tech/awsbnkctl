@@ -168,3 +168,74 @@ func ensureEmptyTFVars(path string) error {
 	const body = "# Sprint 1 placeholder. AWS-shaped tfvars renderer lands in Sprint 2 (PRD 04).\n# Pass values via TF_VAR_<name> env vars or terraform.tfvars.user.\n"
 	return os.WriteFile(path, []byte(body), 0o644)
 }
+
+// runFullLifecyclePlan drives the Sprint 3 full-lifecycle terraform
+// plan: eks_cluster → cert_manager / s3_supply_chain / iam_irsa →
+// flo → cne_instance → license / testing. Identical shape to
+// runClusterPlan but renders the workspace's tfvars (so the
+// supply-chain paths + cluster_name + region surface in the plan)
+// rather than the cluster-only empty placeholder.
+//
+// SPIKE DEFERRAL: this only ever runs `terraform plan` — never
+// `apply`. Live apply against AWS is gated on the PRD 07 operator-
+// run spike; v0.2 unlocks the non-dry-run path.
+func runFullLifecyclePlan(ctx context.Context) error {
+	cctx, err := config.New(flagWorkspace)
+	if err != nil {
+		return err
+	}
+	if cctx == nil {
+		cctx = &config.Context{WorkspaceName: "default"}
+	}
+
+	if !awsaws.HasEnvCredentials() {
+		fmt.Fprintln(os.Stderr, "warning: AWS credentials not detected (set AWS_PROFILE, AWS_ACCESS_KEY_ID, or run from an instance with an attached role); plan will fail when terraform tries to call AWS APIs")
+	}
+
+	stateDir, err := config.WorkspaceStateDir(cctx.WorkspaceName)
+	if err != nil {
+		return fmt.Errorf("resolving workspace state dir: %w", err)
+	}
+
+	var ws *config.Workspace
+	if cctx.Workspace != nil {
+		ws = cctx.Workspace
+	} else {
+		ws = &config.Workspace{TFSource: config.TFSourceCfg{Type: "embedded"}}
+	}
+
+	tfws, err := tf.Open(ctx, cctx.WorkspaceName, ws, stateDir, "", os.Stdout, os.Stderr)
+	if err != nil {
+		return err
+	}
+
+	// Render the workspace's tfvars (region, vpc_id, subnet_ids,
+	// cluster_name, supply-chain paths). Falls back to the
+	// placeholder for a workspace with no values set — the user
+	// can override via TF_VAR_* env vars or --var-file.
+	tfvarsPath := tfws.TFVarsPath()
+	if cctx.Workspace != nil {
+		if werr := tf.WriteTFVars(tfvarsPath, cctx.Workspace, "", ""); werr != nil {
+			return fmt.Errorf("rendering tfvars: %w", werr)
+		}
+	} else if err := ensureEmptyTFVars(tfvarsPath); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(os.Stderr, "→ terraform init (full lifecycle: eks_cluster → cert_manager / s3 / iam_irsa → flo → cne_instance → license / testing)")
+	if err := tfws.Init(ctx); err != nil {
+		return fmt.Errorf("terraform init: %w", err)
+	}
+
+	fmt.Fprintln(os.Stderr, "→ terraform plan (dry-run; no apply)")
+	hasChanges, err := tfws.Plan(ctx)
+	if err != nil {
+		return fmt.Errorf("terraform plan: %w", err)
+	}
+	if hasChanges {
+		fmt.Fprintln(os.Stderr, "✓ plan complete — full Sprint 3 graph planned; changes pending (live apply gated on PRD 07 spike)")
+	} else {
+		fmt.Fprintln(os.Stderr, "✓ plan complete — no changes")
+	}
+	return nil
+}

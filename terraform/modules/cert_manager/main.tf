@@ -1,15 +1,18 @@
 # ============================================================
-# Root Terraform Configuration
-# F5 BNK Orchestrator — deploys to an existing ROKS cluster
-# Modules: cert-manager → flo → cneinstance → license
+# cert_manager — outer module body (Sprint 3 AWS retarget)
+#
+# Calls the inner ./modules/cert-manager body unchanged (PRD 00
+# § "Inheritance map": ports unchanged). The kube_host + kube_token
+# inputs the inner module consumes come from the EKS data sources
+# in providers.tf, not from `ibm_container_cluster_config`.
 # ============================================================
 
 terraform {
   required_version = ">= 1.0"
   required_providers {
-    ibm = {
-      source  = "IBM-Cloud/ibm"
-      version = ">= 1.60.0"
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -22,20 +25,15 @@ terraform {
   }
 }
 
-# ============================================================
-# Module: cert-manager
-# Required before flo — installs cert-manager CRDs
-# ============================================================
-
 module "cert_manager" {
   source = "./modules/cert-manager"
 
-  depends_on = [data.ibm_container_cluster_config.runtime_config]
+  depends_on = [null_resource.eks_cluster_gate]
 
   enabled               = true
   namespace             = var.cert_manager_namespace
   chart_version         = var.cert_manager_version
   post_deployment_delay = 30
-  kube_host             = data.ibm_container_cluster_config.runtime_config.host
-  kube_token            = data.ibm_container_cluster_config.runtime_config.token
+  kube_host             = try(data.aws_eks_cluster.cluster[0].endpoint, "")
+  kube_token            = try(data.aws_eks_cluster_auth.cluster[0].token, "")
 }

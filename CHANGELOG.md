@@ -8,6 +8,25 @@ awsbnkctl began as a hard fork of [`jgruberf5/roksbnkctl`](https://github.com/jg
 
 ## Unreleased
 
+### Added — Sprint 3 (Five reusable modules ported + first end-to-end `up --dry-run`)
+
+- `terraform/modules/{cert_manager,flo,cne_instance,license,testing}/` — five inherited modules ported to consume AWS-shaped inputs (`aws_*` instead of `ibmcloud_*`, `eks_cluster_*` instead of `roks_cluster_*`, `s3_*` instead of `cos_*`, `irsa_role_*` instead of `trusted_profile_*`). Module bodies unchanged where PRD 00 said "ports unchanged"; outer wrappers rebuilt.
+- `terraform/main.tf` — full dependency graph rewired: `eks_cluster` → `cert_manager` / `s3_supply_chain` / `iam_irsa` → `flo` → `cne_instance` → `license` / `testing`.
+- `awsbnkctl up --dry-run` (no subcommand) — first end-to-end plan against the full graph. Live `apply` still gates on operator-run spike per PRD 07.
+- `awsbnkctl plan` aliases `up --dry-run`; `awsbnkctl down --dry-run` plans the destroy graph.
+- PRD 04 cred/exec retarget: `internal/cred/` + `internal/exec/` dropped `IBMCLOUD_API_KEY` env handling; AWS standard chain (env / profile / instance role / SSO) replaces it. IRSA is the in-cluster shape; no env-var injection needed for k8s backend.
+- `internal/cli/doctor_backend.go` — retargeted from IBM Trusted-Profile ops-pod check to IRSA shape (probes `eks.amazonaws.com/role-arn` annotation + `AWS_WEB_IDENTITY_TOKEN_FILE` env).
+- `Workspace.IBMCloud` back-compat alias removed (clean break). `internal/cli/legacy_helpers.go` trimmed.
+- `internal/doctor/doctor.go` — `awsChecks` call relaxed from workspace-nil-gate to unconditional (closes Sprint 2 tech-writer Issue 4). `TestRunWithWhy_StockDevBox_NoWorkspace` updated. Six AWS rows now render on stock dev box (credentials warning + downstream skipped).
+- `docs/prd/04-CREDENTIALS.md` — top-of-file "Resolved in Sprint 3" section: AWS standard credential chain documented; IRSA in-cluster shape; AWS backend × credential matrix; doctor surface; migration steps from IBM-API-key chain.
+- `docs/prd/08-S3-SUPPLY-CHAIN-IRSA.md` — versioning correction (PRD now matches `s3_supply_chain` module's "enabled unconditionally" for FAR/JWT artefact history).
+- `book/src/26-troubleshooting.md` — full first-pass (~1,700 words): SR-IOV VF advertisement, CNEInstance pending, STS chain, IRSA AccessDenied, EKS kubeconfig context, vCPU quotas, two-AZ subnet rule, orphan ENIs, CI provider-cache, cred-leak audit.
+- `book/src/25-cos-supply-chain.md` — chapter 26 cross-link refreshed.
+- `.github/workflows/ci.yml` — new `full-up-dryrun` job runs `awsbnkctl up --dry-run` against fake AWS creds; asserts exit-0 and that plan output mentions all 8 modules.
+- `scripts/e2e-test.sh` — phase markers refined (cluster phases A-H: "Sprint 3 implements dry-run; spike validates apply"; BNK trial phases: "live apply gates on spike"). All scripts still `exit 0`.
+- `scripts/test-integration-aws.sh` — full-up-dryrun gate added alongside per-package tests.
+- `cspell.json` — +33 module-terminology entries; staff `.tf` cspell findings reduced 46 → 4.
+
 ### Added — Sprint 2 (S3 supply chain + IRSA per PRD 08)
 
 - `terraform/modules/s3_supply_chain/` — KMS-encrypted S3 bucket with bucket policy scoping `s3:GetObject` to the FLO IRSA role; `aws_s3_object` resources for the FAR pull-key archive + subscription JWT, sourced from local paths the operator provides at `awsbnkctl init` time.

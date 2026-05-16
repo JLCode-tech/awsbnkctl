@@ -1,36 +1,32 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
-	"github.com/JLCode-tech/awsbnkctl/internal/cred"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 // Cross-verb helpers shared by test.go + tfvars.go + doctor_backend.go.
 //
 // Origin: Sprint 0 split-out from the deleted IBM lifecycle verbs.
-// Sprint 2 (PRD 04 fold) retargets the workspace schema onto AWS;
-// these helpers stay as the smallest cross-package surface that
-// test.go / tfvars.go / doctor_backend.go can share without an import
-// cycle. The IBMCLOUD_API_KEY env propagation that the original
-// helpers carried lives in internal/cred + internal/exec now;
-// retiring those packages' IBM lineage is tracked as a Sprint 3 task
-// per PRD 04. See `issues/issue_sprint2_staff.md` Issue 1 for the
-// retirement plan.
+// Sprint 3 trims the file to the four helpers that still have live
+// callers in test.go / tfvars.go / doctor_backend.go (workspaceEnv,
+// resolveBackendSpecWith, podReady, refDescription). The IBM-cred
+// silencer + context import dropped alongside the PRD 04 retarget;
+// the cred package no longer threads an IBM Cloud API key through
+// the execution backends — AWS credentials resolve via the SDK chain
+// in internal/aws and IRSA in-cluster, so there's nothing for these
+// helpers to inject.
 
 // workspaceEnv composes a child-process env for inherited tool
 // passthroughs. Returns the host env plus KUBECONFIG if a kubeconfig
 // is on disk. AWS credentials are resolved by the SDK chain (env /
-// profile / instance role) so no cred-shaped env vars are injected
-// here; the IBM API key path moved to internal/cred + internal/exec
-// in the v0.x lineage and stays there until Sprint 3 retargets the
-// docker / k8s execution backends per PRD 04.
+// profile / instance role / SSO) — no cred-shaped env vars are
+// injected here.
 func workspaceEnv() (*config.Context, []string, error) {
 	cctx, err := config.New(flagWorkspace)
 	if err != nil {
@@ -52,9 +48,6 @@ func workspaceEnv() (*config.Context, []string, error) {
 //  2. workspace's exec.<tool>.backend
 //  3. perToolDefaultBackend[tool]
 //  4. "local" default
-//
-// Mirrors the v1.0.x shape from the deleted cluster.go so inherited
-// callers (test.go) keep compiling unchanged.
 func resolveBackendSpecWith(cctx *config.Context, tool, flagOverride string) string {
 	if flagOverride != "" {
 		return flagOverride
@@ -108,14 +101,3 @@ func refDescription(c config.TFSourceCfg) string {
 		return "<unknown>"
 	}
 }
-
-// silenceUnused keeps the cred + context imports referenced even when
-// the test surface is the only caller in this file. The cred package
-// still owns the IBM API key resolution (used by docker/k8s exec
-// backends today); Sprint 3 retargets that whole flow per PRD 04 and
-// this stub retires alongside it.
-var _ = func() any {
-	var _ = (*cred.Resolver)(nil)
-	var _ = context.Background
-	return nil
-}()

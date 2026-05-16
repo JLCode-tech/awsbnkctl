@@ -58,24 +58,23 @@ func TestRenderTFVars_AWS(t *testing.T) {
 	}
 }
 
-func TestRenderTFVars_BackCompatIBMCloudRegion(t *testing.T) {
-	// Legacy workspace with only the IBMCloud block populated. The
-	// renderer must surface its region under the AWS-shaped tfvar
-	// name so the upstream EKS module still gets a value during the
-	// one-release back-compat window.
+func TestRenderTFVars_NoIBMCloudFallback(t *testing.T) {
+	// Sprint 3 (PRD 04 retarget) dropped the inherited IBMCloud
+	// back-compat alias. A workspace whose AWS block is empty
+	// renders no `region = ...` line; the renderer no longer
+	// consults any IBM-shaped field.
 	ws := &config.Workspace{
-		IBMCloud: config.IBMCloudCfg{Region: "us-east-2"},
-		Cluster:  config.ClusterCfg{Create: false, Name: "legacy"},
+		AWS:     config.AWSCfg{}, // explicitly empty
+		Cluster: config.ClusterCfg{Create: false, Name: "legacy"},
 	}
 	var buf bytes.Buffer
 	if err := RenderTFVars(&buf, ws, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, `region = "us-east-2"`) {
-		t.Errorf("expected back-compat region fallback; got:\n%s", out)
+	if strings.Contains(out, "region =") {
+		t.Errorf("expected no region line when AWS.Region is empty; got:\n%s", out)
 	}
-	// The legacy IBM-shaped tfvar names must not leak through.
 	for _, leaked := range []string{"ibmcloud_cluster_region", "ibmcloud_resource_group", "create_roks_cluster"} {
 		if strings.Contains(out, leaked) {
 			t.Errorf("legacy IBM tfvar %q must not be emitted:\n%s", leaked, out)

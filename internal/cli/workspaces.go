@@ -88,9 +88,6 @@ func runWSList(_ *cobra.Command, _ []string) error {
 		var region, cluster, tfRef string
 		if ws, err := config.LoadWorkspace(n); err == nil {
 			region = ws.AWS.Region
-			if region == "" {
-				region = ws.IBMCloud.Region
-			}
 			cluster = ws.Cluster.Name
 			switch ws.TFSource.Type {
 			case "github":

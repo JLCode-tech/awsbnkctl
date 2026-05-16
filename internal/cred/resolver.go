@@ -34,7 +34,6 @@ package cred
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -191,32 +190,23 @@ func apiKeyFromKeychain(workspace string) (string, error) {
 	return k, nil
 }
 
-// apiKeyFromConfig reads api_key_b64 from the workspace's config.yaml.
-// Missing workspace / unset field returns ("", nil) so the caller falls
-// through to the next chain step.
+// apiKeyFromConfig formerly read IBMCloud.APIKeyB64 from the workspace
+// config.yaml. Sprint 3 (PRD 04 retarget) dropped the IBMCloud schema
+// block; AWS credentials resolve via the SDK chain in internal/aws,
+// never via the workspace config. Retained as a no-op so the existing
+// chain in IBMCloudAPIKey keeps compiling — it always returns empty so
+// callers fall through to the (now also unused) prompt step.
 func apiKeyFromConfig(workspace string) (string, error) {
 	if workspace == "" {
 		return "", nil
 	}
-	ws, err := config.LoadWorkspace(workspace)
-	if err != nil {
+	if _, err := config.LoadWorkspace(workspace); err != nil {
 		if errors.Is(err, config.ErrWorkspaceNotFound) {
 			return "", nil
 		}
 		return "", err
 	}
-	if ws.IBMCloud.APIKeyB64 == "" {
-		return "", nil
-	}
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(ws.IBMCloud.APIKeyB64))
-	if err != nil {
-		return "", fmt.Errorf("decoding api_key_b64 from %q config.yaml: %w", workspace, err)
-	}
-	key := strings.TrimSpace(string(decoded))
-	if key == "" {
-		return "", fmt.Errorf("api_key_b64 in %q config.yaml decodes to empty", workspace)
-	}
-	return key, nil
+	return "", nil
 }
 
 // apiKeyFromPrompt reads the key from the TTY without echo, then offers to

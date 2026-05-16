@@ -1,47 +1,27 @@
 # ============================================================
-# Root Terraform Variables
-# F5 BNK Orchestrator for existing ROKS cluster
+# cert_manager — outer module variables (Sprint 3 / PRD 04 + PRD 07)
+#
+# AWS retarget of the inherited roksbnkctl wrapper. The inner
+# `./modules/cert-manager` body (helm install of cert-manager via
+# local-exec) is unchanged — only the outer parameter boundary
+# moves from IBM-shaped to AWS-shaped per PRD 00 § "Inheritance
+# map" (ports unchanged).
 # ============================================================
 
-# ============================================================
-# IBM Cloud Variables
-# ============================================================
-
-variable "ibmcloud_api_key" {
-  description = "IBM Cloud API Key"
+variable "aws_region" {
+  description = "AWS region hosting the EKS cluster"
   type        = string
-  sensitive   = true
 }
 
-variable "ibmcloud_cluster_region" {
-  description = "IBM Cloud region where the cluster resides"
-  type        = string
-  default     = "ca-tor"
-}
-
-variable "ibmcloud_resource_group" {
-  description = "IBM Cloud Resource Group name (leave empty to use account default)"
-  type        = string
-  default     = "default"
-}
-
-# ============================================================
-# Cluster Inputs
-# ============================================================
-
-variable "roks_cluster_name_or_id" {
-  description = "Name or ID of the existing OpenShift ROKS cluster to deploy BNK onto"
+variable "eks_cluster_name" {
+  description = "EKS cluster name (replaces roks_cluster_name_or_id from the inherited module)"
   type        = string
 
   validation {
-    condition     = length(var.roks_cluster_name_or_id) > 0
-    error_message = "roks_cluster_name_or_id cannot be empty — an existing cluster is required."
+    condition     = length(var.eks_cluster_name) > 0
+    error_message = "eks_cluster_name cannot be empty — an existing EKS cluster is required."
   }
 }
-
-# ============================================================
-# cert-manager Configuration
-# ============================================================
 
 variable "cert_manager_namespace" {
   description = "Kubernetes namespace for cert-manager"
@@ -55,27 +35,24 @@ variable "cert_manager_version" {
   default     = "v1.17.3"
 }
 
-variable "create_roks_cluster" {
-  description = "When true, cluster is being created by roks_cluster — skip plan-time cluster credential fetch"
+variable "create_eks_cluster" {
+  description = "When true, cluster is being created by eks_cluster — skip plan-time cluster credential fetch"
   type        = bool
   default     = false
 }
 
-variable "roks_cluster_dependency_id" {
-  description = "roks_cluster sentinel ID — when set, defers runtime_config fetch to apply time after roks_cluster completes"
+variable "eks_cluster_dependency_id" {
+  description = "eks_cluster sentinel ID — when set, defers runtime_config fetch to apply time after eks_cluster completes"
   type        = string
   default     = null
 }
 
-# Persistent dir for the kubeconfig that ibm_container_cluster_config downloads.
-# Default lives under /work/.bnk/scratch (host-bind-mounted in the bnk runner) so
-# the non-root container user can write it and the file survives across container
-# exits. path.module would resolve to /opt/tf-project/modules/cert_manager inside
-# the image — root-owned, read-only for the non-root container user, so MkdirAll
-# fails. Per-module subdir keeps concurrent data sources from clobbering each other.
+# Persistent dir kept in the AWS shape for symmetry with the inherited
+# wrapper. Inner helm/kubectl local-exec writes nothing here; the
+# variable persists so consumers calling the outer module with the
+# v0.x `kubeconfig_dir` knob continue to compile.
 variable "kubeconfig_dir" {
-  description = "Persistent, writable dir for ibm_container_cluster_config kubeconfig downloads. Defaults to a host-bind-mounted, module-scoped path under .bnk/scratch."
+  description = "Persistent, writable dir reserved for local-exec scratch space. Inherited from the v0.x wrapper for source compatibility."
   type        = string
   default     = "/work/.bnk/scratch/kubeconfig/cert_manager"
 }
-

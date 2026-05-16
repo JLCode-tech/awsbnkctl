@@ -17,25 +17,22 @@ import (
 // this struct. Plaintext keys in the YAML are rejected at load time by
 // rejectPlaintextSecrets.
 //
-// Sprint 2 (PRD 04 fold, closes Sprint 1 staff Issue 3) introduces the
-// AWS-shaped block. The legacy IBMCloud field stays as a yaml alias for
-// one release so existing workspaces keep loading; new code reads from
-// AWS, with IBMCloud-region fallback at the awsRegionFromContext seam
-// only. The cred/exec packages still reference IBMCloudCfg for the
-// IBM API-key plumbing; their retarget lands in Sprint 3 per PRD 04.
+// Sprint 3 (PRD 04 cred/exec retarget) drops the inherited `IBMCloud`
+// block outright. AWS is the only first-class shape; AWS credentials
+// resolve via the SDK chain (env / shared config / profile / instance
+// role / SSO) — never written to the workspace file. Legacy on-disk
+// workspaces with an `ibmcloud:` block load cleanly because YAML
+// ignores unknown keys at unmarshal time; the region/profile/etc
+// values formerly carried under that block are no longer consulted.
+// Operators upgrading from a v0.1 workspace must re-run `awsbnkctl init`
+// to populate the `aws:` block.
 type Workspace struct {
-	// AWS is the Sprint 2+ block; new workspaces written by
-	// `awsbnkctl init` populate this. Doctor + tf vars renderer read
-	// from here first, fall back to IBMCloud.Region for back-compat.
+	// AWS is the only first-class cloud block; new workspaces written
+	// by `awsbnkctl init` populate this. Doctor + tf vars renderer
+	// + inspect / workspaces.go all read from here. Region empty
+	// means "let the SDK chain resolve AWS_REGION".
 	AWS AWSCfg `yaml:"aws,omitempty"`
 
-	// IBMCloud is the inherited roksbnkctl block. Deprecated as of
-	// Sprint 2 (Sprint 1 staff Issue 3); kept so legacy on-disk
-	// workspaces load and so the cred + exec packages (which still
-	// thread an IBM Cloud API key for the docker/k8s backends) keep
-	// compiling. Sprint 3 retirement is tracked as a Sprint 2 staff
-	// issue.
-	IBMCloud IBMCloudCfg          `yaml:"ibmcloud,omitempty"`
 	Cluster  ClusterCfg           `yaml:"cluster"`
 	BNK      BNKCfg               `yaml:"bnk,omitempty"`
 	Test     TestCfg              `yaml:"test,omitempty"`
@@ -150,24 +147,6 @@ type SupplyChainCfg struct {
 	// (PRD 08 § "Decision" v1.0 stretch). Default false; v1.x
 	// promotes to first-class.
 	EnableECRMirror bool `yaml:"enable_ecr_mirror,omitempty"`
-}
-
-type IBMCloudCfg struct {
-	Region        string `yaml:"region"`
-	ResourceGroup string `yaml:"resource_group"`
-	APIKeySource  string `yaml:"api_key_source,omitempty"` // env | keychain | config | prompt — see secrets.go
-
-	// APIKeyB64 stores the API key base64-encoded inline in the workspace
-	// config. This is OBFUSCATION, NOT ENCRYPTION — anyone with the file
-	// can decode it instantly. Treat the file like a plaintext credential:
-	// chmod 600, .gitignore, never commit. Provided as a convenience for
-	// single-user setups; the keychain or env-var path is the recommended
-	// secure default.
-	//
-	// Note that the field name does NOT match the rejectPlaintextSecrets
-	// regex (which guards `api_key`, not `api_key_b64`), so the value
-	// loads normally without tripping the plaintext rejection.
-	APIKeyB64 string `yaml:"api_key_b64,omitempty"`
 }
 
 type ClusterCfg struct {

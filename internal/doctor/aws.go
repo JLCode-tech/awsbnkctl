@@ -252,11 +252,8 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 }
 
 // awsRegionFromContext extracts the AWS region from the workspace
-// config if present. Sprint 2 (PRD 04 fold) retargets onto the
-// AWS-shaped workspace block (Workspace.AWS.Region); the IBMCloud
-// field stays as a deprecated fallback for one release so legacy
-// on-disk workspaces keep working until the cred + exec retarget
-// (Sprint 3).
+// config if present. Sprint 3 (PRD 04 retarget) dropped the legacy
+// IBMCloud.Region fallback; AWS is the only first-class block.
 //
 // Empty return falls through to the SDK's default chain, which reads
 // AWS_REGION env / shared config. internal/aws's NewClients surfaces
@@ -265,10 +262,7 @@ func awsRegionFromContext(cctx *config.Context) string {
 	if cctx == nil || cctx.Workspace == nil {
 		return ""
 	}
-	if r := cctx.Workspace.AWS.Region; r != "" {
-		return r
-	}
-	return cctx.Workspace.IBMCloud.Region
+	return cctx.Workspace.AWS.Region
 }
 
 // awsProfileFromContext mirrors awsRegionFromContext for AWS_PROFILE.

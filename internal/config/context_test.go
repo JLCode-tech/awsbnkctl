@@ -59,8 +59,8 @@ func TestSaveAndLoadWorkspace_Roundtrip(t *testing.T) {
 	t.Setenv(ROKSBNKCTLHomeEnv, t.TempDir())
 
 	in := &Workspace{
-		IBMCloud: IBMCloudCfg{Region: "us-south", ResourceGroup: "default", APIKeySource: APIKeySourceEnv},
-		Cluster:  ClusterCfg{Create: true, Name: "bnk-demo", OpenShiftVersion: "4.18", WorkersPerZone: 1},
+		AWS:      AWSCfg{Region: "us-east-1", Profile: "default"},
+		Cluster:  ClusterCfg{Create: true, Name: "bnk-demo", WorkersPerZone: 1},
 		TFSource: TFSourceCfg{Type: "github", Repo: "JLCode-tech/awsbnkctl-tf", Ref: "v0.6.7"},
 	}
 	if err := SaveWorkspace("demo", in); err != nil {
@@ -71,7 +71,7 @@ func TestSaveAndLoadWorkspace_Roundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWorkspace: %v", err)
 	}
-	if out.IBMCloud.Region != "us-south" || out.Cluster.Name != "bnk-demo" || out.TFSource.Ref != "v0.6.7" {
+	if out.AWS.Region != "us-east-1" || out.Cluster.Name != "bnk-demo" || out.TFSource.Ref != "v0.6.7" {
 		t.Errorf("roundtrip mismatch: %+v", out)
 	}
 }
@@ -199,70 +199,28 @@ func TestSetCurrent_RejectsMissingWorkspace(t *testing.T) {
 	}
 }
 
-func TestAPIKeyFromConfig_Roundtrip(t *testing.T) {
+// TestAPIKeyFromConfig_RetiredInSprint3 documents the Sprint 3 PRD 04
+// retarget: the workspace-config api_key_b64 path is no longer a
+// production cred source. ResolveAPIKey(..., APIKeySourceConfig) now
+// returns an empty result with an error (the explicit-config path was
+// dropped); the default chain (source=="") falls through to env →
+// keychain → prompt and surfaces the canonical "no key" error when
+// every source is empty.
+func TestAPIKeyFromConfig_RetiredInSprint3(t *testing.T) {
 	t.Setenv(ROKSBNKCTLHomeEnv, t.TempDir())
-	// Don't let the host env shadow the config-stored key.
 	for _, v := range []string{"IBMCLOUD_API_KEY", "IC_API_KEY", "TF_VAR_ibmcloud_api_key", "TF_VAR_IBMCLOUD_API_KEY", "TF_VAR_IC_API_KEY"} {
 		t.Setenv(v, "")
 	}
 
-	plaintext := "test-api-key-12345"
-	encoded := EncodeAPIKeyForConfig(plaintext)
-
-	ws := &Workspace{
-		IBMCloud: IBMCloudCfg{Region: "us-south", APIKeyB64: encoded},
+	if err := SaveWorkspace("retired", &Workspace{
+		AWS:      AWSCfg{Region: "us-east-1"},
 		Cluster:  ClusterCfg{Create: true, Name: "demo"},
 		TFSource: TFSourceCfg{Type: "github", Repo: "x/y", Ref: "v0.0.1"},
-	}
-	if err := SaveWorkspace("demo", ws); err != nil {
-		t.Fatalf("SaveWorkspace: %v", err)
-	}
-
-	// Default chain (env empty, keychain empty in test env, config has key)
-	got, err := ResolveAPIKey("demo", "")
-	if err != nil {
-		t.Fatalf("ResolveAPIKey: %v", err)
-	}
-	if got != plaintext {
-		t.Errorf("got %q, want %q", got, plaintext)
-	}
-
-	// Explicit "config" source
-	got, err = ResolveAPIKey("demo", APIKeySourceConfig)
-	if err != nil {
-		t.Fatalf("ResolveAPIKey(config): %v", err)
-	}
-	if got != plaintext {
-		t.Errorf("explicit source: got %q, want %q", got, plaintext)
-	}
-}
-
-func TestAPIKeyFromConfig_NotSet(t *testing.T) {
-	t.Setenv(ROKSBNKCTLHomeEnv, t.TempDir())
-
-	// Workspace exists but has no api_key_b64.
-	if err := SaveWorkspace("empty", &Workspace{}); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ResolveAPIKey("empty", APIKeySourceConfig); err == nil {
-		t.Error("expected error when api_key_b64 unset and source pinned to config")
-	}
-}
 
-func TestRejectPlaintextSecrets_DoesNotRejectAPIKeyB64(t *testing.T) {
-	t.Setenv(ROKSBNKCTLHomeEnv, t.TempDir())
-
-	ws := &Workspace{
-		IBMCloud: IBMCloudCfg{Region: "us-south", APIKeyB64: EncodeAPIKeyForConfig("k")},
-		Cluster:  ClusterCfg{Create: true, Name: "demo"},
-		TFSource: TFSourceCfg{Type: "github", Repo: "x/y", Ref: "v0.0.1"},
-	}
-	if err := SaveWorkspace("ok", ws); err != nil {
-		t.Fatal(err)
-	}
-	// Ensure the saved file loads cleanly — i.e., the plaintext-rejection
-	// regex doesn't false-positive on `api_key_b64:`.
-	if _, err := LoadWorkspace("ok"); err != nil {
-		t.Errorf("api_key_b64 should not trip plaintext rejection; got %v", err)
+	if _, err := ResolveAPIKey("retired", APIKeySourceConfig); err == nil {
+		t.Error("expected an error from the retired config-source path")
 	}
 }

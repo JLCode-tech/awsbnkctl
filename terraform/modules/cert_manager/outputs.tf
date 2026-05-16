@@ -1,10 +1,5 @@
 # ============================================================
-# Root Terraform Outputs
-# F5 BNK Orchestrator for existing ROKS cluster
-# ============================================================
-
-# ============================================================
-# cert-manager Outputs
+# cert_manager — outer outputs (Sprint 3 AWS retarget)
 # ============================================================
 
 output "cert_manager_namespace" {

@@ -102,3 +102,48 @@ output "ecr_mirror_repository_uris" {
   description = "Map of source image to ECR repository URI (empty when enable_ecr_mirror = false)."
   value       = module.ecr_mirror.repository_uris
 }
+
+
+# ============================================================
+# Sprint 3 — full lifecycle outputs
+# ============================================================
+
+output "cert_manager_namespace" {
+  description = "Namespace where cert-manager is deployed."
+  value       = module.cert_manager.cert_manager_namespace
+}
+
+output "cert_manager_ready_id" {
+  description = "Sentinel ID; (known after apply) until cert-manager CRDs are registered."
+  value       = module.cert_manager.cert_manager_ready_id
+}
+
+output "flo_namespace" {
+  description = "Namespace where FLO is provisioned."
+  value       = module.flo.flo_namespace
+}
+
+output "flo_ready_id" {
+  description = "Sentinel ID; (known after apply) once FLO IRSA ServiceAccount is ready."
+  value       = module.flo.flo_ready_id
+}
+
+output "cneinstance_ready_id" {
+  description = "Sentinel ID; (known after apply) once CNEInstance values are rendered."
+  value       = module.cne_instance.cneinstance_ready_id
+}
+
+output "license_namespace" {
+  description = "Namespace where the License CR will be deployed."
+  value       = module.license.license_namespace
+}
+
+output "license_jwt_s3_url" {
+  description = "S3 URL the FLO IRSA-bound pod fetches the JWT from."
+  value       = module.license.license_jwt_s3_url
+}
+
+output "testing_jumphost_public_ips" {
+  description = "Map of subnet id to public IP for the testing jumphosts."
+  value       = module.testing.testing_cluster_jumphost_public_ips
+}
