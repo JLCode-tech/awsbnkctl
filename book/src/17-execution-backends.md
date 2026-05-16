@@ -439,7 +439,7 @@ spec:
 
 Three details to call out:
 
-1. **Projected Secret for cred propagation.** `Credentials.IBMCloudAPIKey` (when set) becomes a one-shot Secret, mounted via `envFrom: secretRef`. Per [PRD 04 §"In-cluster pod"](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/04-CREDENTIALS.md#in-cluster-pod-k8s-backend) this beats argv (which would show in `kubectl describe pod`) and beats inline `env:` blocks (which surface in `kubectl get pod -o yaml`). The Secret carries the same `ttlSecondsAfterFinished`-equivalent lifecycle: when the Job's `ttlSecondsAfterFinished` deletes the Job, the owning controller's GC sweeps the Secret too via `ownerReferences`.
+1. **Projected Secret for cred propagation.** The resolved AWS credentials (access key ID / secret / session token / region) become a one-shot Secret, mounted via `envFrom: secretRef`. Per [PRD 04 §"In-cluster pod"](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/04-CREDENTIALS.md#in-cluster-pod-k8s-backend) this beats argv (which would show in `kubectl describe pod`) and beats inline `env:` blocks (which surface in `kubectl get pod -o yaml`). The Secret carries the same `ttlSecondsAfterFinished`-equivalent lifecycle: when the Job's `ttlSecondsAfterFinished` deletes the Job, the owning controller's GC sweeps the Secret too via `ownerReferences`. Under IRSA (the v1.x ops-pod-retarget default), the Secret carries empty data and the pod's projected web-identity token replaces the static credentials end-to-end.
 2. **Log streaming via `client-go`.** Once the Job's pod is in `Running` state, `clientset.CoreV1().Pods(ns).GetLogs(name, &corev1.PodLogOptions{Follow: true}).Stream(ctx)` returns an `io.ReadCloser` that we copy through the redactor into `opts.Stdout`. The stream stays open until the pod terminates or ctx cancels.
 3. **Exit-code extraction.** When the pod transitions to `Succeeded` or `Failed`, we read `pod.Status.ContainerStatuses[0].State.Terminated.ExitCode` and return that as the backend's exit code. A `Failed` pod with `ExitCode: 0` (rare; usually OOMKilled or evicted) maps to backend exit code `126` — backend mid-run failure rather than tool failure.
 
@@ -505,12 +505,11 @@ Exit `0` → tool present, proceed. Non-zero → tool missing. What happens next
 - **With `--bootstrap`.** The backend runs the per-tool bootstrap recipe. For Ubuntu (the only OS supported this round), the recipe is roughly:
 
   ```bash
-  # aws needs IBM's apt repo + GPG key first
+  # aws CLI v2 is installed from AWS's official zip distribution
+  # (Ubuntu's apt repos carry only the v1 line)
   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-  unzip awscliv2.zip && sudo ./aws/install \
-    | sudo tee /etc/apt/sources.list.d/awscli.list
-  sudo -n apt-get update -y
-  sudo -n apt-get install -y aws-cli
+  unzip awscliv2.zip
+  sudo ./aws/install
   ```
 
   `iperf3` is simpler — no repo addition, just `sudo -n apt-get install -y iperf3`.
@@ -626,7 +625,16 @@ type RunOpts struct {
 
 type Credentials struct {
     KubeconfigBytes []byte
-    IBMCloudAPIKey  string
+    AWS             AWSCredentials   // resolved via aws-sdk-go-v2's default chain
+                                     //   (env / profile / SSO / IMDS / IRSA)
+}
+
+type AWSCredentials struct {
+    AccessKeyID     string
+    SecretAccessKey string
+    SessionToken    string            // present for SSO / role-assumption / IRSA paths
+    Region          string
+    Source          string            // "EnvConfig", "SharedConfig", "WebIdentity", …
 }
 ```
 

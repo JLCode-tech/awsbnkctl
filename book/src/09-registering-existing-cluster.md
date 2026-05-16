@@ -1,10 +1,10 @@
 # Registering an existing cluster
 
+> **Available in v1.x.** The `awsbnkctl cluster register <name>` verb described in this chapter is **roadmap surface for v1.x** — it does not ship in the v0.9 binary. Running `awsbnkctl cluster register --help` against the v0.9 binary returns `unknown command "cluster"`. The v0.9 path for working against an EKS cluster you didn't provision via `awsbnkctl` is to point `--var-file` at a tfvars file that names the cluster + region + supply-chain bucket and let the bundled HCL's `eks_cluster` module skip cluster creation (the module is idempotent on existing clusters at the AWS API level). The chapter below documents the cleaner v1.x register surface that lifts the metadata-only flow from `roksbnkctl/internal/cli/cluster_register.go` and retargets it at the AWS SDK shape. Tracked under [`docs/PLAN.md`](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/PLAN.md) §"What's deferred to post-v1.0".
+
 `awsbnkctl cluster register <name>` wires `awsbnkctl` up to an EKS cluster that already exists in your AWS account — one you didn't provision via [`cluster up`](./08-cluster-phase.md). After a successful register, the workspace behaves exactly as if you'd done `cluster up`: `awsbnkctl up` deploys BNK trials onto the registered cluster, `awsbnkctl down` tears those trials down, `awsbnkctl status` reports the cluster's identity, and so on.
 
 This chapter covers when registration is the right answer, what input is required vs auto-discovered, the supply-chain bucket naming convention, the `cluster-outputs.json` write, and a worked example.
-
-> **Note.** The `cluster register` verb's as-shipped surface in v0.9 is the operator-driven path described below. The v1.x roadmap adds richer auto-discovery (Multus / SR-IOV DaemonSet status, IRSA OIDC provider matching) and is tracked in `docs/PLAN.md`.
 
 ## When to use this
 

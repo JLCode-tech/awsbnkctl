@@ -8,6 +8,40 @@ awsbnkctl began as a hard fork of [`jgruberf5/roksbnkctl`](https://github.com/jg
 
 ## Unreleased
 
+### Added — Sprint 6 (Hardening + ops-pod IRSA retarget + v0.9-rc release-artefact prep)
+
+**Final sprint.** The repository is now structurally complete for `v0.9-rc1`. The first stable `v1.0` tag waits on the operator-run PRD 07 spike (validating SR-IOV VFs on a real EKS `c5n.4xlarge` node) per `docs/prd/07-EKS-CLUSTER-SRIOV.md` § "Spike status".
+
+- **Sprint 5 BLOCKER closures (staff):** `internal/exec/k8s_install.yaml` retargeted end-to-end from IBM Trusted-Profile shape to AWS IRSA shape. Dropped the `roksbnkctl-ibm-creds` Secret + `IBMCLOUD_API_KEY` mount + IBM SA-annotation patch hook; added `eks.amazonaws.com/role-arn` so the EKS pod-identity webhook auto-injects `AWS_ROLE_ARN` + `AWS_WEB_IDENTITY_TOKEN_FILE`. Namespace/label/SA names retargeted to `awsbnkctl-*`. ClusterRole `secrets:get` → namespaced `secrets:{create,delete,patch}` in `awsbnkctl-test` (per-Job ephemeral files). Closes Sprint 5 tech-writer Issue 1.
+- **Sprint 5 chapter blocker closures (architect):** chapters 8, 9, 11 gained explicit "Available in v1.x" banners on `awsbnkctl cluster <subverb>` / `awsbnkctl bnk <subverb>` references that don't ship in v0.9. Chapter 19 banner updated to reflect Sprint 6's YAML retarget. Closes Sprint 5 tech-writer Issue 2.
+- **Glossary (architect):** chapter 30 rewritten — CRN deleted, S3 / CIS / EKS / OpenShift / Trusted Profile / VPE/VPC-endpoint / TGW / VSI/EC2-instance / SCC entries corrected; new PSA, IRSA, IMDS, redactor, envFrom, Secret, runAsNonRoot, restricted-v2, cred-resolver-chain entries. Cross-link anchors to chapters 14/25/26 fixed. Closes Sprint 5 tech-writer Issue 3.
+- **Secondary IBM-residue sweep (architect):** chapters 17, 18, 32 swept clean of IBM Cloud / ROKS / COS prose; `Credentials.IBMCloudAPIKey` references deleted, Secret names rewritten to `awsbnkctl-aws-creds`, `toolImages` / `toolPackages` examples retargeted, AWS-CLI-v2 install recipe fixed. Closes Sprint 5 tech-writer Issue 4.
+- **README sprint-count refresh (architect):** status banner now reads "Sprint 6 complete; v0.9-rc ready; v1.0 awaits spike". Quick start no longer prefixed "Planned"; fork-relationship section updated.
+- **PLAN.md "What's deferred to post-v1.0" appendix (architect):** consolidates every "v1.x revisit" note from PRDs 07-08 and every Sprint 0-5 open issue into one place. Eight subsections covering ops-pod IRSA auto-provision, ECR mirror first-class story, Karpenter / EKS Auto Mode evaluation, Calico CNI alternative, AWS Secrets Manager for JWT, multi-region GSLB, air-gapped install, Homebrew tap.
+- **Security audit (staff):** `gosec ./...` 55 findings catalogued (10 HIGH known-design/false-positives + 20 G301/G306 user-config file-perm posture accepted; rationale in staff Issue 1). `govulncheck` clean post-bump of `golang.org/x/net` v0.50.0 → v0.53.0 (closes GO-2026-4918 + GO-2026-4559). Secrets scan: no static credentials in source.
+- **goreleaser (staff):** verified `goreleaser build --snapshot --clean` produces six binary archives — linux/macOS/windows × amd64/arm64. `.goreleaser.yml` two surviving "IBM Cloud ROKS" strings retargeted to "AWS EKS".
+- **security-audit CI job (validator):** gosec + govulncheck + gitleaks, fail-on-finding, runs on every PR + main push. `book-build` cspell step extended to also cover `docs/**/*.md`.
+- **cspell (validator):** +49 entries (AWS / Go / k8s domain vocab, British spellings, project placeholders, `subverb`/`subverbs`). Total 416 words. Zero unknown-word findings across 48 files.
+- **e2e-full.yml (validator):** header + step banner refreshed from Sprint 4 framing to Sprint 6 / v1.0-cut framing; preserved trigger surface verbatim.
+
+### Integrator folds (Sprint 6 tech-writer blockers)
+
+- **Chapter 13 (Terraform variables)** — retargeted stale `roks_workers_per_zone` / `openshift_cluster_name` / `roks_min_worker_vcpu_count` references at AWS-shaped `node_*` / `cluster_*` / `node_instance_types`. S3 HMAC keys paragraph rewritten for IRSA-shaped supply chain. Closes Sprint 6 tech-writer Issue 3 (BLOCKER).
+- **Chapter 19 banner** — corrected the stale "do not run ops install" banner to reflect Sprint 6 staff's actual YAML retarget. Closes Sprint 6 tech-writer Issue 2 (BLOCKER).
+- **CHANGELOG Sprint 6 entry** — this section. Closes Sprint 6 tech-writer Issue 1 (BLOCKER).
+
+### v0.9-rc1 ready
+
+All six AWS-retarget sprints (Sprint 0 → Sprint 6) have landed. Repository state:
+- `go build / vet / test / gofmt` clean across all 13 packages.
+- `terraform validate` clean on root + all 8 modules (`eks_cluster`, `cert_manager`, `s3_supply_chain`, `iam_irsa`, `ecr_mirror`, `flo`, `cne_instance`, `license`, `testing`).
+- `awsbnkctl --help` / `init --dry-run` / `up --dry-run` / `down --dry-run` / `test {connectivity,dns,throughput} --dry-run` / `doctor` all work end-to-end offline.
+- `awsbnkctl doctor` reports six AWS pre-flight rows (credentials configured, STS caller-identity, EKS DescribeCluster permission, EC2 vCPU quota, S3 PutObject feasibility, IAM:GetRole FLO IRSA) when a workspace is configured.
+- Book published-ready (`mdbook build book/` clean in CI; cspell zero findings).
+- goreleaser snapshot produces six binary archives.
+- `gosec` + `govulncheck` clean (open findings documented and accepted).
+- CI matrix: 10 jobs (test × Linux/macOS, windows-build, integration, aws-mocked, full-up-dryrun, test-dryrun, security-audit, book-build, spellcheck, goreleaser-check).
+
 ### Added — Sprint 5 (Book retarget + IBM-residue sweep + reference chapter regen)
 
 - **Book retarget (architect):** chapters 1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14 rewritten or substantially edited from IBM Cloud / ROKS / COS framing to AWS / EKS / S3 framing. Mechanical sweeps applied to chapters 2, 3, 13, 15-19, 24, 28, 30-33 (`roksbnkctl`→`awsbnkctl`, `ROKS`→`EKS`, `COS`→`S3`, `IBMCLOUD_API_KEY`→`AWS_ACCESS_KEY_ID`, `IBM Cloud`→`AWS`). Chapter 26 troubleshooting gained sub-anchors (`### AWS LoadBalancer`, `### DNS`) closing Sprint 4 tech-writer Issue 4.

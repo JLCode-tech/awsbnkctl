@@ -56,7 +56,7 @@ The `docker`, `k8s`, and `ssh` backends each maintain a map of tool-name → ima
 
 ```go
 var toolImages = map[string]string{
-    "ibmcloud":  "ghcr.io/JLCode-tech/awsbnkctl-tools-ibmcloud",
+    "aws":       "ghcr.io/JLCode-tech/awsbnkctl-tools-aws",
     "iperf3":    "ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3",
     "terraform": "hashicorp/terraform:1.5.7",
     "<your>":    "<your-image-ref>",
@@ -67,7 +67,7 @@ Tag resolution is handled by `SetToolImageTag` (set in `internal/cli/root.go::in
 
 ### K8s backend
 
-[`internal/exec/k8s.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec/k8s.go) holds two patterns — long-lived ops pod (for tools that share state, like `ibmcloud`) and one-shot Job (for tools that produce a single output, like `iperf3` or DNS probes). New tools pick one pattern:
+[`internal/exec/k8s.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec/k8s.go) holds two patterns — long-lived ops pod (for tools that share state across many invocations, like `aws` in interactive-debug sessions) and one-shot Job (for tools that produce a single output, like `iperf3` or DNS probes). New tools pick one pattern:
 
 - **Ops pod**: add the tool's image to the ops pod's container spec at install time, or `kubectl exec` into the existing ops pod and run the host-installed binary.
 - **One-shot Job**: build a Pod template using the same image conventions as iperf3, run, stream logs, capture exit code, delete. The Job pattern is the right call for tools where the result is the only thing that matters.
@@ -77,13 +77,14 @@ Tag resolution is handled by `SetToolImageTag` (set in `internal/cli/root.go::in
 [`internal/exec/ssh.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec/ssh.go) maintains a map of tool names to apt-package names for the `--bootstrap` auto-install:
 
 ```go
-// toolPackage carries apt-repo metadata + package name; see the
+// toolPackage carries install metadata + binary name; see the
 // production form in internal/exec/ssh.go for the full struct shape
-// (IBM repo URL + GPG key + apt-source line for ibmcloud-cli, etc.).
+// (zip URL + checksum + install command for aws CLI v2, plain apt
+// package for iperf3, etc.).
 var toolPackages = map[string]toolPackage{
-    "ibmcloud": { /* IBM apt repo + key + "ibmcloud-cli" */ },
-    "iperf3":   { /* plain ubuntu-main "iperf3" */ },
-    "<your>":   { /* repo + key + "<deb-package>" */ },
+    "aws":    { /* AWS CLI v2 zip (curl + unzip + ./aws/install)  */ },
+    "iperf3": { /* plain ubuntu-main "iperf3" via apt-get          */ },
+    "<your>": { /* install recipe for <deb-package> or zip dist    */ },
 }
 ```
 

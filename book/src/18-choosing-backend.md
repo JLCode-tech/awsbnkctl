@@ -156,7 +156,7 @@ For CI specifically, also pin `aws.credentials_source: env` in workspace config 
 
 ### "I'm on a clean dev machine without `aws` installed"
 
-Use `--backend docker`. No `apt-get install aws-cli`, no IBM repo + GPG key dance, no upstream-package-version mismatch — `docker pull ghcr.io/JLCode-tech/awsbnkctl-tools-aws:dev` is the only setup, and `awsbnkctl` does that for you on first invocation.
+Use `--backend docker`. No host `aws` install, no zip-and-unzip dance, no upstream-package-version mismatch — `docker pull ghcr.io/JLCode-tech/awsbnkctl-tools-aws:dev` is the only setup, and `awsbnkctl` does that for you on first invocation.
 
 Alternatively, if your laptop is the dev machine and you'll run `aws` more than once, just install it. The `local` backend has lower per-invocation startup latency than `docker` (no container create/start/log-attach), so once you've paid the install cost the local path is faster for the rest of the session.
 
@@ -306,7 +306,7 @@ $ awsbnkctl exec --backend ssh:jumphost ks cluster ls
 $ awsbnkctl ops install
 ✓ Namespace awsbnkctl-ops created
 ✓ ServiceAccount + Role + RoleBinding applied
-✓ Secret awsbnkctl-ibm-creds applied (envFrom secretRef)
+✓ Secret awsbnkctl-aws-creds applied (envFrom secretRef)
 ✓ Pod awsbnkctl-ops Running (2.3s)
 
 # 5. Same aws call routed through the ops pod (k8s backend)

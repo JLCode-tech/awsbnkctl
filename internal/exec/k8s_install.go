@@ -8,24 +8,29 @@ import (
 // `awsbnkctl ops install`. Embedded at build time so the binary is
 // self-contained — no need to ship a separate manifests directory.
 //
-// Template placeholders substituted at apply-time. The manifest still
-// carries inherited IBM-shape placeholders; the AWS retarget of
-// `ops install` (Sprint 6 hardening) replaces these with IRSA-based
-// surface so the ops Pod consumes AWS via projected SA token rather
-// than a long-lived Secret.
+// The ops ServiceAccount carries an `eks.amazonaws.com/role-arn`
+// annotation; the EKS pod-identity webhook injects `AWS_ROLE_ARN` +
+// `AWS_WEB_IDENTITY_TOKEN_FILE` + a projected SA token, and
+// aws-sdk-go-v2 inside the pod assumes the role via
+// `sts:AssumeRoleWithWebIdentity`. No static credential lands in
+// any Secret. PRD 04 §"In-cluster identity".
 //
-//	${ROTATED_AT}  — RFC3339 timestamp of the apply, stamped on the
-//	                 Secret as an annotation so `ops show` can render
-//	                 rotation.
-//	${OPS_IMAGE}   — the awsbnkctl tools image ref; version-pinned to
-//	                 internal/cli.Version.
+// Template placeholders substituted at apply-time:
+//
+//	${OPS_IRSA_ROLE_ARN} — the IAM role ARN provisioned for the
+//	                       ops pod's ServiceAccount by
+//	                       terraform/modules/iam_irsa (PRD 08);
+//	                       resolved from terraform outputs by
+//	                       the CLI layer at install time.
+//	${OPS_IMAGE}         — the awsbnkctl tools image ref;
+//	                       version-pinned to internal/cli.Version.
 //
 //go:embed k8s_install.yaml
 var k8sInstallYAML string
 
 // K8sInstallYAML returns the embedded install manifest template. The
-// CLI layer (internal/cli/ops.go) substitutes ${ROTATED_AT} and
-// ${OPS_IMAGE} before applying.
+// CLI layer substitutes ${OPS_IRSA_ROLE_ARN} and ${OPS_IMAGE} before
+// applying.
 //
 // Exported as a function (not a var) so callers can't accidentally
 // mutate the embedded copy at runtime — the substitution happens on

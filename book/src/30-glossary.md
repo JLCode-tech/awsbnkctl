@@ -1,11 +1,11 @@
 # Glossary
 
-Plain-English definitions of the terms used across the book. Project-specific concepts, IBM-Cloud-specific products, OpenShift / Kubernetes admission concepts, and the F5 BIG-IP Next networking vocabulary all live here. Entries are deliberately one or two sentences; the deep-dive lives in the linked chapter where applicable.
+Plain-English definitions of the terms used across the book. Project-specific concepts, AWS / EKS surfaces, Kubernetes admission concepts, and the F5 BIG-IP Next networking vocabulary all live here. Entries are deliberately one or two sentences; the deep-dive lives in the linked chapter where applicable.
 
 ## A — D
 
-**`api_key_b64`**
-Base64-encoded AWS APIs key stored inline in the workspace `config.yaml`. **Obfuscation, not encryption** — anyone with file-read access decodes instantly. The field name deliberately doesn't match the plaintext-secret rejection regex. See [Chapter 14 §"Source 3"](./14-credentials-resolver.md#source-3--workspace-api_key_b64).
+**AWS standard credential chain**
+The ordered lookup the aws-sdk-go-v2 default config performs for AWS credentials: env vars → shared-config profile → SSO cached token → EC2 instance role (IMDS) → ECS / EKS container task role → web-identity (IRSA). The chain stops at the first source that yields a non-empty value. See [Chapter 14](./14-credentials-resolver.md#the-aws-standard-credential-chain).
 
 **Backend** (`--backend`)
 The execution context for a tool dispatch. One of `local` (os/exec on the host), `docker` (containerised), `k8s` (in-cluster ops pod or Job), or `ssh:<target>` (a registered SSH endpoint). See [Chapter 17](./17-execution-backends.md).
@@ -14,7 +14,7 @@ The execution context for a tool dispatch. One of `local` (os/exec on the host),
 BIG-IP Next for Kubernetes. F5's Kubernetes-native CNF deployment of BIG-IP, made up of FLO (F5 Lifecycle Operator) + CNE Instance + License + CIS. The reason this CLI exists. See [Chapter 1](./01-what-is-bnk.md).
 
 **CIS**
-*Two unrelated CISes appear in this stack.* Inside the cluster, **CIS** is F5's **Container Ingress Services** — the F5 controller that watches Kubernetes Ingress + Route resources and programs the BIG-IP data plane. At the AWS account level, **CIS** is **Cloud Internet Services** — IBM's DNS, CDN, WAF, and DDoS-protection product. Context disambiguates; when in doubt, "F5 CIS" vs "AWS CIS".
+F5's **Container Ingress Services** — the F5 controller that watches Kubernetes Ingress resources and programs the BIG-IP data plane. (Distinct from IBM's Cloud Internet Services product of the same acronym, which is unrelated to BNK on EKS and is not used by `awsbnkctl`.)
 
 **ClusterIP** (k8s)
 A `Service` type that gives a Service an internal cluster IP, reachable only from inside the cluster. Used by the throughput suite's `east-west` mode.
@@ -28,14 +28,11 @@ A Custom Resource defined by FLO. Represents one deployed instance of the BNK da
 **Cobra**
 [`github.com/spf13/cobra`](https://github.com/spf13/cobra) — the Go CLI library `awsbnkctl` is built on. The command tree at [`internal/cli/`](https://github.com/JLCode-tech/awsbnkctl/tree/main/internal/cli) is a cobra command tree.
 
-**S3 (was COS)**
-IBM **Cloud Object Storage** — S3-compatible object store. The BNK supply chain bucket lives on a S3 bucket. See [Chapter 25](./25-cos-supply-chain.md).
+**S3**
+**Amazon Simple Storage Service** — AWS's object store. The BNK supply chain bucket (FAR archive, JWT licence) lives on S3, server-side encrypted with a customer-managed KMS key, and is read by FLO via IRSA. See [Chapter 25](./25-cos-supply-chain.md).
 
-**`cred resolver chain`**
-The ordered lookup for `AWS_ACCESS_KEY_ID`: env var → OS keychain → workspace `aws.profile` → interactive prompt. The chain stops at the first source that yields a non-empty value. See [Chapter 14](./14-credentials-resolver.md#the-aws-standard-credential-chain).
-
-**CRN**
-**Cloud Resource Name** — IBM's globally-unique resource identifier. Starts with `crn:v1:` and encodes account, region, service, and resource ID. Most `awsbnkctl cos` commands accept either a friendly name (resolved at runtime) or a CRN.
+**cred resolver chain**
+See *AWS standard credential chain*.
 
 ## E — J
 
@@ -46,7 +43,7 @@ Network direction term: traffic between two endpoints **inside** the cluster (po
 The Terraform source tree compiled into the `awsbnkctl` binary via Go's `//go:embed` directive. The default `tf_source` is `embedded`. Rebuilding the binary picks up HCL changes. See [Chapter 31 §"The embedded HCL"](./31-building-from-source.md#the-embedded-hcl).
 
 **`envFrom`** (k8s)
-A Pod spec field that references a Secret or ConfigMap and projects all of its keys as environment variables into the container. The k8s backend's ops pod uses `envFrom: secretRef: awsbnkctl-ibm-creds` to receive the API key without listing it in the manifest plaintext.
+A Pod spec field that references a Secret or ConfigMap and projects all of its keys as environment variables into the container. The k8s backend's ops pod uses `envFrom: secretRef: awsbnkctl-aws-creds` to receive AWS credentials without listing them in the manifest plaintext. Under IRSA (the default once the v1.x retarget of `internal/exec/k8s_install.yaml` lands), the Secret carries empty data and the SA's projected web-identity token replaces the static creds.
 
 **`extra_hosts`**
 The workspace config's list of additional URLs to probe under `awsbnkctl test connectivity`. In v1.0 the value is a bare `[]string` of URLs; per-host method/expected-status overrides are deferred. See [Chapter 20](./20-connectivity-testing.md).
@@ -61,7 +58,7 @@ The workspace config's list of additional URLs to probe under `awsbnkctl test co
 Fully Qualified Domain Name — the absolute form of a DNS name ending with a trailing dot (`www.example.com.`).
 
 **FAR auth key**
-The credential tarball (`f5-far-auth-key.tgz`) that FLO uses to pull FAR images from `repo.f5.com`. Lives in the S3 supply-chain bucket. Rotated periodically; see [Chapter 25 §"Licence rotation"](./25-cos-supply-chain.md#licence-rotation).
+The credential tarball (`f5-far-auth-key.tgz`) that FLO uses to pull FAR images from `repo.f5.com`. Lives in the S3 supply-chain bucket. Rotated periodically; see [Chapter 25 §"Rotating the FAR archive"](./25-cos-supply-chain.md#rotating-the-far-archive).
 
 **ghcr.io**
 GitHub Container Registry — where the `awsbnkctl-tools-*` images are published. The k8s backend pulls from `ghcr.io/JLCode-tech/awsbnkctl-tools-{ops,iperf3}`.
@@ -87,7 +84,13 @@ The throughput-suite flag selecting `north-south` (LoadBalancer Service, client 
 **JWT**
 **JSON Web Token** — the signed-token format BNK uses for the subscription licence (`trial.jwt` in the S3 supply-chain bucket).
 
-## K — N
+## I — N
+
+**IMDS**
+**Instance Metadata Service** — the link-local `169.254.169.254` endpoint EC2 instances use to read their attached IAM role's short-lived credentials. The fourth source in the AWS standard credential chain.
+
+**IRSA**
+**IAM Roles for Service Accounts** — AWS's mechanism for binding an IAM role to a Kubernetes ServiceAccount via the cluster's OIDC provider. A pod running under an IRSA-annotated SA gets its credentials by trading the SA's projected web-identity token at the AWS STS endpoint, with no static API key needed on cluster. FLO authenticates against S3 (FAR-image + JWT-licence reads) via IRSA; the v1.x ops-pod retarget does the same for the `awsbnkctl-ops` SA. See [Chapter 25 §"IRSA trust chain"](./25-cos-supply-chain.md#irsa-trust-chain).
 
 **`k`** (`awsbnkctl k <verb>`)
 The internalised kubectl subtree. `awsbnkctl k get/apply/describe/delete/exec/logs/port-forward` — built on `k8s.io/client-go` directly so no host `kubectl` binary is required. See [Chapter 24](./24-day-2-ops.md).
@@ -122,7 +125,7 @@ DNS response code indicating "this name does not exist". `awsbnkctl test dns` ag
 The persistent CLI flag dispatching an `aws`/`exec`/`shell`/`kubectl`/`oc` passthrough over SSH to a named target instead of running it locally. The other half of the SSH-client + `--on` feature alongside the *SSH backend*. See [Chapter 16](./16-on-flag-ssh-jumphosts.md).
 
 **OpenShift**
-Red Hat's enterprise Kubernetes distribution. EKS = managed OpenShift on AWS.
+Red Hat's enterprise Kubernetes distribution. AWS's managed-OpenShift offering is **ROSA** (Red Hat OpenShift Service on AWS); `awsbnkctl` does not target ROSA — it targets stock EKS. The roksbnkctl upstream targeted IBM's managed-OpenShift offering (ROKS) instead. Mentions of OpenShift in this book are either fork-relationship context or apply to the OpenShift `SecurityContextConstraints` admission shape that some inherited Kubernetes manifests still satisfy as a side-effect of also satisfying EKS's Pod Security Admission.
 
 **Ops pod**
 Shorthand for the long-lived k8s-backend execution pod deployed in the `awsbnkctl-ops` namespace by `awsbnkctl ops install`. See [Chapter 19](./19-in-cluster-ops-pod.md).
@@ -139,17 +142,17 @@ The env-var resume mechanism on the e2e driver scripts. `PHASE_FROM=L ./scripts/
 **RBAC**
 **Role-Based Access Control** — the Kubernetes authorization model. The ops pod has a least-privilege RBAC binding; see *ClusterRole*.
 
-**`restricted-v2`**
-The default OpenShift `PodSecurity` policy / SCC at admission. Rejects pods that run as root, allow privilege escalation, or hold the `ALL` capability set. All `awsbnkctl`-managed pods (ops pod, iperf3 server, DNS probe Job) are written to satisfy `restricted-v2`. See [Chapter 22 §"The bundled image and the runAsNonRoot constraint"](./22-throughput-testing.md#the-bundled-image-and-the-runasnonroot-constraint).
+**`restricted`** (PSA profile) / **`restricted-v2`** (SCC)
+The most-restrictive built-in admission profile. On EKS this is the PSA `restricted` profile applied via the `pod-security.kubernetes.io/enforce: restricted` namespace label; on OpenShift the equivalent is the `restricted-v2` SCC. Both reject pods that run as root, allow privilege escalation, or hold the `ALL` capability set. All `awsbnkctl`-managed pods (ops pod, iperf3 server, DNS probe Job) are written to satisfy both. See [Chapter 22 §"The bundled image and the runAsNonRoot constraint"](./22-throughput-testing.md#the-bundled-image-and-the-runasnonroot-constraint).
 
 **redactor**
-The output-stream wrapper at [`internal/exec/redact.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec/redact.go) that masks the IBM API key value in any subprocess's stdout/stderr before it reaches the user's terminal or the log. The defence-in-depth net for credential leaks. See [Chapter 14 §"The redactor"](./14-credentials-resolver.md#the-redactor).
+The output-stream wrapper at [`internal/exec/redact.go`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/exec/redact.go) that masks AWS credential values (access key ID, secret access key, session token) in any subprocess's stdout/stderr before they reach the user's terminal or the log. The defence-in-depth net for credential leaks. See [Chapter 14 §"The redactor"](./14-credentials-resolver.md#the-redactor).
 
 **EKS**
-**Red Hat OpenShift on AWS** — IBM's managed OpenShift offering. The cluster `awsbnkctl up` provisions. See [Chapter 2](./02-why-roks.md).
+**Amazon Elastic Kubernetes Service** — AWS's managed Kubernetes (not OpenShift). The cluster `awsbnkctl up` provisions, with a self-managed SR-IOV node group on `c5n`/`m5n`-family instances layered on top. See [Chapter 2](./02-why-roks.md).
 
 **`runAsNonRoot`**
-A Pod / container `securityContext` field. Required `true` by `restricted-v2`. Images that have `USER root` in the Dockerfile fail admission with this set.
+A Pod / container `securityContext` field. Required `true` by both the EKS PSA `restricted` profile and the OpenShift `restricted-v2` SCC. Images that have `USER root` in the Dockerfile fail admission with this set.
 
 **RTT**
 **Round-Trip Time** — measured in milliseconds for each DNS query. `awsbnkctl test dns -o json` surfaces p50/p95/p99 across the run.
@@ -159,11 +162,14 @@ A Pod / container `securityContext` field. Required `true` by `restricted-v2`. I
 **Schematic JSON**
 The deployer-rendered JSON document describing a BNK deployment. Lives in the S3 supply-chain bucket; not consumed at install time, kept for forensics.
 
-**SCC**
-**Security Context Constraint** — OpenShift's pod-admission policy. `restricted-v2` is the default; pods that violate it (e.g., by running as root) are rejected by the admission controller. See [Chapter 22](./22-throughput-testing.md#the-bundled-image-and-the-runasnonroot-constraint).
+**PSA** (Pod Security Admission)
+EKS 1.25+'s built-in pod-admission policy. The `awsbnkctl-test` and `awsbnkctl-ops` namespaces carry the `pod-security.kubernetes.io/enforce: restricted` label, which rejects pods that run as root, allow privilege escalation, or hold the `ALL` capability set. The same `securityContext` fields that satisfy PSA also satisfy OpenShift's `restricted-v2` SCC — convenient for the inherited manifests. See [Chapter 22 §"The bundled image and the runAsNonRoot constraint"](./22-throughput-testing.md#the-bundled-image-and-the-runasnonroot-constraint).
+
+**SCC** (legacy)
+**Security Context Constraint** — OpenShift's pod-admission policy. EKS uses *PSA* (Pod Security Admission) instead; SCC is included here only because some inherited manifests carry SCC-shaped framing in comments. The `awsbnkctl`-managed pods are written to satisfy both the EKS PSA `restricted` profile and (incidentally) the OpenShift `restricted-v2` SCC.
 
 **Secret** (k8s)
-A namespaced resource holding key/value data, typically base64-encoded credentials. The k8s backend creates `awsbnkctl-ibm-creds` in the `awsbnkctl-ops` namespace at `ops install` time.
+A namespaced resource holding key/value data, typically base64-encoded credentials. The k8s backend creates `awsbnkctl-aws-creds` in the `awsbnkctl-ops` namespace at `ops install` time; under the IRSA-default install path (once the v1.x retarget of `internal/exec/k8s_install.yaml` lands), the Secret is created with empty data and the SA's projected web-identity token replaces the static credentials.
 
 **`secretRef`** (k8s)
 The Pod spec form that references a Secret for environment-variable projection. Used together with `envFrom` for the ops pod's credential injection.
@@ -178,7 +184,7 @@ A Kubernetes resource that provides a stable endpoint for accessing one or more 
 The `--backend ssh:<target>` execution path. Runs the tool on a registered SSH endpoint via the [`internal/remote.Client`](https://github.com/JLCode-tech/awsbnkctl/blob/main/internal/remote/ssh.go) wrapper. See [Chapter 17 §"SSH backend"](./17-execution-backends.md#ssh-backend).
 
 **TGW**
-**Transit Gateway** — AWS's VPC-to-VPC connectivity service. The upstream HCL provisions a TGW between the cluster VPC and the testing-client VPC so the jumphost can reach the cluster's internal endpoints.
+**Transit Gateway** — AWS's VPC-to-VPC connectivity service. `awsbnkctl`'s bundled HCL does not provision a TGW by default — the bastion EC2 instance lives in the cluster's VPC (a public subnet) and reaches the cluster's internal endpoints directly. TGW is supported as an optional input for multi-VPC topologies and is documented in the testing module's variables.
 
 **`tfvars`** (`terraform.tfvars`)
 Variable-value file for Terraform — assigns concrete values to the HCL's `variable` blocks. `awsbnkctl` auto-renders one from `config.yaml`; user overrides layer on top via `terraform.tfvars.user` and `--var-file`. See [Chapter 13](./13-terraform-variables.md).
@@ -195,8 +201,8 @@ Transport Layer Security. The `--insecure` flag on `awsbnkctl test connectivity`
 **TOFU**
 **Trust On First Use** — the SSH-style host-key acceptance pattern. On first connection to a new SSH target, `awsbnkctl` prompts the user to verify the fingerprint; subsequent connections check against the saved fingerprint in `~/.awsbnkctl/known_hosts`. A fingerprint mismatch refuses to connect. See [Chapter 16 §"Host-key handling"](./16-on-flag-ssh-jumphosts.md).
 
-**Trusted Profile**
-An AWS IAM construct that lets a Kubernetes ServiceAccount assume AWS permissions. FLO uses one to authenticate against AWS APIs without storing an API key in the cluster.
+**Trusted Profile** (legacy / upstream)
+The IBM IAM construct that the upstream `roksbnkctl` used to let a Kubernetes ServiceAccount assume IBM Cloud permissions. The AWS equivalent — and the mechanism `awsbnkctl` uses — is **IRSA** (IAM Roles for Service Accounts); see that entry. Mentions of Trusted Profile in this book are fork-relationship context or inherited prose pending the v1.x ops-pod retarget.
 
 **TTL**
 **Time To Live** — DNS-record cache duration in seconds. `awsbnkctl test dns -o json` surfaces each answer's TTL.
@@ -204,14 +210,14 @@ An AWS IAM construct that lets a Kubernetes ServiceAccount assume AWS permission
 **v1.0**
 The release this book is the launch deliverable for. All E2E phases pass on a clean dev box; doctor green-by-default with terraform-only required.
 
-**VPE**
-**Virtual Private Endpoint** — AWS's private-network access point for managed services. Sometimes left dangling after a cluster destroy (see [Chapter 26 §"orphan AWS resources"](./26-troubleshooting.md#symptom-terraform-destroy-leaves-orphan-ibm-cloud-resources-lbs-security-groups-vpes)).
+**VPC endpoint**
+AWS's private-network access point for managed services (gateway endpoints for S3 / DynamoDB; interface endpoints for everything else). The bundled HCL provisions S3 and STS interface endpoints in the cluster's VPC so the ops pod and node-group pods can reach those services without egressing through the NAT gateway. (The upstream `roksbnkctl` used the equivalent IBM Cloud "VPE" — Virtual Private Endpoint — primitive; the name doesn't carry on AWS.)
 
 **VPC**
-**Virtual Private Cloud** — AWS's network-isolation primitive. The cluster lives in one VPC; the testing client jumphost lives in another, connected via TGW.
+**Virtual Private Cloud** — AWS's network-isolation primitive. The cluster's VPC spans at least two AZs (an EKS requirement) and houses the cluster, the SR-IOV node group, and the bastion EC2 instance. Multi-VPC topologies (e.g., a separate testing-client VPC connected via TGW) are supported but not the default. See [Chapter 33 — The data-plane decision](./33-data-plane-decision.md).
 
-**VSI**
-**Virtual Server Instance** — AWS's general-purpose VM. The jumphosts are VSIs.
+**EC2 instance**
+AWS's general-purpose VM. The bastion (the `--on jumphost` target) is an EC2 instance; the SR-IOV node group is built from EC2 instances in the `c5n` / `m5n` families.
 
 **workspace**
 A named slot under `~/.awsbnkctl/<name>/` containing one `config.yaml`, one Terraform state directory, and (usually) one kubeconfig. The kubectl-style multi-environment isolation primitive. See [Chapter 6](./06-workspaces.md).

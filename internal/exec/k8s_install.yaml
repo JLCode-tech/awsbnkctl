@@ -1,81 +1,73 @@
-# roksbnkctl ops install manifests
+# awsbnkctl ops install manifests
 #
 # Embedded into the binary via Go's embed directive (k8s_install.go).
-# `roksbnkctl ops install` applies these in order, performing template
-# substitution for ${IBMCLOUD_API_KEY_B64} (base64 of the resolved cred)
-# and ${OPS_IMAGE} (resolved at install time).
+# `awsbnkctl ops install` applies these in order, performing template
+# substitution for ${OPS_IRSA_ROLE_ARN} (the IRSA role ARN provisioned
+# by terraform/modules/iam_irsa for the ops-pod ServiceAccount) and
+# ${OPS_IMAGE} (the awsbnkctl tools image ref, resolved at install
+# time from the binary's version).
 #
-# PRD 03 §"K8s" + PRD 04 §"K8s" jointly drive this layout. Two namespaces
-# are created up front so the long-lived ops Pod (in roksbnkctl-ops) and
-# the per-Job ephemeral pods (in roksbnkctl-test) both have a place to
-# land without race-y namespace-creation logic during test runs.
+# PRD 03 §"K8s" + PRD 04 §"In-cluster identity" jointly drive this
+# layout. Two namespaces are created up front so the long-lived ops
+# Pod (in awsbnkctl-ops) and the per-Job ephemeral pods (in
+# awsbnkctl-test) both have a place to land without race-y
+# namespace-creation logic during test runs.
 #
 # Document separator order matters — we apply documents one at a time
 # and bail on first error, so namespaces must precede objects that live
 # in them.
+#
+# IRSA shape: the ops pod's ServiceAccount carries the
+# `eks.amazonaws.com/role-arn` annotation. The EKS-managed
+# pod-identity webhook reads that annotation at pod-admission time and
+# (a) mounts a projected SA token at
+# `/var/run/secrets/eks.amazonaws.com/serviceaccount/token` and (b)
+# injects `AWS_ROLE_ARN` + `AWS_WEB_IDENTITY_TOKEN_FILE` env vars into
+# the container. aws-sdk-go-v2 inside the pod sees those env vars and
+# assumes the role via `sts:AssumeRoleWithWebIdentity` automatically —
+# no static key in any Secret. The pod-identity webhook is part of
+# EKS, not awsbnkctl; the IAM role and the SA annotation value are
+# created upstream by `terraform/modules/iam_irsa` (PRD 08).
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: roksbnkctl-ops
+  name: awsbnkctl-ops
   labels:
-    roksbnkctl.io/managed: "true"
+    awsbnkctl.io/managed: "true"
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: roksbnkctl-test
+  name: awsbnkctl-test
   labels:
-    roksbnkctl.io/managed: "true"
-    roksbnkctl.io/test: "true"
+    awsbnkctl.io/managed: "true"
+    awsbnkctl.io/test: "true"
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: roksbnkctl-ops
-  namespace: roksbnkctl-ops
+  name: awsbnkctl-ops
+  namespace: awsbnkctl-ops
   labels:
-    roksbnkctl.io/managed: "true"
-  # `ops install --trusted-profile=auto|on` patches an additional
-  # annotation `iam.cloud.ibm.com/trusted-profile: <profile-id>` here
-  # at apply time. Empty when the static-key Secret path is in use.
-  # PRD 04 §"Resolved in Sprint 9" §"Trusted-profile auto-provisioning".
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: roksbnkctl-ibm-creds
-  namespace: roksbnkctl-ops
-  labels:
-    roksbnkctl.io/managed: "true"
+    awsbnkctl.io/managed: "true"
   annotations:
-    # Stamped at apply time so `ops show` can render a rotation timestamp.
-    roksbnkctl.io/rotated-at: "${ROTATED_AT}"
-type: Opaque
-data:
-  # Populated at apply-time from the workspace's resolved IBM Cloud API key.
-  # PRD 04 §"K8s": cred lives in a Secret, projected via envFrom on the ops
-  # pod (and as envFrom for ephemeral Jobs that need it).
-  #
-  # Sprint 9 / PRD 04 §"Resolved in Sprint 9" §"Trusted-profile auto-
-  # provisioning": when `--trusted-profile=auto|on` provisions a profile,
-  # the renderer passes an empty key to decodeOpsManifests so these data
-  # fields hold the empty string. The ops pod authenticates via the
-  # trusted-profile annotation on the SA + projected token, NOT this
-  # Secret. The Secret remains in the manifest so that `--trusted-profile=
-  # off` (and the auto-fallback path) can repopulate it without a
-  # schema change.
-  IBMCLOUD_API_KEY: "${IBMCLOUD_API_KEY_B64}"
-  IC_API_KEY: "${IBMCLOUD_API_KEY_B64}"
+    # IRSA wiring — the EKS pod-identity webhook reads this annotation
+    # and injects projected-SA-token + AWS_ROLE_ARN + AWS_WEB_IDENTITY_TOKEN_FILE
+    # into the ops pod's container at admission time. The role ARN is
+    # provisioned by `terraform/modules/iam_irsa/` (PRD 08) and resolved
+    # by `awsbnkctl ops install` from terraform outputs before applying
+    # this manifest.
+    eks.amazonaws.com/role-arn: "${OPS_IRSA_ROLE_ARN}"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: roksbnkctl-ops
+  name: awsbnkctl-ops
   labels:
-    roksbnkctl.io/managed: "true"
+    awsbnkctl.io/managed: "true"
 rules:
-  # Job lifecycle in roksbnkctl-test (one-shot tool runs).
+  # Job lifecycle in awsbnkctl-test (one-shot tool runs).
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "create", "delete", "watch"]
@@ -93,43 +85,46 @@ rules:
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create", "get"]
-  # Secret read in roksbnkctl-ops only, scoped to the one cred Secret.
-  # `resourceNames` keeps the SA from reading other Secrets in the
-  # namespace. PRD 04 §"In-cluster pod" least-privilege.
+  # Per-Job ephemeral Secret create/delete in awsbnkctl-test. The k8s
+  # backend's runAsJob path materialises opts.Files into a per-Job
+  # Secret mounted at /work; cleanup runs via Job ownerRef on success
+  # and explicit Delete on context cancel. Scoped to the test namespace
+  # only — no cluster-wide Secret read; AWS credentials reach pods via
+  # IRSA. PRD 04 §"In-cluster identity".
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get"]
-    resourceNames: ["roksbnkctl-ibm-creds"]
+    verbs: ["create", "delete", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: roksbnkctl-ops
+  name: awsbnkctl-ops
   labels:
-    roksbnkctl.io/managed: "true"
+    awsbnkctl.io/managed: "true"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: roksbnkctl-ops
+  name: awsbnkctl-ops
 subjects:
   - kind: ServiceAccount
-    name: roksbnkctl-ops
-    namespace: roksbnkctl-ops
+    name: awsbnkctl-ops
+    namespace: awsbnkctl-ops
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: roksbnkctl-ops
-  namespace: roksbnkctl-ops
+  name: awsbnkctl-ops
+  namespace: awsbnkctl-ops
   labels:
-    app: roksbnkctl-ops
-    roksbnkctl.io/managed: "true"
+    app: awsbnkctl-ops
+    awsbnkctl.io/managed: "true"
 spec:
-  serviceAccountName: roksbnkctl-ops
+  serviceAccountName: awsbnkctl-ops
   restartPolicy: Always
-  # OpenShift restricted-v2 SCC compliance — same posture the iperf3 SCC
-  # fix uses. Pod-level seccomp + runAsNonRoot, container-level
-  # allowPrivilegeEscalation=false + cap drop.
+  # EKS Pod Security Admission (restricted profile) compliance:
+  # pod-level seccomp + runAsNonRoot, container-level
+  # allowPrivilegeEscalation=false + cap drop. Same posture the
+  # ephemeral test Job specs use (see internal/exec/k8s.go).
   securityContext:
     runAsNonRoot: true
     seccompProfile:
@@ -140,19 +135,20 @@ spec:
       imagePullPolicy: IfNotPresent
       command: ["sleep", "infinity"]
       env:
-        # The pod runs with OpenShift's SCC-assigned random non-root
-        # UID, which has no /etc/passwd entry — ibmcloud's home-dir
-        # fallback then hits `/` (read-only fs root) and tries to
-        # mkdir `/.bluemix`, failing with permission-denied.
-        # Override HOME to a writable path inside the container so
-        # ibmcloud's config dir lands at /tmp/.bluemix instead.
-        # Same rationale applies to any tool that probes $HOME at
-        # invocation time (helm, kubectl, oc).
+        # The pod runs as a non-root UID per PSA restricted; that UID
+        # may have no /etc/passwd entry, so tools that probe $HOME at
+        # invocation time (aws, kubectl, helm) hit `/` (read-only fs
+        # root) and try to mkdir state dirs there, failing with
+        # permission-denied. Override HOME to a writable path inside
+        # the container so aws's config dir lands at /tmp/.aws instead.
         - name: HOME
           value: /tmp
-      envFrom:
-        - secretRef:
-            name: roksbnkctl-ibm-creds
+      # No envFrom: secretRef — AWS credentials reach the pod via IRSA.
+      # The EKS pod-identity webhook injects AWS_ROLE_ARN +
+      # AWS_WEB_IDENTITY_TOKEN_FILE based on the ServiceAccount's
+      # eks.amazonaws.com/role-arn annotation; aws-sdk-go-v2 picks them
+      # up and exchanges the projected SA token for short-lived IAM
+      # credentials. PRD 04 §"In-cluster identity".
       securityContext:
         allowPrivilegeEscalation: false
         runAsNonRoot: true

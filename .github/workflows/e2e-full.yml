@@ -3,10 +3,10 @@ name: Full E2E
 # Manual-trigger workflow for the combined A-H + I-N + L-DNS e2e
 # driver.
 #
-# Sprint 4 status: the backend-matrix phases (I-N + L-DNS) join the
-# cluster-bring-up phases (A-H) at the dry-run tier. The combined
-# dry-run regression surface now lives across two CI jobs in
-# .github/workflows/ci.yml:
+# Sprint 6 status (final pre-v1.0 sprint): the backend-matrix phases
+# (I-N + L-DNS) and the cluster-bring-up phases (A-H) have both
+# landed at the dry-run tier. The combined dry-run regression surface
+# lives across two CI jobs in .github/workflows/ci.yml:
 #
 #   - `full-up-dryrun` (Sprint 3) — exercises `awsbnkctl up --dry-run`
 #     against the eight-module root graph.
@@ -21,13 +21,16 @@ name: Full E2E
 # for live-AWS runs. The trigger surface (workflow_dispatch +
 # release/** push) survives so downstream automation (release
 # branches, the integrator's babysit loop) keeps parsing it; the
-# body echoes the updated Sprint 4 skip-banner and exits 0.
+# body echoes the Sprint 6 skip-banner and exits 0.
 #
-# Sprint 6 cuts v1.0 gated on the operator-run spike — at which point
-# this workflow transitions from skip-stub to actual e2e driver
-# invocation (renaming `cluster_region` → `aws_region` and threading
-# AWS_* secrets instead of IBMCLOUD_API_KEY; tracked as Sprint 3
-# validator Issue 7).
+# Sprint 6 is the final pre-v1.0 sprint — the release is
+# **structurally complete** at v0.9-rc1 candidate. The transition
+# from skip-stub to live e2e driver invocation (renaming
+# `cluster_region` → `aws_region`, threading AWS_* secrets instead
+# of IBMCLOUD_API_KEY, fronting an AWS-shaped e2e driver script
+# under scripts/e2e-*.sh) lands together with the v1.0 cut, which
+# itself gates on the operator-run PRD 07 spike. Tracked as Sprint
+# 3 validator Issue 7.
 #
 # Triggers:
 #   - workflow_dispatch — manual run from the Actions tab.
@@ -63,26 +66,28 @@ permissions:
 
 jobs:
   full-e2e:
-    name: Full E2E (Sprint 4 stub — live apply gates on PRD 07 spike)
+    name: Full E2E (Sprint 6 stub — v1.0 cut gates on PRD 07 spike)
     runs-on: ubuntu-latest
     # Gate to this fork so cross-repo PRs don't try to run it. Sprint
-    # 4 brief: trigger surface still gated to JLCode-tech/awsbnkctl;
-    # body now references both the Sprint 3 full-up-dryrun and the
-    # Sprint 4 test-dryrun CI jobs for the dry-run regression
-    # surface, and the PRD 07 spike for the live-apply gate.
+    # 6 brief: trigger surface still gated to JLCode-tech/awsbnkctl;
+    # body references the Sprint 3 full-up-dryrun + Sprint 4
+    # test-dryrun CI jobs for the dry-run regression surface, plus
+    # the Sprint 6 security-audit job, and the PRD 07 spike for the
+    # live-apply gate that lands v1.0.
     if: github.repository == 'JLCode-tech/awsbnkctl'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sprint 4 skip banner
+      - name: Sprint 6 skip banner
         run: |
           echo "════════════════════════════════════════════════════════════"
-          echo "Full E2E — Sprint 4 stub"
+          echo "Full E2E — Sprint 6 stub (final pre-v1.0 sprint)"
           echo "════════════════════════════════════════════════════════════"
           echo "Dry-run tier of phases A-H + I-N + L-DNS is exercised by"
-          echo "  two CI jobs in .github/workflows/ci.yml (every PR):"
-          echo "    full-up-dryrun (Sprint 3) — awsbnkctl up --dry-run"
-          echo "    test-dryrun    (Sprint 4) — awsbnkctl test {conn,dns,thpt} --dry-run"
+          echo "  three CI jobs in .github/workflows/ci.yml (every PR):"
+          echo "    full-up-dryrun  (Sprint 3) — awsbnkctl up --dry-run"
+          echo "    test-dryrun     (Sprint 4) — awsbnkctl test {conn,dns,thpt} --dry-run"
+          echo "    security-audit  (Sprint 6) — gosec + govulncheck + gitleaks"
           echo ""
           echo "Live-apply tier still gates on the operator-run PRD 07 spike:"
           echo "  docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\""
@@ -97,6 +102,8 @@ jobs:
           echo "  Phase  L-DNS (Route 53 GSLB probe):  Sprint 4 dry-run + PRD 07 spike for apply"
           echo "  Phase  M (cred-leak audit):          Sprint 4 implements; live exercise in spike"
           echo "  Phase  N (mixed-mode lifecycle):     Sprint 4 implements; live exercise in spike"
-          echo "  Full v1.0 sign-off:                  Sprint 6 (gated on spike)"
-          echo "See docs/PLAN.md § Sprint 4 for the retarget plan."
+          echo "  Security audit (offline):            Sprint 6 ci.yml (gosec/govulncheck/gitleaks)"
+          echo "  Book PDF artefact (release-time):    Sprint 6 — local make book-pdf + release-publish"
+          echo "  Full v1.0 sign-off:                  v1.0 cut (gated on PRD 07 spike)"
+          echo "See docs/PLAN.md § Sprint 6 for the v1.0-readiness gate."
           exit 0

@@ -1,5 +1,7 @@
 # Tearing down
 
+> **Available in v1.x.** The `awsbnkctl bnk down` and `awsbnkctl cluster down` phase-scoped destroy verbs described in this chapter are **roadmap surface for v1.x** — only `awsbnkctl down` ships in the v0.9 binary. The v0.9 destroy story is the single-phase `awsbnkctl down` (drives a monolithic `terraform destroy` against the workspace's only state directory), plus `awsbnkctl ws delete` for local cleanup; the three-verb / phase-aware refusal catalogue documented here lands when the v1.x two-phase split (see [Chapter 8 §"Available in v1.x"](./08-cluster-phase.md)) ships. Until then, on a v0.9 workspace `down` is byte-for-byte equivalent to the legacy single-state branch of the decision tree below. Tracked under [`docs/PLAN.md`](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/PLAN.md) §"What's deferred to post-v1.0".
+
 `awsbnkctl down`, `awsbnkctl bnk down`, and `awsbnkctl cluster down` are the three destroy verbs — the inverses of [`up`](./10-deploying-bnk-trials.md), [`bnk up`](./10-deploying-bnk-trials.md#the-bnk-up--bnk-down-command-group), and [`cluster up`](./08-cluster-phase.md) respectively. This chapter covers what each one removes, the ordering constraint between them, the refusal messages you'll hit if you ask for the wrong one, what survives a destroy, the `--auto` flag for non-interactive runs, and the workspace-cleanup story.
 
 ## The phase-aware decision tree

@@ -26,11 +26,14 @@ import (
 // Namespaces and well-known names used by the k8s backend. Mirror the
 // values baked into k8s_install.yaml — the backend assumes ops install
 // has already provisioned these.
+//
+// No cred-Secret constant: AWS credentials reach the ops pod via the
+// EKS pod-identity webhook's env-var injection (PRD 04 §"In-cluster
+// identity"), so the backend never names a credential Secret by hand.
 const (
 	K8sOpsNamespace  = "awsbnkctl-ops"
 	K8sTestNamespace = "awsbnkctl-test"
 	K8sOpsPodName    = "awsbnkctl-ops"
-	K8sOpsSecretName = "awsbnkctl-ibm-creds"
 
 	// k8sJobReadyTimeout is how long we wait for an ephemeral Job's pod
 	// to reach Running before streaming logs. Image pulls on a cold
@@ -87,7 +90,7 @@ func (b *K8sBackend) Name() string { return "k8s" }
 //
 // Future cleanup: bump RunOpts to carry a LongLivedExec field directly
 // once the integrator is ready for an API change.
-const k8sLongLivedKey = "ROKSBNKCTL_K8S_LONG_LIVED=1"
+const k8sLongLivedKey = "AWSBNKCTL_K8S_LONG_LIVED=1"
 
 // extractLongLivedFlag pulls the sentinel out of env and returns
 // (longLived, filteredEnv). Callers pass the filtered env on to the pod

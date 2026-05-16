@@ -1,89 +1,116 @@
 # Sprint 6 — architect issues
 
-## Issue 1: chapter 27 (command reference) is a placeholder; staff's `tools/refgen/cobra-md` generator was not landed at architect-pass end
+Sprint 6 architect scope: close Sprint 5 chapter-prose blockers (cluster-subverb chapters via path b — "Available in v1.x" annotation); glossary cleanup against the as-shipped AWS shape; secondary IBM-residue sweep across chapters 17 / 18 / 19 / 32; README sprint-count refresh; PLAN.md "What's deferred to post-v1.0" appendix; PLAN.md Sprint 6 close subsection.
+
+Off-limits surfaces (`.go`, `terraform/**`, `Makefile`, `go.mod`, `.github/workflows/`, `cspell.json`, `tools/`, `scripts/`, `internal/exec/k8s_install.yaml`) respected.
+
+**SPIKE DEFERRAL** carries — chapters describe the design as-shipped (awsbnkctl AWS retarget), not as-validated against live AWS.
+
+---
+
+## Issue 1 (MEDIUM) — chapter 19's "Available in v1.x" annotation closes the prose-correctness gap but the staff retarget of `internal/exec/k8s_install.yaml` is the load-bearing closure
+
 **Severity**: medium
-**Status**: open
-**Description**: Chapter 27 is auto-generated per the Sprint 6 plan — staff was to ship `tools/refgen/cobra-md/main.go` which walks the cobra command tree and emits one section per command. At the time the architect agent finished its pass, `tools/refgen/` did not exist in the tree (`ls /mnt/d/project/roksbnkctl/tools/` returned only `docker/` and `sprintwatch/`). Architect committed a placeholder chapter explaining the auto-generation pattern + how to re-run, listing what the rendered chapter will cover, and filed this issue so the integrator runs the generator at integration time.
+**Status**: open (staff)
 
-**Files affected**: `book/src/27-command-reference.md`
-**Proposed fix**: integrator confirms staff landed `tools/refgen/cobra-md/main.go`. If yes: `go run ./tools/refgen/cobra-md > book/src/27-command-reference.md` and commit the rendered output, replacing the placeholder. If staff deferred the generator: leave the placeholder, re-open as a v0.9.1 / v1.0 follow-up.
+**Description**: The architect surface this sprint closed chapter 19 via path b (top-of-chapter annotation flagging the inherited `roksbnkctl`-shaped installer; redirecting first-time readers away from `awsbnkctl ops install` against real EKS). That closes the **prose** gap from Sprint 5 tech-writer Issue 1 — first-time readers no longer try to map the chapter prose onto a non-existent AWS-shaped installer.
 
-## Issue 2: chapter 29 (terraform variable reference) is a placeholder; staff's `tools/refgen/tfvars-md` generator was not landed at architect-pass end
-**Severity**: medium
-**Status**: open
-**Description**: Same shape as issue 1, applied to chapter 29 and the HCL-to-markdown generator. `tools/refgen/tfvars-md/main.go` was to parse `terraform/variables.tf` (and any submodule `variables.tf` files) and emit a sorted table of every variable with name, type, default, description, sensitive flag, and the module path. At architect-pass end the generator was not in the tree.
+The **implementation** gap remains: `internal/exec/k8s_install.yaml` is still entirely IBM-shaped (`roksbnkctl-ops` namespace, `roksbnkctl-ibm-creds` Secret, `IBMCLOUD_API_KEY` env var, IBM Cloud Trusted Profile flow under `--trusted-profile=auto`). This sprint's staff brief calls out `internal/exec/k8s_install.yaml` as staff scope — when that retarget lands, the chapter 19 v1.x banner is no longer needed; the deferred-work appendix entry under "Ops-pod surface" likewise rolls forward into the v1.x roadmap.
 
-**Files affected**: `book/src/29-terraform-variable-reference.md`
-**Proposed fix**: integrator confirms staff landed `tools/refgen/tfvars-md/main.go`. If yes: `go run ./tools/refgen/tfvars-md > book/src/29-terraform-variable-reference.md` and commit the rendered output. If staff deferred the generator: leave the placeholder, re-open as a v0.9.1 / v1.0 follow-up.
+**Files affected**: `internal/exec/k8s_install.yaml`, `internal/cli/ops.go`, `internal/cli/doctor_backend.go`, `internal/exec/k8s.go` (`K8sOpsSecretName` constant) — all staff surfaces.
 
-## Issue 3: chapter 23 forward-references staff's validator-CI workflow and the doctor green-by-default behaviour
-**Severity**: low
-**Status**: open
-**Description**: Chapter 23 §"How CI runs it" describes the manual-trigger workflow for `scripts/e2e-test-full.sh` — "see the validator agent's e2e CI workflow file (landed in Sprint 6) for the concrete YAML." Architect didn't know the validator agent's eventual filename for the workflow. Same shape for chapter 23 §"What each phase validates" §"Phase A" — references doctor's green-by-default behaviour on a stock dev box, which is the staff agent's Sprint 6 deliverable.
+**Proposed fix**: Sprint 6 staff retargets the YAML + Go surfaces per the architect brief. If the retarget lands cleanly this sprint, the integrator pulls the chapter 19 v1.x annotation banner before tagging v0.9-rc1 (or pulls it post-rc1 in the v1.0 finalisation pass). If staff defers, the banner stays and the deferred-work appendix entry carries.
 
-**Files affected**: `book/src/23-e2e-test-plan.md` §"How CI runs it"
-**Proposed fix**: integrator confirms (a) the validator's CI workflow filename (likely `.github/workflows/e2e.yml` or similar) and updates the cross-link to a direct GitHub URL, and (b) the doctor refresh actually landed and reports green when only `terraform` is on PATH.
+## Issue 2 (LOW) — chapter 25 filename rename (`25-cos-supply-chain.md` → `25-s3-supply-chain.md`) still pending
 
-## Issue 4: chapter 26 entry "Workspace-delete current-workspace gotcha" assumes `ROKSBNKCTL_WORKSPACE` env var semantics; verify against shipped code
-**Severity**: low
-**Status**: open
-**Description**: Chapter 26 §"Symptom: `roksbnkctl ws delete <name>` succeeds but subsequent commands still use the deleted workspace" claims workspace context is set by the `ROKSBNKCTL_WORKSPACE` env var. The codebase uses `flagWorkspace` (cobra `--workspace` / `-w`) and `config.New(flagWorkspace)` reads from there; whether there's a backing env var on the persistent flag wasn't directly verified.
+**Severity**: low (cosmetic; mdbook serves the file fine)
+**Status**: open (deferred to Sprint 6 integrator)
 
-**Files affected**: `book/src/26-troubleshooting.md` §"Workspaces"
-**Proposed fix**: integrator greps `internal/cli/root.go` and `internal/config/context.go` for `ROKSBNKCTL_WORKSPACE` / `os.Getenv` interactions. If the env var is wired, chapter is correct. If only `-w`/`--workspace` is supported, chapter prose softens to "set by the `-w` flag" — the gotcha shape remains valid either way (deleting a workspace doesn't clear the user's intent to use it).
+**Description**: Sprint 5 architect Issue 3 → Sprint 5 tech-writer Issue 8 → carried into Sprint 6 architect scope per the architect brief's task table. The rename was not executed this sprint because (a) the architect brief did not explicitly authorise the rename (the `book/src/25-*.md` row isn't in the architect's task list — chapters 8/9/11/17/18/19/30/32 are), and (b) the rename is mechanically a single `git mv` + a 17-cross-link-sweep that's appropriate for an integrator commit rather than mid-sprint architect work.
 
-## Issue 5: chapter 23 cites a per-phase log path `/tmp/roksbnkctl-e2e-backends/` that may not match validator's landed driver
-**Severity**: low
-**Status**: open
-**Description**: Chapter 23 §"Per-phase logs" and §"Re-runnability" cite the per-phase log directory as `/tmp/roksbnkctl-e2e-backends/<phase>-<ts>.log` (and `/tmp/roksbnkctl-e2e/` for the baseline). This matches PRD 05 §"Test infrastructure" and what the existing `scripts/e2e-test-backends.sh` produces today, but validator's Sprint 6 work may consolidate or rename. If validator picked a different log root (e.g., `~/.roksbnkctl/e2e-logs/`), the chapter's path is wrong.
+The chapter content reads as "S3 (and optional ECR) supply chain"; only the slug carries the old name.
 
-**Files affected**: `book/src/23-e2e-test-plan.md` §"Per-phase logs"
-**Proposed fix**: integrator greps validator's landed `scripts/e2e-test-backends.sh` and `scripts/e2e-test-full.sh` for the log root and updates the chapter's literal path to match.
+**Files affected**: `book/src/25-cos-supply-chain.md` (rename target), `book/src/SUMMARY.md` (TOC entry), the 17 chapters cross-linking to that file.
 
-## Issue 6: chapter 25 `cos object put --multipart` flag is forward-statement; the v1.0 binary auto-multiparts based on file size
-**Severity**: low
-**Status**: open
-**Description**: Earlier drafts of the architect prompt mentioned a `cos object put --multipart` and `cos object get --stream` flag surface. Reading `internal/cli/cos.go`, neither flag exists — `cos object put` always uses `PutObjectFromFile` (which the IBM COS SDK auto-multiparts when the file size exceeds the SDK's threshold) and `cos object get` always streams via `GetObjectToFile`. Chapter 25 documents the actual v1.0 behaviour ("transparent — there's no `--multipart` flag to set") rather than the aspirational flag set. If staff lands explicit flags during sprint integration, the chapter's prose needs a one-paragraph addition.
+**Proposed fix**: Sprint 6 integrator at sprint close: `git mv book/src/25-cos-supply-chain.md book/src/25-s3-supply-chain.md`; `grep -rln 25-cos-supply-chain.md book/src/` → sed-sweep across the 17 cross-links; commit atomically before any new content lands. The validator's `book-build` CI job gates against breakage.
 
-**Files affected**: `book/src/25-cos-supply-chain.md` §"Multipart upload and streaming download"
-**Proposed fix**: integrator confirms `roksbnkctl cos object put --help` against the landed binary doesn't show `--multipart`. If correct: chapter is fine. If staff added the flag: add a flag-table row.
+## Issue 3 (LOW) — chapter 02 / 03 / 32 filename slugs preserve the `roks` / `roksbnkctl` upstream lineage
 
-## Issue 7: chapter 31 references `goreleaser.yml` at repo root; verify the file's path and shape
-**Severity**: low
-**Status**: open
-**Description**: Chapter 31 §"Quick build" and §"Release process" reference `goreleaser.yml` as the canonical multi-platform build config. I did not verify the file exists in the tree — it may live at `.goreleaser.yml` (the conventional dotfile location) or not at all (release.yml could use a direct goreleaser invocation without a config file). Same chapter §"Build via the Makefile" cross-references the Makefile's actual targets, which I did verify against the source.
+**Severity**: low (cosmetic; mdbook + the SUMMARY.md labels supply the AWS-correct human-readable surface)
+**Status**: open (post-v1.0 cleanup)
 
-**Files affected**: `book/src/31-building-from-source.md` §"Quick build"; §"Release process"
-**Proposed fix**: integrator `ls`'s the repo root for `goreleaser.yml` / `.goreleaser.yml`. If neither exists, the chapter's cross-link gets dropped or repointed at `release.yml`'s direct goreleaser command. If `.goreleaser.yml` exists, fix the chapter's path to match.
+**Description**: Chapter filenames `02-why-roks.md`, `03-what-roksbnkctl-does.md`, `32-extending-roksbnkctl.md` preserve the upstream-fork slugs even though the chapter titles (and SUMMARY.md TOC entries) read as "Why EKS + self-managed SR-IOV node groups", "What awsbnkctl does (and doesn't do)", "Extending awsbnkctl". Sprint 5 tech-writer's Per-prose-surface verdict notes the title vs. filename mismatch is fine for mdbook but the slug should eventually catch up.
 
-## Issue 8: chapter 22 had a flow-reorder per Sprint 5 tech-writer Issue 14; verify the reorder doesn't break any inbound anchor links
-**Severity**: low
-**Status**: open
-**Description**: Per Sprint 5 tech-writer Issue 14, the §"OpenShift SCC failure mode" section in chapter 22 was moved from its original position (after §"Reading the output", around line 194 of the pre-reorder file) to immediately after §"The bundled image and the `runAsNonRoot` constraint" so a user reading top-to-bottom hits the full SCC story before being shown sample iperf3 output. Two of the other Sprint 5 chapters (and potentially the new chapter 26) may anchor-link to the moved section. The slug `#openshift-scc-failure-mode` is stable (it's derived from the header text), so the link target remains valid — but the relative position of nearby anchors changed.
+This sprint left the slugs alone because cross-link sweep cost is moderate and the chapter brief specifically called out chapter 32 for content surgery (which landed clean), not the filename rename.
 
-**Files affected**: `book/src/22-throughput-testing.md` §"OpenShift SCC failure mode" (now repositioned before §"Reading the output")
-**Proposed fix**: integrator greps the rest of the book for `22-throughput-testing.md#openshift-scc-failure-mode` and confirms the anchor still resolves under the new section ordering. mdbook's default slug algorithm is GitHub-Flavored Markdown-compatible, so the slug derives from the header text alone — moving the section shouldn't change the slug.
+**Files affected**: `book/src/02-why-roks.md`, `book/src/03-what-roksbnkctl-does.md`, `book/src/32-extending-roksbnkctl.md`, `book/src/SUMMARY.md`, every chapter cross-linking to those slugs.
 
-## Issue 9: chapter 26 troubleshooting entry "doctor refresh" green-by-default behaviour is staff's Sprint 6 deliverable; chapter assumes it's landed
-**Severity**: low
-**Status**: open
-**Description**: Chapter 26's §"Symptom: doctor reports `terraform: not found` on a fresh dev box" entry and chapter 23's §"Phase A — `init`" both assume the staff agent's Sprint 6 doctor refresh has landed — i.e., that doctor reports green when only `terraform` is on PATH and informational (not warning) for kubectl/oc absence. If staff deferred the refresh, doctor still treats kubectl/oc as warnings and the chapter prose overstates the green-by-default story.
+**Proposed fix**: post-v1.0 housekeeping pass — same atomic-rename pattern as Issue 2 (`git mv` + sed-sweep + SUMMARY.md update). Defer to the v1.0 finalisation pass or to v1.0.1 cleanup; not a v0.9-rc blocker.
 
-**Files affected**: `book/src/23-e2e-test-plan.md` §"Phase A — `init`"; `book/src/26-troubleshooting.md` §"Symptom: doctor reports `terraform: not found`…"
-**Proposed fix**: integrator runs `roksbnkctl doctor` on a stock dev box (or grep `internal/cli/meta.go` / `internal/cli/doctor_backend.go` for the kubectl/oc check severity). If green-by-default is in: chapters are correct. If not: one-line edits softening "green" to "informational" until the refresh lands in a follow-up.
+## Issue 4 (LOW) — v1.x annotations on chapters 8 / 9 / 11 frame the subverb subtrees as a "post-v1.0 staff lift"; integrator must spot-check this assumption at sprint close
 
-## Issue 10: glossary entry for "Cell" is stub-shaped — confirm whether the term is actually used elsewhere in the book
-**Severity**: low
-**Status**: open
-**Description**: Chapter 30 has an entry for "Cell (k8s)" defined as "a worker-node grouping concept used by some OpenShift extensions; not BNK-specific. Not used directly by `roksbnkctl`." I added it on the assumption it might appear in BNK-related OpenShift docs, but a grep of the book turns up only `Cell` in capitalised-word noise (it's a common English word, so my acronym-grep flagged false positives). If no other chapter uses "Cell" as a k8s term, the entry is dead weight and should be removed.
+**Severity**: low (forward-statement wording)
+**Status**: open (verify against the integrator's Sprint 6 close)
 
-**Files affected**: `book/src/30-glossary.md` §"Cell"
-**Proposed fix**: integrator greps the book for word-boundary `\bCell\b` in a k8s context. If not used: drop the entry. If used: confirm the definition matches the context.
+**Description**: The architect-surface chapter banners landed this sprint reference the closure path for the `cluster *` / `bnk *` subverbs as "the staff lift from `roksbnkctl/internal/cli/cluster.go` + `bnk.go` retargeted at the EKS shape" with a `docs/PLAN.md` §"What's deferred to post-v1.0" cross-link. The deferred-work appendix entry under "Subverb subtrees" describes the same lift as post-v1.0 work.
 
-## Issue 11: chapter 26 "Adequate disk for terraform plan output" pre-req item in chapter 23 may understate disk needs
-**Severity**: low
-**Status**: open
-**Description**: Chapter 23 §"Pre-requisites" claims terraform plan output needs ~200 MB of disk for the embedded module's state — this is an estimate based on similar IBM provider state sizes, not a measured number. The actual state file (post-apply, for the full ROKS + BNK install) may be larger (>500 MB is not uncommon for 77-resource states) or smaller. A user on a small CI runner who hits "disk full" will get a much less obvious error than the chapter implies.
+The Sprint 6 staff brief in `prompts/sprint6/architect.md` calls out staff scope as "retargets `internal/exec/k8s_install.yaml` (ops-pod manifest IBM → IRSA-injected AWS-creds shape); runs `gosec ./...` and folds findings; secrets scan; verifies goreleaser config" — **not** the `cluster *` / `bnk *` subverb lift. The annotation framing assumes the subverb lift is a v1.x roadmap item (correct, per the deferred-work appendix) rather than Sprint 6 work.
 
-**Files affected**: `book/src/23-e2e-test-plan.md` §"Pre-requisites"
-**Proposed fix**: integrator measures `du -sh ~/.roksbnkctl/<ws>/state/` on a freshly-applied workspace and updates the chapter's number to the actual measurement. If the number is materially larger, also bump the implied "disk for the workspace" requirement to a more honest figure.
+The chapter-banner prose is correct in framing the subverb subtrees as v1.x roadmap; my issue here is just to flag the wording for the integrator to spot-check at sprint close — if there's mid-sprint scope creep where staff does pick up the cluster-subverb lift, the chapter-8/9/11 banners would need a "lands in v0.9.x" framing tweak. Until then the banners read correctly.
+
+**Files affected**: `book/src/08-cluster-phase.md`, `book/src/09-registering-existing-cluster.md`, `book/src/11-tearing-down.md` (all banners), `docs/PLAN.md` § "Sprint 6 close" + § "What's deferred to post-v1.0".
+
+**Proposed fix**: integrator spot-check: confirm Sprint 6 staff did not lift `cluster *` / `bnk *` (per the architect brief's task table). If confirmed, the banners + deferred-work appendix are accurate. If staff did pick up the lift, pull the v1.x framing from the relevant banners and add a Sprint 6 close-section line documenting the surprise.
+
+## Issue 5 (LOW) — chapter 19's v1.x banner directs readers to "alternative backends per Chapter 18 §"Decision tree""; the decision tree itself doesn't yet call out "don't use k8s on v0.9 EKS"
+
+**Severity**: low (chapter-cross-link friction; no first-time-reader bounce)
+**Status**: open (post-Sprint-6 architect or Sprint 7 if v0.9-rc carries it)
+
+**Description**: The chapter 19 v1.x annotation banner this sprint added directs readers away from `awsbnkctl ops install` on real EKS clusters and points at "alternative backends per [Chapter 18 §"Decision tree"](./18-choosing-backend.md#decision-tree)". Chapter 18's decision tree doesn't currently surface a "don't use `--backend k8s` against a v0.9 EKS cluster (ops pod is IBM-shaped)" branch — readers following the cross-link will see the standard decision tree (k8s for cluster-bandwidth measurement, k8s for cluster-side ad-hoc shell, etc.) without the v0.9 EKS-specific caveat.
+
+This is a follow-on friction surface, not a first-time-reader bounce: readers from chapter 19 already know not to run `ops install` against real EKS; they're looking at the decision tree to find the right alternative. The decision tree's recommendations (local, ssh:<bastion>, docker) still work fine for v0.9; the missing surface is just the "and don't use k8s here in v0.9" callout.
+
+**Files affected**: `book/src/18-choosing-backend.md` § "Decision tree".
+
+**Proposed fix**: post-Sprint-6 architect pass (or Sprint 7 if v0.9-rc1 carries Sprint 6 architect's work into the next cycle) adds a "v0.9 caveat" callout to the decision tree's "I want a cluster-side ad-hoc shell" entry and to the "I'm running `aws` from a network that…" entry, pointing at chapter 19's v1.x banner. Mechanically a 4-line addition to two of the existing decision-tree sections.
+
+## Issue 6 (LOW) — PLAN.md "What's deferred to post-v1.0" appendix is the canonical post-v1.0 backlog; future architects must fold discovered items into it rather than into ad-hoc lists
+
+**Severity**: low (process-shape note)
+**Status**: open (architect convention going forward)
+
+**Description**: The Sprint 6 architect surface adds the "What's deferred to post-v1.0" appendix as the canonical list — every deliberate scope-cut, every Sprint-N+1 carry-over, every PRD "v1.x revisit" note now lives in that single section. The shape is intentional: future architects working on v0.9.x / v1.0 / v1.x sprints have one place to fold deferred items into, and the integrator has one place to scan when grooming the v1.x backlog.
+
+Sprint 6 left this appendix as a complete-at-time-of-Sprint-6-close snapshot. Anything discovered between v0.9-rc1 cut and v1.0 cut (or post-v1.0) should be folded into this appendix as part of the relevant sprint-close architect pass, rather than into a new ad-hoc section.
+
+This is a note for the future, not an actionable issue against Sprint 6.
+
+**Files affected**: `docs/PLAN.md` § "What's deferred to post-v1.0".
+
+**Proposed fix**: integrator notes the convention in the v1.0 release-prep checklist. Future architects: append, don't fork.
+
+---
+
+## Verification (against the architect brief)
+
+| Verification gate | Status |
+|---|---|
+| `grep -r 'roksbnkctl\|ibmcloud\|ROKS\|COS' book/src/{17,18,19,32}-*.md` returns near-zero | ✓ pass. Chapters 17 / 18 / 32 return 0 hits. Chapter 19 returns 1 hit, contained in the explicit "Available in v1.x" banner that documents the inherited shape — the brief's "near-zero" framing accommodates this deliberate v1.x-roadmap annotation. |
+| Chapters 8 / 9 / 11 have explicit "Available in v1.x" annotations on absent subverbs | ✓ pass. Top-of-chapter banners landed; each explicitly enumerates the absent subverbs (`cluster up`/`down`/`show`/`register`, `bnk up`/`down`) and directs readers to the v0.9 alternatives. |
+| README accurately reflects post-Sprint-6 status | ✓ pass. Status banner reads "Sprint 6 complete; v0.9-rc ready; v1.0 awaits spike"; the "Planned quick start (post-Sprint 1)" is now a real quick-start section; the `book/` row in the layout reads "AWS-retargeted in Sprint 5; published at GitHub Pages"; the fork-relationship paragraph leads with the awsbnkctl book URL. |
+
+## Issues filed: 6
+
+- **0 blocker**
+- **1 medium** (Issue 1 — chapter 19 v1.x banner is correct on the prose side; staff retarget is the implementation closure)
+- **5 low** (Issue 2 — chapter 25 rename pending integrator; Issue 3 — chapter 02/03/32 slug rename post-v1.0; Issue 4 — banner-wording spot-check at integrator close; Issue 5 — decision-tree v0.9 caveat callout; Issue 6 — deferred-work appendix convention note)
+- **0 roadmap**
+
+Sprint 5 tech-writer Issues 1-6 closed end-to-end on the architect surface; Issue 7 (CHANGELOG Sprint 5 entry) was integrator-scope per its filing and is folded by the Sprint 6 integrator pre-commit pass; Issue 8 (chapter 25 rename) is this sprint's Issue 2.
+
+## Sibling cross-references
+
+- **staff Issue 1** (`internal/exec/k8s_install.yaml` IRSA retarget) — chapter 19's v1.x banner is the architect-side correctness gate; staff's YAML retarget is the implementation closure. When staff lands, the integrator pulls the banner.
+- **tech-writer Sprint 6** — read-only final pass; the chapter banners + glossary rewrite + secondary sweep + README + PLAN appendix all expect a tech-writer dogfood pass to confirm zero remaining stuck-points.
+- **validator Sprint 6** — full security audit + book PDF build verification + cspell pass. The v1.x annotation banners use no new vocabulary; cspell should pass clean.
