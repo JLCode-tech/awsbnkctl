@@ -467,17 +467,97 @@ E2E phases pass on a stock dev host. Security review clean. v1.0 binary attached
 
 - Late-discovered AWS quotas or instance-type availability issues in untested regions. Mitigate: declare a "tested regions" list (us-east-1, us-west-2, eu-west-1) in the docs; everything else is best-effort.
 
+### Sprint 6 close (actual)
+
+What shipped (architect surface — confirmed at this commit):
+
+- **Chapters 8 / 9 / 11 "Available in v1.x" annotations** — top-of-chapter banners on `book/src/08-cluster-phase.md`, `book/src/09-registering-existing-cluster.md`, and `book/src/11-tearing-down.md` flag the `awsbnkctl cluster up`/`cluster down`/`cluster show`/`cluster register`/`bnk up`/`bnk down` subverbs as v1.x roadmap surface. The v0.9 binary ships only the single-phase unscoped lifecycle (`up` / `down` / `apply` / `plan` / `init` / `status`); the chapter prose describes the v1.x two-phase design as the staff lift from `roksbnkctl/internal/cli/cluster.go` + `bnk.go` will land it. Closes Sprint 5 tech-writer Issue 2 BLOCKER (path b: explicit "Available in v1.x" notes on absent subverbs) — first-time readers no longer hit `unknown command "cluster"` and bounce. The v1.x retarget itself is folded into the "Subverb subtrees: `cluster up/down/show/register` + `bnk up/down`" entry of the deferred-work appendix below.
+- **Chapter 19 "Available in v1.x" annotation** — top-of-chapter banner on `book/src/19-in-cluster-ops-pod.md` flags the as-shipped `internal/exec/k8s_install.yaml` as the **inherited `roksbnkctl` IBM-shape**: the v0.9 `awsbnkctl ops install` lands a pod named `roksbnkctl-ops` in a `roksbnkctl-ops` namespace with Secret `roksbnkctl-ibm-creds` populated from `IBMCLOUD_API_KEY` — working IBM mechanics, wrong cloud on EKS. The banner directs readers away from running `ops install` against real EKS clusters until the Sprint 6 staff retarget (ops-pod manifest IBM → IRSA-injected AWS-creds shape) lands, and points at alternative backends via [Chapter 18 §"Decision tree"](../book/src/18-choosing-backend.md#decision-tree). Closes Sprint 5 tech-writer Issue 1 BLOCKER on the prose side; the YAML retarget is the staff surface this sprint and is the gate for IRSA-by-default mention everywhere else in the book.
+- **Chapter 30 glossary cleanup** — `book/src/30-glossary.md` rewritten against the as-shipped AWS shape. Entries deleted or retargeted: **CRN** deleted (IBM-only concept; `awsbnkctl cos` subtree doesn't exist); **S3** rewritten as Amazon Simple Storage Service (was framed as IBM Cloud Object Storage); **CIS** disambiguated to F5 Container Ingress Services (IBM Cloud Internet Services confusion removed); **EKS** rewritten as Amazon Elastic Kubernetes Service (was "Red Hat OpenShift on AWS — IBM's managed OpenShift offering", a triple factual error); **OpenShift** rewritten to clarify EKS ≠ OpenShift and ROSA is the AWS-managed-OpenShift product, framed as fork-relationship context; **Trusted Profile** rewritten as the IBM upstream concept with IRSA as the AWS equivalent + see-IRSA cross-link; **VPE** rewritten as **VPC endpoint** (the AWS primitive name); **TGW** rewritten to reflect that the bundled HCL doesn't provision a TGW by default; **VSI** rewritten as **EC2 instance**; **SCC** kept as legacy-context entry with PSA called out as the EKS-equivalent admission shape; **PSA** added as a new top-level entry; **IRSA** added as a new top-level entry; **IMDS** added; **redactor** rewritten against AWS-cred values (was "the IBM API key value"); **envFrom** / **Secret** entries rewritten to reference `awsbnkctl-aws-creds` and the IRSA-default v1.x retarget; **cred resolver chain** entry collapsed to a see-AWS-standard-credential-chain cross-link; stale anchor cross-references (chapter 14 `#source-3--workspace-api_key_b64`, chapter 25 `#licence-rotation`, chapter 26 `#orphan-ibm-cloud-resources`) replaced with current heading slugs. Closes Sprint 5 tech-writer Issue 3 HIGH end-to-end.
+- **Chapters 17 / 18 / 32 IBM-residue sweep** — `book/src/17-execution-backends.md` L442 (`Credentials.IBMCloudAPIKey`) rewritten to describe the AWS-shaped resolved-creds Secret-projection path with IRSA-default v1.x note; the `Credentials` struct example at L627 rewritten to surface `AWSCredentials` (`AccessKeyID` / `SecretAccessKey` / `SessionToken` / `Region` / `Source`) replacing the deleted `IBMCloudAPIKey` field; the SSH bootstrap recipe at L508 retargeted from "IBM's apt repo + GPG key" to the AWS CLI v2 zip-distribution install. `book/src/18-choosing-backend.md` worked-example terminal output L309 updated from `Secret awsbnkctl-ibm-creds applied` to `Secret awsbnkctl-aws-creds applied`; L159 "no IBM repo + GPG key dance" rewritten as "no zip-and-unzip dance". `book/src/32-extending-roksbnkctl.md` L59 docker tool-images map worked example rewritten from `"ibmcloud": …awsbnkctl-tools-ibmcloud` to `"aws": …awsbnkctl-tools-aws`; L70 ops-pod long-lived pattern example rewritten from `ibmcloud` (state-shared) to `aws` (interactive-debug-shared); L82-87 ssh `toolPackages` map rewritten from `ibmcloud` (IBM apt repo) to `aws` (AWS CLI v2 zip dist). Sweep verification: `grep -rn 'roksbnkctl\|ibmcloud\|ROKS\|COS' book/src/{17,18,32}-*.md` returns 0 hits; chapter 19's hits are contained in the explicit "Available in v1.x" banner that documents the inherited shape. Closes Sprint 5 tech-writer Issue 4 / Sprint 5 tech-writer Issue 5 (renumbered) HIGH.
+- **README sprint-count refresh** — `README.md` status banner rewritten from "pre-release (M0 — Sprint 0 just landed; first tagged release `v0.2` gated on Sprint 1)" to "**Sprint 6 complete; v0.9-rc ready; v1.0 awaits spike**" with the operator-run PRD 07 spike framing surfaced inline. The "Planned quick start (post-Sprint 1)" heading is now "Quick start" against the as-shipped binary; "**Nothing in this README works yet until Sprint 1 closes**" pulled. The `book/` row in the repo layout now reads "AWS-retargeted in Sprint 5; published at GitHub Pages" rather than "to be retargeted in later sprints". The fork-relationship paragraph now points readers at the awsbnkctl book first; the roksbnkctl book is framed as the ROKS-shaped counterpart for shared-concept reference. Closes Sprint 5 tech-writer Issue 6 MEDIUM.
+- **PLAN.md "What's deferred to post-v1.0" appendix** — new section at the end of the document (below) consolidating every Sprint 1+ "v1.x revisit" note from PRDs 07 + 08 and every "Sprint N+1" issue still open from Sprints 0-5. The five-line v1.x section that was here pre-Sprint-6 has been folded into the richer appendix.
+- **PLAN.md Sprint 6 close** — this section.
+
+What was deferred (carries into post-v1.0):
+
+- **Operator-run spike** (PRD 07 § Spike status) still gates `v1.0`. The v0.9-rc1 release artefacts ship without the "officially supported on this account" tag; anyone with operator-run spike validation can cut v1.0 immediately.
+- **`internal/exec/k8s_install.yaml` IRSA retarget** (Sprint 5 tech-writer Issue 1 BLOCKER staff side, Sprint 6 staff carry per the brief). The architect chapter 19 annotation closes the prose-side correctness gap; the YAML + `internal/cli/ops.go` retarget is staff scope this sprint. If it doesn't land by Sprint 6 close, the "ops-pod IRSA retarget" entry in the deferred-work appendix carries it.
+- **`cluster register` EKS verb implementation** (lift from `roksbnkctl/internal/cli/cluster_register.go`, retarget at `internal/aws/eks.go`). Sprint 5 staff Issue 5 → architect chapter 9 annotation closes the prose side; the implementation lift is the deferred-work appendix entry under "Subverb subtrees".
+- **`cluster up/down/show` + `bnk up/down` EKS verbs implementation** (lift from `roksbnkctl/internal/cli/cluster.go` + `bnk.go`). Same shape as `cluster register`.
+- **Chapter 25 filename rename** (`25-cos-supply-chain.md` → `25-s3-supply-chain.md`). Sprint 5 architect Issue 3 → Sprint 5 tech-writer Issue 8 → Sprint 6 integrator at sprint close.
+
+Sibling agent surfaces (staff: `internal/exec/k8s_install.yaml` IRSA retarget + `gosec` + secrets-scan + goreleaser six-archive build + ops.go template substitution + `K8sOpsSecretName` constant; validator: full security audit workflow + release CI workflow validation + book PDF build + final cspell + CI matrix end-state documentation; tech-writer: v1.0-readiness preview + full book read-through + release-artefact spec-check + MIGRATING.md sanity check) report independently; see the per-agent issue files at `issues/issue_sprint6_{staff,validator,tech-writer}.md` for what landed on those surfaces. The integrator reconciles at sprint close and cuts the `v0.9-rc1` candidate tag (v1.0 candidate follows once the operator-run spike validates).
+
 ---
 
-## v1.x deferred work (post-v1.0)
+## What's deferred to post-v1.0
 
-These deliberately defer past v1.0 to keep the M6 scope finite:
+This appendix catalogues every deliberate scope-cut and Sprint-N+1 carry-over that lands past the v1.0 tag. The list draws from PRDs 07 + 08 "v1.x revisit" notes, every "Sprint N+1" / "v1.x roadmap" issue still open at Sprint 6 close, and the architect-surface decisions to ship-as-roadmap rather than ship-as-implemented for v1.0.
 
-- **ECR mirror story closure.** Sprint 2 ships an optional ECR mirror module; v1.x makes it the default for air-gapped customers and adds an automated FAR-image sync workflow.
-- **EKS Auto Mode + AWS Karpenter integration.** The Sprint 1 spike validates against a fixed node group; v1.x adds support for elastic / Karpenter-managed node groups if AWS ENA-SR-IOV semantics permit.
-- **AWS-native cred backends.** v1.x evaluates SSO and IAM Identity Center first-class support in the cred resolver chain.
-- **Homebrew tap.** Same as roksbnkctl — on the v1.x roadmap.
-- **Cross-region GSLB testing.** Sprint 4's DNS probe handles single-region GSLB; multi-region is a v1.x stretch.
+The shape is deliberate: v1.0 is the AWS-retarget structural-completeness gate (binaries, security review, book, E2E phases), not the feature-completeness gate. The items below are real work to do, not scope creep — they were sequenced past v1.0 to keep the M0-M6 scope finite and the v1.0 cut achievable on the 13-week plan.
+
+### Gating v1.0 itself
+
+- **Operator-run PRD 07 spike validation** (`docs/prd/07-EKS-CLUSTER-SRIOV.md` § Spike status). The v0.9-rc1 release artefacts ship structurally complete but without the "officially supported on this account" tag. v1.0 is cut once the spike validates SR-IOV VFs on a real `c5n.4xlarge` EKS node and the device-plugin advertisement (`intel.com/sriov` resources schedulable) is confirmed in the operator's account. Until then the binary is shipped, the docs are shipped, the CI is green — but the data-plane decision in PRD 07 is "validated offline / design-complete" rather than "validated against live AWS".
+
+### Subverb subtrees (currently annotated as v1.x in the book)
+
+- **`awsbnkctl cluster up` / `cluster down` / `cluster show`** (chapter 8). The two-phase split — durable cluster phase vs. iterative trial phase, separate state directories, `deploy_bnk=false` override, `cluster-outputs.json` artefact — is documented in chapter 8 as v1.x roadmap surface. Implementation lift from `roksbnkctl/internal/cli/cluster.go` retargeted at the EKS shape; the upstream tree's pattern carries across cleanly, so the v1.x landing is mostly mechanical retarget + AWS-SDK calls in place of IBM Cloud SDK calls. Cross-link: chapter 8's "Available in v1.x" banner.
+- **`awsbnkctl cluster register <eks-name>`** (chapter 9). The metadata-only attach-to-existing-cluster path. Implementation lift from `roksbnkctl/internal/cli/cluster_register.go` retargeted at `internal/aws/eks.go` (`eks:DescribeCluster` lookup, OIDC-provider matching, supply-chain-bucket discovery). Cross-link: chapter 9's "Available in v1.x" banner; Sprint 5 architect Issue 5 + Sprint 5 tech-writer Issue 3.
+- **`awsbnkctl bnk up` / `bnk down`** (chapter 10 / chapter 11). The trial-phase-scoped commands plus the legacy-single-state-workspace refusal catalogue. Implementation lift from `roksbnkctl/internal/cli/bnk.go`. Cross-link: chapter 11's "Available in v1.x" banner.
+- **`awsbnkctl migrate`** — the state-migration command referenced in the chapter 11 refusal catalogue ("…or migrate the state first"). v0.9 / v1.0 ship without the verb; the refusal text references it so the wording stays valid once it lands.
+
+### Ops-pod surface (currently annotated as v1.x in chapter 19)
+
+- **`internal/exec/k8s_install.yaml` IRSA retarget** — full sweep of the embedded ops-pod manifest from `roksbnkctl-ops` / `roksbnkctl-ibm-creds` / `IBMCLOUD_API_KEY` / Trusted-Profile shape to `awsbnkctl-ops` / `awsbnkctl-aws-creds` / standard AWS env-var names / IRSA-via-OIDC-provider shape. The `--trusted-profile=auto` flow (chapter 19 §"Trusted-profile flow") becomes the IRSA-auto-provisioning flow with the AWS IAM role replacing the IBM Cloud Trusted Profile.
+- **`internal/cli/ops.go` retarget** — template substitution + `K8sOpsSecretName` constant + `probeOpsPodIRSA` doctor probe rewritten against the AWS-shaped manifest. The `resolveTrustedProfileForInstall` function retargets at AWS IAM Identity perm probing instead of IBM IAM Identity.
+- **In-pod `aws sso login` wrap retarget** (paralleling the Sprint 10 upstream "Sprint 10 carry-over" from chapter 19's partial-closure admonition). The pod's startup script needs to use the IRSA-projected web-identity token directly rather than `--apikey "$IBMCLOUD_API_KEY_B64"`.
+- Closes Sprint 5 tech-writer Issue 1 BLOCKER staff side (the architect-side prose annotation is the chapter 19 banner landing this sprint).
+
+### S3 supply chain (PRD 08 v1.x revisit notes)
+
+- **ECR mirror story first-class** (PRD 08 § Trade-offs). Sprint 2 shipped the optional `ecr_mirror` module; v1.x makes it the default for air-gapped customers and adds an automated FAR-image sync workflow (`skopeo copy` on a cron'd CodeBuild project, or a `null_resource` that runs at apply time with explicit user opt-in). Until then, air-gapped customers run the v1.0 stretch module manually.
+- **AWS Secrets Manager for the JWT** (PRD 08 § Decisions). Considered for v1.0, deferred. The JWT lives in S3 server-side encrypted via the supply-chain bucket's KMS key; Secrets Manager would add per-secret cost without rotation-semantics gain for an artefact whose threat model is read-only at apply time. v1.x revisit if the threat model evolves.
+- **SSE-S3 as a documented alternative to customer-managed KMS** (PRD 08 § Trade-offs). v1.0 ships customer-managed KMS (CMK) by default because the supply-chain bucket holds the JWT (sensitive). v1.x evaluates SSE-S3 (free, AWS-managed) for cost-sensitive customers.
+- **Per-component FLO IRSA roles** (PRD 08 § Trade-offs). v1.0 ships a single FLO IRSA role that has permission for both FAR-image pulls and FLO controller actions. v1.x revisits if F5 surfaces per-component permission needs.
+- **`internal/aws/s3.go` live-rotation path** — the SDK helpers (`PutObject` / `HeadObject` / `GetObject`) exist for doctor probes today; the "rotate a single object without re-running `terraform apply`" path is documented in PRD 08 as a v1.x first-class workflow. Until then, FAR-archive and JWT rotation is `terraform apply` after editing the local source paths in tfvars.
+
+### EKS cluster + SR-IOV node group (PRD 07 v1.x revisit notes)
+
+- **EKS Auto Mode + Karpenter integration** (PRD 07 § Alternatives considered). Rejected for v1.0 because Karpenter has no clean integration with SR-IOV device plugins as of the spike. v1.x adds support for elastic / Karpenter-managed node groups if AWS ENA-SR-IOV semantics permit.
+- **EFA (Elastic Fabric Adapter) for the high-throughput tier** (PRD 07 § Decision). v1.0 ships with ENA-SR-IOV enabled and EFA off (not needed for BNK's control + data plane; EFA narrows the instance family). v1.x evaluates EFA for the high-throughput tier.
+- **Mixed instance families per cluster** (PRD 07 § Trade-offs). v1.0 recommends single-family clusters because the SR-IOV device-plugin config is per-vendor/device-ID and mixing `c5n` + `m5n` doubles the config matrix. v1.x revisits the multi-family story.
+
+### Doctor (Sprint 4 architect Issue 4 carry-over)
+
+- **Service Quotas check in doctor** (`internal/doctor/aws.go`). Sprint 4 carry-over; PRD 04 § doctor surface documents the v1.x quota row. Feature-flagged off by default in v1.0 because the AWS Service Quotas API is region-scoped and the lookups add cred-roundtrip latency to every doctor invocation. v1.x makes it on-by-default with cached lookups.
+
+### Throughput testing (Sprint 5 tech-writer + Sprint 4 tech-writer carry-over)
+
+- **`Iperf3DefaultImage` flip post-publish** (Sprint 4 tech-writer Issue 1 → Sprint 6 hardening). The bundled `awsbnkctl-tools-iperf3` image-tag default needs to flip from `:dev` to `:v0.9.0` once the GHCR release publishes the matching tag.
+
+### Cross-region GSLB testing (Sprint 4 tech-writer note)
+
+- **Multi-region `--gslb-compare` vantages** (chapter 21). v1.0 handles single-region GSLB via the multi-backend `--gslb-compare` workflow against local / k8s / ssh:<bastion> vantages within one region. Multi-region (an ssh:<bastion> in us-west-2 and another in eu-west-1) is the v1.x stretch.
+
+### Cred resolver chain (PRD 04 v1.x revisit notes)
+
+- **AWS-native SSO + IAM Identity Center first-class** (PRD 04 § Where the AWS chain lives). v1.0 reads SSO tokens via the aws-sdk-go-v2 default chain (the SSO source produces an `aws.Credentials` like any other). v1.x evaluates surfacing IAM Identity Center as a first-class workspace-config block with profile-discovery from the SSO directory.
+- **`internal/cred/` package deletion** (Sprint 4 architect Issue 4). The dormant IBMCloud-shaped resolver in `internal/cred/` is kept for back-compat-naming-only at v0.9; no production caller materialises a non-empty value. Sprint 5 staff scoped the deletion alongside the docker tmpfile-bind-mount path and the SSH wrapper-script env-propagation retirement; if any residual surface survives Sprint 6, the deletion is the post-v1.0 cleanup pass.
+
+### Distribution + packaging
+
+- **Homebrew tap** (Sprint 0 carry-over). Same as roksbnkctl — on the v1.x roadmap. v1.0 ships goreleaser-built binaries via GitHub Releases only.
+- **Windows Docker Desktop backend coverage** (chapter 17 § Docker backend). Linux/macOS docker daemons are in scope for v1.0; Windows is deferred.
+- **`awsbnkctl ops show --output json`** (chapter 19 § ops show). v1.0 ships a fixed six-line key/value block; structured JSON output is on the v1.x roadmap once `ops show` grows additional fields (image-id hash, env-hash reconciliation against the live pod).
+
+### Documentation polish (low-priority carry-overs)
+
+- **Chapter 25 filename rename** (`25-cos-supply-chain.md` → `25-s3-supply-chain.md`). Sprint 5 architect Issue 3 → Sprint 5 tech-writer Issue 8 → Sprint 6 integrator at sprint close.
+- **Chapter 02 / 03 / 32 filename renames** (`02-why-roks.md`, `03-what-roksbnkctl-does.md`, `32-extending-roksbnkctl.md` → AWS-shaped slugs). Sprint 5 tech-writer Per-prose-surface verdict notes the title vs. filename mismatch is fine for mdbook but the slug should eventually catch up. Same atomic-rename window as chapter 25.
+
+The above is the canonical list — anything not on it that gets discovered as a deferred item should be folded back in here as part of the post-v1.0 backlog grooming.
 
 ---
 

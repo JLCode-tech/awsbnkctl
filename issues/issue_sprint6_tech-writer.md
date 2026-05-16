@@ -1,616 +1,276 @@
-# Sprint 6 — tech writer issues
-
-Sprint 6 is the **v1.0 dress rehearsal** — last sprint before the
-release tag. Findings cover the 9 new chapters (23, 25, 26, 27, 28,
-29, 30, 31, 32), the EDNS / `tools/docker/ibmcloud` Dockerfile carry-
-overs, the Phase I/M/N implementation against PRD 05, the doctor
-refresh, the `MIGRATING.md` content, and the v1.0 release-readiness
-preview.
-
-Reviewed: 9 new / refreshed chapters, 1 reordered chapter (22),
-`MIGRATING.md`, `CHANGELOG.md`, `README.md`, `docs/PLAN.md` §Sprint 6,
-`docs/prd/05-E2E-TEST-PLAN.md` §I/M/N, `scripts/e2e-test-backends.sh`,
-`scripts/e2e-test-full.sh`, `.github/workflows/e2e-full.yml`,
-`internal/doctor/doctor.go`, `internal/exec/docker.go`,
-`internal/exec/ssh.go`, `internal/test/dns.go`. Cross-checked book
-slugs + cross-references.
-
-12 issues filed: **1 blocker** (chapter 23 `--use-existing-cluster`
-flag reference that doesn't exist in the binary, fed into the
-release-checklist as a "supported invocation"), 6 medium, 4 low, 1
-roadmap. The blocker is doc-only (no code regression) but it goes to
-the v1.0 release narrative.
-
-The Sprint 6 gate criteria from `docs/PLAN.md` §"Gate to Sprint 7"
-(all 32 chapters drafted; doctor green-by-default; previous-sprint
-acceptance criteria still hold; all E2E phases pass on a clean host):
-**three of four are clean — see Issue 11 for the e2e-coverage gate
-nuance**. Sprint 6 is otherwise releasable to Sprint 7.
-
-## Issue 1 (BLOCKER — chapter 23 documents a non-existent `--use-existing-cluster` flag on `scripts/e2e-test-backends.sh`)
-
-**Severity**: blocker (v1.0 release narrative)
-**Status**: open
-
-**Description**: Chapter 23 §"How to run it locally" line 49 documents
-the invocation:
-
-```bash
-./scripts/e2e-test-backends.sh --use-existing-cluster
-```
-
-and again at line 77 + line 232 as the "intended workflow on a flake"
-path. The flag **does not exist** in `scripts/e2e-test-backends.sh` —
-`grep -n "use-existing-cluster\|use_existing" scripts/e2e-test-backends.sh`
-returns zero hits. The script's config block (lines 37-44) shows the
-only knobs are `WORKSPACE`, `TFVARS`, `PHASE_FROM`, `DRY_RUN`, `LOG_DIR`,
-`ROKSBNKCTL`, `RUN_K6` — no cluster-reuse flag. The preflight (lines
-167-188) implicitly assumes a cluster from a prior `scripts/e2e-test.sh`
-Phase D run is up and reachable; there's no "skip the up" knob.
-
-A user running `./scripts/e2e-test-backends.sh --use-existing-cluster`
-will see Bash's `set -u` ignore the flag (it's just an unused positional
-arg) and the script will run normally — but the flag-table format and
-the three repeated mentions across the chapter set the expectation that
-this is a real, documented invocation. A reader copy-pasting from the
-book will be confused when other "documented" flags don't work.
-
-Chapter 23 is the user-facing E2E reference; for v1.0 release-gate
-correctness this MUST match the shipped surface.
-
-**Files affected**: `book/src/23-e2e-test-plan.md` §"How to run it
-locally" (line 49), §"Resuming a partial run" (line 77), §"Re-runnability"
-(line 232).
-
-**Proposed fix**: choice of two:
-
-1. **Drop the flag from chapter 23** — the implicit "the cluster from
-   the prior `e2e-test.sh` Phase D is up" contract is what the script
-   actually enforces. Rewrite the invocation as a bare
-   `./scripts/e2e-test-backends.sh` and add a one-line note ("requires
-   a live cluster — either run after Phase D of `e2e-test.sh`, or
-   provision via `roksbnkctl up` in a separate workspace first").
-2. **Land the flag in the script** — add `--use-existing-cluster`
-   parsing to `scripts/e2e-test-backends.sh::preflight` (currently a
-   no-op; the script already assumes the cluster exists). The flag
-   becomes documentation-as-code: present-and-no-op for now,
-   semantically meaningful for the integrator's mental model.
-
-Option (1) is the smaller surface for v1.0 polish; option (2) is the
-"document-the-actual-flag" path if Sprint 7 wants to land the knob.
-
-## Issue 2 (HIGH — chapter 23 cites a per-phase log path that doesn't match the script's actual log emission)
-
-**Severity**: medium (correctness of a release-checklist artefact)
-**Status**: open
-
-**Description**: Chapter 23 §"Per-phase logs" (line 84) says:
-
-> Each phase logs to `/tmp/roksbnkctl-e2e-backends/<phase>-<timestamp>.log`
-> (and the baseline driver writes the equivalent under
-> `/tmp/roksbnkctl-e2e/`). Failures preserve the log; success deletes
-> everything but the last summary line.
-
-The actual `scripts/e2e-test-backends.sh` (lines 66-68) writes a
-**single combined** log:
-
-```bash
-mkdir -p "$LOG_DIR"          # /tmp/roksbnkctl-e2e-backends/
-RUN_TS=$(date +%Y%m%d-%H%M%S)
-RUN_LOG="$LOG_DIR/run-$RUN_TS.log"
-```
-
-Every `step`, `capture`, and `log` invocation appends to `RUN_LOG`
-unconditionally — there are no per-phase log files. The architect-pass
-issue file (Issue 5) said this would be the case and asked the
-integrator to verify; the integrator's resolution note claimed
-"validator's path matches the chapter's prose", but that's incorrect.
-
-Additionally there's no "success deletes everything but the last
-summary line" behaviour — the script keeps the full run log on both
-success and failure.
-
-**Files affected**: `book/src/23-e2e-test-plan.md` §"Per-phase logs"
-(line 84).
-
-**Proposed fix**: rewrite §"Per-phase logs" to reflect the actual
-emission shape:
-
-> Each driver writes one combined log per run at
-> `/tmp/roksbnkctl-e2e-backends/run-<timestamp>.log` (and the baseline
-> driver writes the equivalent at `/tmp/roksbnkctl-e2e/run-<ts>.log`).
-> The combined runner adds a third layer at
-> `/tmp/roksbnkctl-e2e-full/run-<ts>.log` with the two child driver
-> logs nested under `baseline/` and `backends/` subdirectories. Logs
-> are preserved on both success and failure; clean them up manually
-> when disk pressure warrants.
-
-Per-phase log splitting is a sensible v1.x request — file a follow-up.
-
-## Issue 3 (HIGH — chapter 23 lists Phase J in the "Backends + extras" tier table but no `phase_J` exists in `scripts/e2e-test-backends.sh`)
-
-**Severity**: medium (chapter 23 misrepresents the shipped e2e surface)
-**Status**: open
-
-**Description**: Chapter 23's at-a-glance table (lines 20-36) places
-Phase J ("kubectl internalisation") in the **Backends + extras** tier
-alongside I, K, L, L-DNS, M, N — implying it's driven by
-`scripts/e2e-test-backends.sh`. The chapter also lists "14 phases" in
-the prose at line 9 (actually 15 distinct labels when you count L-DNS
-as a phase).
-
-Grepping `scripts/e2e-test-backends.sh` for `phase_J` returns zero
-hits. The script jumps from `phase_I` straight to `phase_K` —
-deliberately, because PRD 05 §J requires `sudo mv kubectl
-$KUBECTL_PATH.hidden` to PATH-strip kubectl, which can't be safely
-automated inside the e2e driver (it mutates the host environment for
-all other tools). PRD 05 §J even has it labelled as needing sudo and
-expects the integrator's manual sign-off, not an automated phase.
-
-So Phase J is **not** part of the automated coverage — it's a manual
-release-checklist item. The at-a-glance table misleads the reader.
-
-**Files affected**: `book/src/23-e2e-test-plan.md` lines 9, 20-36
-(at-a-glance table), line 130 (§"Phase J — kubectl internalisation"
-implies it's run by the driver).
-
-**Proposed fix**:
-
-- Update line 9 prose to "14 phases organised into two tiers, plus
-  Phase J as a manual integrator step" — or drop the count entirely
-  and let the table speak for itself.
-- In the at-a-glance table, move the Phase J row out of the backends
-  tier with a "manual" annotation in the driver column:
-  `| J | manual | kubectl internalisation (PATH-stripped) | 02 |`.
-- In §"Phase J — kubectl internalisation" add a one-paragraph callout
-  at the top: "Phase J is a manual integrator step; it requires
-  `sudo mv` of the kubectl/oc binaries which the automated driver
-  doesn't perform. The integrator runs it during the per-release
-  checklist (`docs/E2E_TEST.md` §6 once added)."
-- (Optional polish) Add an entry to `docs/E2E_TEST.md` §"Per-release
-  checklist" between items 4 and 5 covering the manual Phase J path.
-
-## Issue 4 (MEDIUM — chapter 26 references a non-existent `--refresh-kubeconfig` flag on `init` and `cluster register`)
-
-**Severity**: medium (broken-as-documented user workaround)
-**Status**: open
-
-**Description**: Chapter 26 §"Symptom: `roksbnkctl up` post-apply hook
-fails fetching the admin kubeconfig with a 404" (line 49) says:
-
-> run `roksbnkctl init --refresh-kubeconfig -w <workspace>` (or just
-> `roksbnkctl kubeconfig --download` once that command lands) to retry
-> just the fetch without re-applying.
-
-and again at §"Symptom: `register` succeeds but `roksbnkctl k get
-nodes` immediately errors `Unauthorized`" (line 221):
-
-> ```bash
-> roksbnkctl kubeconfig --download
-> # or, force a refresh via the registration flow
-> roksbnkctl cluster register <name> --refresh-kubeconfig
-> ```
-
-Two of these three commands don't exist:
-
-- `roksbnkctl init --refresh-kubeconfig` — chapter 27 shows `init` has
-  only `--tf-source` and `--upgrade-tf` flags. `grep -rn
-  "refresh-kubeconfig" internal/cli/` returns zero hits.
-- `roksbnkctl cluster register --refresh-kubeconfig` — chapter 27 shows
-  `cluster register` has only `--prompt` and `--registry-cos-name`.
-  Same grep returns zero hits.
-- `roksbnkctl kubeconfig --download` — chapter 27 confirms this **does**
-  exist (line 725). Good.
-
-The chapter is also internally inconsistent — line 49 hedges
-"`kubeconfig --download` once that command lands" implying the command
-doesn't exist yet, but line 219 says to run it. The command does exist;
-the hedge is stale.
-
-**Files affected**: `book/src/26-troubleshooting.md` §"Workspace-delete…
-404" entry (line 49), §"register succeeds but Unauthorized" entry
-(line 221).
-
-**Proposed fix**:
-
-- Line 49: drop the `init --refresh-kubeconfig` reference; drop the
-  "once that command lands" hedge. The correct fix is simply
-  `roksbnkctl kubeconfig --download -w <workspace>`.
-- Line 221: drop the `cluster register --refresh-kubeconfig` line.
-  The correct fix is `roksbnkctl kubeconfig --download --cluster
-  <name>` (chapter 27 shows the `--cluster` flag on `kubeconfig`
-  for exactly this case).
-
-## Issue 5 (MEDIUM — chapter 13 + `MIGRATING.md` document `terraform.tfvars.user` at the wrong path)
-
-**Severity**: medium (cross-document drift carried from Sprint 3)
-**Status**: open
-
-**Description**: `internal/tf/terraform.go::UserTFVarsPath` (line 169-
-171) puts the file at the workspace root:
-
-```go
-func (w *Workspace) UserTFVarsPath() string {
-    return filepath.Join(filepath.Dir(w.stateDir), "terraform.tfvars.user")
-}
-```
-
-i.e., `~/.roksbnkctl/<ws>/terraform.tfvars.user` — a sibling of
-`config.yaml`, **outside** the `state/` directory.
-
-Chapter 28 §"How `--var-file` interacts with `config.yaml`" (line 288)
-gets this right: `~/.roksbnkctl/<ws>/terraform.tfvars.user`.
-
-But Chapter 13 and the new `MIGRATING.md` both say it lives inside
-`state/`:
-
-- `book/src/13-terraform-variables.md` line 31: `~/.roksbnkctl/dev/state/terraform.tfvars.user`
-- `book/src/13-terraform-variables.md` lines 45, 84, 150 — same.
-- `MIGRATING.md` line 34: `~/.roksbnkctl/<workspace>/state/terraform.tfvars.user`
-- `MIGRATING.md` lines 113-122 (workspace layout diagram) puts
-  `terraform.tfvars.user` under `state/`.
-
-A user copy-pasting from either of these will create a file the binary
-doesn't look at — `HasUserTFVars()` returns false, so the layering
-silently skips them.
-
-**Files affected**: `book/src/13-terraform-variables.md` (4 references);
-`MIGRATING.md` lines 34 + 113-122 (workspace layout diagram).
-
-**Proposed fix**: bulk find/replace `state/terraform.tfvars.user` →
-`terraform.tfvars.user` (i.e., one level up) in chapter 13 and
-MIGRATING.md. Update the workspace-layout diagram in MIGRATING.md to
-show `terraform.tfvars.user` as a sibling of `config.yaml`, not under
-`state/`. Chapter 28 is the source of truth.
-
-## Issue 6 (MEDIUM — chapter 23 cross-link to chapter 16's "Auto-discovery from terraform outputs" — section title doesn't match + no anchor)
-
-**Severity**: low (broken cross-reference)
-**Status**: open
-
-**Description**: Chapter 23 §"Phase D — `up` lifecycle" (line 108):
-
-> the phase auto-registers the `jumphost` target (per [Chapter 16 §"Auto-discovery from terraform outputs"](./16-on-flag-ssh-jumphosts.md)) so subsequent phases can `--on jumphost` without manual config.
-
-Two problems:
-
-1. The link has no `#anchor` — it just points at `./16-on-flag-ssh-jumphosts.md`.
-2. The cited section title "Auto-discovery from terraform outputs"
-   doesn't exist in chapter 16. The actual section header is
-   `## Auto-discovery from \`roksbnkctl up\`` (line 46).
-
-**Files affected**: `book/src/23-e2e-test-plan.md` line 108.
-
-**Proposed fix**: rewrite the link as `[Chapter 16 §"Auto-discovery
-from `roksbnkctl up`"](./16-on-flag-ssh-jumphosts.md#auto-discovery-from-roksbnkctl-up)`.
-Verify the slug renders correctly under mdbook (GFM slug strips the
-backticks, so `auto-discovery-from-roksbnkctl-up` should resolve).
-
-## Issue 7 (MEDIUM — chapter 27 auto-generator omits cobra `Aliases`, hiding the `ws` short form documented elsewhere)
-
-**Severity**: medium (auto-generator surface gap)
-**Status**: open
-
-**Description**: Chapter 27 is generated by `tools/refgen/cobra-md` and
-renders the canonical command name from `cmd.Use`. For the workspaces
-subtree, that's:
-
-```
-## `roksbnkctl workspaces`
-### `roksbnkctl workspaces current`
-### `roksbnkctl workspaces delete`
-…
-```
-
-But `internal/cli/workspaces.go:18` declares `Aliases: []string{"ws"}`
-on the parent command, and the rest of the book uses `roksbnkctl ws`
-universally (chapters 6, 23, 26, 28, 30, 32, MIGRATING.md, CHANGELOG.md
-— every prose mention is `ws`, not `workspaces`).
-
-A reader landing on chapter 27 looking for `roksbnkctl ws` won't find
-the entry; readers cross-referencing from elsewhere in the book will
-get table-of-contents anchor mismatches. `grep -rn "Aliases" tools/refgen/cobra-md/main.go`
-shows the generator never reads the `Aliases` slice.
-
-Similar (single-instance) for `k port_forward` (chapter 27 emits
-`k port-forward` — kebab — but the `Aliases` slice has `port_forward`
-underscore form; less impactful since chapter 27's primary form is
-already what users type).
-
-**Files affected**: `tools/refgen/cobra-md/main.go` (generator code,
-not a chapter edit) — but the chapter 27 output is the visible artefact.
-
-**Proposed fix**: extend the generator to emit a one-line "**Aliases**:
-`ws`" callout under any command whose `Aliases` slice is non-empty.
-Place it directly under the per-command synopsis paragraph (before
-the flag table) so readers can find the short form without leaving
-the section. Re-run `go run ./tools/refgen/cobra-md > book/src/27-command-reference.md`
-to refresh the chapter content; commit both the generator change and
-the regenerated chapter. Sprint 7 polish window is the right place.
-
-## Issue 8 (LOW — chapter 23's "Backends + extras" driver column references the wrong script for Phase I-N)
-
-**Severity**: low (factual inaccuracy that mirrors Issue 3's J row)
-**Status**: open
-
-**Description**: Chapter 23's at-a-glance table (lines 20-36) attributes
-the backends tier to `scripts/e2e-test-backends.sh` — correct. But the
-prose at line 16 says the combined driver runs "A-H first to bring
-infrastructure up, then I-N (which reuse the cluster from D) before
-D's destroy." This is **not** what `scripts/e2e-test-full.sh`
-actually does — the staff-written combined runner (lines 134-172 of
-`e2e-test-full.sh`) explicitly notes the design tradeoff:
-
-> the simpler path is: just let the baseline driver complete D (which
-> is the `up + tests + down` cycle), then the backends driver brings
-> up a SEPARATE workspace.
-
-i.e., the baseline driver A-H runs to completion (Phase H destroys),
-THEN the backends driver provisions its own cluster via Phase N's N1
-step. Chapter 23's "reuse the cluster from D before D's destroy"
-narrative doesn't match the implementation; it describes the
-PRD 05-envisioned design, which the v1.0 build deliberately doesn't
-implement (validator's Sprint 6 Issue 4 documents the design choice).
-
-**Files affected**: `book/src/23-e2e-test-plan.md` line 16; cost +
-time table (~5 hours total — partially correct since the cluster does
-get re-provisioned).
-
-**Proposed fix**: rewrite line 16 to match the actual design:
-
-> A combined driver, `scripts/e2e-test-full.sh`, runs both tiers in
-> sequence: A-H first to bring up + exercise + tear down the baseline
-> cluster, then I-N which provisions a fresh cluster via Phase N's
-> mixed-mode lifecycle step. The two drivers stay decoupled — each
-> can be run standalone — at the cost of an extra cluster apply
-> (~70min wall-time). Cluster-sharing across the two drivers (the
-> PRD-envisioned design) is queued for v1.x; see PRD 05 §"Test
-> infrastructure".
-
-Also bump the cost+time table's wall-time estimate — the actual
-combined run is closer to 5-7 hours, not 4-6, because of the second
-cluster apply.
-
-## Issue 9 (LOW — chapter 23 carries a stale forward-reference to "the validator agent's e2e CI workflow file")
-
-**Severity**: low (architect placeholder the integrator didn't update)
-**Status**: open
-
-**Description**: Chapter 23 §"How CI runs it" (line 179):
-
-> See the validator agent's e2e CI workflow file (landed in Sprint 6)
-> for the concrete YAML.
-
-The file is `.github/workflows/e2e-full.yml` (landed; see Issue 1 of
-the architect's open list). The integrator should have replaced this
-stale "ask the validator agent" placeholder with a direct link.
-
-**Files affected**: `book/src/23-e2e-test-plan.md` line 179.
-
-**Proposed fix**: replace the sentence with:
-
-> See [`.github/workflows/e2e-full.yml`](https://github.com/jgruberf5/roksbnkctl/blob/main/.github/workflows/e2e-full.yml)
-> for the workflow YAML; the workflow is manually triggered from the
-> Actions tab (with optional `cluster_region` + `teardown_on_success`
-> inputs) and runs automatically on every `release/**` branch push.
-
-## Issue 10 (LOW — chapter 32 `internal/exec/registry.go` reference doesn't exist; `ResolveBackend` lives in `backend.go`)
-
-**Severity**: low (contributor-facing chapter has a misnamed file path)
-**Status**: open
-
-**Description**: Chapter 32 §"Adding a new execution backend" step 2
-(line 15):
-
-> The `ResolveBackend(spec string)` function in
-> `internal/exec/registry.go` dispatches `--backend <name>` to your
-> constructor.
-
-There's no `internal/exec/registry.go` — `ResolveBackend` lives at
-`internal/exec/backend.go:127`. Same paragraph references "Add an
-entry to the registry — either via the package's `init()` block or
-via a `Register(name string, factory func() Backend)` call". The
-`Register` function exists at `backend.go:166` but takes
-`(name string, b Backend)` — not `(name string, factory func() Backend)`.
-
-Also chapter 32 §"Adding a new tool to an existing backend" (line 80):
-
-```go
-var toolPackages = map[string][]string{
-    "ibmcloud": {"ibmcloud-cli"},
-    "iperf3":   {"iperf3"},
-    "<your>":   {"<deb-package>"},
-}
-```
-
-The actual type is `map[string]toolPackage` (a struct), not
-`map[string][]string` — see `internal/exec/ssh.go:35`. Minor; the
-shape is illustrative.
-
-**Files affected**: `book/src/32-extending-roksbnkctl.md` lines 15, 80.
-
-**Proposed fix**: change `registry.go` → `backend.go`. Fix the
-`Register` signature to match the actual `func Register(name string,
-b Backend)`. Fix the `toolPackages` example to reflect the actual
-struct type — either show the real struct shape or rewrite the
-example as `map[string]string{"<tool>": "<package-or-spec>"}` with a
-"the real type is a struct with apt repo + package fields; see
-`internal/exec/ssh.go` for the production form" note.
-
-## Issue 11 (LOW — MIGRATING.md introduces a "v0.10" version label that nothing else in the project uses)
-
-**Severity**: low (versioning surface inconsistency)
-**Status**: open
-
-**Description**: `MIGRATING.md` §"From roksbnkctl v0.7 / v0.8 → v0.9
-→ v0.10" (line 78) and §"v0.10 (current — Sprint 6)" (line 82) label
-Sprint 6 as **v0.10**. The rest of the project disagrees:
-
-- `CHANGELOG.md` §"Unreleased — Sprint 6 (v1.0 prep)" (line 85) —
-  labels Sprint 6 as v1.0 prep, not v0.10.
-- `docs/PLAN.md` §"M4 / v1.0" — Sprint 6 + Sprint 7 together produce
-  the v1.0 tag; no intermediate v0.10.
-- `README.md` line 7 — "v0.9 release candidate" status, which per
-  the prompt should flip to "v1.0 release candidate" in Sprint 7
-  (not "v0.10").
-- The resolved-issue file `resolved_sprint6_staff.md` mentions
-  "v0.10" only as a Sprint 6 staff Issue 1 follow-up (chapter 21
-  EDNS doc drift); the staff issue itself doesn't say v0.10 will
-  be tagged.
-
-So MIGRATING.md introduces a v0.10 label that no other artefact uses
-and no plan-of-record commits to. Either the project does tag v0.10
-between Sprint 6 + Sprint 7 (in which case PLAN.md, CHANGELOG.md, and
-README all need a one-line update), or MIGRATING.md is the outlier and
-its "v0.10" label should be revised to "Sprint 6 / v1.0 prep" to match
-CHANGELOG's framing.
-
-**Files affected**: `MIGRATING.md` lines 78, 82 (heading + section
-intro).
-
-**Proposed fix**: pick one of:
-
-1. **Drop v0.10 from MIGRATING.md** — relabel the section as
-   "Sprint 6 → v1.0 prep" or just "v1.0 (Sprint 7 cut)" and merge
-   the v0.10 content into the v1.0 entry. Cleanest for the v1.0
-   release narrative.
-2. **Land v0.10 properly** — add a v0.10 entry to `CHANGELOG.md`
-   between the existing v0.9.0 and Unreleased sections, update
-   `README.md` status to "v0.10" (interim between v0.9 RC and v1.0
-   tag), and add a v0.10 row to `docs/PLAN.md` §"Milestones". This
-   is the bigger surface change.
-
-Option (1) is the recommended path for v1.0 polish.
-
-## Issue 12 (ROADMAP — chapter 23 + PRD 05 drift on Phase I/M/N step labels)
-
-**Severity**: roadmap (PRD vs implementation divergence — pick one
-source of truth in v1.x)
-**Status**: filed for v1.x
-
-**Description**: PRD 05 §"Phase I" defines I0-I7 (8 steps); the shipped
-`scripts/e2e-test-backends.sh::phase_I` implements I0-I11 (12 steps —
-validator's Sprint 6 build-out added I6 wrong-fingerprint, I7-I9
-purpose-built-target steps, I10 context-cancel, I11 doctor). Chapter
-23's prose for Phase I is consistent with the script (12 steps), but
-PRD 05 is not.
-
-PRD 05 §"Phase N" defines N0-N10 (11 steps); the script implements
-N1-N6 (6 steps, restructured). Chapter 23's prose summarises Phase N
-without enumerating, so it's silent on the count.
-
-PRD 05 §"Phase M" defines M1-M7 (7 steps); the script implements
-M1-M7 (matches).
-
-The CHANGELOG.md line "12 steps I0-I11" + "N1-N6" matches the
-implementation but doesn't match PRD 05's step numbering. Per chapter
-32 §"The PRD process" line 128 — "When the implementation diverges
-from the PRD, the PRD gets updated to match — never the other way
-around" — PRD 05 §I and §N should be refreshed to match the shipped
-step matrix.
-
-**Files affected**: `docs/prd/05-E2E-TEST-PLAN.md` §"Phase I" (8
-steps; should be 12), §"Phase N" (11 steps; should be 6 + a note on
-N7-N10 being deferred to manual integrator scope per the simpler
-chained design).
-
-**Proposed fix**: out-of-scope for tech-writer pass; file as a v1.0
-sign-off action item or v1.1 PRD-refresh task. Adding the explicit
-"PRD 05 §I/§N updated to match Sprint 6 implementation" item to
-PLAN.md §"Sprint 7" would track it cleanly.
-
-## Spot-check: non-issues confirmed clean
-
-- **Chapter 22 reorder**: `## OpenShift SCC failure mode` now precedes
-  `## Reading the output` (lines 120 + 132). Anchor `#openshift-scc-failure-mode`
-  resolves unchanged (mdbook GFM slug). Inbound references from
-  chapters 26 + 30 still land correctly.
-- **Chapter 21 EDNS Client Subnet update**: line 289 matches `internal/test/dns.go`'s
-  `EDNSClientSubnet` struct (family / source_netmask / scope_netmask /
-  address) including the `omitempty` framing. Schema-version statement
-  is honest ("v0.10 added an optional `edns_client_subnet` object").
-- **Chapter 30 glossary**: all required acronyms (BNK, ROKS, FAR, FLO,
-  CIS, GSLB, SCC, TOFU, SPDY, RBAC) present. "Cell" entry dropped per
-  architect Issue 10. Cross-link coverage is good. Anchor on "Licence
-  rotation" resolves (chapter 25 has the `### Licence rotation` heading).
-- **Chapter 26 entry count**: 29 entries (well above the 15-entry
-  threshold); all entries follow symptom → root cause → fix. Coverage
-  is comprehensive (SCC, terraform retries, kubeconfig 404, workspace-
-  delete current-workspace, Docker daemon, k8s ops pod, SSH backend
-  tool-not-found are all covered).
-- **Chapter 26 workspace-delete current-workspace gotcha**: integrator
-  correctly rewrote the prose to drop the `ROKSBNKCTL_WORKSPACE` env
-  var reference (env var doesn't exist; `ROKSBNKCTL_HOME` does, but
-  not `_WORKSPACE`). The corrected prose reads naturally.
-- **Chapter 27 auto-generator output**: 1151 lines covering all top-
-  level commands. Markdown valid, code fences balanced, anchor
-  backlinks work. Top-of-chapter callout documents the regeneration
-  command. (Aliases gap noted in Issue 7.)
-- **Chapter 29 auto-generator output**: 205 lines covering root module
-  + 6 submodules. Sensitive flag honored on `ibmcloud_api_key` +
-  `bigip_password`. Markdown valid. Generator command documented at top.
-- **Chapter 31 `.goreleaser.yml` path**: integrator fixed
-  `goreleaser.yml` → `.goreleaser.yml` per architect Issue 7.
-- **Doctor refresh**: `internal/doctor/doctor.go::runWithWhy` (line 84
-  onward) treats `terraform` as the only required tool;
-  `checkBinaryInformational` for kubectl/oc/ibmcloud/iperf3/dig;
-  `checkKubeconfigInformational` replaces the warning path. Chapter 5
-  + chapter 26 + chapter 23 §"Phase A" prose all match.
-- **PRD 05 cross-link from chapter 23**: every PRD URL uses the
-  GitHub-canonical form per chapter 32's style guide.
-- **`MIGRATING.md` workspace-migration content**: minus the
-  terraform.tfvars.user path bug (Issue 5) and the v0.10 label (Issue
-  11), the content is comprehensive — covers `bnk`-to-roksbnkctl,
-  manual-deploy-to-roksbnkctl, per-version notes, workspace layout +
-  what's preserved across upgrades + cross-host transfer.
-- **`scripts/e2e-test-full.sh`**: present, executable (`-rwxr-xr-x`),
-  runs cleanly under DRY_RUN (resolved per validator Issue 1).
-- **`.github/workflows/e2e-full.yml`**: workflow valid, secret-driven
-  tfvars, optional SSH-target env keys for purpose-built-target steps.
-  Matches chapter 23's "manual-trigger workflow" framing.
-
-## v1.0 readiness verdict
-
-PLAN.md §"Sprint 6 — Gate to Sprint 7" (line 477) defines four gate
-items:
-
-1. ✅ **All E2E phases pass on a clean test host** — Phase A-H
-   (baseline driver), Phase I (12 steps), K, L, L-DNS, M (7 steps),
-   N (6 steps) all wired and verified under DRY_RUN. Live run is
-   integrator scope per validator's Issue 1 resolution.
-2. ✅ **All previous sprints' acceptance criteria still hold** —
-   Sprint 5 EDNS deferral closed (Sprint 6 staff Issue 1 resolved);
-   Sprint 5 chapter 22 reorder confirmed (Sprint 5 tech-writer
-   Issue 14 closed); Sprint 5 TruncatedFlag re-added (Sprint 5
-   validator Issue 4 closed).
-3. ✅ **Doctor green-by-default on a stock dev box** — refactored
-   in `internal/doctor/doctor.go`; pinned by
-   `TestHasFailures_StockDevBoxGreen`; live integrator sign-off per
-   `docs/E2E_TEST.md` §5.
-4. ⚠ **All 32 chapters drafted (some still rough — Sprint 7 polishes)**
-   — 32 chapters present, but the inaccuracies surfaced in Issues 1-
-   10 represent more than "rough polish" for some chapters:
-   - Issue 1 (`--use-existing-cluster` flag that doesn't exist) is a
-     **release-blocker** — it goes to the front of the book's user-
-     facing E2E surface and a user running the documented command
-     will be confused.
-   - Issues 2 + 3 + 4 are **medium** — they break documented user
-     workarounds + misrepresent the e2e coverage. Each one is a
-     ~5-line chapter edit; Sprint 7's polish window has time.
-   - Issues 5 + 6 + 8 are **medium** — drift between book and
-     code/scripts; cumulatively they erode user trust in the docs.
-
-**Verdict**: **Sprint 6 gate criteria met with one blocker carry-over
-(Issue 1) for Sprint 7 polish**. The v1.0 tag should not be cut until
-at least Issues 1-5 are resolved. Issues 6-10 are Sprint 7 polish
-items; Issue 11 is a labelling decision; Issue 12 is v1.x scope.
-
-Overall, the sprint is in materially good shape — chapter 22 reorder,
-chapter 21 EDNS update, doctor refresh, MIGRATING.md, the two auto-
-generators, the `.github/workflows/e2e-full.yml`, the cred-resolver
-invariance test, the dropped `ENTRYPOINT ["ibmcloud"]` shim, and all
-9 hand-written chapters land cleanly. The findings here are the
-expected "second-pass tech-writer review" surface: cross-document
-drift + a handful of forward-references that didn't get pruned during
-integration. Nothing v1.0-blocking that Sprint 7's polish pass can't
-close in a single PR.
+# Sprint 6 — tech-writer issues (final pre-v1.0 sprint)
+
+Final read-only pass at sprint close. This is the **v1.0-readiness preview** that goes into the v0.9-rc1 release notes.
+
+**Read-only.** No project files edited. **SPIKE DEFERRAL** carries — v0.2 first tag and v1.0 final still gate on operator-run PRD 07 spike (live EKS 1.30 + SR-IOV CNI bring-up).
+
+> **File-overwrite note.** The `issue_sprint6_tech-writer.md` that existed at tech-writer-dispatch time contained Sprint 6 tech-writer findings from the **roksbnkctl / IBM Cloud** upstream project (EDNS Dockerfile, `tools/docker/ibmcloud` carry-overs, IBM-Cloud Phase I/M/N notes). That predates the awsbnkctl fork and described surfaces that do not exist in this repo. The validator did the same overwrite on its sibling file (Issue 7 in `issue_sprint6_validator.md`); this file follows the same path. The historical content is recoverable from git history.
+
+**Scope walked end-to-end:**
+
+- 34 chapters under `book/src/` (Parts I-X) + `SUMMARY.md` + `preface.md`
+- `README.md` (refreshed sprint-count framing)
+- `CHANGELOG.md` (entries Sprint 0-5; **Sprint 6 entry missing**)
+- `MIGRATING.md`
+- `internal/exec/k8s_install.yaml` (staff IRSA retarget verification)
+- All 6 workflow files under `.github/workflows/`
+- Sibling Sprint 6 issue files (architect / staff / validator)
+- Sprint 5 tech-writer issue file (closure verification)
+
+**Verification (Sprint 6 close):**
+
+- `go build ./...` ✓ clean
+- `go test ./...` ✓ 10 packages ok / 0 failures (cached)
+- `terraform validate` on **all 8 modules** (`cert_manager`, `cne_instance`, `ecr_mirror`, `eks_cluster`, `flo`, `iam_irsa`, `license`, `s3_supply_chain`, `testing`) → ✓ all "Success! The configuration is valid." Root tree requires `terraform init` first (expected; modules not pre-resolved on a clean clone).
+- `grep -iE 'ibm|roks|cos|ibmcloud' internal/exec/k8s_install.yaml` → **0 hits** (Sprint 5 BLOCKER Issue 1 closed end-to-end on the YAML side; ServiceAccount carries `eks.amazonaws.com/role-arn: ${OPS_IRSA_ROLE_ARN}` annotation; standalone IBM-creds Secret deleted; rbac scoped to `awsbnkctl-ops` / `awsbnkctl-test`).
+- Sprint 5 BLOCKER Issue 1 **prose** side: chapter 19 annotated at top with "Available in v1.x" banner per architect path-(b) closure; the architect's chapter-banner annotation closes the first-time-reader bounce. However, the body of chapter 19 (lines 166-425) **still reads as the IBM trusted-profile + `awsbnkctl-ibm-creds` Secret narrative verbatim** — see Issue 2 below.
+- Chapters 8 / 9 / 11 carry the v1.x banners listing absent subverbs explicitly (Sprint 5 Issue 2 architect closure verified).
+- Chapters 17 / 18 / 32 are clean of IBM/ROKS/COS residue (Sprint 5 Issue 4 closure verified).
+- `.github/workflows/ci.yml` carries the **`security-audit`** job (gosec + govulncheck + gitleaks) added by validator this sprint; `book-build` job extended to also cover `docs/**/*.md`; `release.yml`, `book.yml`, `e2e-full.yml`, `spellcheck.yml`, `tools-images.yml` all spec-clean.
+
+---
+
+## Issue 1 (BLOCKER) — CHANGELOG.md has no Sprint 6 entry; the v0.9-rc1 release notes have nothing to cite
+
+**Severity**: blocker (release-gate)
+**Status**: open (integrator pre-tag)
+
+**Description**: The Sprint 6 architect brief noted CHANGELOG.md as "the integrator adds Sprint 6 at commit time." At sprint close the file's "Unreleased" section opens directly with the Sprint 5 entry — there is no Sprint 6 entry covering the staff IRSA YAML retarget, the govulncheck `golang.org/x/net@v0.53.0` bump, the goreleaser snapshot validation, the gosec audit posture, the new `security-audit` CI job, the cspell `docs/**/*.md` extension, the `e2e-full.yml` Sprint 6 banner refresh, the chapter 8/9/11 v1.x annotations, the chapter 17/18/19/32 IBM-residue secondary sweep, the glossary cleanup, the PLAN.md "What's deferred to post-v1.0" appendix, or the README sprint-count refresh.
+
+The Sprint 5 entry also still carries a "Carried into Sprint 6 (blockers per tech-writer review)" subsection — by sprint close that list either lands as resolved items in the new Sprint 6 entry or rolls into the deferred-work appendix.
+
+**Files affected**: `CHANGELOG.md` (integrator scope at commit time).
+
+**Proposed fix**: integrator authors the Sprint 6 entry as part of the v0.9-rc1 tag-cut commit. Without it, the v0.9-rc1 release notes have no per-sprint summary of what's in the candidate.
+
+## Issue 2 (BLOCKER) — Chapter 19 body (lines 166-425) is still the IBM trusted-profile narrative verbatim; only the top-of-chapter banner names the v1.x framing
+
+**Severity**: blocker (correctness drift; first-time reader who skips the banner is misled end-to-end)
+**Status**: open (architect — path (a) closure that was deferred from Sprint 5)
+
+**Description**: The architect's Sprint 6 chapter-19 closure is the path-(b) annotation banner at the top (lines 3-5) explicitly framing the chapter as describing the inherited shape pending the v1.x IRSA retarget. That banner is the smallest-correct closure for the first-time-reader-bounce problem.
+
+But the **chapter body**, from §"Trusted-profile flow (v1.2+)" (line 166) onwards, still reads verbatim as the IBM trusted-profile + `awsbnkctl-ibm-creds` + `IBMCLOUD_API_KEY` walkthrough. ~260 lines describe `--trusted-profile=auto|on|off`, the IBM IAM perm probe (`iam-identity`), the v1.2.0 partial-closure admonition referencing "Sprint 10", the `awsbnkctl.io/trusted-profile-managed` annotation, the `--apikey "$AWS_ACCESS_KEY_ID"` in-pod wrap, the Secret-rendered-with-empty-data manifest. The prose is internally inconsistent: the banner says "do not run `awsbnkctl ops install` against a real EKS cluster" while the body walks the reader through `awsbnkctl ops install --trusted-profile=auto` as if it were a supported v1.2 surface.
+
+A reader who lands on chapter 19 from a SUMMARY.md TOC click and scrolls past the banner (banners are easy to skip) reads ~260 lines of v1.2-shape IBM trusted-profile guidance and walks away with a fundamentally wrong mental model of how IRSA works on AWS.
+
+The staff-side YAML retarget (`internal/exec/k8s_install.yaml`) is clean. The architect annotation banner is in place. The body rewrite is the missing piece — either gate the body sections behind explicit "(v1.x — current installer is still inherited shape)" subheadings, or rewrite the body against the as-shipped IRSA design (the YAML is now structurally correct; the prose can describe it truthfully).
+
+**Files affected**: `book/src/19-in-cluster-ops-pod.md` (lines 166-425 — the §"Trusted-profile flow (v1.2+)" subtree).
+
+**Proposed fix**: post-Sprint-6 architect pass (or v1.0 finalisation pass): rewrite the §"Trusted-profile flow" subtree against the IRSA shape the YAML now ships. Sprint 6 architect's deferral here is defensible (the body rewrite is ~3 hours of architect work and the brief gave priority to the secondary-residue sweep + glossary cleanup + chapter-banner closures), but the body-rewrite gap means chapter 19 is **not** v1.0-ready end-to-end.
+
+## Issue 3 (BLOCKER) — Chapter 13 (Terraform variables) was missed entirely by the Sprint 5 mechanical sweep and the Sprint 6 secondary sweep; it still describes ROKS / OpenShift / IBM Cloud verbatim
+
+**Severity**: blocker (correctness drift; chapter 13 is a Part-IV reference surface, hit on every "how do I tune <variable>" query)
+**Status**: open (architect)
+
+**Description**: `book/src/13-terraform-variables.md` carries **10 hits** of unswept IBM-Cloud / ROKS / OpenShift residue. The Sprint 5 architect's mechanical sweep was lexical (`roksbnkctl`→`awsbnkctl` / `ROKS`→`EKS` / `COS`→`S3`) and did not cover the variable names because the chapter uses `roks_workers_per_zone` / `roks_cluster` / `openshift_cluster_name` / `openshift_cluster_version` — variable names the sweep had no rules for.
+
+Concrete examples (line numbers from current file):
+
+- L53: `| openshift_cluster_name | tf-openshift-cluster | Cluster name. ... |`
+- L54: `| roks_workers_per_zone | 1 | Worker nodes per AZ. 2 ⇒ 6 workers in a 3-AZ MZR region. |` ("MZR" is an IBM Cloud Multi-Zone Region term)
+- L55: `| create_roks_cluster | true | Set false to adopt an existing cluster. Pair with roks_cluster_id_or_name. |`
+- L56: `| openshift_cluster_version | "4.18" | OpenShift minor. Quote it — YAML/HCL parses 4.18 as float otherwise. |`
+- L116: `S3 HMAC keys — auto-generated by the roks_cluster module via the S3 service-credentials resource`
+- L129-131: worked-example tfvars block uses `roks_workers_per_zone = 6 / roks_min_worker_vcpu_count = 32 / roks_min_worker_memory_gb = 128`
+- L158: "Cluster identity, region, **OpenShift version**, worker count"
+
+The actual variable names in `terraform/variables.tf` (per the chapter 29 auto-generated reference) are `eks_cluster_name`, not `openshift_cluster_name`; the EKS module has no `openshift_cluster_version`; the chapter 13 worked example tells the reader to drop tfvars that don't exist in the v0.9 HCL. A user following chapter 13 verbatim against the as-shipped `terraform/variables.tf` gets `Error: An input variable with the name "roks_workers_per_zone" has not been declared` on the first `terraform plan`.
+
+**Files affected**: `book/src/13-terraform-variables.md` (~10 surface edits + the worked-example tfvars block rewrite).
+
+**Proposed fix**: post-Sprint-6 architect pass: rewrite chapter 13 against the actual `terraform/variables.tf` surface (cross-check with chapter 29 auto-gen). The chapter is otherwise structurally sound (the layering rule + `--var-file` semantics + AWS_ACCESS_KEY_ID exception are all generic); it's the variable-name surface and the worked example that need the IBM→AWS retarget.
+
+## Issue 4 (HIGH) — Chapter 28 (Configuration reference) carries an unretargeted `cos:` block, IBM-shaped field descriptions, and `openshift_version` field
+
+**Severity**: high (Part VIII reference chapter; users hit it on every "what fields does config.yaml support" lookup)
+**Status**: open (architect)
+
+**Description**: `book/src/28-configuration-reference.md` carries the largest cluster of OpenShift / COS residue outside chapter 19 (11 OpenShift hits, 9 `cos`-named field hits). The Sprint 5 chapter-28 mechanical sweep retargeted some prose (the chapter has "S3" wording around the `cos:` block) but missed the structural fields:
+
+- L28: `cos:             # optional; supply-chain auto-upload` in the config.yaml example block
+- L148: `## cos:` block — heading still uses the IBM-Cloud Object Storage name
+- L151: full `cos:` YAML block + L161-165 field-by-field table calling out IBM CRN semantics
+- L231: `| cluster.openshift_version | string | 4.18 | OpenShift minor version. |`
+- L247-250: field-by-field table rows for `cos.instance` / `cos.bucket` / `cos.upload[].source` / `cos.upload[].key`
+- L270: behaviour table row: `| cluster.openshift_version | Empty string passed to upstream HCL; the module picks the current default. |`
+- L278: `| cos | Block omitted ⇒ no pre-flight uploads; FLO reads whatever's already in the configured bucket. |`
+
+The actual `Workspace` struct in `internal/config/workspace.go` uses an `s3:` / `aws.supply_chain:` shape; there is no `cluster.openshift_version` field. A user who lands on chapter 28 reads ~40 lines of guidance on a `cos:` block that the as-shipped binary rejects.
+
+**Files affected**: `book/src/28-configuration-reference.md` (~20 surface edits + the `cos:` block rewrite per the actual schema).
+
+**Proposed fix**: post-Sprint-6 architect pass: cross-check chapter 28 against `internal/config/workspace.go::Workspace` and the chapter 27 auto-generated cobra-md reference. Rewrite the `cos:` block, drop the `openshift_version` field row, update the field-by-field table to match the actual schema.
+
+## Issue 5 (HIGH) — MIGRATING.md is still scaffold-shape ("no shipped release yet") despite being the v0.9-rc1 / v1.0-candidate migration surface
+
+**Severity**: high (PLAN.md Sprint 6 end-of-sprint gate explicitly calls out "MIGRATING.md is the final word for migrators"; status banner says "scaffolding")
+**Status**: open (architect or staff)
+
+**Description**: `MIGRATING.md` opens with a "**Status:** scaffolding. awsbnkctl has no shipped release yet — the sections below describe the migration *target* so the implementation knows what to honour. Each section will be tightened as the corresponding sprint lands." That status framing was correct at Sprint 0; by Sprint 6 close the binary works end-to-end (modulo the operator-run spike) and the file is shipping as part of the v0.9-rc1 candidate cut.
+
+Concrete gaps versus the as-shipped surface:
+
+- L46: `Per-version migration notes will land here as releases are cut. Until v0.2 ships (gated on Sprint 1 — see docs/PLAN.md), there is nothing to migrate between.` The sprint count is now wrong (Sprint 6 closed, not Sprint 1); the v0.9-rc1 candidate is the first migration target.
+- L52-57: chapter cross-references describe Chapter 6/12/13/14/17 as "will document the underlying mechanics referenced above once they are retargeted at AWS" — those chapters are retargeted (Sprint 5), so the cross-references should be tightened to "see Chapter X for the mechanics" rather than "will document … once retargeted".
+- L58: "Until then, the equivalent chapters in the [roksbnkctl book] describe the same mechanics for the shared surface" — replace with a direct link to the published awsbnkctl book section.
+- "From manual EKS + BNK deployment" section (L9-22) needs a paragraph explicitly naming the as-shipped v0.9 limitations (no `cluster *` / `bnk *` subverbs; ops-pod prose lags the YAML; operator-run spike still required for the SR-IOV node-group VF advertisement).
+
+PLAN.md § Sprint 6 lists "MIGRATING.md is the final word for migrators" as an end-of-sprint gate. Sprint 6 close ships the file as scaffold-shape; that gate is not met.
+
+**Files affected**: `MIGRATING.md` (status banner + per-version section + cross-reference tightening + v0.9-rc1-specific migration notes).
+
+**Proposed fix**: post-Sprint-6 architect pass (or v1.0 finalisation pass): rewrite the status banner against the v0.9-rc1 candidate cut; add a "## v0.9-rc1" subsection under "Between awsbnkctl versions" naming the as-shipped surface + known v1.x gaps; tighten the chapter cross-references to point at the now-retargeted awsbnkctl chapters directly.
+
+## Issue 6 (HIGH) — Chapter 30 Glossary closure (Sprint 5 Issue 3) is partial — some entries correct, several still carry OpenShift/IBM framing or stale cross-references
+
+**Severity**: high (glossary is the lookup surface every new term references; factual errors here propagate)
+**Status**: open (architect)
+
+**Description**: Sprint 5 tech-writer Issue 2 (HIGH) catalogued ~10 glossary entries that survived the architect Sprint 5 sweep with stale or factually wrong content. The Sprint 6 architect's glossary rewrite closed the most-egregious ones — CIS entry now disambiguates IBM's product as unrelated to BNK on EKS; the S3 definition is now correct; the EKS entry correctly identifies EKS as managed Kubernetes (not managed OpenShift); the redactor entry now says "masks AWS credential values"; the OpenShift entry now correctly identifies ROSA.
+
+Remaining drift the Sprint 6 architect pass did not catch:
+
+- **L46 "envFrom"** describes `envFrom: secretRef: awsbnkctl-aws-creds` — but the as-shipped k8s_install.yaml (per Sprint 6 staff verification) **has no envFrom field at all** (IRSA injection replaces it entirely; the manifest carries only `env: HOME=/tmp`). The glossary describes a Secret-projection mechanism that doesn't exist in v0.9.
+- **L145 "restricted (PSA profile) / restricted-v2 (SCC)"** and **L168 "SCC (legacy)"** preserve OpenShift SCC framing as a co-equal admission profile. EKS uses PSA only; SCC mentions should be relegated to a one-line "(inherited from roksbnkctl framing; not enforced on EKS)" parenthetical rather than full entries.
+- **L171 "Secret (k8s)"** says `awsbnkctl-aws-creds` Secret is created at `ops install` time — but the as-shipped YAML deletes the standalone Secret entirely (the per-Job ephemeral Secret in `awsbnkctl-test` is the only Secret the ops surface creates).
+- **L19 "ClusterRole"** references the `awsbnkctl-test` namespace verbatim without cross-linking chapter 19 — readers seeing the namespace name land on chapter 19's v1.x banner and get confused about whether the namespace is real or roadmap.
+
+**Files affected**: `book/src/30-glossary.md` (~5 surface edits, none structural).
+
+**Proposed fix**: post-Sprint-6 architect pass: cross-check glossary entries against `internal/exec/k8s_install.yaml` as actually shipped; collapse PSA / SCC entries; drop the `awsbnkctl-aws-creds` envFrom references (or annotate as v1.x); tighten the ClusterRole cross-link.
+
+## Issue 7 (MEDIUM) — README "Status" banner says "Sprint 6 complete; v0.9-rc ready" but the "Quick start" section uses `go install ...@latest` which won't work until a tag is cut
+
+**Severity**: medium (first-time-reader stuck-point — the binary install path doesn't work end-to-end at v0.9-rc1 cut time)
+**Status**: open (architect or integrator pre-tag)
+
+**Description**: README §"Quick start" (L18-37) opens with `go install github.com/JLCode-tech/awsbnkctl/cmd/awsbnkctl@latest`. At v0.9-rc1 candidate (pre-tag) `@latest` resolves to the most-recent tag — which is `v0.0.0` or the upstream fork-point reference, neither of which is a working AWS-shape build. A first-time reader copy-pasting the quick-start runs into either "no matching versions" or installs a stale fork-point binary that doesn't have the AWS surface.
+
+The status banner correctly frames the project as "Sprint 6 complete; v0.9-rc ready; v1.0 awaits spike" but the quick-start should either (a) explicitly note "available once v0.9-rc1 tag is cut" with a placeholder version (`@v0.9.0-rc1`) and a `git clone` + `make build` fallback for pre-tag dogfood readers; or (b) defer until the integrator cuts the tag and the workflow lands the binary at goreleaser's release page.
+
+**Files affected**: `README.md` § Quick start (L18-37).
+
+**Proposed fix**: integrator at v0.9-rc1 tag-cut: replace `@latest` with `@v0.9.0-rc1` (or the actual tag chosen) and add a "Build from source (pre-tag readers)" sub-block with `git clone … && cd awsbnkctl && make build`.
+
+## Issue 8 (LOW) — Chapter 25 filename rename (`25-cos-supply-chain.md` → `25-s3-supply-chain.md`) still pending
+
+**Severity**: low (cosmetic; mdbook serves the file fine; 17 cross-links across the book reference the IBM-era slug)
+**Status**: open (integrator at sprint close — same surface as Sprint 6 architect Issue 2)
+
+**Description**: Already filed by Sprint 6 architect (Issue 2); included here for tech-writer cross-reference. The rename is an atomic `git mv` + sed-sweep across the 17 chapters referencing the old slug; chapter content has already been retargeted to "S3 (and optional ECR) supply chain" so only the slug carries the legacy name. The `book-build` CI job will catch any broken cross-link.
+
+**Files affected**: `book/src/25-cos-supply-chain.md` → `book/src/25-s3-supply-chain.md`; `book/src/SUMMARY.md`; 17 cross-linking chapters.
+
+**Proposed fix**: integrator pre-commit: `git mv book/src/25-cos-supply-chain.md book/src/25-s3-supply-chain.md && grep -rln 25-cos-supply-chain.md book/src/ | xargs sed -i '' 's|25-cos-supply-chain.md|25-s3-supply-chain.md|g'`.
+
+## Issue 9 (LOW) — `release.yml` PDF-attach posture is correct-as-architected but the chain (`release.yml` → operator `make release-publish`) is not visible to a first-time release-cutter
+
+**Severity**: low (process surface; the validator's Sprint 6 Issue 2 documents the architecture rationale)
+**Status**: open (post-Sprint-6 documentation pass)
+
+**Description**: Sprint 6 validator's Issue 2 caught that `release.yml` deliberately does not attach the book PDF (the multi-GB pandoc + XeLaTeX + mermaid-cli toolchain is local-driven; the integrator runs `make release-publish VERSION=vX.Y.Z` post-workflow to upload the PDF). This is the right design decision but the chain is invisible to a first-time release-cutter — `release.yml` succeeds, the GitHub Release page exists, the PDF attachment is missing, and there is no in-release-workflow signal telling the cutter "now run `make release-publish` locally to land the PDF".
+
+The `.goreleaser.yml` carries the comment; the `release.yml` workflow does not. A future operator who cuts v1.0 by tag-push and doesn't read `.goreleaser.yml`'s release block ships v1.0 without the PDF asset.
+
+**Files affected**: `.github/workflows/release.yml` (final echo step), `CONTRIBUTING.md` (release-cutting section), `docs/PLAN.md` (release-cutting checklist).
+
+**Proposed fix**: post-Sprint-6 staff or validator pass: add a final `echo` step to `release.yml`'s `goreleaser` job naming the `make release-publish` next-action; add a "Cutting a release" section to `CONTRIBUTING.md` that lists the two-step ritual (tag-push → workflow → `make release-publish`); cross-link from PLAN.md.
+
+---
+
+## Per-prose-surface verdict
+
+| Surface | Verdict |
+|---|---|
+| **Preface** | Clean. Status banner correctly frames v0.9 + Sprint 5 retarget. The "fork-relationship paragraph in Chapter 32 is the only place that intentionally references the upstream roksbnkctl codebase" framing is now slightly wrong (chapter 19 banner intentionally references it too; chapters 13 / 28 unintentionally do) — minor banner-text drift, not a stuck-point. |
+| **SUMMARY.md** | Clean. All Parts I-X resolve; TOC labels read as AWS-shape. Legacy slugs deferred to post-v1.0 housekeeping per Sprint 6 architect Issues 2 + 3. |
+| **Chapters 1-7 (Parts I-II)** | Clean. Read smoothly as a first-time reader. Quick-start (chapter 7) walks correctly through `init → up → test → down` against the AWS shape. |
+| **Chapters 8-11 (Part III — cluster lifecycle)** | Banners correctly frame as v1.x; v0.9 readers redirect to quick start + chapter 10. Sprint 5 Issue 2 closed end-to-end. |
+| **Chapter 12 (workspace config)** | Clean prose, but a few `cos:` cross-references (L149/369) drift — minor. |
+| **Chapter 13 (Terraform variables)** | **BLOCKER (Issue 3).** Still describes ROKS / OpenShift / IBM-Cloud variable surface verbatim. Worked example doesn't match `terraform/variables.tf`. |
+| **Chapter 14 (Credentials resolver)** | Clean. Correctly describes AWS standard chain + IRSA in-cluster shape. |
+| **Chapters 15-18 (Parts IV-V)** | Clean. Chapters 17/18 verified IBM-residue-free per Sprint 5 Issue 4 closure. |
+| **Chapter 19 (ops pod)** | **BLOCKER (Issue 2).** Top banner closes the bounce; body is still ~260 lines of inherited IBM trusted-profile narrative including ghost-Sprint-10 references and `IBMCLOUD_API_KEY` env-var prose. |
+| **Chapters 20-23 (Part VI — testing)** | Clean. Sprint 4 prose stands up at sprint close. |
+| **Chapters 24-26 (Part VII — operations)** | Clean. Chapter 25 carries the slug-rename Issue 8 but content is correctly S3-shape. Chapter 26 troubleshooting walks the IRSA trust chain correctly. |
+| **Chapter 27 (Command reference)** | Clean. Auto-generated from cobra-md per Sprint 5. |
+| **Chapter 28 (Configuration reference)** | **HIGH (Issue 4).** Still carries `cos:` block + `openshift_version` field. |
+| **Chapter 29 (Terraform variable reference)** | Clean (auto-generated from tfvars-md per Sprint 5). The "roks_*" / "trusted_profile" mentions are all "replaces …" migration annotations — correct prose, not stale residue. |
+| **Chapter 30 (Glossary)** | **HIGH (Issue 6).** Sprint 6 architect closed most Sprint 5 Issue 3 items but ~5 entries drift on PSA/SCC framing + envFrom + Secret naming. |
+| **Chapters 31-33 (Parts IX-X)** | Clean. Chapter 32 fork-relationship section reads correctly; chapter 33 SR-IOV decision-record is accurate. |
+| **README.md** | Status banner reflects Sprint 6 complete + v0.9-rc ready + v1.0 awaits spike — correct per architect refresh. Quick-start has the `@latest` issue (Issue 7). |
+| **CHANGELOG.md** | **BLOCKER (Issue 1).** No Sprint 6 entry. |
+| **MIGRATING.md** | **HIGH (Issue 5).** Still scaffold-shape. |
+| **k8s_install.yaml** | Clean. Staff IRSA retarget verified — zero IBM/ROKS/COS hits. |
+| **CI workflows (6 files)** | Clean. `security-audit` job lands; `book-build` extended to `docs/**/*.md`; `e2e-full.yml` banner refreshed; `release.yml`/`book.yml` posture documented per validator Issue 2. |
+
+---
+
+## Dogfooding-loop stuck-points
+
+Walked the README quick-start → first cluster scenario as a first-time reader:
+
+1. **Stuck-point at install (Issue 7, MEDIUM):** `go install …@latest` against a pre-tag candidate doesn't yield the AWS-shape binary. First-time reader bounces.
+2. **Stuck-point at "what variables can I tune" (Issue 3, BLOCKER):** new reader landing on chapter 13 from the quick-start's `awsbnkctl init` worked example sees `roks_workers_per_zone` and tries it; gets `unknown variable`. Real-user-give-up severity.
+3. **Stuck-point at "what fields does config.yaml support" (Issue 4, HIGH):** new reader landing on chapter 28 sees `cos:` block; tries to add `cos.bucket` to their `config.yaml`; gets `unknown field cos`.
+4. **Stuck-point at "how do I install the ops pod" (Issue 2, BLOCKER):** reader scrolls past chapter 19 banner, follows the `awsbnkctl ops install --trusted-profile=auto` walkthrough, gets `unknown flag --trusted-profile` (the v0.9 binary has no such flag) — and the chapter still references "Sprint 10" as the closure milestone for a chapter that's part of a v1.0-candidate book.
+
+Severity skew: **2 blocker stuck-points + 2 high stuck-points** at the reader-actually-bounces level.
+
+## Cross-document drift verdict
+
+PLAN.md (per architect Sprint 6 Issue 6 — "What's deferred to post-v1.0" appendix) is the canonical post-v1.0 list. CHANGELOG is missing the Sprint 6 entry (Issue 1). MIGRATING is scaffold-shape (Issue 5). README quick-start uses `@latest` against a pre-tag candidate (Issue 7). The four documents tell **inconsistent** stories about the v0.9-rc1 candidate — PLAN says "Sprint 6 complete; v1.0 awaits spike", README says "Sprint 6 complete; v0.9-rc ready", CHANGELOG says nothing about Sprint 6, MIGRATING says "no shipped release yet". Drift caught: yes; load-bearing.
+
+## Gate-criteria audit (Sprint 6 close per the brief)
+
+| Gate | Status |
+|---|---|
+| Sprint 5 BLOCKER Issue 1 (chapter 19 + k8s_install.yaml) | YAML side: ✓ closed (staff verified). Prose side: partial — banner closes the bounce; body (Issue 2) still drifts. |
+| Sprint 5 BLOCKER Issue 2 (chapters 8/9/11 "Available in v1.x") | ✓ closed (architect-verified; tech-writer-verified). |
+| Sprint 5 HIGH Issue 3 (glossary correctness) | Partial — most-egregious items closed; ~5 entries drift (Issue 6 above). |
+| Sprint 5 HIGH Issue 4 (chapters 17/18/19/32 IBM-residue) | ✓ closed for 17/18/32. Chapter 19 covered by banner per Issue 1 closure path. |
+| README sprint-count refresh | ✓ closed (architect-verified). Quick-start path has separate Issue 7. |
+| CHANGELOG comprehensive (Sprint 0-6 entries) | ✗ open (Issue 1 above). |
+| MIGRATING is the final word for migrators | ✗ open (Issue 5 above). |
+| goreleaser snapshot produces 6 binary archives | ✓ closed (staff verified). |
+| Security audit (gosec / govulncheck / secrets scan) | ✓ closed (staff verified; validator landed the `security-audit` CI job). |
+| `make build`, `go test ./...`, `terraform validate` | ✓ closed (tech-writer-verified). |
+| CI matrix end-state (security-audit + release + book-build) | ✓ closed (validator-verified + tech-writer-verified). |
+
+## Issues filed: 9
+
+- **3 blocker** (Issue 1 CHANGELOG; Issue 2 chapter 19 body; Issue 3 chapter 13)
+- **3 high** (Issue 4 chapter 28; Issue 5 MIGRATING; Issue 6 glossary residue)
+- **1 medium** (Issue 7 README `@latest`)
+- **2 low** (Issue 8 chapter 25 slug; Issue 9 release.yml PDF-attach visibility)
+
+## Sibling cross-references
+
+- **architect Sprint 6 Issue 2** (chapter 25 rename) — same surface as my Issue 8.
+- **architect Sprint 6 Issues 4 + 5** (chapter banners spot-check + chapter 18 decision-tree v0.9 caveat) — correctly out of scope for v0.9-rc1.
+- **staff Sprint 6** — YAML retarget closed end-to-end; chapter 19 body rewrite is the unfinished half (architect scope, not staff).
+- **validator Sprint 6 Issue 2** (release.yml PDF-attach posture) — same surface as my Issue 9.
+- **Sprint 5 tech-writer Issues 1-4** — closures verified in this pass; partial-closure detail in Issues 2 / 6 above.
+
+---
+
+## Release-readiness verdict (v1.0-readiness preview for v0.9-rc1 release notes)
+
+**Verdict: yes-with-spike-pending — AND with 3 blocker-class doc gaps to close pre-tag.**
+
+The **code surface** is v0.9-rc1-ready: build clean, tests pass, all 8 terraform modules validate, `internal/exec/k8s_install.yaml` ships the correct IRSA shape, security audit posture documented and CI-gated, goreleaser produces the 6-binary matrix. The **operator-run spike (PRD 07)** carries as the gate to v1.0 final per the deferred-work appendix.
+
+The **docs surface** is NOT v0.9-rc1-ready end-to-end. Three blocker-class gaps:
+
+1. CHANGELOG.md has no Sprint 6 entry (Issue 1; integrator at tag-cut)
+2. Chapter 19 body still walks the IBM trusted-profile narrative verbatim despite the v1.x banner (Issue 2; architect post-Sprint-6)
+3. Chapter 13 still describes ROKS / OpenShift / IBM-Cloud variable surface (Issue 3; architect post-Sprint-6 — first-time reader following the quick-start hits this within 10 minutes)
+
+Three additional high-severity drift items (Issues 4-6) plus the README quick-start `@latest` issue (Issue 7) follow on the heels of the blockers.
+
+**Recommended integrator path before cutting v0.9-rc1:** land Issue 1 (CHANGELOG) at tag-cut; defer Issues 2-7 to a v0.9.x architect cycle that ships before v1.0 final. The binary surface is structurally ready; the documentation surface needs one more architect pass to clear chapters 13 / 19 (body) / 28 plus MIGRATING.md before v1.0 final.
+
+SPIKE DEFERRAL carries — v1.0 first-tag still gates on operator-run PRD 07 spike (live EKS 1.30 + SR-IOV CNI VF advertisement on `c5n.4xlarge`). The Sprint 6 release is **structurally complete** at v0.9-rc1; anyone with operator-run spike validation can cut v1.0 immediately once the three blocker doc gaps above are folded.

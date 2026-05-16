@@ -584,14 +584,100 @@ jobs:
         # malformed code fences.
         run: mdbook build book/
 
-      - name: cspell (book/src/**/*.md)
+      - name: cspell (book/src/**/*.md + docs/**/*.md)
         # Hard-fail on any unknown-word finding. Sprint 5 validator
         # closed the cspell.json vocabulary to zero findings against
-        # the rewritten chapter set; this job ensures future chapter
-        # edits keep that posture. New domain words land via a
-        # cspell.json edit on the same PR.
+        # the rewritten chapter set; Sprint 6 validator extends the
+        # gate to `docs/**/*.md` (PRDs + PLAN + SHAKEOUT) so any
+        # future PR that introduces a typo in either the book or the
+        # operator-facing docs surface fails fast. New domain words
+        # land via a cspell.json edit on the same PR.
         uses: streetsidesoftware/cspell-action@v6
         with:
           config: cspell.json
           files: |
             book/src/**/*.md
+            docs/**/*.md
+
+  security-audit:
+    name: security audit (gosec + govulncheck + gitleaks)
+    # Sprint 6 (PLAN.md § "Sprint 6" — hardening + v1.0 cut prep):
+    # the v1.0-readiness security gate. Runs on every PR + push to
+    # main; surfaces three classes of regression before tag time:
+    #
+    #   1. gosec — static analysis for the well-known go security
+    #      anti-patterns (G104 unchecked errors, G304 file-inclusion,
+    #      G306 file perms, G402 TLS InsecureSkipVerify, G404 weak
+    #      RNG, ...). Tunable via `.gosec.yaml` if needed; the
+    #      default ruleset is what `gosec ./...` produces.
+    #   2. govulncheck — Go's official module-graph vulnerability
+    #      scanner. Reports any module that lands a CVE per the
+    #      official Go vulnerability database. Stricter than the
+    #      `go list -m -u all` scan because it cross-references
+    #      symbol-level reachability — only fails on vulns the
+    #      binary actually exercises.
+    #   3. gitleaks — secret-scan over the full repo tree, including
+    #      git history (depth-1 by default; tunable). Catches AWS
+    #      access-key IDs, generic API tokens, SSH private keys,
+    #      ...). Mirrors what an integrator's pre-tag `gitleaks
+    #      detect --redact` run would catch.
+    #
+    # All three steps run with `continue-on-error: false` (the
+    # default) — the v1.0 gate posture per PLAN.md § Sprint 6 is
+    # "gosec ./... clean; secrets scan clean". A finding fails the
+    # job, blocks the PR, and surfaces in the Actions tab as a
+    # red-x check.
+    #
+    # Live-AWS validation is NOT exercised here — those checks gate
+    # on the operator-run PRD 07 spike. This job is the static
+    # offline gate; the runtime gate is the spike.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs the full git history to scan past commits
+          # (the default fetch-depth: 1 only gives the worktree, not
+          # the history). 0 means "all history". govulncheck +
+          # gosec only need the worktree, but the cost of the extra
+          # fetch is bounded (~5 MB repo today).
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gosec (Go static security analyzer)
+        # The official upstream-maintained action; pins to a tagged
+        # release (no @master). Default args run `gosec ./...` over
+        # the whole module; `-fmt sarif` would emit GH Code Scanning
+        # output, but for now we just fail-on-finding to keep the
+        # surface simple. Add a `.gosec.yaml` at repo root if a
+        # finding needs to be suppressed with a rationale.
+        uses: securego/gosec@master
+        with:
+          args: ./...
+
+      - name: govulncheck (Go vulnerability scanner)
+        # Reachability-aware; reports only vulns the binary
+        # actually exercises. Driven by the official upstream
+        # action which installs the latest `govulncheck` binary
+        # and runs it against `./...`.
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          # Default `./...` covers cmd/ + internal/.
+          check-latest: true
+
+      - name: gitleaks (secret scan)
+        # Scans the full git history for committed secrets. Uses
+        # the upstream-maintained gitleaks-action; runs in default
+        # mode (no license required for public repos). A finding
+        # fails the job; the integrator triages from the Actions
+        # log + redacted secret patterns. Suppression rationale,
+        # if any, lives in `.gitleaks.toml` at repo root.
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

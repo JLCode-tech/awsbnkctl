@@ -78,7 +78,7 @@ release:
   header: |
     ## awsbnkctl {{ .Tag }}
 
-    Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on IBM Cloud ROKS.
+    Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on AWS EKS.
 
     Read the book: <https://JLCode-tech.github.io/awsbnkctl/book/> — _Deploying and Testing BIG-IP Next for Kubernetes with awsbnkctl_
 
@@ -119,7 +119,7 @@ release:
 #       owner: JLCode-tech
 #       name: homebrew-tap
 #     homepage: "https://JLCode-tech.github.io/awsbnkctl/book/"
-#     description: "Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on IBM Cloud ROKS."
+#     description: "Single-binary CLI for deploying F5 BIG-IP Next for Kubernetes on AWS EKS."
 #     license: "MIT"
 #     test: |
 #       system "#{bin}/awsbnkctl", "version"

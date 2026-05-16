@@ -2,7 +2,7 @@
 
 A single-binary CLI for deploying F5 BIG-IP Next for Kubernetes (BNK) onto AWS EKS, managing its S3-backed supply chain, and validating the deployment with built-in connectivity, DNS, and throughput tests.
 
-> **Status:** pre-release (M0 — Sprint 0 just landed; first tagged release `v0.2` gated on Sprint 1 per [`docs/PLAN.md`](docs/PLAN.md)). Forked from [`jgruberf5/roksbnkctl`](https://github.com/jgruberf5/roksbnkctl) (IBM Cloud ROKS) and being retargeted at AWS EKS with self-managed SR-IOV node groups. The roksbnkctl source is preserved on `upstream/main`; AWS-specific work lands on `main`. **Nothing in this README works yet until Sprint 1 closes** — the surface is documented up front so the implementation has a target to hit.
+> **Status:** **Sprint 6 complete; v0.9-rc ready; v1.0 awaits spike.** All six AWS-retarget sprints (Sprint 0 identity rewrite → Sprint 5 book retarget → Sprint 6 hardening + security audit + release-artefact prep) have landed per [`docs/PLAN.md`](docs/PLAN.md). The v0.9 release candidate is structurally complete — `awsbnkctl up` / `down` / `test` / `doctor` work end-to-end, the embedded HCL stands up an EKS cluster + SR-IOV self-managed node group + S3 supply chain + IRSA, goreleaser produces six binary archives (linux/macOS/windows × amd64/arm64), the book ships at the AWS shape, `gosec` and the secrets scan are clean, and the v0.9-rc tag is ready to cut. The first stable **`v1.0`** tag waits on the operator-run PRD 07 spike (validating SR-IOV VFs on a real EKS `c5n.4xlarge` node) — see [`docs/PLAN.md`](docs/PLAN.md) §"What's deferred to post-v1.0". Until the spike clears, the binaries ship without the "officially supported on this account" tag; anyone with operator-run spike validation can cut v1.0 immediately. Forked from [`jgruberf5/roksbnkctl`](https://github.com/jgruberf5/roksbnkctl) (IBM Cloud ROKS); the roksbnkctl source is preserved on `upstream/main`, AWS-specific work lands on `main`.
 
 ## Why fork roksbnkctl instead of starting clean
 
@@ -14,7 +14,7 @@ Three of the five Terraform modules in roksbnkctl — `cert_manager`, `flo`, `cn
 4. IRSA / IAM OIDC to replace IBM Trusted Profiles
 5. Self-managed node groups on ENA-enabled instance types (`c5n`, `m5n`) + SR-IOV CNI DaemonSet + Multus, for BNK data-plane SR-IOV requirements
 
-## Planned quick start (post-Sprint 1)
+## Quick start
 
 ```bash
 # 1. Install the binary
@@ -23,7 +23,7 @@ go install github.com/JLCode-tech/awsbnkctl/cmd/awsbnkctl@latest
 # 2. Interactive setup — region, VPC, EKS version, node-group shape.
 awsbnkctl init
 
-# 3. Make AWS credentials available (standard chain: env, profile, instance role).
+# 3. Make AWS credentials available (standard chain: env, profile, SSO, IRSA, IMDS).
 export AWS_PROFILE=...
 
 # 4. Plan + confirm + apply + auto-fetch kubeconfig.
@@ -36,7 +36,7 @@ awsbnkctl test
 awsbnkctl down
 ```
 
-Same 4-command lifecycle as roksbnkctl: `init` → `up` → `test` → `down`.
+Same 4-command lifecycle as roksbnkctl: `init` → `up` → `test` → `down`. The canonical user guide lives at the published book: <https://JLCode-tech.github.io/awsbnkctl/book/>.
 
 ## Target architecture
 
@@ -72,14 +72,14 @@ awsbnkctl/
 ├── internal/                  # Go packages (cli, tf, aws, k8s, cred, exec, test, doctor, …)
 ├── terraform/                 # the HCL deployment — embedded into the binary at build time
 ├── tools/                     # vendored tool images + cobra-md / tfvars-md reference generators
-├── book/                      # mdBook sources (to be retargeted at AWS in later sprints)
+├── book/                      # mdBook sources — AWS-retargeted in Sprint 5; published at GitHub Pages
 ├── docs/                      # PLAN.md (sprint roadmap), prd/ (per-feature design specs)
 ├── agents/                    # four-role sprint pattern: architect / staff / validator / tech-writer
 ├── prompts/                   # checked-in per-sprint task briefs (auditable + reproducible)
 └── scripts/                   # e2e test runners
 ```
 
-The Terraform that drives the deployment will be embedded into the binary at build time — every tagged release ships a matched CLI + HCL pair, eliminating skew between binary and TF.
+The Terraform that drives the deployment is embedded into the binary at build time — every tagged release ships a matched CLI + HCL pair, eliminating skew between binary and TF.
 
 ## Development model
 
@@ -91,7 +91,7 @@ The sprint roadmap lives in [`docs/PLAN.md`](docs/PLAN.md). Per-feature design r
 
 awsbnkctl is a hard fork of [`jgruberf5/roksbnkctl`](https://github.com/jgruberf5/roksbnkctl). The `upstream` git remote points at the source repo so improvements can be cherry-picked across (`git fetch upstream && git log upstream/main ^main`). The shared surface — cobra scaffolding, Terraform driver, k8s client wrapper, DNS / connectivity / throughput tests, doctor framework, four-agent sprint pattern, mdBook documentation — should stay close. AWS-specific surface (cluster, storage, IAM, data-plane) diverges by design.
 
-The roksbnkctl book is the canonical learning resource for the shared concepts (workspaces, execution backends, cred chain, internalised kubectl) until the awsbnkctl book catches up: <https://jgruberf5.github.io/roksbnkctl/book/>.
+The awsbnkctl book — published at <https://JLCode-tech.github.io/awsbnkctl/book/> — is the canonical learning resource as of Sprint 5. The roksbnkctl book at <https://jgruberf5.github.io/roksbnkctl/book/> stays useful as the ROKS-shaped counterpart for the shared concepts (workspaces, execution backends, cred chain, internalised kubectl), but the AWS-shaped surface (cluster, storage, IAM, data plane) is now documented end-to-end in the awsbnkctl book.
 
 ## What this is *not*
 
