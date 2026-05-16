@@ -4,7 +4,7 @@ Snapshot of where the awsbnkctl AWS-retarget left off, and what to do when picki
 
 ## State as of last session
 
-All six AWS-retarget sprints (Sprint 0 → Sprint 6) committed and pushed to `JLCode-tech/awsbnkctl@main`. **The repository is structurally complete for `v0.9-rc1`.**
+All six AWS-retarget sprints (Sprint 0 → Sprint 6) committed and pushed to `JLCode-tech/awsbnkctl@main`. **`v0.9.0-rc1` cut, published as prerelease, and live at https://github.com/JLCode-tech/awsbnkctl/releases/tag/v0.9.0-rc1** with 6 binary archives + checksums (linux/macOS/windows × amd64/arm64). v1.0 awaits the operator-run PRD 07 spike.
 
 Commit timeline:
 
@@ -29,22 +29,20 @@ Verification state (last green check on commit `e2debed`):
 - `mdbook build book/` + `cspell` zero findings (verified in CI)
 - 10 CI jobs configured
 
+## Done since previous handoff
+
+- **`v0.9.0-rc1` cut + published.** Annotated tag pushed to `main`; release workflow built and attached 6 binary archives + `checksums.txt`; release flagged as prerelease. Note: tag pattern in `.github/workflows/release.yml` is `"v*.*.*"` (three-dot), so the original `v0.9-rc1` plan was renamed to `v0.9.0-rc1`.
+- **Fork-Actions gotcha resolved.** GitHub disables Actions on new forks by default; had to enable them via Settings → Actions UI before workflows fired (operator-side click; no API path). First release was triggered manually via `workflow_dispatch` after enabling. Subsequent pushes auto-fire normally.
+
 ## Immediate next actions
 
-### 1. Cut `v0.9-rc1` (no AWS required)
+### 1. (Optional, ~10 min) Attach book PDF to the release
 
-```bash
-cd /Users/j.lucia/Code/github/awsbnkctl
-git tag v0.9-rc1
-git push origin v0.9-rc1
-```
+The current `v0.9.0-rc1` ships without the PDF (Sprint 6 validator Issue 3 flagged that the docker-based PDF build wasn't exercisable in their sandbox). To attach:
 
-This triggers `.github/workflows/release.yml` which runs goreleaser, attaches binaries + checksums + book PDF, and publishes to https://github.com/JLCode-tech/awsbnkctl/releases.
-
-Verify post-tag:
-- Release page shows 6 archive files + `checksums.txt` + `awsbnkctl-book-v0.9-rc1.pdf`
-- `go install github.com/JLCode-tech/awsbnkctl/cmd/awsbnkctl@v0.9-rc1` succeeds
-- `awsbnkctl --version` reports the tag
+- Build locally: `make book-pdf` (uses the docker-based renderer — bakes Mermaid diagrams as vector SVG)
+- Upload: `gh release upload v0.9.0-rc1 awsbnkctl-book-v0.9.0-rc1.pdf -R JLCode-tech/awsbnkctl`
+- Or extend `.goreleaser.yml` to attach the PDF on future tag pushes (v1.0 candidate)
 
 ### 2. Run the PRD 07 spike (requires AWS account, ~$5–15 cost)
 
@@ -73,7 +71,7 @@ Spike fail modes + mitigations are catalogued in PRD 07 § "Spike fail modes". T
 
 After the spike:
 1. Fill in `docs/prd/07-EKS-CLUSTER-SRIOV.md` § "Resolved in spike" with findings
-2. If hypothesis holds → cut `v1.0` (`git tag v1.0.0 && git push origin v1.0.0`)
+2. If hypothesis holds → cut `v1.0` annotated tag matching the `v*.*.*` pattern (`git tag -a v1.0.0 -m "..."  && git push origin v1.0.0`); release workflow fires automatically now that Actions is enabled on the fork
 3. If hypothesis breaks → file Sprint 7 work to address (PRD 07 lists mitigations: ENA tuning, FLO patch, multi-ENI fallback, EC2-metal as last resort)
 
 ## How to resume work with Claude Code
@@ -92,6 +90,9 @@ Each sprint's task brief is checked in at `prompts/sprint<N>/` for auditability 
 - **Disk hygiene matters.** `terraform/modules/*/.terraform/` directories grow to 600-800MB each during validate; clean with `find terraform -name '.terraform' -type d -exec rm -rf {} +` after any module work. `.gitignore` excludes them but they fill the local disk fast.
 - **Agent 529 errors.** Anthropic API can return `529 Overloaded` mid-dispatch; agents may complete substantial work before the error. Always check git state on disk before retrying — sometimes the work landed and you just need to take over the final tasks (file issues, commit) as integrator.
 - **Test contract carry-over.** `internal/doctor/doctor_test.go::TestRunWithWhy_StockDevBox_NoWorkspace` enforces an inherited "stock dev box = no warnings" contract. Doctor changes that surface new warnings on a workspace-less box require updating this test.
+- **Fork Actions disabled by default.** Even with `actions/permissions` reporting `enabled:true`, a freshly-forked repo has Actions disabled at the UI layer. The user must click "I understand my workflows, go ahead and enable them" in the Actions tab before any workflow fires. There's no API path to flip this. Tags pushed before this is done don't retroactively trigger — re-trigger via `workflow_dispatch` or delete-and-re-push.
+- **`gh` defaults to upstream on forks.** `git remote -v` shows both `origin` (the fork) and `upstream` (the source); `gh` picks one heuristically. Use `-R JLCode-tech/awsbnkctl` explicitly when querying the fork to avoid confusing "no runs" output from the upstream repo.
+- **Release tag pattern.** `.github/workflows/release.yml` matches `"v*.*.*"` (three dots required). `v0.9-rc1` wouldn't trigger; `v0.9.0-rc1` does.
 
 ## v1.x backlog (deferred from v1.0)
 
@@ -106,6 +107,8 @@ Consolidated in `docs/PLAN.md` § "What's deferred to post-v1.0". Highlights:
 - **Air-gapped install path** — currently assumes outbound HTTPS to AWS APIs + ECR + FAR registry.
 - **Homebrew tap** — same as roksbnkctl's v1.x roadmap.
 - **Doctor visibility on stock dev box** — Sprint 1 tech-writer Issue 1: AWS rows currently workspace-gated to preserve inherited test contract. v1.x relaxes the contract.
+- **Book PDF in releases** — `.goreleaser.yml` doesn't attach `awsbnkctl-book-<tag>.pdf` today. Either extend goreleaser to invoke `make book-pdf` + add an archive entry, or run the build locally pre-tag and `gh release upload`. v1.0 candidate decision.
+- **Inherited roksbnkctl release tags on the fork** — `v0.9.0` through `v1.2.1` still exist as refs (from upstream). They don't conflict with our `v0.9.0-rc1` but `go install …@v1.0.0` resolves to the inherited (roksbnkctl) commit which won't build under the `awsbnkctl` module path. Decide pre-v1.0 whether to delete those tags (`git push --delete origin v1.0.0` etc.) or leave them as historical noise.
 
 ## Open issue files worth a read before resuming
 
@@ -124,12 +127,14 @@ This session built up auto-memory at `~/.claude/projects/-Users-j-lucia-Code-git
 
 If you're a Claude Code agent picking this up cold:
 
-1. `git log --oneline -10` to see the sprint-commit timeline
+1. `git log --oneline -10` to see the sprint-commit timeline (latest: `4aa2689` docs, `e2debed` Sprint 6, plus `v0.9.0-rc1` tag)
 2. Read this file (`docs/NEXT_STEPS.md`) and `docs/PLAN.md` § Sprint 6 close + "What's deferred to post-v1.0"
 3. Skim `docs/prd/07-EKS-CLUSTER-SRIOV.md` for the load-bearing design + spike protocol
 4. Skim `agents/README.md` + `prompts/README.md` for the four-role dispatch pattern
 5. `go build ./... && go test ./...` to verify the green-gate still holds
-6. Confirm with the operator before:
-   - cutting tags (visible action, can't easily un-tag in releases)
+6. `gh release view v0.9.0-rc1 -R JLCode-tech/awsbnkctl` to confirm the rc is still live
+7. Confirm with the operator before:
+   - cutting tags (visible action, can't easily un-tag in releases — and remember `v*.*.*` pattern requirement)
    - running `terraform apply` against live AWS (cost + irreversible state)
    - running the PRD 07 spike (~$5-15 in real AWS resources)
+   - deleting any inherited roksbnkctl tags (historical refs; deletion affects anyone with cached `go install` paths)
