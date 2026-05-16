@@ -8,6 +8,22 @@ awsbnkctl began as a hard fork of [`jgruberf5/roksbnkctl`](https://github.com/jg
 
 ## Unreleased
 
+### Added — Sprint 4 (Test surface refresh + doctor polish + AWS E2E phases)
+
+- `internal/cli/test.go` + `internal/cli/test_dryrun.go` — `awsbnkctl test {connectivity,dns,throughput,all}` plumbed with workspace-derived region + cluster + namespace defaults; `--dry-run` flag plans the probe without executing.
+- `internal/k8s/iperf3.go` — Pod Security Admission (`restricted` profile) compliance: `runAsNonRoot: true`, `runAsUser: 1000`, `seccompProfile: RuntimeDefault`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`. EKS 1.25+ ready.
+- `internal/aws/servicequotas.go` + tests — optional `RunningOnDemandVCPUQuota` probe (Service Quotas `L-1216C47A`). Feature-flag gated (off by default).
+- `internal/doctor/aws.go` — feature-flagged Service Quotas row alongside the existing six AWS pre-flight checks.
+- `internal/cli/cluster.go::runFullLifecyclePlan` — first-run UX fix: catches "missing tfvars" terraform error, returns friendly "workspace not initialised — run `awsbnkctl init -w <name>` first" message. Closes Sprint 3 tech-writer Issue 3.
+- `docs/prd/04-CREDENTIALS.md` § "Where the AWS chain lives in the tree" — rewritten to accurately describe the host-side cred chain (`internal/aws/{client,sts}.go`) vs. in-cluster IRSA (auto-injected by EKS pod-identity webhook). Closes Sprint 3 tech-writer Issue 1 (HIGH).
+- `book/src/20-connectivity.md` — full chapter (~1,490 words): HTTPS probes, AWS NLB/ALB shape recognition, failure-mode interpretation.
+- `book/src/21-dns-testing-gslb.md` — full chapter (~1,700+ words): miekg/dns vantages, GSLB divergence detection, Route 53 specifics.
+- `book/src/22-throughput.md` — full chapter (~1,900+ words): iperf3-via-k8s-Job, PSA requirements, baseline expectations on c5n.4xlarge.
+- `book/src/23-e2e-test-plan.md` — full chapter (~2,200+ words): phase-letter system A-N, AWS-flavoured phases, local-vs-CI execution.
+- `.github/workflows/ci.yml` — new `test-dryrun` job: materialises a fake workspace under `~/.awsbnkctl/ci-dryrun/config.yaml`, runs all three test verbs with `--dry-run`, asserts exit-0.
+- `cspell.json` — additions for `Route53`, `iperf3`, `PSA`, `seccomp`, `SCC`, `vantage`, `vantages`, `GSLB`, `divergence`.
+- `scripts/e2e-test-backends.sh` + `scripts/e2e-test.sh` — phase markers K-N refined for Sprint 4 status.
+
 ### Added — Sprint 3 (Five reusable modules ported + first end-to-end `up --dry-run`)
 
 - `terraform/modules/{cert_manager,flo,cne_instance,license,testing}/` — five inherited modules ported to consume AWS-shaped inputs (`aws_*` instead of `ibmcloud_*`, `eks_cluster_*` instead of `roks_cluster_*`, `s3_*` instead of `cos_*`, `irsa_role_*` instead of `trusted_profile_*`). Module bodies unchanged where PRD 00 said "ports unchanged"; outer wrappers rebuilt.

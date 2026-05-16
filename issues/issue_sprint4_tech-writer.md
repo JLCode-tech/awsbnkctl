@@ -1,645 +1,363 @@
 # Sprint 4 — tech writer issues
 
-Findings cover the three new chapters (17 full, 18, 19), staff's
-`internal/exec/{k8s,ssh}.go` + `internal/cli/ops.go` +
-`internal/exec/k8s_install.yaml`, the iperf3 SCC fix in
-`internal/k8s/iperf3.go`, validator's new test suite, integrator's
-three follow-up fixes (Dockerfile `USER 1000`, k8s `jobNameSanitizer`,
-chapter 19 rotation rewrite), README + PRD + PLAN drift. All findings
-are doc/example-correctness only — no code changes proposed.
+Read-only sprint-close review covering: PRD 04 wording reconciliation
+(closes Sprint 3 tech-writer Issue 1, HIGH), chapters 20-23 first-time-
+reader pass, test-surface dogfood (4 commands), first-run UX fix
+(closes Sprint 3 tech-writer Issue 3, medium), PSA spec-check on the
+iperf3 Pod, build-green dogfood, cross-link audit. **SPIKE DEFERRAL**
+carries — no live AWS.
 
-## Issue 1: chapters 17 + 19 document the ops pod's name as `ops` but the actual name is `roksbnkctl-ops`
+Sibling deliverables reviewed in full:
+- `issues/issue_sprint4_architect.md` (4 low issues; PRD 04 §"Where the
+  AWS chain lives in the tree" lands; chapters 20-23 ship in band)
+- `issues/issue_sprint4_staff.md` (1 resolved-during-sprint, 3 carry-
+  overs; test --dry-run on three verbs; first-run UX fix in
+  `runFullLifecyclePlan`; PSA Pod spec verified; Service Quotas behind
+  `AWSBNKCTL_DOCTOR_SERVICE_QUOTAS=1`)
+- `issues/issue_sprint4_validator.md` (15 issues across two passes;
+  `test-dryrun` CI job aligned to actual workspace schema; cspell +6;
+  e2e marker refresh across two scripts + one workflow)
 
-**Severity**: high
+---
+
+## Issue 1: chapter 22 § "Tuning knobs" image tag uses the awsbnkctl-tools-iperf3 form but `Iperf3DefaultImage` is still `networkstatic/iperf3:latest`
+
+**Severity**: medium
 **Status**: open
-**Description**: This is a load-bearing drift between the chapters and
-the shipped surface. Every reader who runs `kubectl get pods -n
-roksbnkctl-ops` after `roksbnkctl ops install` will see one pod named
-`roksbnkctl-ops`, not `ops`.
 
-Chapter 17 §"K8s backend" §"Long-lived ops pod pattern" (line 251):
-
-> The pod is named `ops` in the `roksbnkctl-ops` namespace.
-
-Chapter 17 §"Long-lived ops pod pattern" code block (lines 256-267) hard-codes:
-
-```go
-Resource("pods").Namespace("roksbnkctl-ops").Name("ops").
-```
-
-Chapter 19 §5 "Create the Pod" (lines 119-149) renders the pod manifest
-with `metadata.name: ops` and container `name: ops`.
-
-Chapter 19 §"`roksbnkctl ops show`" sample output (line 168):
-
-```
-pod:                 ops                         status=Running, ready=true (2/2)
-```
-
-The actual implementation (`internal/exec/k8s.go:32`):
-
-```go
-K8sOpsPodName    = "roksbnkctl-ops"
-```
-
-And `internal/exec/k8s_install.yaml:107-108`:
+**Description**: Chapter 22 § "Tuning knobs in workspace config"
+(lines 113-121) shows the workspace-config knob as:
 
 ```yaml
-kind: Pod
-metadata:
-  name: roksbnkctl-ops
-  namespace: roksbnkctl-ops
+test:
+  throughput:
+    image: ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3:v0.7.0
 ```
 
-Note the resolved_sprint4_architect.md Issue 1 disposition asserts "the
-chapter's `ops` short-name matches the namespace-scoped resolution
-`roksbnkctl-ops/roksbnkctl-ops`" — this is incorrect; the namespace-
-scoped resolution is `<namespace>/<podName>` = `roksbnkctl-ops/roksbnkctl-ops`,
-i.e. the pod name *itself* is `roksbnkctl-ops`, not `ops`.
+The dry-run plan output prints the **actual** server image and confirms
+the drift:
 
-The actual container name inside the pod is `tools` (`k8s_install.yaml:123`),
-not `ops` as chapter 19 §5 documents at line 131 (`- name: ops`).
+```
+$ ./bin/awsbnkctl test throughput --dry-run --workspace test
+## test throughput — dry-run plan (workspace=test)
+  …
+  targets (1):
+    - iperf3 server image: networkstatic/iperf3:latest
+```
 
-**Files affected**: `book/src/17-execution-backends.md` (prose at line 251;
-code block at lines 256-267); `book/src/19-in-cluster-ops-pod.md`
-(manifest at lines 119-149; sample show output at line 168; reference
-prose throughout the chapter that says "the ops pod" implicitly assuming
-the short name)
+`internal/k8s/iperf3.go:22` pins `Iperf3DefaultImage =
+"networkstatic/iperf3:latest"`. A first-time reader who follows
+chapter 22 § "EKS 1.25+ Pod Security Admission compliance" (lines 53-82)
+will read that the **bundled** `awsbnkctl-tools-iperf3` image declares
+`USER 1000` and therefore satisfies PSA `restricted` without further
+config, then read § "Tuning knobs" and see that same bundled image as
+the suggested workspace config — and the next paragraph in § "PSA
+compliance" warns:
 
-**Proposed fix**: replace every `name: ops`, `Name("ops")`, "named
-`ops`", and `pod: ops` reference in chapters 17 + 19 with
-`roksbnkctl-ops`. Replace the container name `ops` in chapter 19's pod
-manifest with `tools`. The sample `ops show` output should match the
-actual `internal/cli/ops.go::runOpsShow` print order (see Issue 4).
+> Stock images that run as root (the unbundled
+> `networkstatic/iperf3:latest`) will fail PSA admission
 
-## Issue 2: chapter 19's ClusterRole rules table doesn't match `internal/exec/k8s_install.yaml`
+…which is **exactly** the default the binary uses when the workspace
+doesn't override it. This is the same forward-statement that the
+architect's Issue 1 flags for the version pin, but extends to the image
+**name** itself: chapter 22 documents the bundled image as the default
+end-state; the binary's default is the unbundled stock image. Until the
+`awsbnkctl-tools-iperf3` image actually publishes to GHCR (Sprint 6
+hardening, per architect's Issue 1), the chapter's worked example reads
+the bundled image as canonical and the dry-run plan contradicts it.
 
-**Severity**: high
+The discrepancy is harmless at the dry-run tier (no pod is created), but
+on a live `--mode east-west` run against an EKS cluster with PSA
+`restricted` enforced on `awsbnkctl-test`, the default
+`networkstatic/iperf3:latest` will get rejected at admission with the
+exact PodSecurity error chapter 22 § PSA compliance documents — a
+classic "documented failure mode that the default config triggers"
+trap.
+
+**Files affected**: `internal/k8s/iperf3.go:22`
+(`Iperf3DefaultImage` constant); `book/src/22-throughput-testing.md`
+§ "Tuning knobs in workspace config" (lines 113-121) +
+§ "PSA compliance" (line 73). Cross-cuts architect's Issue 1.
+
+**Proposed fix**: two reasonable shapes:
+  (a) Sprint 5 staff flips `Iperf3DefaultImage` to the bundled
+      `ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3:<v>` form **after**
+      the image has been published at v0.7.0 (Sprint 6 hardening lane);
+      chapter 22 stays as-is.
+  (b) Until (a) lands, chapter 22 adds a one-line callout right after
+      the PSA compliance § warning that says "the default image
+      (`networkstatic/iperf3:latest`) **does** run as root and will fail
+      PSA `restricted` admission on EKS 1.25+; set
+      `test.throughput.image` to the bundled image (or any non-root
+      iperf3 image) before running `--mode east-west` against an EKS
+      cluster".
+
+Either resolves the dogfooding stuck-point. (a) is the cleaner shape
+once the image publishes; (b) closes the gap immediately. Defer to the
+integrator's call on sprint ordering.
+
+## Issue 2: `up --dry-run` first-run UX fix is friendly but exits non-zero — verify intended UX
+
+**Severity**: low (verification-only)
+**Status**: open (informational)
+
+**Description**: Sprint 3 tech-writer Issue 3 asked staff to fold a
+friendly init-needed message into `runFullLifecyclePlan` when the
+workspace's tfvars haven't been written yet. Verified:
+
+```
+$ HOME=/tmp/empty-home AWS_ACCESS_KEY_ID=test \
+    AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 \
+    ./bin/awsbnkctl up --dry-run
+Error: workspace "default" is not initialised — run `awsbnkctl init
+-w default` first to capture region / VPC / subnets / FAR archive /
+JWT, or pass --var-file=<path> to supply values directly
+awsbnkctl: workspace "default" is not initialised — run `awsbnkctl init
+-w default` first to capture region / VPC / subnets / FAR archive /
+JWT, or pass --var-file=<path> to supply values directly
+$ echo $?
+1
+```
+
+The message is friendly, concrete, names the right `init` invocation,
+mentions the escape-hatch (`--var-file=`), and short-circuits **before**
+terraform boots (no `terraform plan` noise; the staff issue confirms
+this lands in `cli/cluster.go::translatePlanError`). All of that closes
+Sprint 3 tech-writer Issue 3.
+
+One verification-only observation: exit code is `1`, not `0`. For a
+`--dry-run` invocation, `0` would also be defensible — "this would
+need init first" is a plan-tier outcome, not a failure. The current
+shape (`1`) treats "not initialised" as an error condition, which has
+its own logic ("CI should fail loudly if its workspace isn't set up").
+Both are reasonable; flagging here only to confirm the integrator is
+aware of the choice. Not a blocker.
+
+The friendly message itself prints twice (`Error: …` then
+`awsbnkctl: …`) — that's the standard cobra error path layered on
+top of the binary's own stderr error wrapper. Same shape every other
+error path uses, so consistent.
+
+**Files affected**: `internal/cli/cluster.go::translatePlanError`
+(staff's Sprint 4 deliverable; verified working as advertised).
+
+**Proposed fix**: none required. If the integrator wants the `--dry-run`
+path to exit `0` for "not initialised yet" instead of `1`, that's a
+one-line change in `runFullLifecyclePlan`'s error handling — but the
+current behavior is consistent with `terraform plan` returning `2` for
+"changes pending", `1` for "init required", `0` for "no changes". I'd
+keep it as-is.
+
+## Issue 3: `awsbnkctl test --help` lists four subcommands but the brief enumerates three (connectivity, dns, throughput) + `all`
+
+**Severity**: low (cosmetic; no user-visible impact)
 **Status**: open
-**Description**: Chapter 19 §"RBAC: the ClusterRole rules" (lines
-219-227) documents a six-row table of rules. Five of those six rows
-don't match the actual embedded manifest:
 
-| Documented rule | Actual rule |
+**Description**: Dogfood result for `awsbnkctl test --help`:
+
+```
+Available Commands:
+  connectivity HTTP/HTTPS reachability against configured hosts
+  dns          DNS resolution probe (single-vantage, GSLB-compare, or workspace-driven)
+  list         List available test suites
+  throughput   iperf3 throughput; deploys server pod automatically (v1.x)
+```
+
+Four subcommands: `connectivity`, `dns`, `list`, `throughput`. The
+parent help block describes `all` as "the default if no suite is
+specified" (i.e., `awsbnkctl test` with no positional arg dispatches
+`all`), and `list` is the subcommand the staff issue catalogues as
+"the four subcommands". Two reasonable framings:
+
+- Today: bare `awsbnkctl test` → all suites; `awsbnkctl test list` →
+  enumerate; per-suite subcommands → individual suites. There is no
+  literal `awsbnkctl test all` subcommand registered; the prose framing
+  in `--help` ("`all` — run all of the above (default if no suite is
+  specified)") implies one exists.
+- Chapter 20 § "Running connectivity inside `awsbnkctl test all`"
+  (lines 106-126) explicitly invokes `awsbnkctl test all`. This works
+  today because positional-arg dispatch sends bare `test all` through
+  the bare-`test` path, but the conceptual model is "implicit default,
+  not a named subcommand".
+
+This is a documentation-shape issue, not a behavior issue. The reader
+who runs `awsbnkctl test all --help` will get the parent `test`
+help text (not a dedicated `all`-subcommand help), and the reader who
+runs `awsbnkctl test list` will see the four-subcommand enumeration
+that omits `all`. Both behaviours are explainable, neither is wrong.
+
+**Files affected**: `book/src/20-connectivity-testing.md` § "Running
+connectivity inside `awsbnkctl test all`" (lines 106-126);
+`internal/cli/test.go::testCmd` long description.
+
+**Proposed fix**: Sprint 5 architect (book retarget pass) adds a
+one-line clarification to chapter 20 noting that `awsbnkctl test all`
+is the bare-`test` invocation (no subcommand registered), or registers
+an explicit `all` subcommand if the conceptual clarity is worth the
+indirection. Cosmetic; no Sprint 4 blocker.
+
+## Issue 4: chapter 23 still tags PRD 04 wording-fix to chapter 26's troubleshooting cross-link but chapter 26's "AWS LoadBalancer" sub-section isn't named verbatim
+
+**Severity**: low
+**Status**: open
+
+**Description**: Chapter 20 § "AWS LoadBalancer shapes the suite
+recognises" (line 47) cross-links:
+
+> For diagnosing the failure mode when one *doesn't* answer, see
+> [Chapter 26 § AWS LoadBalancer](./26-troubleshooting.md)…
+
+Chapter 26's actual section headings (sampled): "Cluster + node group",
+"AWS credentials + auth", "S3 supply-chain", "EKS kubeconfig",
+"Orphan resources", "CI provider-cache". No literal `§ AWS
+LoadBalancer` heading exists yet; the LoadBalancer failure shapes are
+sprinkled across the "Cluster + node group" and "AWS credentials"
+sections.
+
+Same for chapter 21 § "Worked example" (line 176):
+
+> Three common follow-up failure modes are catalogued in
+> [Chapter 26 § DNS](./26-troubleshooting.md).
+
+No `§ DNS` heading in chapter 26 either. Sprint 5 architect's book-
+retarget pass naturally folds these in; the cross-links are forward-
+statement to that work. The chapter 26 catalog grows sprint-by-sprint
+per its own preamble ("expect the catalogue to grow alongside
+Sprint 4's test-surface work and Sprint 6's hardening pass").
+
+Reader experience: clicking the link lands in chapter 26 (which exists,
+which has real content), but the in-page anchor `#aws-loadbalancer` or
+`#dns` doesn't resolve to a specific heading — the reader scrolls to
+find the relevant section. Stuck-point severity: low. A first-time
+reader looking for "why didn't my NLB answer" still gets to the right
+chapter; the friction is one scroll, not a dead-end.
+
+**Files affected**: `book/src/26-troubleshooting.md` (missing sub-
+sections); `book/src/20-connectivity-testing.md` line 47;
+`book/src/21-dns-testing-gslb.md` line 176.
+
+**Proposed fix**: Sprint 5 architect adds `### AWS LoadBalancer` and
+`### DNS` sub-sections to chapter 26 (or whatever sub-section naming
+convention the chapter settles on) and the cross-link anchors resolve
+naturally. No Sprint 4 blocker; folding into Sprint 5's natural revisit
+is the right shape.
+
+---
+
+## Per-prose-surface verdict
+
+| Surface | Verdict |
 |---|---|
-| `pods`, `pods/exec`, `pods/log` → get/list/watch/create/delete | `pods` → get/list/watch only (no create/delete); `pods/log` → get/list; `pods/exec` → create/get |
-| `secrets` (named `roksbnkctl-ibm-creds`) → get/list | `secrets` → get (no resourceNames restriction; no list verb) |
-| `services` → get/list/create/delete | **rule absent from manifest** |
-| `apps/deployments` → get/list/create/delete | **rule absent from manifest** |
-| `namespaces` → get/list | **rule absent from manifest** |
-| `batch/jobs` → get/list/watch/create/delete | `batch/jobs` → get/list/create/delete/watch — matches |
-
-The "named secrets" restriction is the load-bearing one for the chapter's
-"least-privilege per PRD 04" framing — the actual manifest has no
-`resourceNames` filter on `secrets: get`, so the SA can read **any**
-Secret in the namespaces the binding covers. Chapter 19's prose right
-after the table at line 223:
-
-> **Named** so the SA can't read other Secrets in the namespace —
-> least-privilege per PRD 04 §"In-cluster pod".
-
-…is materially incorrect against the shipped YAML.
-
-Chapter 19 also lists "Notably **not** granted" entries (lines 228-232)
-claiming the pod can't write Secrets or modify its own RBAC. The actual
-manifest doesn't grant write/delete on Secrets or RBAC either, so this
-part is fine — but it implies the surrounding rule set is tighter than
-it actually is.
-
-**Files affected**: `book/src/19-in-cluster-ops-pod.md` §"RBAC: the
-ClusterRole rules" (lines 215-243)
-
-**Proposed fix**: Either (a) update the table to match the actual
-`internal/exec/k8s_install.yaml:64-87` rule set, or (b) propose to the
-staff agent that the manifest be tightened to match what the chapter
-documents (adding `resourceNames: ["roksbnkctl-ibm-creds"]` to the
-Secret rule, and adding the missing `services` + `deployments` +
-`namespaces` rules iff the ops pod actually needs them). The "named
-secrets" claim is the security-spine assertion the chapter rests on —
-it must be true or the prose must change.
-
-## Issue 3: chapter 17's iperf3 server-side shape says "Deployment" but the actual implementation is a bare Pod
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 17 §"iperf3 server side" (lines 322-327) says:
-
-> The `iperf3` test deploys a **server** Deployment + LoadBalancer
-> Service into `roksbnkctl-test`…
->
-> | Side | Resource | Lifetime |
-> |---|---|---|
-> | Server | `roksbnkctl-iperf3-server` Deployment + LoadBalancer Service | torn down after the client Job completes |
-
-The actual implementation in `internal/k8s/iperf3.go:59-97` creates a
-bare `corev1.Pod` (NOT a Deployment), named `roksbnkctl-iperf3` (NOT
-`roksbnkctl-iperf3-server`). The Service is named `roksbnkctl-iperf3`
-and its type is dynamic (`LoadBalancer` for `--mode north-south`,
-`ClusterIP` for `--mode east-west`) — chapter 17 hard-codes "LoadBalancer".
-
-**Files affected**: `book/src/17-execution-backends.md` §"iperf3 server
-side" (lines 322-330)
-
-**Proposed fix**: replace the table row with the actual resource type
-("Pod + Service (LoadBalancer or ClusterIP depending on `--mode`)"),
-fix the names to `roksbnkctl-iperf3` (both sides), and add a one-line
-note about the `--mode` driving the Service type. Cross-reference
-[Chapter 22 — Throughput testing] for the mode semantics. While here,
-the chapter's claim that the test deploys "Deployment + LoadBalancer
-Service" implicitly promises HA / multi-replica behaviour the bare Pod
-doesn't provide; this should be reworded.
-
-## Issue 4: chapter 19's `roksbnkctl ops show` sample output doesn't match what the binary prints
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 19 §"`roksbnkctl ops show`" (lines 166-179)
-shows a richly-formatted sample output with field names like
-`service-account`, `clusterrole`, `secret`, `last-rotation`,
-`in-use-by-pod`, `rbac subject`, plus a `2/2` ready count and an
-`-o json` flag at line 189.
-
-The actual `internal/cli/ops.go::runOpsShow` (lines 152-185) prints a
-much simpler block:
-
-```
-namespace:    roksbnkctl-ops
-pod:          roksbnkctl-ops
-phase:        Running
-ready:        true
-image:        ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:dev
-rbac subject: system:serviceaccount:roksbnkctl-ops:roksbnkctl-ops
-secret:       roksbnkctl-ibm-creds (rotated 2026-05-10T11:03:17Z)
-```
-
-Specifically:
-- No `service-account:` field on its own line
-- No `clusterrole:` field (chapter 19 says "6 rules; see `kubectl
-  describe clusterrole`" but the binary doesn't emit this row at all)
-- No `(1 secret bound)` ServiceAccount-counted line
-- No `ready=true (2/2)` container-count format — the binary prints
-  `ready: true` (bool), since the pod has exactly one container (`tools`)
-- No `started=` timestamp
-- No `image-id=` sha256 line
-- No `in-use-by-pod=true (env hash matches)` — the env-hash comparison
-  described in chapter 19 §"Rotation" (line 294) doesn't exist in the
-  current `runOpsShow` implementation
-- `last-rotation=` does exist but the chapter's prose at line 185 (and
-  again at lines 167, 185-186) claims it's derived from "the Secret's
-  resolution timestamp" set by `ops install` — the actual mechanism
-  is the `roksbnkctl.io/rotated-at` annotation stamped by
-  `decodeOpsManifests` at install time (which matches; just clarify
-  the annotation name for advanced users)
-- `roksbnkctl ops show -o json` (line 189): the `-o`/`--output` flag is
-  persistent at root (line 119 of root.go declares it), so it *parses*,
-  but `runOpsShow` ignores `flagOutput` — there's no JSON branch in
-  the function. Documenting `-o json` as "emits the same data as a
-  structured object suitable for CI assertions" is aspirational.
-
-**Files affected**: `book/src/19-in-cluster-ops-pod.md` §"`roksbnkctl
-ops show`" (lines 161-189)
-
-**Proposed fix**: rewrite the sample-output block to match the actual
-six-line print format. Drop the `-o json` paragraph or downgrade it to
-"Sprint 5+" status. The "in-use-by-pod env-hash" reconciliation is a
-worthwhile feature but it doesn't exist today and shouldn't be
-documented as a current capability; either file as a staff follow-up or
-remove the prose.
-
-## Issue 5: chapter 19's `roksbnkctl ops uninstall` sample doesn't reflect the `--confirm` gate
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 19 §"`roksbnkctl ops uninstall`" (lines
-191-204) shows a sample where `roksbnkctl ops uninstall` *immediately*
-starts deleting:
-
-```
-$ roksbnkctl ops uninstall
-deleting Pod              roksbnkctl-ops/ops                        ... done
-deleting Secret           roksbnkctl-ops/roksbnkctl-ibm-creds       ... done
-…
-```
-
-The actual `internal/cli/ops.go::runOpsUninstall` (lines 187-241) is a
-destructive-action gate: without `--confirm`, the command prints a
-**preview** of what *would* be deleted and exits successfully. Only
-`roksbnkctl ops uninstall --confirm` actually deletes anything. The
-`--confirm` flag is registered at `ops.go:70`:
-
-```go
-opsUninstallCmd.Flags().BoolVar(&flagOpsConfirm, "confirm", false, ...)
-```
-
-Chapter 19 doesn't mention `--confirm` once, anywhere. Readers who copy
-the sample will get the preview, see "Would delete (re-run with --confirm
-to proceed)" in the output, and be confused about what's wrong.
-
-Additionally:
-- The sample says `Pod roksbnkctl-ops/ops` — same `ops` vs
-  `roksbnkctl-ops` drift covered in Issue 1.
-- The sample lists six deletion rows (Pod, Secret, SA, ClusterRoleBinding,
-  ClusterRole, Namespace `roksbnkctl-ops`). The actual implementation
-  also deletes `Namespace roksbnkctl-test` (ops.go:234-236) — that's a
-  seventh row the sample misses. Worth calling out because chapter 19
-  explicitly says elsewhere (line 213) "`ops uninstall` does not touch
-  `roksbnkctl-test`" — which contradicts the actual code.
-
-**Files affected**: `book/src/19-in-cluster-ops-pod.md` §"`roksbnkctl
-ops uninstall`" (lines 191-213)
-
-**Proposed fix**: update the sample to:
-1. Show the default `roksbnkctl ops uninstall` invocation producing the
-   preview output (the `Would delete (re-run with --confirm…)` block).
-2. Show a second `roksbnkctl ops uninstall --confirm` invocation
-   producing the actual deletion output (matching the `tryDel` format
-   in `runOpsUninstall`, which is `✓ deleted <label>` to stderr, not
-   `deleting … ... done` to stdout).
-3. Update the prose at line 213 — `ops uninstall` **does** delete the
-   `roksbnkctl-test` namespace, so the "does not touch roksbnkctl-test"
-   claim is wrong. Either fix the prose or file with staff to drop the
-   `roksbnkctl-test` deletion call.
-
-## Issue 6: chapter 17 §SSH bootstrap-failure exit codes don't match the staff implementation
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 17 §"SSH backend" §"Per-tool apt-bootstrap"
-states (line 391):
-
-> Bootstrap failure modes (all surface as exit `126` — backend mid-run
-> failure — with a remediation message)
-
-Then the table at lines 394-398 lists three failure modes with mixed
-exit codes (126 for sudo, **126 implicitly** for non-Ubuntu, **127**
-for network unreachable). The "all surface as exit `126`" lead-in
-contradicts the network-unreachable row's `127`.
-
-Cross-checking against `internal/exec/ssh.go::ensureTool`:
-
-| Chapter 17 failure | Documented code | Actual code | File:line |
-|---|---|---|---|
-| `--bootstrap` not set, tool missing | "exit `127`" (line 367) | `127` (sshExitFailedToStart) | ssh.go:250 |
-| sudo password required | `126` (line 395) | `126` | ssh.go:289 |
-| sudo install failed | n/a | `126` | ssh.go:295 |
-| non-Ubuntu OS | (chapter 17 table row implies `126`) | `126` (sshExitStartedThenFailed) | ssh.go:265 |
-| apt repo unreachable | "Exit `127`" (line 397) | `127` (sshExitFailedToStart) | ssh.go:280 |
-| no apt mapping for tool | n/a (chapter doesn't cover) | `126` | ssh.go:255 |
-
-The actual code splits 126 (started, then sudo/install/Ubuntu-detection
-broke) from 127 (couldn't reach the repo / tool missing before bootstrap).
-Chapter 17's "all surface as exit `126`" lead-in is incorrect; the
-correct framing is "some are 126 (we got partway in), some are 127 (we
-never got going)".
-
-Also: chapter 17 §"Per-tool apt-bootstrap" line 396 says the non-Ubuntu
-check tests `/etc/os-release`'s `ID=ubuntu`. The actual check at
-`ssh.go:260-264` uses `lsb_release -is` and compares
-case-insensitively to `Ubuntu`. Same intent, different mechanism;
-worth a one-word fix in the chapter so a user debugging "auto-install
-only supports Ubuntu" looks in the right place.
-
-**Files affected**: `book/src/17-execution-backends.md` §"SSH backend"
-§"Per-tool apt-bootstrap" (lines 391-398) and §"Bootstrap failure modes
-(consolidated)" (lines 451-459)
-
-**Proposed fix**: rewrite the "all surface as exit `126`" lead-in to
-acknowledge the 126/127 split; update the `Non-Ubuntu OS` row to
-reference `lsb_release -is`; add a row for "no apt mapping for tool"
-(staff agent's `toolPackages` map only has iperf3 + ibmcloud today —
-the SSH backend errors with exit 126 for any other tool name).
-
-## Issue 7: chapter 17's `--backend` flag format documentation omits the `k8s` and `ssh` shapes
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 17 §"The `--backend` CLI flag" line 47-50 shows
-the format as:
-
-```
---backend <name>            # local | docker | k8s
---backend ssh:<target-name> # SSH backend; target name from `roksbnkctl targets list`
-```
-
-Two minor inaccuracies:
-
-1. The first line lists `local | docker | k8s` but the actual root flag
-   registered at `internal/cli/root.go:123` documents the value as
-   `local | docker | k8s | ssh:<target>` (i.e., `ssh:<target>` is a
-   member of the same value set, not a separate format). The two-row
-   layout suggests these are different flag shapes, which they aren't.
-2. The hint "target name from `roksbnkctl targets list`" is correct but
-   the actual flag help text says "target" without the cross-reference.
-   Worth keeping the cross-reference in the chapter for discoverability.
-
-**Files affected**: `book/src/17-execution-backends.md` lines 47-50
-
-**Proposed fix**: collapse to a single-row format showing
-`--backend local|docker|k8s|ssh:<target>` and note that the
-`ssh:<target>` form requires a target registered via `roksbnkctl
-targets add`.
-
-## Issue 8: chapter 18 references DNS-probe flags that don't exist yet (and may be confusing)
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 18 §"I'm doing GSLB DNS validation" (lines
-101-115) shows:
-
-```bash
-roksbnkctl test dns \
-  --target www.example.com \
-  --type A \
-  --server gslb-vip.f5.example.com \
-  --gslb-compare
-```
-
-None of `--target`, `--type`, `--server`, or `--gslb-compare` exist on
-`roksbnkctl test dns` today (the current implementation at
-`internal/cli/test.go:126-133` just calls `test.RunDNS` against
-workspace `extra_hosts`). All four flags land in Sprint 5 per
-PLAN.md and PRD 03 §"DNS Probe". Chapter 18 acknowledges this at line
-115:
-
-> The DNS probe lands in Sprint 5; [Chapter 21 — DNS testing for GSLB]
-> is the chapter to read once it ships.
-
-This is the recommended pattern in the prompt (forward-references to
-Sprint 5+ are explicit and future-tense), so this is **not** a bug —
-but the example reads as runnable today. Readers running through the
-chapter may try the command and get "unknown flag: --gslb-compare"
-errors with no Sprint 5 hint in the error message.
-
-**Files affected**: `book/src/18-choosing-backend.md` §"I'm doing GSLB
-DNS validation" (lines 101-115)
-
-**Proposed fix**: add a one-line lead-in to the code block clarifying
-"Sprint 5+; the flags below don't exist on `roksbnkctl test dns` today"
-so the example reads as forward-looking, not copy-paste. Same applies
-to the "DNS probe over `docker` is rejected" prose at lines 66 + 191-198
-which describes an error path that may not be wired yet (the chapter
-acknowledges this implicitly but readers may be confused).
-
-## Issue 9: PRD 03 open question for `--bootstrap` opt-in is now answered by the implementation
-
-**Severity**: low
-**Status**: open
-**Description**: PRD 03 §"Open questions" line 402 still phrases the
-`--bootstrap` decision as a recommendation:
-
-> **`--bootstrap` opt-in for SSH**: should auto-install of missing
-> tools require `--bootstrap` to opt in, to avoid surprise `sudo
-> apt-get` invocations? **Recommendation: yes, opt-in by default**…
-
-Staff has now landed the opt-in implementation
-(`internal/exec/ssh.go::ensureTool` errors with rc=127 + "rerun with
---bootstrap"); chapter 17 documents the opt-in default. PRD 03's "open
-question" framing is stale — this is now a closed decision.
-
-Same for line 400's "Long-lived ops pod vs per-call Job for k8s
-backend": staff shipped **both** (long-lived for ad-hoc ibmcloud,
-one-shot Job for iperf3). And line 401's "Image versioning": staff
-landed "tie to roksbnkctl version" (`toolImageTag` reads `Version`).
-Line 403 ("Backend startup failures: hard error vs fall back") was
-landed as hard-error per the Sprint 3 → 4 carry-over.
-
-Only line 404 (`--backend ssh` without `:target`) is genuinely still
-open — the current code errors with `no target specified` (ssh.go:107),
-matching the PRD's recommendation, so this one is also de-facto closed.
-
-**Files affected**: `docs/prd/03-EXECUTION-BACKENDS.md` §"Open
-questions" (lines 398-404)
-
-**Proposed fix**: convert the resolved questions into a short "Resolved
-in Sprint 4" subsection that links to the decision (chapter 17 §SSH
-backend, chapter 17 §K8s backend, etc.). Keeps the PRD honest as a
-living document. Same pattern Sprint 3 used for closing the cred-
-resolver chain question.
-
-## Issue 10: README highlight bullet for Sprint 4 links only to chapter 17; missing chapter 18 + 19 cross-references
-
-**Severity**: low
-**Status**: open
-**Description**: The Sprint 4 highlight bullet at `README.md:38` says:
-
-> **`--backend k8s` + `--backend ssh` (v0.9)** — … See [chapter 17].
-
-Sprint 1 + 2 + 3 highlight bullets follow the same single-link pattern
-(chapter 16 for `--on`, chapter 24 for k-verbs, chapter 17 for
-`--backend docker`). For Sprint 4 specifically, two additional chapters
-landed (18 — decision tree; 19 — ops pod reference) and the README's
-highlight bullet would benefit from a follow-on "for which one to use,
-see [chapter 18]; for the ops-pod prerequisite, see [chapter 19]"
-cross-reference. Otherwise the chapter 18 + 19 reader-discovery path
-is via the chapter 17 cross-references only.
-
-Sprint 1 + 2 + 3 chapters each shipped exactly one user-facing chapter
-on the same topic, so the single-link convention worked. Sprint 4 ships
-three. This is a one-line improvement.
-
-**Files affected**: `README.md` line 38
-
-**Proposed fix**: extend the highlight bullet's "See [chapter 17]…" to
-something like "See [chapter 17] for backend mechanics, [chapter 18]
-for which one to use, and [chapter 19] for the in-cluster ops pod
-lifecycle."
-
-## Issue 11: chapter 19 §"Rotation" omits the IC_API_KEY alias and the `roksbnkctl ops show`-driven verification
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 19 §"Rotation: rotating the API key" (lines
-266-294) — rewritten by the integrator this pass to drop the
-non-existent `--rotate-key` flag and walk the three resolver-chain
-update paths — is materially correct. Two small issues:
-
-1. The actual Secret carries **two** keys, not one. Look at
-   `internal/exec/k8s_install.yaml:51-56`:
-
-   ```yaml
-   data:
-     IBMCLOUD_API_KEY: "${IBMCLOUD_API_KEY_B64}"
-     IC_API_KEY: "${IBMCLOUD_API_KEY_B64}"
-   ```
-
-   Both `IBMCLOUD_API_KEY` and `IC_API_KEY` (the older alias older
-   `ibmcloud` versions accept) are populated. Chapter 17 §"Env
-   propagation" line 121 correctly notes the dual-name pattern for the
-   local backend; chapter 19 §"Credential propagation" lines 244-264
-   and §"Rotation" §297-301 only mention `IBMCLOUD_API_KEY`. Worth a
-   one-line "the same value is also exposed as `IC_API_KEY` for older
-   CLI versions" addition.
-
-2. The §"Rotation" code-block at line 291 (the kubectl-only fallback)
-   uses `pod/ops`:
-
-   ```bash
-   kubectl rollout restart pod/ops -n roksbnkctl-ops
-   ```
-
-   Same drift as Issue 1 — actual pod name is `roksbnkctl-ops`. Worth
-   fixing in lockstep with Issue 1.
-
-3. `kubectl rollout restart pod/<name>` is not a valid kubectl verb;
-   `rollout restart` only operates on Deployments / DaemonSets /
-   StatefulSets (controllers that own pods, not bare pods). The bare
-   ops pod isn't a Deployment (Issue 3 shows the iperf3 server is the
-   same case). The actual rotation flow has to be `kubectl delete pod
-   roksbnkctl-ops -n roksbnkctl-ops` (and rely on `restartPolicy:
-   Always` to bring it back? — no, the pod is bare, there's no
-   controller recreating it). `roksbnkctl ops install` is the canonical
-   way to recreate the bare pod with fresh Secret-derived env.
-
-**Files affected**: `book/src/19-in-cluster-ops-pod.md` §"Rotation"
-(lines 266-294) + §"Credential propagation" (lines 244-264)
-
-**Proposed fix**: (1) add the `IC_API_KEY` alias note to §"Credential
-propagation"; (2) replace `pod/ops` with `pod/roksbnkctl-ops`; (3)
-replace the bare `kubectl rollout restart pod/...` example with
-either `kubectl delete pod roksbnkctl-ops -n roksbnkctl-ops` + an
-inline note that the bare pod has no controller (so re-running
-`roksbnkctl ops install` is the canonical recreate path) or
-remove the kubectl-only path entirely.
-
-## Issue 12: chapter 19's `roksbnkctl ops install` step list mentions "kubectl apply --server-side" semantics that the actual implementation doesn't use
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 19 §"4. Create or update the credential Secret"
-line 114 says:
-
-> If the Secret already exists (re-running `ops install` after a key
-> rotation), `roksbnkctl` uses `kubectl apply --server-side` semantics:
-> the `IBMCLOUD_API_KEY` field is updated to the new value, the rest
-> of the Secret's metadata is preserved.
-
-The actual implementation at `internal/cli/ops.go::applyOpsObject`
-case `*corev1.Secret` (lines 315-340) does a client-side Get +
-mutate-in-place (`existing.Data = o.Data`) + Update, NOT a server-side
-apply (the kubernetes Go client's `cs.CoreV1().Secrets().Apply()` shape
-isn't used). The semantics are similar in practice but `kubectl apply
---server-side` is a specific server-side merge protocol with field
-ownership tracking — the chapter's framing implies that, the code
-doesn't do that.
-
-This is a small fidelity issue; "client-side Get + Update preserving
-existing metadata, with new Data fields and annotations merged in" is
-the accurate description. Same applies to the chapter's implicit claim
-about ClusterRole / ClusterRoleBinding updates (also client-side
-Get-then-Update at lines 343-383).
-
-**Files affected**: `book/src/19-in-cluster-ops-pod.md` §"4. Create or
-update the credential Secret" line 114
-
-**Proposed fix**: change "uses `kubectl apply --server-side` semantics"
-to "does a client-side Get + Update that overwrites `data` and merges
-annotations in" so the description matches the actual `applyOpsObject`
-code path.
-
-## Issue 13: chapter 17 §"`:dev` tag resolution" still describes the Sprint 3 hard-code as the current state
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 17 §"`:dev` tag resolution" line 208 says:
-
-> Sprint 3 shipped a hard-coded `:dev` for `ibmcloud` + `iperf3`; that
-> lookup map landed unchanged this sprint because the `:dev` tag is
-> what `tools/docker/Makefile` produces locally and what the
-> `.github/workflows/build-tools-images.yml` workflow publishes on
-> every push to `main`. On a `git tag v1.0.0` release the same
-> workflow re-tags the image as `:v1.0.0` and pushes both.
-
-This is wrong on two counts:
-
-1. The Sprint 3 hard-code **did change** this sprint per staff issue 2
-   in `issues/issue_sprint4_staff.md` — `internal/exec/docker.go::toolImages`
-   now resolves the tag from the binary's `Version` (set via ldflags)
-   via the `toolImageTag()` resolver. A tag-released binary
-   (`Version="v0.10.0"`) pulls
-   `ghcr.io/jgruberf5/roksbnkctl-tools-ibmcloud:v0.10.0`; only `dev`
-   builds use the `:dev` tag. The chapter's "landed unchanged this
-   sprint" claim is the opposite of what happened.
-2. The default in `internal/exec/docker.go::toolImages` for `terraform`
-   is `hashicorp/terraform:1.5.7` (a literal pin, not tag-version
-   resolved). Chapter 17's table at line 206 says
-   `hashicorp/terraform:<v>` which reads as "Sprint 4 version-resolved"
-   — actually a hard-coded `1.5.7`. Worth noting that terraform is the
-   exception to the new tag-version resolver.
-
-The next paragraph in chapter 17 (line 208) — "The default in
-`internal/exec/docker.go::toolImages` flips to the version-tagged form
-at release-tag time" — describes the new (Sprint 4) behaviour accurately,
-so the two sentences contradict each other.
-
-**Files affected**: `book/src/17-execution-backends.md` §"`:dev` tag
-resolution" (lines 198-211)
-
-**Proposed fix**: rewrite the paragraph at line 208 to acknowledge the
-Sprint 4 polish carry-over (`toolImageTag()` resolver landed; `:dev`
-fallback only for `dev` builds; tagged releases pull matching tagged
-images). Update the table at line 206 to clarify that `terraform`
-stays pinned at `1.5.7` regardless of `roksbnkctl` version.
-
-## Issue 14: test names + comments in `internal/exec/k8s_test.go` could be more specific about what they pin
-
-**Severity**: low
-**Status**: open
-**Description**: Per the prompt's task 9 — flag tests with generic names
-or missing intent-documenting comments. Two examples in the Sprint 4
-test additions:
-
-1. `TestK8sBackend_Run_Job_CreatesJobAndSecret_TTL` (k8s_test.go:345)
-   pins three things at once: Job creation, Files Secret creation, TTL
-   value. The test body covers all three correctly, but a reader looking
-   for "what does this test fail if I break" has to scan ~80 lines.
-   Splitting into three tests would scale better as the Job shape
-   grows in Sprint 5+.
-
-2. `TestK8sBackend_NoCredValueInArgv` (k8s_test.go:470) is a critical
-   security assertion (PRD 04 §"In-cluster pod") but the test docstring
-   doesn't say "PRD 04 SECURITY: cred value never appears in container
-   argv, Env-by-Value, or annotations". Compare against
-   `internal/exec/audit_test.go::TestCredAudit_K8s_NoLeakInJobSpec`
-   (line 198) which **does** carry the rationale in a top-of-function
-   doc comment.
-
-Neither blocks the sprint; both are quality-of-test improvements for
-future maintainers reading the suite cold.
-
-**Files affected**: `internal/exec/k8s_test.go` (test names at lines 345,
-425, 470)
-
-**Proposed fix**: rename the bundle-three-assertions tests to express
-each invariant separately when convenient; add docstrings to the
-security-relevant tests stating the PRD invariant they pin.
-
-## Verification gates
-
-- `go build ./...` ✓ (binary at `/tmp/roksbnkctl`, 101 MB)
-- Chapter 17 `*Coming in Sprint 4.*` markers: ✓ gone (grep returns 0
-  hits in chapters 17/18/19)
-- All Sprint 5+ forward-references in chapter 18 explicitly future-tense
-  (`Sprint 5`, `lands in Sprint 5`, `deferred to Sprint 5+`) — ✓
-- Chapters 17 + 18 + 19 cross-references resolve (sampled chapters
-  12, 14, 16, 22 link targets; PRD 03 + PRD 04 GitHub URLs)
-- `book/src/SUMMARY.md` chapter titles match h1 of each chapter file —
-  ✓ (Sprint 4 chapters: "Execution backends: local, docker, k8s, ssh"
-  / "Choosing a backend per tool" / "The in-cluster ops pod" all match)
-- Go version (`go.mod`: 1.25.0) consistent across README + chapter 4
-- `roksbnkctl ops install/show/uninstall` subcommands all wired in
-  `internal/cli/ops.go::init`
-- `--bootstrap` persistent flag wired at `internal/cli/root.go:124`
-- `perToolDefaultBackend` map present at `internal/cli/cluster.go:338`
-  with the expected three entries (iperf3=k8s, ibmcloud=local,
-  terraform=local)
-
-## Summary
-
-14 issues filed for Sprint 4: 2 high (chapter 17 + 19 pod name; chapter
-19 RBAC table), 4 medium (iperf3 server shape; `ops show` output; `ops
-uninstall` --confirm gate; SSH bootstrap exit codes), 8 low. Build,
-chapters render, all cross-references resolve. The high-severity items
-are reader-blocking (anyone copy-pasting chapter 19's `kubectl get pod
-ops` will hit `NotFound`; anyone trusting chapter 19's RBAC table will
-mis-audit the deployed surface). Recommend integrator land Issues 1, 2,
-4, 5, 6 before the M3-prelim gate review.
+| `docs/prd/04-CREDENTIALS.md` § "Where the AWS chain lives in the tree" | **Ships.** Closes Sprint 3 tech-writer Issue 1 (HIGH) end-to-end. Function names (`NewClients`, `CredentialsConfigured`, `HasEnvCredentials`, `Clients.CallerIdentity`) all verified verbatim against `internal/aws/{client,sts}.go`. `internal/cred/` correctly named as deprecated-for-back-compat-only. |
+| `book/src/20-connectivity-testing.md` (~1,500 words) | **Ships.** Reads cleanly as first-time reader; NLB/ALB shape recognition is concrete; failure-mode table is diagnostic-first. Chapter 26 cross-link missing sub-anchor (Issue 4). |
+| `book/src/21-dns-testing-gslb.md` (~1,800 words) | **Ships.** Three-vantage diagram + JSON schemas + worked us-west-2/us-east-1/eu-west-1 example all land. Worth its slightly-above-band word count. Chapter 26 cross-link missing sub-anchor (Issue 4). |
+| `book/src/22-throughput-testing.md` (~1,500 words) | **Ships with caveat.** PSA contract documented correctly; c5n.4xlarge baselines concrete; tuning knobs schema clear. Issue 1 (bundled-image-vs-default-image drift) is the medium-severity stuck-point a live east-west reader would hit. |
+| `book/src/23-e2e-test-plan.md` (~2,200 words) | **Ships.** Phase-letter system + dry-run/live-tier split + cost-and-time table all useful. Estimates pending validation (architect's Issue 3) — cosmetic. |
+| `docs/PLAN.md` § Sprint 4 close (architect surface) | **Ships.** Mirrors Sprint 3 shape; integrator extends with sibling surfaces at tag-cut per the maintenance contract. |
+
+## Dogfooding-loop stuck-points
+
+**Total: 2** (1 medium, 1 low).
+
+- **Medium (Issue 1)** — chapter 22's "set this in your workspace
+  config" image tag (`awsbnkctl-tools-iperf3`) reads as the canonical
+  default, but the binary's `Iperf3DefaultImage` is the stock
+  `networkstatic/iperf3:latest` that chapter 22 § PSA compliance
+  itself warns against. A live `--mode east-west` runner who skips
+  setting `test.throughput.image` will hit the documented PSA
+  admission rejection.
+- **Low (Issue 3)** — `awsbnkctl test --help` enumerates four
+  subcommands and prose says "five" implicitly (including `all`).
+  Conceptual confusion only; no behavior break.
+
+## Dogfood results (exit codes)
+
+| Command | Exit | Notes |
+|---|---|---|
+| `./bin/awsbnkctl test --help` | **0** | Renders four subcommands cleanly + persistent `--dry-run` + `--insecure` flags |
+| `HOME=/tmp/tw4home ./bin/awsbnkctl test connectivity --dry-run -w test` | **0** | Plan resolved; 1 target enumerated |
+| `HOME=/tmp/tw4home ./bin/awsbnkctl test dns --dry-run -w test` | **0** | Plan resolved; 1 target enumerated |
+| `HOME=/tmp/tw4home ./bin/awsbnkctl test throughput --dry-run -w test` | **0** | Plan resolved; mode=north-south, backend=k8s; iperf3 image visible in plan output (surfaces Issue 1) |
+| `HOME=/tmp/empty-home AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 ./bin/awsbnkctl up --dry-run` | **1** | Friendly init-needed message; no terraform spew; closes Sprint 3 tech-writer Issue 3 |
+| `make build` | **0** | Single `go build` line; binary at `bin/awsbnkctl` |
+| `go test ./...` | **0** | All packages pass (aws, cli, config, cred, doctor, exec, k8s, remote, test, tf, refgen) |
+
+## PSA compliance spec-check
+
+`internal/k8s/iperf3.go::BuildIperf3Pod` (lines 95-132) verified to
+include the four PSA-`restricted`-required fields:
+
+- **Pod-level** `RunAsNonRoot: true` (line 110), `RunAsUser: 1000`
+  (line 111), `SeccompProfile.Type: RuntimeDefault` (lines 112-114)
+- **Container-level** `AllowPrivilegeEscalation: false` (line 122),
+  `RunAsNonRoot: true` (line 123), `Capabilities.Drop: [ALL]`
+  (lines 124-126)
+
+The function's docstring (lines 71-94) explicitly cites PRD 03 §iperf3
++ § OpenShift SCC + Sprint 4 staff brief § "throughput.go PSA
+compliance" as the contract source. Closes the brief's PSA gate at the
+Pod surface. The client-side Job spec built by the k8s execution
+backend (`internal/exec/k8s.go`) is **not** equivalently pinned —
+that's staff's own Issue 3 (medium carry-over to Sprint 5), unchanged.
+
+## Sprint 3 carry-overs closure verdict
+
+| Carry-over | Status |
+|---|---|
+| **Sprint 3 tech-writer Issue 1 (HIGH)** — PRD 04 wording drift | **Closed.** Sprint 4 architect's § "Where the AWS chain lives in the tree" describes the actual two-package split verbatim; function names verified against shipped code. |
+| **Sprint 3 tech-writer Issue 3 (medium)** — `up --dry-run` first-run UX gap | **Closed.** Staff's `translatePlanError` fold returns the friendly init-needed message before terraform boots; verified by dogfood (HOME=/tmp/empty-home invocation above). |
+| **Sprint 3 tech-writer Issue 2 (medium)** — 302 IBM-residue hits | **Carried.** PLAN.md Sprint 4 close + architect's Sprint 4 close section both name this as Sprint 5 work; staff Issue 1 in Sprint 5 catalog has the per-file breakdown. Not a Sprint 4 regression. |
+
+## Cross-document drift verdict
+
+- **PRD 04 ↔ `internal/aws/`** — clean. Every function named in
+  PRD 04 § "Where the AWS chain lives in the tree" exists at the
+  documented path with the documented signature.
+- **PRD 04 ↔ `internal/cred/resolver.go`** — clean. PRD documents the
+  package as deprecated; code matches (no production caller threads
+  non-empty value; Sprint 5 deletion target).
+- **PRD 05 ↔ chapter 23** — clean. Chapter 23 reframes PRD 05's phase
+  letters for the AWS retarget; cost-and-time table matches PRD 05's
+  budget orders of magnitude.
+- **Chapter 22 ↔ `internal/k8s/iperf3.go`** — drift. Issue 1 — chapter
+  documents the bundled image as canonical; code defaults to the stock
+  `networkstatic/iperf3:latest` that the same chapter's PSA section
+  flags as failure-mode-triggering.
+- **Chapters 20-23 internal cross-links** — resolve cleanly (all linked
+  chapters exist; sampled 12, 17, 19, 26, 33). Chapter 26 sub-section
+  anchors missing (Issue 4) — folds into Sprint 5 book retarget.
+- **CHANGELOG / README** — Sprint 4 entry not yet appended to either
+  (integrator's responsibility at tag-cut per the maintenance contract
+  at PLAN.md bottom; consistent with prior sprint pattern).
+
+## Gate-criteria audit (PLAN.md Sprint 4 end-of-sprint gate)
+
+| Gate criterion | Status |
+|---|---|
+| `awsbnkctl test {dns,connectivity,throughput}` runs against a workspace config (mocked end-to-end) | **Met.** All three dry-run subcommands exit 0; validator's `test-dryrun` CI job exercises the same surface; staff plumbed workspace region + cluster outputs into the plan path. |
+| Live AWS validation in operator-run spike | **TBD-by-spike-operator.** SPIKE DEFERRAL carries; PRD 07 § spike protocol still gates v0.2. |
+| `awsbnkctl doctor` covers all six AWS rows | **Met from Sprint 3.** Sprint 4 staff added the optional Service Quotas check (`AWSBNKCTL_DOCTOR_SERVICE_QUOTAS=1`); off by default. |
+| AWS-flavoured E2E phases pass against mocked fixtures | **Met.** Validator's e2e marker refresh + DRY_RUN smoke green on both scripts. |
+| `internal/k8s/iperf3.go` Job spec includes runAsNonRoot, seccompProfile, capabilities.drop ALL | **Met.** Verified verbatim. |
+| Build green (`make build`, `go test ./...`) | **Met.** Both exit 0. |
+
+## Issues filed: 4
+
+- 0 blocker
+- 0 high
+- 1 medium (Issue 1 — image-default ↔ chapter-22-canonical drift)
+- 3 low (Issues 2, 3, 4 — exit-code verification, `test all`
+  cosmetic, cross-link sub-anchors)
+- 0 roadmap
+
+## Release-readiness verdict
+
+**Ready for integrator.** Sprint 4 does not cut a tag per PLAN.md
+("The integrator commits. Sprint 4 does not cut a tag."). All gate
+criteria are met at the **dry-run / mocked-fixture tier**; live-tier
+gate carries on the operator-run spike per the SPIKE DEFERRAL contract.
+Sprint 3 carry-overs (tech-writer Issues 1 and 3) are closed cleanly.
+The single medium-severity finding (Issue 1) is a docs/code drift the
+integrator can either patch at commit time (chapter 22 callout) or fold
+into Sprint 5 (`Iperf3DefaultImage` flip after image publish). No
+blockers.

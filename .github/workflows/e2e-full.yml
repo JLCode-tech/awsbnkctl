@@ -3,23 +3,31 @@ name: Full E2E
 # Manual-trigger workflow for the combined A-H + I-N + L-DNS e2e
 # driver.
 #
-# Sprint 3 status: the dry-run tier of the cluster-bring-up phases
-# (A-H) has landed via the `full-up-dryrun` job in
-# .github/workflows/ci.yml (Sprint 3 staff wired the root-module
-# orchestrator end-to-end). The **live-apply** tier still gates on
-# the operator-run PRD 07 spike (docs/prd/07-EKS-CLUSTER-SRIOV.md §
-# "Spike protocol"), so this workflow stays a skip-stub for live-AWS
-# runs. The trigger surface (workflow_dispatch + release/** push)
-# survives so downstream automation (release branches, the
-# integrator's babysit loop) keeps parsing it; the body echoes the
-# updated skip-banner and exits 0.
+# Sprint 4 status: the backend-matrix phases (I-N + L-DNS) join the
+# cluster-bring-up phases (A-H) at the dry-run tier. The combined
+# dry-run regression surface now lives across two CI jobs in
+# .github/workflows/ci.yml:
 #
-# Sprint 4 will graduate the backend-matrix phases (I-N + L-DNS) and
-# bring this workflow closer to a real driver. Sprint 6 cuts v1.0
-# gated on the operator-run spike — at which point this workflow
-# transitions from skip-stub to actual e2e driver invocation
-# (renaming `cluster_region` → `aws_region` and threading AWS_*
-# secrets instead of IBMCLOUD_API_KEY).
+#   - `full-up-dryrun` (Sprint 3) — exercises `awsbnkctl up --dry-run`
+#     against the eight-module root graph.
+#   - `test-dryrun` (Sprint 4) — exercises `awsbnkctl test
+#     {connectivity,dns,throughput} --dry-run` against a fake
+#     workspace materialised in the runner's HOME.
+#
+# Both jobs run on every PR. The **live-apply** tier of every phase
+# (cluster bring-up + backend matrix + DNS probe + throughput) still
+# gates on the operator-run PRD 07 spike (docs/prd/07-EKS-CLUSTER-
+# SRIOV.md § "Spike protocol"), so this workflow stays a skip-stub
+# for live-AWS runs. The trigger surface (workflow_dispatch +
+# release/** push) survives so downstream automation (release
+# branches, the integrator's babysit loop) keeps parsing it; the
+# body echoes the updated Sprint 4 skip-banner and exits 0.
+#
+# Sprint 6 cuts v1.0 gated on the operator-run spike — at which point
+# this workflow transitions from skip-stub to actual e2e driver
+# invocation (renaming `cluster_region` → `aws_region` and threading
+# AWS_* secrets instead of IBMCLOUD_API_KEY; tracked as Sprint 3
+# validator Issue 7).
 #
 # Triggers:
 #   - workflow_dispatch — manual run from the Actions tab.
@@ -27,9 +35,9 @@ name: Full E2E
 #
 # NOT triggered on PR / push to main / push to feature branches — the
 # fast unit + integration tiers in ci.yml cover those. The Sprint 3
-# `full-up-dryrun` job in ci.yml runs on every PR and provides the
-# dry-run regression gate that this workflow's live-apply path will
-# eventually wrap.
+# `full-up-dryrun` + Sprint 4 `test-dryrun` jobs in ci.yml run on every
+# PR and provide the dry-run regression gates that this workflow's
+# live-apply path will eventually wrap.
 
 on:
   workflow_dispatch:
@@ -55,22 +63,26 @@ permissions:
 
 jobs:
   full-e2e:
-    name: Full E2E (Sprint 3 stub — live apply gates on PRD 07 spike)
+    name: Full E2E (Sprint 4 stub — live apply gates on PRD 07 spike)
     runs-on: ubuntu-latest
     # Gate to this fork so cross-repo PRs don't try to run it. Sprint
-    # 3 brief: trigger surface still gated to JLCode-tech/awsbnkctl;
-    # body now references PRD 07 spike for the live-apply gate.
+    # 4 brief: trigger surface still gated to JLCode-tech/awsbnkctl;
+    # body now references both the Sprint 3 full-up-dryrun and the
+    # Sprint 4 test-dryrun CI jobs for the dry-run regression
+    # surface, and the PRD 07 spike for the live-apply gate.
     if: github.repository == 'JLCode-tech/awsbnkctl'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sprint 3 skip banner
+      - name: Sprint 4 skip banner
         run: |
           echo "════════════════════════════════════════════════════════════"
-          echo "Full E2E — Sprint 3 stub"
+          echo "Full E2E — Sprint 4 stub"
           echo "════════════════════════════════════════════════════════════"
-          echo "Dry-run tier of phases A-H is exercised by the"
-          echo "  full-up-dryrun job in .github/workflows/ci.yml (every PR)."
+          echo "Dry-run tier of phases A-H + I-N + L-DNS is exercised by"
+          echo "  two CI jobs in .github/workflows/ci.yml (every PR):"
+          echo "    full-up-dryrun (Sprint 3) — awsbnkctl up --dry-run"
+          echo "    test-dryrun    (Sprint 4) — awsbnkctl test {conn,dns,thpt} --dry-run"
           echo ""
           echo "Live-apply tier still gates on the operator-run PRD 07 spike:"
           echo "  docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\""
@@ -78,10 +90,13 @@ jobs:
           echo "   install Multus + SR-IOV CNI + device plugin DaemonSets;"
           echo "   schedule a pod requesting intel.com/sriov:1)."
           echo ""
-          echo "Remaining e2e phase status:"
-          echo "  Phases A-H (cluster bring-up):    Sprint 3 dry-run + PRD 07 spike for apply"
-          echo "  Phases I-N (backend matrix):      Sprint 4"
-          echo "  Phase L-DNS:                      Sprint 4"
-          echo "  Full v1.0 sign-off:               Sprint 6 (gated on spike)"
-          echo "See docs/PLAN.md for the retarget plan."
+          echo "Per-phase status:"
+          echo "  Phases A-H (cluster bring-up):       Sprint 3 dry-run + PRD 07 spike for apply"
+          echo "  Phases I-J (local/docker backends):  Sprint 4 dry-run + PRD 07 spike for apply"
+          echo "  Phases K-L (multi-tool + k8s):       Sprint 4 dry-run + PRD 07 spike for apply"
+          echo "  Phase  L-DNS (Route 53 GSLB probe):  Sprint 4 dry-run + PRD 07 spike for apply"
+          echo "  Phase  M (cred-leak audit):          Sprint 4 implements; live exercise in spike"
+          echo "  Phase  N (mixed-mode lifecycle):     Sprint 4 implements; live exercise in spike"
+          echo "  Full v1.0 sign-off:                  Sprint 6 (gated on spike)"
+          echo "See docs/PLAN.md § Sprint 4 for the retarget plan."
           exit 0

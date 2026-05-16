@@ -3,11 +3,37 @@ package doctor
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	awspkg "github.com/JLCode-tech/awsbnkctl/internal/aws"
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
+
+// serviceQuotasFeatureFlagEnv gates the Sprint 4 optional Service
+// Quotas probe in the doctor. Off by default — the operator opts in by
+// exporting AWSBNKCTL_DOCTOR_SERVICE_QUOTAS=1 (or `true`/`yes`/`on`)
+// before invoking `awsbnkctl doctor`. Once the operator-run spike
+// validates the live signal, v0.x flips the default and retires the
+// flag.
+//
+// Brief §"Optional Service Quotas check" — gated by an internal
+// feature flag (off by default).
+const serviceQuotasFeatureFlagEnv = "AWSBNKCTL_DOCTOR_SERVICE_QUOTAS"
+
+// serviceQuotasEnabled reports whether the operator opted in to the
+// Service Quotas probe via the feature-flag env var. Accepts any of
+// `1`, `true`, `yes`, `on` (case-insensitive) — keeps the toggle
+// ergonomic without parsing nuance.
+func serviceQuotasEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(serviceQuotasFeatureFlagEnv)))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
 
 // awsChecks runs the AWS-shaped pre-flight checks introduced in
 // Sprint 1 + extended in Sprint 2 per PRD 07 § "internal/aws/" + PRD
@@ -168,6 +194,39 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 			},
 			Why: "PRD 07's self-managed node group needs EC2 quota headroom; this probe validates the IAM permission path.",
 		})
+	}
+
+	// Check 4b (optional, feature-flagged): Service Quotas
+	// GetServiceQuota for L-1216C47A (Running On-Demand Standard
+	// instances). Off by default — operator opts in via
+	// AWSBNKCTL_DOCTOR_SERVICE_QUOTAS=1. When the IAM permits the
+	// servicequotas:GetServiceQuota call we surface the live quota
+	// value (e.g. "256 vCPU"); when AccessDenied we surface that as a
+	// Warning row pointing at the IAM gap. Brief §"Optional Service
+	// Quotas check" — gated by an internal feature flag (off by
+	// default) until v0.x validates the signal on live AWS.
+	if serviceQuotasEnabled() {
+		val, sqErr := clients.RunningOnDemandVCPUQuota(ctx)
+		switch {
+		case sqErr == nil:
+			out = append(out, withWhy{
+				Check: Check{
+					Name:   "aws servicequotas:RunningOnDemand-vCPU",
+					Status: StatusOK,
+					Detail: fmt.Sprintf("L-1216C47A = %.0f vCPU (live Service Quotas value)", val),
+				},
+				Why: "PRD 07's self-managed node group needs ≥48 vCPU (3× c5n.4xlarge). The live quota answers whether the account can host that without a limit-increase ticket.",
+			})
+		default:
+			out = append(out, withWhy{
+				Check: Check{
+					Name:   "aws servicequotas:RunningOnDemand-vCPU",
+					Status: StatusWarning,
+					Detail: fmt.Sprintf("probe failed: %v (verify IAM attaches servicequotas:GetServiceQuota; falling back to the default 5-instance / 80-vCPU pointer above)", sqErr),
+				},
+				Why: "optional probe surfaces the live running-on-demand vCPU quota; AccessDenied is expected when the operator's IAM doesn't permit it",
+			})
+		}
 	}
 
 	// Check 5: S3 PutObject feasibility probe (PRD 08). HeadBucket

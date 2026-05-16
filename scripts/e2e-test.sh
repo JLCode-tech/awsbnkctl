@@ -1,22 +1,35 @@
 #!/usr/bin/env bash
 # scripts/e2e-test.sh — end-to-end shake-out driver for awsbnkctl.
 #
-# ▶ Sprint 3 status: cluster phases (A-H) now run at the **dry-run**
-#   tier — Sprint 3 staff lands the first end-to-end `awsbnkctl up
-#   --dry-run` against the full module graph (eks_cluster →
-#   cert_manager → s3_supply_chain + iam_irsa → flo → cne_instance →
-#   license → testing). The phase bodies in this driver still emit
-#   skip banners against **live** AWS because SPIKE DEFERRAL (PRD 07
-#   §"Spike protocol") gates the apply-tier on the operator-run spike;
-#   the dry-run tier is exercised by the `full-up-dryrun` CI job in
+# ▶ Sprint 4 status: the backend matrix (phases I-N) + the AWS-hosted
+#   GSLB DNS probe (L-DNS) join the cluster-bring-up phases at the
+#   **dry-run** tier. Sprint 3 landed `awsbnkctl up --dry-run` for the
+#   full module graph (eks_cluster → cert_manager → s3_supply_chain +
+#   iam_irsa → flo → cne_instance → license → testing); Sprint 4 lands
+#   the test verb surface (`test connectivity|dns|throughput`
+#   --dry-run), the K8s + SSH execution backends in mocked form, and
+#   the AWS Route 53 vantage for the GSLB-aware DNS probe. The phase
+#   bodies in this driver still emit skip banners against **live**
+#   AWS because SPIKE DEFERRAL (PRD 07 §"Spike protocol") gates the
+#   apply tier on the operator-run spike. The Sprint 4 dry-run tier
+#   is exercised by the `full-up-dryrun` + `test-dryrun` CI jobs in
 #   .github/workflows/ci.yml. The script's per-phase markers below
 #   now reflect that split.
 #
 #     Phases A-H (cluster bring-up)  →  Sprint 3 implements dry-run
 #                                       (CI: full-up-dryrun job);
 #                                       live apply gates on PRD 07 spike
-#     Phases I-N (backend matrix)    →  Sprint 4
-#     Phase L-DNS                    →  Sprint 4
+#     Phases I-J (local/docker backend matrix)
+#                                    →  Sprint 4 implements dry-run
+#                                       (CI: test-dryrun job);
+#                                       live apply gates on PRD 07 spike
+#     Phases K-N (multi-tool + k8s + ssh + mixed-mode)
+#                                    →  Sprint 4 implements dry-run /
+#                                       mocked tier; live apply gates
+#                                       on PRD 07 spike
+#     Phase L-DNS (AWS Route 53 GSLB)
+#                                    →  Sprint 4 implements dry-run;
+#                                       live apply gates on PRD 07 spike
 #     v1.0 sign-off run              →  Sprint 6
 #
 #   The script preserves the inherited public surface (env vars,
@@ -128,13 +141,13 @@ phase_E() { skip_phase E "workspace ops (during D's idle window)"        "Sprint
 phase_F() { skip_phase F "S3 object CRUD (replaces COS in Sprint 2)"     "Sprint 3 implements dry-run; live apply gates on spike"; }
 phase_G() { skip_phase G "passthrough commands (aws / kubectl / exec)"   "Sprint 3 implements dry-run; spike validates apply"; }
 phase_H() { skip_phase H "final cleanup (workspace teardown)"            "Sprint 3 implements dry-run; live apply gates on spike"; }
-phase_I() { skip_phase I "backend matrix — local execution backend"     "Sprint 4"; }
-phase_J() { skip_phase J "backend matrix — docker execution backend"    "Sprint 4"; }
-phase_K() { skip_phase K "backend matrix — multi-tool docker phase"     "Sprint 4"; }
-phase_L() { skip_phase L "backend matrix — k8s execution backend"       "Sprint 4"; }
-phase_M() { skip_phase M "backend matrix — ssh execution backend"       "Sprint 4"; }
-phase_N() { skip_phase N "backend matrix — mixed-mode integration"      "Sprint 4"; }
-phase_L_DNS() { skip_phase L-DNS "AWS-hosted GSLB DNS probe"            "Sprint 4"; }
+phase_I()     { skip_phase I     "backend matrix — local execution backend"                "Sprint 4 implements dry-run; live apply gates on PRD 07 spike"; }
+phase_J()     { skip_phase J     "backend matrix — docker execution backend"               "Sprint 4 implements dry-run; live apply gates on PRD 07 spike"; }
+phase_K()     { skip_phase K     "backend matrix — multi-tool docker phase"                "Sprint 4 implements dry-run; live apply gates on PRD 07 spike"; }
+phase_L()     { skip_phase L     "backend matrix — k8s execution backend (iperf3 + ops pod)" "Sprint 4 implements dry-run; live apply gates on PRD 07 spike"; }
+phase_M()     { skip_phase M     "backend matrix — ssh execution backend"                  "Sprint 4 implements dry-run; live apply gates on PRD 07 spike"; }
+phase_N()     { skip_phase N     "backend matrix — mixed-mode integration"                 "Sprint 4 implements dry-run; live apply gates on PRD 07 spike"; }
+phase_L_DNS() { skip_phase L-DNS "AWS Route 53 GSLB-aware DNS probe (miekg/dns, cross-vantage)" "Sprint 4 implements dry-run; live apply gates on PRD 07 spike"; }
 
 # spike_mode_banner emits the PRD 07 §4 spike protocol as inline text
 # when --spike-mode is set. Sprint 3: still stub-only at the **live**
@@ -172,7 +185,7 @@ should_run() {
 main() {
     bold "awsbnkctl E2E test — run-id $RUN_TS"
     log "log: $RUN_LOG"
-    log "Sprint 3 status: cluster phases at dry-run tier; live apply gates on PRD 07 spike."
+    log "Sprint 4 status: cluster phases A-H + backend phases I-N + L-DNS at dry-run tier; live apply gates on PRD 07 spike."
 
     if [[ "$SPIKE_MODE" == "1" ]]; then
         spike_mode_banner
@@ -198,11 +211,14 @@ main() {
 
     echo "" >&2
     yellow "════════════════════════════════════════════════════════════"
-    yellow "Sprint 3 status: cluster + BNK phases A-H run at dry-run tier"
-    yellow "  (CI: full-up-dryrun job in .github/workflows/ci.yml)."
-    yellow "Live-apply phases gate on the operator-run PRD 07 spike."
-    yellow "Backend phases I-N + L-DNS pending Sprint 4."
-    yellow "(see docs/PLAN.md for the retarget plan; PRD 07 §4 for the spike.)"
+    yellow "Sprint 4 status: cluster + BNK phases A-H and backend phases"
+    yellow "  I-N + L-DNS run at dry-run tier."
+    yellow "  CI gates: full-up-dryrun job + test-dryrun job in"
+    yellow "  .github/workflows/ci.yml."
+    yellow "Live-apply phases gate on the operator-run PRD 07 spike"
+    yellow "  (docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\")."
+    yellow "v1.0 sign-off lands in Sprint 6."
+    yellow "(see docs/PLAN.md § Sprint 4 for the retarget plan.)"
     yellow "════════════════════════════════════════════════════════════"
 }
 

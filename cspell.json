@@ -224,7 +224,13 @@
     "sriovdp",
     "tfstate",
     "tolerations",
-    "VNIC"
+    "VNIC",
+    "Route53",
+    "route53",
+    "iperf3",
+    "PSA",
+    "seccomp",
+    "divergence"
   ],
   "ignorePaths": [
     "book/book/**",

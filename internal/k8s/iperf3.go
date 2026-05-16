@@ -52,11 +52,54 @@ func (c *Client) DeployIperf3(ctx context.Context, opts Iperf3Options) error {
 		return err
 	}
 
-	// SCC posture for OpenShift restricted-v2 + Kubernetes Pod Security
-	// "restricted" admission. Without these fields the pod fails admission
-	// on OpenShift with "must define runAsNonRoot…seccompProfile…".
-	// PRD 03 §"iperf3" §"OpenShift SCC" tracks this fix.
-	pod := &corev1.Pod{
+	pod := BuildIperf3Pod(opts)
+	svc := BuildIperf3Service(opts)
+
+	if _, err := c.clientset.CoreV1().Pods(opts.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating iperf3 pod: %w", err)
+		}
+	}
+	if _, err := c.clientset.CoreV1().Services(opts.Namespace).Create(ctx, svc, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating iperf3 service: %w", err)
+		}
+	}
+	return nil
+}
+
+// BuildIperf3Pod returns the iperf3 server Pod object. Extracted from
+// DeployIperf3 so the PSA-compliance contract is unit-testable without
+// a clientset.
+//
+// SCC / Pod Security Admission posture for EKS 1.25+ `restricted`
+// profile + OpenShift restricted-v2:
+//
+//   - PodSecurityContext.RunAsNonRoot=true (admission rejects RunAsUser=0)
+//   - PodSecurityContext.SeccompProfile.Type=RuntimeDefault (PSA
+//     `restricted` requires a non-Unconfined seccomp profile)
+//   - Container.AllowPrivilegeEscalation=false
+//   - Container.RunAsNonRoot=true (defence-in-depth; pod-level setting
+//     covers but container-level pin is what `restricted` validates
+//     against on EKS)
+//   - Container.Capabilities.Drop=[ALL] (PSA `restricted` requires the
+//     ALL drop to baseline)
+//
+// PRD 03 §"iperf3" §"OpenShift SCC" + Sprint 4 staff brief
+// §"throughput.go PSA compliance" pin this contract.
+//
+// RunAsUser is set to 1000 at the pod level for plain Kubernetes (the
+// bundled awsbnkctl-tools-iperf3 image's USER directive). OpenShift's
+// SCC mutating webhook overrides this with a namespace-allocated UID
+// so the pinned 1000 doesn't collide; on EKS the value is honoured as-is.
+func BuildIperf3Pod(opts Iperf3Options) *corev1.Pod {
+	if opts.Namespace == "" {
+		opts.Namespace = Iperf3Namespace
+	}
+	if opts.Image == "" {
+		opts.Image = Iperf3DefaultImage
+	}
+	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      Iperf3PodName,
 			Namespace: opts.Namespace,
@@ -65,16 +108,7 @@ func (c *Client) DeployIperf3(ctx context.Context, opts Iperf3Options) error {
 		Spec: corev1.PodSpec{
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot: ptr.To(true),
-				// OpenShift's SCC admission overrides RunAsUser with a
-				// project-allocated uid; on plain k8s (kind, minikube)
-				// the bundled awsbnkctl-tools-iperf3 image must respect
-				// uid 1000 (see tools/docker/iperf3/Dockerfile USER
-				// directive). The networkstatic/iperf3 default image
-				// runs as root and will fail admission with RunAsNonRoot
-				// — users on plain k8s should switch to the bundled
-				// image (set test.throughput.image to
-				// ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3:<v>).
-				RunAsUser: ptr.To(int64(1000)),
+				RunAsUser:    ptr.To(int64(1000)),
 				SeccompProfile: &corev1.SeccompProfile{
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
@@ -95,8 +129,28 @@ func (c *Client) DeployIperf3(ctx context.Context, opts Iperf3Options) error {
 			RestartPolicy: corev1.RestartPolicyAlways,
 		},
 	}
+}
 
-	svc := &corev1.Service{
+// BuildIperf3Service returns the iperf3 Service object. Extracted from
+// DeployIperf3 for parity with BuildIperf3Pod — keeps the spec-builder
+// surface unit-testable.
+//
+// When opts.ServiceType=LoadBalancer on EKS, the AWS Load Balancer
+// Controller (or the in-tree provider) provisions an NLB by default.
+// Operators can set the workspace's
+// test.throughput.lb_annotations map to add AWS-specific annotations
+// such as `service.beta.kubernetes.io/aws-load-balancer-type: external`
+// + `service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip`
+// for the modern NLB shape. v0.x reads no such annotations; the
+// AWS-default NLB is acceptable for north-south throughput testing.
+func BuildIperf3Service(opts Iperf3Options) *corev1.Service {
+	if opts.Namespace == "" {
+		opts.Namespace = Iperf3Namespace
+	}
+	if opts.ServiceType == "" {
+		opts.ServiceType = corev1.ServiceTypeClusterIP
+	}
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      Iperf3SvcName,
 			Namespace: opts.Namespace,
@@ -112,18 +166,6 @@ func (c *Client) DeployIperf3(ctx context.Context, opts Iperf3Options) error {
 			}},
 		},
 	}
-
-	if _, err := c.clientset.CoreV1().Pods(opts.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("creating iperf3 pod: %w", err)
-		}
-	}
-	if _, err := c.clientset.CoreV1().Services(opts.Namespace).Create(ctx, svc, metav1.CreateOptions{}); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("creating iperf3 service: %w", err)
-		}
-	}
-	return nil
 }
 
 // ensureNamespace creates the namespace if it doesn't already exist.

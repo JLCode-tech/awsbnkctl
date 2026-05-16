@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -188,6 +189,24 @@ func runFullLifecyclePlan(ctx context.Context) error {
 		cctx = &config.Context{WorkspaceName: "default"}
 	}
 
+	// Sprint 3 tech-writer Issue 3 (medium) — first-run UX gap.
+	// Without a prior `awsbnkctl init`, the user hits terraform's
+	// "no value for required variable" stack trace for vpc_id,
+	// subnet_ids, far_auth_file_local_path, jwt_file_local_path.
+	// That's a confusing first encounter — the resolution is `init`,
+	// not "fix the terraform error". Surface a friendly message
+	// before terraform boots so the user knows what to run.
+	//
+	// Operators who genuinely want to plan against externally-supplied
+	// tfvars (CI on a fresh checkout) can pass --var-file=… or set
+	// TF_VAR_* env vars; those paths bypass this gate by virtue of
+	// having a workspace OR by failing terraform's check later (the
+	// var-file flow needs a workspace anyway for state-dir resolution).
+	if cctx.Workspace == nil && len(flagVarFiles) == 0 {
+		return fmt.Errorf("workspace %q is not initialised — run `awsbnkctl init -w %s` first to capture region / VPC / subnets / FAR archive / JWT, or pass --var-file=<path> to supply values directly",
+			cctx.WorkspaceName, cctx.WorkspaceName)
+	}
+
 	if !awsaws.HasEnvCredentials() {
 		fmt.Fprintln(os.Stderr, "warning: AWS credentials not detected (set AWS_PROFILE, AWS_ACCESS_KEY_ID, or run from an instance with an attached role); plan will fail when terraform tries to call AWS APIs")
 	}
@@ -230,7 +249,7 @@ func runFullLifecyclePlan(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "→ terraform plan (dry-run; no apply)")
 	hasChanges, err := tfws.Plan(ctx)
 	if err != nil {
-		return fmt.Errorf("terraform plan: %w", err)
+		return translatePlanError(err, cctx.WorkspaceName)
 	}
 	if hasChanges {
 		fmt.Fprintln(os.Stderr, "✓ plan complete — full Sprint 3 graph planned; changes pending (live apply gated on PRD 07 spike)")
@@ -238,4 +257,24 @@ func runFullLifecyclePlan(ctx context.Context) error {
 		fmt.Fprintln(os.Stderr, "✓ plan complete — no changes")
 	}
 	return nil
+}
+
+// translatePlanError catches the most-common "missing required
+// variable" terraform errors and converts them to a single-line
+// `awsbnkctl`-shaped hint. The raw terraform error is preserved (still
+// printed to stderr by the tf wrapper) so debugging info isn't lost;
+// the returned error is the actionable summary the operator sees in
+// `awsbnkctl: <err>` on the last line.
+//
+// Sprint 3 tech-writer Issue 3 carry-over fold.
+func translatePlanError(err error, wsName string) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "No value for required variable") ||
+		strings.Contains(msg, "no value for required variable") {
+		return fmt.Errorf("terraform plan: required variables unset for workspace %q — run `awsbnkctl init -w %s` to capture region / VPC / subnets / FAR archive / JWT, or pass --var-file=<path> with values", wsName, wsName)
+	}
+	return fmt.Errorf("terraform plan: %w", err)
 }
