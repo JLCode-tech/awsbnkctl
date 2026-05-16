@@ -410,9 +410,8 @@ func runDNSGSLBCompare(ctx context.Context, cctx *config.Context, target string,
 //   - "k8s" runs in-cluster as a one-shot Job that re-execs the
 //     `awsbnkctl` binary with the same probe args + `-o json`. The
 //     binary lives inside the ops pod's image (the bundled tools
-//     image ships with `/usr/local/bin/awsbnkctl` alongside
-//     `ibmcloud`). The Job's stdout is parsed back into a
-//     DNSProbeResult.
+//     image ships `/usr/local/bin/awsbnkctl`). The Job's stdout is
+//     parsed back into a DNSProbeResult.
 //   - "ssh:<target>" runs the binary on the named SSH target.
 //
 // Sprint 5 implements local + k8s; ssh is a stub that returns an
@@ -441,7 +440,7 @@ func dispatchDNSProbe(ctx context.Context, cctx *config.Context, spec, target st
 // runDNSProbeK8s executes the DNS probe inside the cluster as a
 // one-shot Job that self-execs `awsbnkctl test dns ...` against the
 // same flags. The Job's image is the bundled ops pod image (which
-// carries the `awsbnkctl` binary alongside `ibmcloud`).
+// carries the `awsbnkctl` binary).
 //
 // PRD 03 §"DNS probe" §"K8s shape": the binary itself runs in-cluster;
 // no separate image needed.

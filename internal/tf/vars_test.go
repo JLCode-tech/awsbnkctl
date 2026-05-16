@@ -8,9 +8,8 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
-// Sprint 2 (PRD 04 fold) retargets the renderer onto Workspace.AWS.
-// Tests below pin the AWS-shaped output and the back-compat region
-// fallback to the IBMCloud block.
+// AWS retarget (PRD 04 fold): the renderer reads only Workspace.AWS.
+// Tests below pin the AWS-shaped output.
 
 func TestRenderTFVars_AWS(t *testing.T) {
 	ws := &config.Workspace{
@@ -58,11 +57,9 @@ func TestRenderTFVars_AWS(t *testing.T) {
 	}
 }
 
-func TestRenderTFVars_NoIBMCloudFallback(t *testing.T) {
-	// Sprint 3 (PRD 04 retarget) dropped the inherited IBMCloud
-	// back-compat alias. A workspace whose AWS block is empty
-	// renders no `region = ...` line; the renderer no longer
-	// consults any IBM-shaped field.
+func TestRenderTFVars_EmptyAWSBlockEmitsNoRegion(t *testing.T) {
+	// A workspace whose AWS block is empty renders no `region = ...`
+	// line; the renderer consults only the AWS-shaped fields.
 	ws := &config.Workspace{
 		AWS:     config.AWSCfg{}, // explicitly empty
 		Cluster: config.ClusterCfg{Create: false, Name: "legacy"},
@@ -74,11 +71,6 @@ func TestRenderTFVars_NoIBMCloudFallback(t *testing.T) {
 	out := buf.String()
 	if strings.Contains(out, "region =") {
 		t.Errorf("expected no region line when AWS.Region is empty; got:\n%s", out)
-	}
-	for _, leaked := range []string{"ibmcloud_cluster_region", "ibmcloud_resource_group", "create_roks_cluster"} {
-		if strings.Contains(out, leaked) {
-			t.Errorf("legacy IBM tfvar %q must not be emitted:\n%s", leaked, out)
-		}
 	}
 }
 

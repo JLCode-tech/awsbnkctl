@@ -92,8 +92,8 @@ func startSSHContainer(ctx context.Context, t *testing.T) *sshFixture {
 
 	// linuxserver/openssh-server reads PUBLIC_KEY (and PUBLIC_KEY_FILE)
 	// at startup; whatever we hand in becomes authorized_keys for USER_NAME.
-	// PASSWORD_ACCESS=false enforces key-only auth — matches what `ibmcloud`
-	// jumphosts ship and what we want to validate against.
+	// PASSWORD_ACCESS=false enforces key-only auth — matches what
+	// production jumphosts ship and what we want to validate against.
 	user := "testuser"
 	req := testcontainers.ContainerRequest{
 		Image:        "lscr.io/linuxserver/openssh-server:latest",

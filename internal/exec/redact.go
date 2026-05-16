@@ -7,12 +7,10 @@ import (
 
 // redactMarker is the placeholder substituted for any matched secret.
 // PRD 04 §"Cross-backend principles" #1 — backends shouldn't leak creds,
-// but the redactor catches accidental tool-side prints (e.g., an
-// `ibmcloud` debug dump that includes env vars). The marker is plain
-// ASCII so it shows up cleanly in any sink (terminal, file, log
-// pipeline). The validator's redact_test.go uses the same string under
-// the name `redactMarker`; ours is `redactMarker` to avoid a same-
-// package redeclare collision.
+// but the redactor catches accidental tool-side prints (e.g., a tool
+// running with verbose-logging that includes secret env vars). The
+// marker is plain ASCII so it shows up cleanly in any sink (terminal,
+// file, log pipeline).
 const redactMarker = "[REDACTED]"
 
 // redactor wraps an io.Writer and substitutes redactMarker for any

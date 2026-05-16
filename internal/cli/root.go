@@ -92,7 +92,7 @@ func warnLegacyState(_ *cobra.Command, _ []string) error {
 //
 // Loads $PWD/.env at startup if present — godotenv's Load does NOT
 // overwrite existing env vars, so anything already in the shell wins.
-// Lets users keep IBMCLOUD_API_KEY, GITHUB_TOKEN, TF_VAR_* etc. in a
+// Lets users keep AWS_PROFILE, GITHUB_TOKEN, TF_VAR_* etc. in a
 // project-scoped file instead of shell profiles.
 func Execute() {
 	loadDotenv()

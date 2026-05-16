@@ -91,8 +91,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Sprint 3 (PRD 04 retarget): AWS is the only first-class cloud
-	// block; the inherited IBMCloud fallback dropped.
+	// AWS is the only first-class cloud block (PRD 04 retarget).
 	region := cctx.Workspace.AWS.Region
 	fmt.Fprintf(tw, "Region:\t%s\n", or(region, "(unset)"))
 	if cctx.Workspace.AWS.Profile != "" {

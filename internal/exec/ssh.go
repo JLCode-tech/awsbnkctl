@@ -19,22 +19,14 @@ const (
 	sshExitStartedThenFailed = 126 // session established but exec couldn't spawn the wrapped process
 )
 
-// toolPackages maps argv[0] tool names to the apt package + repo
-// metadata the SSH bootstrap path needs. Sprint 4 covers iperf3 and
-// ibmcloud; future tools register here.
-//
-// IBMRepo=true triggers the "add IBM apt repo + GPG key" pre-step
-// before the install. The Sprint 0 jumphost integration tests pinned
-// `jammy` (Ubuntu 22.04); we keep that for v1 and bump in a later
-// sprint when noble (24.04) becomes the default ROKS jumphost image.
+// toolPackages maps argv[0] tool names to the apt package metadata the
+// SSH bootstrap path needs. Future tools register here.
 type toolPackage struct {
-	Name    string
-	IBMRepo bool
+	Name string
 }
 
 var toolPackages = map[string]toolPackage{
-	"iperf3":   {Name: "iperf3", IBMRepo: false},
-	"ibmcloud": {Name: "ibmcloud-cli", IBMRepo: true},
+	"iperf3": {Name: "iperf3"},
 }
 
 // SSHBackendOpts are runtime knobs the SSH backend reads via package-
@@ -323,22 +315,6 @@ func (b *SSHBackend) ensureTool(ctx context.Context, client remoteClient, tool s
 		return sshExitStartedThenFailed, fmt.Errorf("ssh: --bootstrap auto-install only supports Ubuntu (got %q); pre-install %s on the target", osID, pkg.Name)
 	}
 
-	// IBM apt repo + GPG key for ibmcloud-cli.
-	if pkg.IBMRepo {
-		repoCmd := "set -e; " +
-			"curl -fsSL https://download.clis.cloud.ibm.com/Linux/Ubuntu/repo.gpg | sudo -n apt-key add - && " +
-			"echo 'deb https://download.clis.cloud.ibm.com/Linux/Ubuntu jammy main' | sudo -n tee /etc/apt/sources.list.d/ibmcloud.list >/dev/null"
-		rc, err := client.Run(ctx, []string{"sh", "-c", repoCmd}, remote.RunOpts{
-			Stdout: io.Discard, Stderr: io.Discard,
-		})
-		if err != nil {
-			return sshExitFailedToStart, fmt.Errorf("ssh: adding IBM apt repo: %w", err)
-		}
-		if rc != 0 {
-			return sshExitFailedToStart, fmt.Errorf("ssh: adding IBM apt repo failed (rc=%d) — target can't reach https://download.clis.cloud.ibm.com or sudo password required", rc)
-		}
-	}
-
 	// apt-get update + install with sudo -n (passwordless required).
 	rc, err := client.Run(ctx, []string{"sudo", "-n", "apt-get", "update", "-y"}, remote.RunOpts{
 		Stdout: io.Discard, Stderr: io.Discard,
@@ -518,20 +494,15 @@ func (b *SSHBackend) runViaWrapper(ctx context.Context, client remoteClient, tem
 //
 // Local-user / local-session env vars are NOT propagated to the remote
 // shell — they reference paths and identities that only exist on the
-// caller's host (e.g. HOME=/home/jgruber on the local machine doesn't
+// caller's host (e.g. HOME=/home/<user> on the local machine doesn't
 // exist on a Ubuntu jumphost where the remote user is `ubuntu`). The
-// remote shell starts with its own login env (HOME, USER, PATH, etc.)
-// and the project-specific vars (IBMCLOUD_*, KUBECONFIG, ROKSBNKCTL_*,
-// TERM, LANG) we deliberately propagate sit on top of that.
-//
-// Without this filter, the remote ibmcloud CLI tries to mkdir the
-// caller's local HOME path and fails with "Configuration error: mkdir
-// /home/jgruber: permission denied" (e2e Phase I2 surfaced this).
+// remote shell starts with its own login env (HOME, USER, PATH, etc.);
+// project-specific vars (AWS_*, KUBECONFIG, AWSBNKCTL_*, TERM, LANG)
+// sit on top of that.
 func mergeSSHEnv(env []string, creds *Credentials) []string {
 	// Env keys that are per-user or per-session on the caller's host.
 	// Stripping them lets the remote shell use its own login-derived
-	// values. Match exact key names; substrings are NOT matched (we
-	// don't want to accidentally drop IBMCLOUD_HOME or similar).
+	// values. Match exact key names; substrings are NOT matched.
 	localOnly := map[string]bool{
 		"HOME":    true,
 		"USER":    true,

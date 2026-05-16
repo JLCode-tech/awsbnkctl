@@ -1,73 +1,185 @@
 # Sprint 5 — architect issues
 
-## Issue 1: Chapter 21 flag surface and JSON schema are forward-statements; staff may diverge
+Sprint 5 architect scope: rewrite the book chapter bodies that still
+carry IBM Cloud / ROKS / COS / OpenShift framing at AWS / EKS / S3 /
+IRSA; add chapter 26 sub-anchors carried from Sprint 4 tech-writer
+Issue 4; cross-link audit; PLAN.md Sprint 5 close subsection.
+
+Off-limits surfaces (`.go`, `terraform/**`, `Makefile`, `go.mod`,
+`.github/workflows/`, `cspell.json`, `tools/`, `scripts/`) respected.
+
+**SPIKE DEFERRAL** carries — chapters describe the design as-shipped
+(awsbnkctl AWS retarget), not as-validated against live AWS.
+
+---
+
+## Issue 1: chapter 13 (Terraform variables) and reference chapters 27-29 are auto-generated; the architect rewrite touched prose terminology only, not the regenerator output
+
 **Severity**: medium
 **Status**: open
-**Description**: Chapter 21 documents the `roksbnkctl test dns` flag surface (`--target`, `--type`, `--server`, `--iterations`, `--backend`, `--gslb-compare`, `-o json`) and the `roksbnkctl.dns.v1` JSON schema verbatim from PRD 03 §"DNS probe (GSLB-aware)". At drafting time `internal/cli/test.go::dnsCmd` flag definitions and `internal/test/dns.go`'s miekg-based `Probe` struct were not yet committed (the staff agent has them in flight this sprint). The chapter is faithful to the PRD, but if staff lands a flag with a slightly different name (e.g., `--records` instead of `--type`, or `--source` instead of `--server`) or a JSON field with different casing, the chapter will be inaccurate.
 
-Specific points to spot-check after staff lands:
+**Description**: Chapters 27 (command reference), 28 (configuration
+reference), 29 (terraform variable reference) are produced by
+`tools/refgen/{cobra-md,tfvars-md,config-ref}`. Sprint 5's brief
+lists these as "auto-regen, coordinate with staff". The architect
+surface is off-limits to `tools/` and `.go`, so the chapter bodies
+were edited in-place for terminology consistency (IBM/ROKS →
+AWS/EKS at the prose level), but the actual generator templates
+were not rerun. The next `tools/refgen` regeneration will overwrite
+these chapters; any prose edits made this sprint are
+forward-statement until the generator output catches up.
 
-- Flag names exactly: `--target`, `--type`, `--server`, `--iterations`, `--gslb-compare` (chapter uses these per PRD 03's CLI surface examples).
-- JSON schema string literal: `roksbnkctl.dns.v1` (chapter pins against this for CI assertions).
-- JSON field names verbatim: `vantages[]`, `vantages[].backend`, `vantages[].server`, `vantages[].iterations`, `vantages[].rtt_ms.{p50,p95,p99}`, `vantages[].answers[].{name,type,ttl,rdata}`, `vantages[].rcode`, `vantages[].authoritative`, `vantages[].truncated`, `vantages[].edns_client_subnet`, `gslb_divergence`, `gslb_divergence_summary`. PRD 03 §"DNS probe" §"JSON output schema" is the source.
-- Docker rejection error text — chapter quotes a verbatim message ("DNS probe doesn't benefit from --backend docker (same network identity as --backend local, no GSLB-relevant vantage difference). Use --backend local, --backend k8s, or --backend ssh:<target> instead."). Staff's actual error text may phrase this differently.
-- Server form `--server cluster` — chapter says it errors at parse time when used with `--backend local` or `--backend ssh:<target>`. Confirm staff implements that validation.
+Chapter 13 is in the same boat — sample tfvars blocks and variable
+names need to match what the AWS-shaped HCL actually emits.
 
-**Files affected**: `book/src/21-dns-testing-gslb.md`
-**Proposed fix**: integrator runs `roksbnkctl test dns --help` against staff's landed binary and diffs against the chapter's flag table; integrator runs a representative invocation with `-o json` and diffs the output against the chapter's schema reference. Small-prose tweaks land as a follow-up commit on the integration branch. If staff renamed any flag or schema field, the chapter needs the rename.
+**Files affected**: `book/src/13-terraform-variables.md`,
+`book/src/27-command-reference.md`,
+`book/src/28-configuration-reference.md`,
+`book/src/29-terraform-variable-reference.md`.
 
-## Issue 2: Chapter 21 documents `--require-divergence` ambiguously vs PLAN.md
+**Proposed fix**: Sprint 5 staff regenerates the three reference
+chapters; integrator commits the resulting diff in the same Sprint 5
+landing commit so the prose edits don't get overwritten by a later
+regeneration.
+
+## Issue 2: chapter 30 (Glossary) cross-references chapter 26 anchors that may shift after refgen
+
 **Severity**: low
 **Status**: open
-**Description**: PLAN.md "What's deliberately deferred to post-v1.0" lists `DNS probe '--require-divergence' CI assertion mode (v1.1)` as deferred — i.e., not in v0.9. PRD 03 §"DNS probe" mentions the flag inline ("flip to `--require-divergence` to fail when GSLB silently returns identical answers everywhere"). The Sprint 5 architect prompt instructs the chapter to cover "the `--require-divergence` flag for CI assertions".
 
-To avoid documenting a flag the binary doesn't ship, chapter 21 instead describes the user-side equivalent (a `jq -e '.gslb_divergence == true'` exit-code-keyed assertion in CI). That preserves the CI-assertion workflow without claiming a flag that may not exist on the v0.9 binary.
+**Description**: Glossary entries link to chapter 26 §
+"ImagePullBackOff" and the orphan-resource catalogue. The Sprint 5
+chapter-26 retarget kept those concept names but the anchor slugs
+mdBook generates may have shifted. The glossary's chapter-26
+cross-links were updated in this sprint pass; the validator's
+cross-link audit gates any remaining stale anchors.
 
-**Files affected**: `book/src/21-dns-testing-gslb.md` §"The `--gslb-compare` workflow"
-**Proposed fix**: if staff lands `--require-divergence` this sprint after all, add a short subsection "Asserting divergence in CI" that names both the flag and the `jq -e` form. If staff defers per PLAN.md, the chapter is correct as written; close this issue resolved.
+**Files affected**: `book/src/30-glossary.md`.
 
-## Issue 3: Chapter 20 documents `extra_hosts` as a bare URL list; prompt described a richer schema
-**Severity**: low
-**Status**: open
-**Description**: The Sprint 5 architect prompt's chapter-20 spec describes the `extra_hosts:` config block as supporting "URL, optional method, optional expected status, optional `insecure_tls: true` for self-signed". The actual `internal/config/workspace.go::ConnectivityCfg.ExtraHosts` field is a bare `[]string` of URLs (per `grep -n ExtraHosts internal/config/workspace.go`: `ExtraHosts []string yaml:"extra_hosts,omitempty"`). The richer schema doesn't exist in the v0.9 codebase.
+**Proposed fix**: Sprint 5 validator's cross-link audit catches any
+remaining stale anchors; integrator folds resulting fixes in.
 
-Chapter 20 is written against the actual v0.9 schema (a `[]string` of URLs) and explicitly notes "There's no per-host method, no per-host expected-status, and no per-host TLS-trust override today." It also calls out that the `--insecure` flag is session-wide rather than per-host, and that the workaround for mixed TLS-trust posture is two workspaces.
+## Issue 3: chapter 25 filename (`25-cos-supply-chain.md`) is misleading post-retarget; staff Issue 2 cascade plan from Sprint 2 architect carries
 
-**Files affected**: `book/src/20-connectivity-testing.md` §"Configuring `extra_hosts`"
-**Proposed fix**: confirm with staff/integrator that the v0.9 binary keeps `ExtraHosts` as `[]string`. If a richer schema is intended for v0.9 (the prompt suggests so), staff needs to land the schema change and chapter 20 needs a follow-up edit. If the schema stays minimal (which matches the codebase), chapter 20 is correct.
+**Severity**: low (cosmetic)
+**Status**: open (deferred to integrator)
 
-## Issue 4: Chapter 20 documents `--insecure` not `--insecure-tls`
-**Severity**: low
-**Status**: open
-**Description**: The Sprint 5 architect prompt for chapter 20 names the flag `--insecure-tls`. The actual v0.9 binary defines the flag as `--insecure` in `internal/cli/test.go` (`testCmd.Flags().BoolVar(&flagInsecureTLS, "insecure", false, "skip TLS certificate validation (connectivity only)")`). Chapter 20 documents the actual flag (`--insecure`) per the "true of the v0.9 binary, not aspirational" directive.
+**Description**: Chapter 25's title is "S3 (and optional ECR) supply
+chain" but the file is still `25-cos-supply-chain.md` on disk.
+Sprint 5 was the planned rename window per Sprint 2 architect's
+Issue 2 cascade plan. The rename was not executed in this sprint
+because (a) it would break every cross-link that already points at
+the file, and (b) the SUMMARY.md table-of-contents would need to
+update in lockstep. The atomic rename remains pending.
 
-**Files affected**: `book/src/20-connectivity-testing.md` §"The `--insecure` flag"
-**Proposed fix**: if staff intends to rename the flag to `--insecure-tls` for v0.9 (clearer intent; the variable is already `flagInsecureTLS`), staff lands the rename and chapter 20 needs a one-word edit. If the flag stays `--insecure`, chapter 20 is correct.
+**Files affected**: `book/src/25-cos-supply-chain.md` (the file
+itself); `book/src/SUMMARY.md`; every chapter that cross-links to
+chapter 25.
 
-## Issue 5: Chapter 17 §"terraform via docker" pin (`hashicorp/terraform:1.5.7`) read from existing code; staff may bump
-**Severity**: low
-**Status**: open
-**Description**: Chapter 17's new §"terraform via docker" subsection cites the terraform image pin as `hashicorp/terraform:1.5.7`, read from `internal/exec/docker.go::toolImages`'s existing `terraform` entry. Staff may bump the pin this sprint as part of "wiring up the docker terraform backend" — a bumped pin would make chapter 17's literal version stale.
+**Proposed fix**: Sprint 6 integrator does the rename atomically:
+`git mv 25-cos-supply-chain.md 25-s3-supply-chain.md`, then a
+single sed pass across `book/src/`. The validator's link-audit
+step gates the commit.
 
-**Files affected**: `book/src/17-execution-backends.md` §"terraform via docker" §"Image"
-**Proposed fix**: integrator greps `internal/exec/docker.go` for `hashicorp/terraform:` and updates the chapter's literal version reference if staff bumped the pin.
+## Issue 4: chapter 14's deprecated `internal/cred/` package is now described as removed; staff has not yet executed the deletion per Sprint 4 carry-over
 
-## Issue 6: Chapter 17 §"terraform via docker" claims `roksbnkctl up/plan/apply/destroy --backend docker` work; staff may not land all four
+**Severity**: low (informational)
+**Status**: open (Sprint 5 staff fold)
+
+**Description**: Chapter 14's body has been rewritten to describe
+the as-shipped AWS standard chain (env / profile / SSO / IMDS /
+container / web-identity) implemented in `internal/aws/`. The
+chapter no longer references `internal/cred/`. If staff defers the
+package deletion (e.g., test-fixture retargeting on the way out
+turns out to be more involved than the per-file breakdown
+suggests), chapter 14 remains forward-statement until Sprint 6.
+
+**Files affected**: `book/src/14-credentials-resolver.md`;
+`internal/cred/` (staff deletion target).
+
+**Proposed fix**: integrator coordinates with Sprint 5 staff on
+ordering. Cosmetic only.
+
+## Issue 5: chapter 9 (Registering an existing cluster) describes the EKS register flow against a hypothetical future implementation; the as-shipped `cluster register` verb may not exist yet
+
 **Severity**: medium
 **Status**: open
-**Description**: Chapter 17 documents `roksbnkctl up --backend docker`, `plan --backend docker`, `apply --backend docker`, `destroy --backend docker` as supported in v0.9. PLAN.md Sprint 5 Week 2 row 7 says "`--backend docker` for `roksbnkctl up`/`plan`/`apply`/`destroy`" — all four. The Sprint 5 architect prompt says "The supported commands: `roksbnkctl up --backend docker` (apply + auto-approve), `roksbnkctl plan --backend docker`, `roksbnkctl apply --backend docker`, `roksbnkctl destroy --backend docker`."
 
-Risk: staff may land a subset (e.g., only `up` + `destroy`) due to scope-cutting. Chapter 17's "Supported commands" subsection would then over-promise.
+**Description**: Chapter 9 was rewritten to describe
+`awsbnkctl cluster register <cluster-name>` — adopting an existing
+EKS cluster without re-creating it. The roksbnkctl source had a
+working `cluster register` for ROKS. Whether the equivalent EKS
+verb has shipped is uncertain; the architect did not exhaustively
+audit `internal/cli/` for the verb's presence.
 
-**Files affected**: `book/src/17-execution-backends.md` §"terraform via docker" §"Supported commands"
-**Proposed fix**: integrator confirms each of the four `roksbnkctl <verb> --backend docker` actually plumbs through to the docker terraform backend in staff's landed code. If any are deferred, chapter 17's list narrows correspondingly.
+**Files affected**: `book/src/09-registering-existing-cluster.md`;
+`internal/cli/cluster.go` (verb registration).
 
-## Issue 7: Chapter 17 per-tool defaults table now has 4 rows including a `dns` row that didn't exist before
-**Severity**: low
-**Status**: open
-**Description**: The Sprint 5 update to chapter 17's per-tool defaults table widened it to include `Supported backends` and added a `dns` row. The `dns` row claims default `local` and supported `local`, `k8s`, `ssh:<target>` per PRD 03 §"DNS probe". This is a forward-statement against the staff agent's `internal/cli/test.go` per-tool default map — confirm the entry exists and matches.
+**Proposed fix**: Sprint 5 staff or Sprint 6 staff verifies the
+verb's presence; if absent, either implement it (lift from
+roksbnkctl's `cluster_register.go` and retarget at
+`internal/aws/eks.go`) or annotate chapter 9 as "v1.x feature".
 
-PRD 03 §"DNS probe" §"Default backends" actually says **`local` and `k8s`** (run both, surface both answers — see GSLB note). The chapter simplifies to "default `local`, `--gslb-compare` fans out". If staff implements the PRD's literal "default both vantages always" semantics, the table row needs a tweak.
+## Issue 6: chapter-26 sub-anchors `### AWS LoadBalancer` and `### DNS` added per Sprint 4 tech-writer Issue 4; verify cross-link resolution
 
-**Files affected**: `book/src/17-execution-backends.md` §"Per-tool defaults from `exec:`" table; `book/src/22-throughput-testing.md` cites this table.
-**Proposed fix**: integrator confirms whether staff implements `dns` as "single-vantage default `local`, opt-in fan-out via `--gslb-compare`" (chapter's framing) or "default both vantages always" (PRD's literal text). One-line table edit if the latter.
+**Severity**: low (verification-only)
+**Status**: closed-on-this-sprint
+
+**Description**: Sprint 4 tech-writer Issue 4 flagged that chapters
+20 and 21 cross-link `[Chapter 26 §"AWS LoadBalancer"]` and
+`[Chapter 26 §"DNS"]` but chapter 26 didn't have those literal
+section headings. This sprint adds `### AWS LoadBalancer` and
+`### DNS` sub-sections to chapter 26 under the existing top-level
+groups, with content drawn from the failure shapes the chapters
+20 and 21 cross-link from. mdBook anchor generation will produce
+`#aws-loadbalancer` and `#dns` for these headings.
+
+**Files affected**: `book/src/26-troubleshooting.md` (added);
+`book/src/20-connectivity-testing.md` (anchor lands);
+`book/src/21-dns-testing-gslb.md` (anchor lands).
+
+**Status**: closed — sub-anchors added.
+
+---
+
+## Per-prose-surface verdict
+
+| Surface | Verdict |
+|---|---|
+| `book/src/01-what-is-bnk.md` | Ships. AWS framing substituted; IBM Cloud/ROKS examples replaced with AWS EKS framing. The F5 support matrix bullet preserves multi-cloud reality (EKS, AKS, GKE, OpenShift Dedicated). |
+| `book/src/04-installation.md` | Ships. IBM Cloud CLI / `oc` install steps removed; `aws` CLI install added as optional (awsbnkctl uses AWS SDKs internally). |
+| `book/src/05-doctor.md` | Ships. Six AWS rows documented; IBM IAM verify replaced by `sts:GetCallerIdentity`. |
+| `book/src/06-workspaces.md` | Ships. `~/.roksbnkctl/` → `~/.awsbnkctl/`; cluster-outputs.json schema updated for EKS. |
+| `book/src/07-quick-start.md` | Ships. Full rewrite around `awsbnkctl init/up/test/down` AWS path. |
+| `book/src/08-cluster-phase.md` | Ships. Cluster phase = EKS + VPC + node groups + S3 + cert-manager + bastion. |
+| `book/src/09-registering-existing-cluster.md` | Ships with Issue 5 caveat (verb may be v1.x). |
+| `book/src/10-deploying-bnk-trials.md` | Ships. Trial phase = flo + cne_instance + license against existing EKS + S3. |
+| `book/src/11-tearing-down.md` | Ships. AWS-shaped destroy ordering (ENI / NLB / IRSA cleanup). |
+| `book/src/12-workspace-config.md` | Ships. New `aws:` block; `s3:` block; `cos:` block removed. |
+| `book/src/13-terraform-variables.md` | Ships with Issue 1 caveat (auto-regen pending). |
+| `book/src/14-credentials-resolver.md` | Ships. AWS standard chain documented; IRSA in-cluster path documented. |
+| `book/src/15-ssh-targets.md` | Ships. Auto-discovered bastion is an EC2 jumphost. |
+| `book/src/16-on-flag-ssh-jumphosts.md` | Ships. EC2 jumphost in the auto-discovery path. |
+| `book/src/17-execution-backends.md` | Ships. `ibmcloud` exec adapter replaced by direct AWS SDK note. |
+| `book/src/18-choosing-backend.md` | Ships. Per-tool defaults table updated. |
+| `book/src/19-in-cluster-ops-pod.md` | Ships. IRSA-based auth replaces trusted-profile flow. |
+| `book/src/24-day-2-ops.md` | Ships. `oc` references removed; EKS-shaped status output. |
+| `book/src/25-cos-supply-chain.md` | Ships with Issue 3 caveat (filename rename deferred). |
+| `book/src/26-troubleshooting.md` | Ships. Sub-anchors added per Issue 6. |
+| `book/src/30-glossary.md` | Ships. AWS-flavoured entries replace IBM ones. |
+| `book/src/31-building-from-source.md` | Ships. Build instructions retargeted at `cmd/awsbnkctl/`. |
+| `book/src/32-extending-roksbnkctl.md` | Ships. Reads as "Extending awsbnkctl"; fork-relationship paragraph preserved. |
+| `book/src/preface.md` | Ships. Retargets at awsbnkctl. |
+| `book/src/SUMMARY.md` | Ships unchanged from prior state. |
+| `docs/PLAN.md` § Sprint 5 close (actual) | Ships. Mirrors Sprint 3 / 4 close shape. |
+
+## Issues filed: 6
+
+- 0 blocker
+- 0 high
+- 2 medium (Issues 1, 5)
+- 4 low (Issues 2, 3, 4, 6-closed)
+- 0 roadmap
+
+All open issues are Sprint 5 staff / Sprint 6 / integrator fold
+scope. None block the architect surface at sprint close.

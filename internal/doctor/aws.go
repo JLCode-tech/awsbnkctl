@@ -311,8 +311,8 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 }
 
 // awsRegionFromContext extracts the AWS region from the workspace
-// config if present. Sprint 3 (PRD 04 retarget) dropped the legacy
-// IBMCloud.Region fallback; AWS is the only first-class block.
+// config if present. AWS is the only first-class cloud block
+// (PRD 04 retarget).
 //
 // Empty return falls through to the SDK's default chain, which reads
 // AWS_REGION env / shared config. internal/aws's NewClients surfaces

@@ -32,8 +32,8 @@ import (
 // content, just returns it without re-downloading.
 //
 // stripping: GitHub tarballs have a single top-level dir (e.g.
-// "ibmcloud_terraform_bigip_next_for_kubernetes_2_3-0.6.7/"); we strip
-// it so the .tf files land directly under the dest.
+// "awsbnkctl-tf-0.6.7/"); we strip it so the .tf files land directly
+// under the dest.
 func FetchSource(ctx context.Context, src config.TFSourceCfg, baseDir string) (string, error) {
 	switch src.Type {
 	case "", "embedded":

@@ -63,7 +63,7 @@ func NewFromKubeconfigFile(path string) (*Client, error) {
 func NewFromDefault() (*Client, error) {
 	path := DefaultKubeconfigPath()
 	if path == "" {
-		return nil, errors.New("no kubeconfig found: set $KUBECONFIG or run `ibmcloud ks cluster config --admin -c <cluster>`")
+		return nil, errors.New("no kubeconfig found: set $KUBECONFIG or run `aws eks update-kubeconfig --name <cluster> --region <region>`")
 	}
 	return NewFromKubeconfigFile(path)
 }

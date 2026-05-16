@@ -6,11 +6,11 @@
 //     teardown)
 //   - (v1.x) component log fetching, pod-readiness watch for status
 //
-// `awsbnkctl kubectl` and `awsbnkctl oc` shell to local installs and do not
-// use this package — they're convenience verbs that just load the
-// workspace's KUBECONFIG before exec'ing.
+// `awsbnkctl kubectl` shells to a local install and does not use this
+// package — it's a convenience verb that just loads the workspace's
+// KUBECONFIG before exec'ing.
 //
 // Kubeconfig source for v1: $KUBECONFIG env or ~/.kube/config. v1.x
-// adds direct fetch from the IBM container service SDK so users don't
-// need to run `ibmcloud ks cluster config --admin` themselves.
+// adds direct fetch from the AWS EKS SDK so users don't need to run
+// `aws eks update-kubeconfig` themselves.
 package k8s
