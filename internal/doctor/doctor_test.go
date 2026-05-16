@@ -28,13 +28,23 @@ import (
 // TestRunWithWhy_StockDevBox_NoWorkspace asserts: on a host with
 // (potentially) no kubectl/oc/ibmcloud/iperf3/dig and no workspace
 // initialised, the doctor emits no StatusError rows. The only
-// "required" tool is terraform; if terraform itself isn't on the
-// host, this test naturally returns an error row for it — that's
-// the intentional one hard fail.
+// "required" tools are terraform + helm; if either isn't on the
+// host, this test naturally returns an error row for it — those are
+// the intentional hard fails.
+//
+// Sprint 3 (closes Sprint 2 tech-writer Issue 4): the AWS-row block
+// now surfaces unconditionally — on a stock dev box without AWS
+// credentials configured, the `aws credentials` row is StatusWarning
+// (naming the missing AWS_PROFILE / AWS_ACCESS_KEY_ID env var) and
+// every downstream AWS row (sts / eks / ec2 / s3 / iam) is
+// StatusSkipped. The contract widens to allow that one warning row
+// and the cascade of skipped rows in addition to the unchanged
+// `workspace` warning.
 //
 // The test passes a nil-Workspace config.Context so the workspace +
-// API-key + IAM-auth checks degrade to "no workspace" warnings, not
-// errors. This is the "fresh dev box, before `awsbnkctl init`" shape.
+// IAM-auth checks degrade to "no workspace" / "no credentials"
+// warnings, not errors. This is the "fresh dev box, before
+// `awsbnkctl init`" shape.
 func TestRunWithWhy_StockDevBox_NoWorkspace(t *testing.T) {
 	cctx := &config.Context{WorkspaceName: "test-stock-dev"}
 	pairs := runWithWhy(context.Background(), cctx)
@@ -53,11 +63,23 @@ func TestRunWithWhy_StockDevBox_NoWorkspace(t *testing.T) {
 					p.Check.Name, p.Check.Detail)
 			}
 		case StatusWarning:
-			// The workspace check returns StatusWarning when the
-			// workspace isn't initialised — that's expected on a
-			// fresh dev box. Other warnings are flagged for review.
-			if p.Check.Name != "workspace" {
-				t.Errorf("unexpected StatusWarning on %q: %s — Sprint 6 green-by-default contract expects 0 warnings except 'workspace not initialised'",
+			// Allowed warnings: `workspace` (unchanged) +
+			// `aws credentials` (Sprint 3 visibility relaxation —
+			// closes Sprint 2 tech-writer Issue 4).
+			switch p.Check.Name {
+			case "workspace", "aws credentials":
+				// expected
+			default:
+				t.Errorf("unexpected StatusWarning on %q: %s — Sprint 3 contract allows 'workspace' + 'aws credentials' warnings only",
+					p.Check.Name, p.Check.Detail)
+			}
+		case StatusSkipped:
+			// Downstream AWS rows (sts / eks / ec2 / s3 / iam) are
+			// Skipped when `aws credentials` failed; that's the
+			// documented degrade. Any other Skipped row is a
+			// regression.
+			if !strings.HasPrefix(p.Check.Name, "aws ") {
+				t.Errorf("unexpected StatusSkipped on %q: %s — only `aws *` rows may be Skipped on a stock dev box",
 					p.Check.Name, p.Check.Detail)
 			}
 		}

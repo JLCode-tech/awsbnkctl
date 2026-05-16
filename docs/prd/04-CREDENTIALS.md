@@ -3,6 +3,81 @@
 > Cross-cutting concern for [PRD 03 (execution backends)](./03-EXECUTION-BACKENDS.md). Read this before designing or reviewing the backend interfaces.
 >
 > Estimated effort: small in code (~300 LOC), medium in design care.
+>
+> **awsbnkctl note (Sprint 3).** This PRD is inherited from `roksbnkctl@v1.2.1`. The IBM-specific sections below — the `IBMCLOUD_API_KEY` resolver chain, the docker tmpfile-bind-mount pattern, the IBM Trusted Profile auto-provisioning path — describe the v1.2 shape of the upstream tool and are retained for historical context. The AWS-retargeted shape lives in [§"Resolved in Sprint 3"](#resolved-in-sprint-3) and replaces the IBM-Cloud surface end-to-end: host-side credentials resolve via the AWS standard chain (env → profile → instance role → SSO), in-cluster workload identity is IRSA (see [PRD 08](./08-S3-SUPPLY-CHAIN-IRSA.md)), and the SSH / docker / k8s backends are retargeted accordingly. Read the Sprint 3 section first if you only care about the AWS path.
+
+## Resolved in Sprint 3
+
+Sprint 3 (`v0.5`) closes the IBM → AWS cred-chain retarget that was deferred from Sprint 2 alongside the Workspace alias rename (`Workspace.IBMCloud` → `Workspace.AWS`). The user-facing shape lives in [Chapter 14 — Credentials and the AWS resolver chain](../../book/src/14-credentials-resolver.md); the in-cluster shape lives in [Chapter 25 — S3 (and optional ECR) supply chain](../../book/src/25-cos-supply-chain.md) and [PRD 08](./08-S3-SUPPLY-CHAIN-IRSA.md).
+
+### Host-side: the AWS standard credential chain
+
+The `roksbnkctl` host-side chain (`IBMCLOUD_API_KEY` env → OS keychain → workspace `api_key_b64` → interactive prompt) is replaced by the AWS standard chain that aws-sdk-go-v2 implements out of the box. `internal/cred.Resolver` (Sprint 3 staff implementation) delegates to `config.LoadDefaultConfig(ctx)` for resolution and surfaces the resolved provider name for doctor reporting. The order of resolution:
+
+| # | Source | Provider name (sdk) | Notes |
+|---|---|---|---|
+| 1 | Env vars (`AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` [+ `AWS_SESSION_TOKEN`]) | `EnvironmentCredentials` | The CI / explicit-injection path. `AWS_PROFILE` selects an alternate profile from the shared config; `AWS_REGION` overrides the workspace's region setting. |
+| 2 | Shared config files (`~/.aws/credentials`, `~/.aws/config`) | `SharedConfigCredentials` | The dev-box path. Honours `AWS_PROFILE`; honours `source_profile` for role chaining. |
+| 3 | SSO / IAM Identity Center (`sso_session` / `sso_account_id` in `~/.aws/config`) | `SSOCredentials` | Picks up `aws sso login`-cached tokens. `awsbnkctl` does not initiate SSO login itself in v0.x; the operator runs `aws sso login` once per session and the cached token flows through this chain transparently. |
+| 4 | EC2 instance-role IMDSv2 | `IMDSCredentials` | The CI-on-EC2 / bastion path. Used when `awsbnkctl` runs from an EC2 instance with an attached instance profile; no static keys needed on disk. |
+| 5 | ECS / EKS pod task role (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`) | `ContainerCredentials` | The "ops pod running awsbnkctl against another cluster" path. Same chain link the IRSA webhook injects, but for the *host-side* awsbnkctl invocation, not the in-cluster FLO pod. |
+| 6 | Web identity token (`AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`) | `WebIdentityCredentials` | The GitHub-Actions-OIDC-against-AWS path. |
+
+There is **no interactive prompt fallback** — when no chain link resolves, `awsbnkctl` errors with a deterministic message naming the resolved provider list and pointing at `awsbnkctl doctor` for diagnosis. This is a deliberate departure from the upstream `roksbnkctl` chain's "prompt for API key" tail: AWS credentials are multi-field (key ID + secret + optional session token + optional region + optional MFA), they have no canonical single-field stdin shape, and the recommended path on every supported platform is `aws configure` or `aws sso login` rather than ad-hoc prompting. The TTY/non-TTY behaviour is uniform: both error identically, both point at the same remediation.
+
+### In-cluster: IRSA replaces Trusted Profile
+
+The upstream `roksbnkctl` k8s backend's IBM Trusted Profile auto-provisioning ([§"Resolved in Sprint 9"](#resolved-in-sprint-9) below) maps directly onto IRSA on AWS — the same "no static key in any Secret" property, the same projected-SA-token-as-OIDC-proof flow, the same lifetime semantics. The shape:
+
+- **EKS OIDC provider** — created by `terraform/modules/eks_cluster/` per PRD 07; replaces the IBM Cloud OIDC issuer the v1.2 upstream `ops install --trusted-profile=auto` flow bound against.
+- **IAM role per workload** — `awsbnkctl-ops-<workspace>` ops-pod role (Sprint 4) + `awsbnkctl-<workspace>-flo-supply-reader` FLO role (Sprint 3); each one's trust policy pins `<oidc-issuer>:sub` to a specific `system:serviceaccount:<ns>:<name>`. Replaces the per-workspace trusted-profile naming.
+- **Pod-identity webhook injection** — the EKS-managed webhook injects `AWS_ROLE_ARN` + `AWS_WEB_IDENTITY_TOKEN_FILE` + a projected SA token volume; aws-sdk-go-v2 inside the pod sees those env vars and assumes the role via `sts:AssumeRoleWithWebIdentity`. Replaces the IBM IAM endpoint's projected-SA-token exchange.
+
+There is no `--trusted-profile={auto,on,off}` flag on the AWS surface — IRSA is the only in-cluster cred path, and the "static key in a Secret" fallback the IBM Cloud path retained is not offered. The trust chain is fully Terraform-managed; doctor probes the assume-role end-to-end (see [Chapter 25 § "Verifying the supply chain end-to-end"](../../book/src/25-cos-supply-chain.md#verifying-the-supply-chain-end-to-end)).
+
+### Backend × credential matrix (AWS retarget)
+
+The retargeted equivalents of the inherited tables further down this PRD:
+
+| Backend | host-side AWS creds | in-cluster AWS creds | SSH key |
+|---|---|---|---|
+| **local** | env / profile / IMDS / SSO via the standard chain; same chain aws-sdk-go-v2 uses. `AWS_PROFILE` / `AWS_REGION` propagate to terraform via `TF_VAR_*` and to the AWS provider via its native env vars. | n/a | n/a |
+| **docker** | bind-mount `~/.aws/` read-only at `/root/.aws:ro` (single dir, not parent); pass `AWS_PROFILE` / `AWS_REGION` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` by name (no `=value` form, value inherits). For SSO-cached tokens, the mount picks up `~/.aws/sso/cache/`. | n/a | n/a |
+| **k8s** | the ops pod's IRSA role (Sprint 4); SA-annotated, webhook-injected. No static key in any Secret. | IRSA via the ops pod's IAM role; the same role aws-sdk-go-v2 picks up via env-var injection. | n/a — SSH not run from inside the cluster |
+| **ssh** | propagate `AWS_PROFILE` (preferred) or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` + `AWS_SESSION_TOKEN` via `ssh -o SetEnv=...`; wrapper-script fallback when `AcceptEnv` isn't configured. The remote target's `~/.aws/credentials` is the canonical source when `AWS_PROFILE` alone is propagated. | n/a | the **backend's own** SSH key — separate from cred-for-tools (unchanged from the inherited shape) |
+
+The anti-patterns from the inherited "Anti-patterns to avoid" list translate directly:
+
+- ❌ `--env AWS_SECRET_ACCESS_KEY=$KEY` — value visible in `docker inspect`. Use `--env AWS_SECRET_ACCESS_KEY` (bare name).
+- ❌ Bind-mounting `~/` or `~/.aws/sso/` parent — exposes other profiles' tokens. Bind-mount `~/.aws/` itself, read-only.
+- ❌ Embedding AWS keys in workspace `config.yaml`. The AWS path has no `api_key_b64` equivalent; static keys belong in `~/.aws/credentials` (the standard chain reads them there) or in env vars.
+
+### Doctor surface (AWS-shaped)
+
+The doctor checks that replace the inherited IBM-Cloud-shaped rows:
+
+| Row | Check |
+|---|---|
+| `aws credentials resolved` | `sts:GetCallerIdentity` succeeds; reports the resolved provider name (env / profile / IMDS / SSO / IRSA / container). |
+| `aws region resolved` | `AWS_REGION` env or `~/.aws/config` profile region is set and is a valid AWS region string. |
+| `aws eks describe-cluster` | When a workspace cluster name is set, `eks:DescribeCluster` succeeds against it. |
+| `aws s3 supply-chain bucket reachable` | When the supply-chain bucket exists, `s3:HeadBucket` succeeds (uses the host-side identity, not IRSA — IRSA is in-cluster only). |
+| `aws iam:GetOpenIDConnectProvider` | OIDC provider exists and matches the eks_cluster output. |
+| `aws irsa flo role assumable` | The FLO IRSA role's trust policy resolves; condition keys match the Sprint 3 `flo` module's SA defaults. |
+
+The interactive-prompt-loop failure mode the inherited PRD covers (CI / non-TTY runs hanging on the `IBMCLOUD_API_KEY` prompt) does not recur on the AWS path — see "no interactive prompt fallback" above.
+
+### Migration from `roksbnkctl`
+
+Users coming from the IBM Cloud path:
+
+1. `IBMCLOUD_API_KEY` → `AWS_PROFILE` (preferred) or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`. Run `aws configure` once per dev box; awsbnkctl picks it up via the standard chain.
+2. OS keychain entry for the IBM API key → no equivalent needed; `~/.aws/credentials` (mode `0600` by `aws configure`) is the canonical disk location.
+3. Workspace `ibmcloud.api_key_b64` → no equivalent. The AWS retarget removes the plaintext-on-disk shortcut; static keys live in `~/.aws/credentials` or in env, nowhere else.
+4. `roksbnkctl ops install --trusted-profile=auto` → `awsbnkctl ops install` (Sprint 4) provisions an IRSA role for the ops pod's ServiceAccount; no flag needed (IRSA is the only path).
+5. FLO Trusted Profile → FLO IRSA role; the `iam_irsa` Terraform module (Sprint 2) creates and binds it; see PRD 08.
+
+See [`MIGRATING.md` § "From roksbnkctl"](../../MIGRATING.md) for the operator-facing migration steps.
 
 ## Resolved in Sprint 9
 

@@ -259,6 +259,25 @@ Replace the IBM COS supply chain with S3 (or ECR mirror) for FAR pull keys, JWT 
 - Module wiring order is fragile — terraform's dependency graph cares about explicit `depends_on` for cross-module readiness gates. roksbnkctl's pattern (each module exports a `ready_id` consumed downstream) carries over verbatim.
 - BNK CNEInstance reconciliation can take 8-15 min; CI test timeouts need explicit budget.
 
+### Sprint 3 close (actual)
+
+What shipped (architect surface — confirmed at this commit):
+
+- **PRD 04 update** — added a top-level §"Resolved in Sprint 3" section documenting the AWS standard credential chain (env / profile / SSO / IMDS / container / web-identity), the IRSA replacement of the upstream IBM Trusted Profile path, the AWS-retargeted backend × credential matrix, the AWS-shaped doctor rows, and the migration steps from `roksbnkctl`. The inherited "Resolved in Sprint 9" IBM-cloud sections are retained as historical context (the upstream's v1.2 surface).
+- **PRD 08 versioning correction** — Decision § now documents that `aws_s3_bucket_versioning.status = "Enabled"` ships unconditionally (no `var.enable_bucket_versioning` toggle), with the audit-trail-outweighs-storage-cost rationale and a corresponding entry in the Trade-offs accepted section. Resolves the Sprint 2 tech-writer Issue 2 PRD ↔ module drift.
+- **Chapter 26 first-pass** — `book/src/26-troubleshooting.md` replaces the inherited IBM-flavoured catalogue with ~1,700 words of AWS-shaped symptom → root-cause → fix entries across cluster + node group (SR-IOV VF advertisement, CNEInstance pending), AWS creds + auth (STS chain resolution, IRSA `AccessDenied`), EKS access (kubeconfig context, access-entry mapping), terraform + quotas (vCPU `VcpuLimitExceeded`, two-AZ subnet requirement, orphan ENI cleanup), and CI-specific (provider-cache invalidation, cred-leak audit). Cross-links to chapters 23, 25, 33 + PRD 04.
+- **Chapter 25 cross-link refresh** — chapter 25's chapter-26 cross-reference now points at a concrete section (`§"AWS credentials + auth"`) instead of the prior forward-reference framing.
+
+What was deferred (carries into Sprint 4 or later):
+
+- **Operator-run spike** (PRD 07 § Spike status) still gates `v0.2`. Sprint 3 closes offline work; live `awsbnkctl apply` against AWS waits on the operator.
+- **Doctor refresh** (`internal/doctor/aws.go`) is Sprint 4. The AWS-shaped doctor rows the PRD 04 update documents land then; PRD 04 codifies the contract Sprint 4 implements.
+- **ECR mirror v1.x first-class** (PRD 08 § Trade-offs).
+- **Chapter 14 deep rewrite** (current chapter targets `IBMCLOUD_API_KEY`; Sprint 5 retargets at the AWS chain) — the PRD 04 cred-chain section is the design surface that rewrite will draw from.
+- **Chapter 25 filename rename** (`25-cos-supply-chain.md` → `25-s3-supply-chain.md`) — Sprint 5 architect, per Sprint 2 architect Issue 2 cascade plan.
+
+Sibling agent surfaces (staff terraform module ports, validator CI matrix, tech-writer read-only pass) report independently; see the per-agent issue files at `issues/issue_sprint3_{staff,validator,tech-writer}.md` for what landed on those surfaces. The integrator reconciles at sprint close.
+
 ---
 
 ## Sprint 4 — test surface + doctor (weeks 7-8)

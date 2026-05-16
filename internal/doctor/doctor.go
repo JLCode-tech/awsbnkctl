@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
-	"github.com/JLCode-tech/awsbnkctl/internal/cred"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
@@ -119,7 +118,16 @@ func runWithWhy(ctx context.Context, cctx *config.Context) []withWhy {
 	// kubeconfig as a warning produces noise on a fresh dev box.
 	out = append(out, checkKubeconfigInformational())
 
-	// Workspace + creds.
+	// Workspace + AWS pre-flight checks.
+	//
+	// Sprint 3 (PRD 04 retarget): the AWS row block now surfaces
+	// unconditionally — closes Sprint 2 tech-writer Issue 4. On a
+	// stock dev box without a workspace, the `aws credentials` row
+	// degrades to a Warning naming the missing env var; downstream
+	// rows (sts / eks / ec2 / s3 / iam) render as Skipped. A first-
+	// time user runs `awsbnkctl doctor` and sees the AWS-side gap
+	// even before `awsbnkctl init`. The legacy IBMCLOUD_API_KEY
+	// `checkAPIKey` row retired with the workspace schema change.
 	if cctx == nil {
 		out = append(out, withWhy{
 			Check: Check{Name: "workspace", Status: StatusError, Detail: "no config context"},
@@ -127,19 +135,7 @@ func runWithWhy(ctx context.Context, cctx *config.Context) []withWhy {
 		return out
 	}
 	out = append(out, checkWorkspace(cctx))
-	if cctx.Workspace != nil {
-		out = append(out, checkAPIKey(cctx))
-		// Sprint 1 AWS-shaped checks (credentials configured, STS caller-identity,
-		// EKS DescribeCluster permission probe). Gated on a workspace existing
-		// to honour the inherited "stock dev box = 0 warnings" contract
-		// (TestRunWithWhy_StockDevBox_NoWorkspace). The visibility trade-off
-		// is tracked as a Sprint 2 deliverable per tech-writer Issue 1 — when
-		// the workspace schema is retargeted at AWS per PRD 04, the test
-		// contract is revisited and AWS checks surface unconditionally.
-		// EC2 quota + S3 PutObject probes are deferred to Sprint 2 per
-		// PRD 07 + PRD 08.
-		out = append(out, awsChecks(ctx, cctx)...)
-	}
+	out = append(out, awsChecks(ctx, cctx)...)
 
 	return out
 }
@@ -260,23 +256,9 @@ func checkWorkspace(cctx *config.Context) withWhy {
 	return withWhy{Check: c, Why: "per-environment config + state"}
 }
 
-func checkAPIKey(cctx *config.Context) withWhy {
-	c := Check{Name: "ibmcloud api key"}
-	resolver := &cred.Resolver{
-		Workspace:      cctx.WorkspaceName,
-		Source:         cctx.Workspace.IBMCloud.APIKeySource,
-		NonInteractive: true,
-	}
-	_, err := resolver.IBMCloudAPIKey(context.Background())
-	if err != nil {
-		c.Status = StatusError
-		c.Detail = err.Error()
-		return withWhy{Check: c, Why: "auth for terraform + IBM SDK calls"}
-	}
-	c.Status = StatusOK
-	c.Detail = "resolved"
-	return withWhy{Check: c, Why: "auth for terraform + IBM SDK calls"}
-}
+// checkAPIKey (IBMCLOUD_API_KEY resolver probe) retired in Sprint 3
+// (PRD 04 retarget). AWS credentials resolve via the SDK chain — the
+// `aws credentials` row in awsChecks surfaces the equivalent signal.
 
 // PrintResults writes a tabular human-readable rendering to w.
 //

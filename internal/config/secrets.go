@@ -12,7 +12,13 @@ import (
 	"golang.org/x/term"
 )
 
-// API key resolution sources for IBMCloudCfg.APIKeySource.
+// API key resolution sources. Sprint 3 (PRD 04 retarget) drops the
+// IBM-named env/keychain/config plumbing from production paths;
+// AWS resolves via the SDK chain (env / shared config / profile /
+// instance role / SSO) and never via a workspace-config field.
+// These constants persist as integration-test fixtures referenced
+// from the inherited cred resolver tests that are themselves
+// scheduled for retirement in Sprint 4 alongside the cred-shim.
 const (
 	APIKeySourceEnv      = "env"
 	APIKeySourceKeychain = "keychain"
@@ -20,12 +26,14 @@ const (
 	APIKeySourcePrompt   = "prompt"
 
 	// keychainService is the OS-keychain "service" namespace awsbnkctl uses.
-	// Per-workspace entries are stored under user="<workspace>/ibmcloud_api_key".
+	// Per-workspace entries persist as "<workspace>/ibmcloud_api_key" for
+	// inherited resolver tests; new code does not consult the keychain.
 	keychainService = "awsbnkctl"
 )
 
-// apiKeyEnvVars are the env vars consulted (in order) when resolving from
-// "env" — same set bnk historically forwarded into the runner image.
+// apiKeyEnvVars persists as a fixture for the inherited cred resolver
+// test surface. Production code consults AWS credentials via the SDK
+// chain in internal/aws, never this list.
 var apiKeyEnvVars = []string{
 	"IBMCLOUD_API_KEY",
 	"IC_API_KEY",
@@ -106,35 +114,20 @@ func apiKeyFromEnv() (string, bool) {
 	return "", false
 }
 
-// apiKeyFromConfig reads api_key_b64 from the workspace's config.yaml,
-// base64-decodes it, and returns the plaintext.
-//
-// Returns empty (no error) when the field is unset or the workspace
-// hasn't been initialised yet — falls through to the next source in
-// the resolution chain.
-//
-// Reminder: base64 is OBFUSCATION, not encryption. Anyone with the
-// file can decode it. The recommended secure path is the OS keychain.
+// apiKeyFromConfig formerly read the legacy IBMCloud.APIKeyB64 field
+// from the workspace config.yaml. Sprint 3 dropped that schema; AWS
+// credentials resolve via the SDK chain and never appear in the
+// workspace file. Retained as a no-op shim so the inherited resolver
+// chain keeps compiling; always returns empty so callers fall through
+// to the next source.
 func apiKeyFromConfig(workspace string) (string, error) {
-	ws, err := LoadWorkspace(workspace)
-	if err != nil {
+	if _, err := LoadWorkspace(workspace); err != nil {
 		if errors.Is(err, ErrWorkspaceNotFound) {
 			return "", nil
 		}
 		return "", err
 	}
-	if ws.IBMCloud.APIKeyB64 == "" {
-		return "", nil
-	}
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(ws.IBMCloud.APIKeyB64))
-	if err != nil {
-		return "", fmt.Errorf("decoding api_key_b64 from %q config.yaml: %w", workspace, err)
-	}
-	key := strings.TrimSpace(string(decoded))
-	if key == "" {
-		return "", fmt.Errorf("api_key_b64 in %q config.yaml decodes to empty", workspace)
-	}
-	return key, nil
+	return "", nil
 }
 
 // EncodeAPIKeyForConfig base64-encodes a plaintext API key for storage
@@ -233,17 +226,13 @@ func SaveAPIKeyForWorkspace(workspace, key string) (string, error) {
 	}
 }
 
-// saveAPIKeyToConfig writes api_key_b64 into the workspace's existing
-// config.yaml. The workspace must already be initialised — for first
-// `awsbnkctl init` flow, callers should run SaveWorkspace first then call
-// this.
-func saveAPIKeyToConfig(workspace, plaintext string) error {
-	ws, err := LoadWorkspace(workspace)
-	if err != nil {
-		return err
-	}
-	ws.IBMCloud.APIKeyB64 = base64.StdEncoding.EncodeToString([]byte(plaintext))
-	return SaveWorkspace(workspace, ws)
+// saveAPIKeyToConfig formerly persisted api_key_b64 into the workspace
+// config.yaml under the IBMCloud block. Sprint 3 dropped the block;
+// AWS credentials resolve via the SDK chain and never via the
+// workspace config. Retained as a no-op error stub so the inherited
+// keychain-fallback shim in SaveAPIKeyForWorkspace keeps compiling.
+func saveAPIKeyToConfig(workspace, _ string) error {
+	return fmt.Errorf("config-file API-key persistence retired in Sprint 3 (PRD 04 retarget): AWS credentials resolve via the SDK chain for workspace %q", workspace)
 }
 
 // DeleteAPIKeyFromKeychain removes the workspace's keychain entry. Used

@@ -55,13 +55,14 @@ func runBackendChecks(ctx context.Context, cctx *config.Context, spec string) []
 //   - apiserver reachable (clientset construction succeeds)
 //   - ops pod Ready
 //   - ServiceAccount + ClusterRole + ClusterRoleBinding present
-//   - cred Secret has IBMCLOUD_API_KEY populated (legacy IBM lineage;
-//     PRD 08 § "Decision" §"IRSA" retargets this onto the
-//     IRSA-flavoured FLO role + serviceaccount annotation. Sprint 3
-//     replaces this row with an iam:GetRole probe + a kube-side
-//     check that the FLO SA carries the
-//     `eks.amazonaws.com/role-arn` annotation. Until then the IBM
-//     row stays so the legacy k8s backend keeps doctor coverage.)
+//   - Sprint 3 (PRD 04 retarget): the ops-pod IRSA shape probe replaces
+//     the v0.x IBMCLOUD_API_KEY Secret + env check. The ops SA must
+//     carry the `eks.amazonaws.com/role-arn` annotation (the EKS
+//     pod-identity webhook injects `AWS_ROLE_ARN` +
+//     `AWS_WEB_IDENTITY_TOKEN_FILE` into the pod env from there); we
+//     surface whether the annotation is set and whether the pod env
+//     carries the injected vars. No static AWS access key ever lands
+//     in any Secret under the IRSA model.
 //   - RBAC negative check: ops SA can NOT delete pods cluster-wide
 //
 // PRD 03 §"K8s" §"doctor extensions"; PRD 08 § "Decision" §"IRSA".
@@ -130,54 +131,34 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 		add("ops clusterrolebinding", doctor.StatusOK, "awsbnkctl-ops")
 	}
 
-	secret, err := cs.CoreV1().Secrets(execbackend.K8sOpsNamespace).Get(probeCtx, execbackend.K8sOpsSecretName, metav1.GetOptions{})
-	if err != nil {
-		add("ops cred secret", doctor.StatusError, err.Error())
-	} else {
-		key := secret.Data["IBMCLOUD_API_KEY"]
-		if len(key) == 0 {
-			add("ops cred secret", doctor.StatusError, "IBMCLOUD_API_KEY data field empty")
+	// Sprint 3 (PRD 04 retarget): IRSA-shape ops-pod check replaces
+	// the v0.x IBMCLOUD_API_KEY Secret probe. The ops ServiceAccount
+	// must carry the `eks.amazonaws.com/role-arn` annotation; the
+	// EKS pod-identity webhook reads it and injects `AWS_ROLE_ARN`
+	// + `AWS_WEB_IDENTITY_TOKEN_FILE` env vars into the pod. Doctor
+	// surfaces both halves (annotation + injected env) so the
+	// operator can distinguish "missing annotation" from "webhook
+	// not running" from "stale pod that pre-dates the annotation".
+	sa, err := cs.CoreV1().ServiceAccounts(execbackend.K8sOpsNamespace).Get(probeCtx, "awsbnkctl-ops", metav1.GetOptions{})
+	if err == nil {
+		roleARN := sa.Annotations["eks.amazonaws.com/role-arn"]
+		if roleARN == "" {
+			add("ops IRSA role annotation", doctor.StatusError,
+				"ServiceAccount missing eks.amazonaws.com/role-arn — rerun `awsbnkctl ops install` to wire IRSA")
 		} else {
-			add("ops cred secret", doctor.StatusOK, fmt.Sprintf("%s (rotated %s)", secret.Name, secret.Annotations["awsbnkctl.io/rotated-at"]))
-		}
-		// Sprint 5: cred rotation freshness check. Annotated with
-		// awsbnkctl.io/rotated-at on `ops install`; we surface a
-		// warning (not error) when the value is older than 30 days
-		// — best-practice rotation reminder, not a hard fail.
-		if rotated := secret.Annotations["awsbnkctl.io/rotated-at"]; rotated != "" {
-			if t, perr := time.Parse(time.RFC3339, rotated); perr == nil {
-				age := time.Since(t)
-				if age > 30*24*time.Hour {
-					add("ops cred rotation", doctor.StatusWarning,
-						fmt.Sprintf("API key has not been rotated for %d days; consider re-running `awsbnkctl ops install` with a fresh key", int(age.Hours()/24)))
-				} else {
-					add("ops cred rotation", doctor.StatusOK,
-						fmt.Sprintf("rotated %d days ago", int(age.Hours()/24)))
-				}
-			}
+			add("ops IRSA role annotation", doctor.StatusOK, roleARN)
 		}
 	}
 
-	// Sprint 5: ops-pod env runtime check. Verify the pod's
-	// environment actually carries IBMCLOUD_API_KEY at exec time.
-	// Failure modes this catches: the Secret was deleted out-of-band
-	// after install; the pod was created from a stale envFrom that
-	// no longer references the Secret; the deployment somehow lost
-	// the secretRef.
-	//
-	// We exec `printenv IBMCLOUD_API_KEY` against the pod and check
-	// that the response is non-empty. The actual VALUE never lands
-	// in the doctor output — we render "(present, redacted)" or
-	// "(empty)" so the leak surface stays zero.
 	if restCfg != nil {
-		if probeOpsPodEnv(probeCtx, cs, restCfg) {
-			add("ops pod env IBMCLOUD_API_KEY", doctor.StatusOK, "(present, redacted)")
+		if probeOpsPodIRSA(probeCtx, cs, restCfg) {
+			add("ops pod env AWS_WEB_IDENTITY_TOKEN_FILE", doctor.StatusOK, "(present — IRSA token mounted)")
 		} else {
-			add("ops pod env IBMCLOUD_API_KEY", doctor.StatusError,
-				"empty at runtime — Secret missing or envFrom misconfigured; rerun `awsbnkctl ops install`")
+			add("ops pod env AWS_WEB_IDENTITY_TOKEN_FILE", doctor.StatusError,
+				"empty at runtime — IRSA webhook didn't inject AWS_WEB_IDENTITY_TOKEN_FILE; verify the ServiceAccount carries eks.amazonaws.com/role-arn and the pod was recreated after the annotation landed")
 		}
 	} else {
-		add("ops pod env IBMCLOUD_API_KEY", doctor.StatusWarning,
+		add("ops pod env AWS_WEB_IDENTITY_TOKEN_FILE", doctor.StatusWarning,
 			"could not build REST config to probe pod env at runtime")
 	}
 
@@ -320,24 +301,25 @@ func runDNSProbeCheck(ctx context.Context, cctx *config.Context) (doctor.Check, 
 	return c, true
 }
 
-// probeOpsPodEnv exec's `printenv IBMCLOUD_API_KEY` against the ops
-// pod and reports whether the value comes back non-empty. The actual
-// value is read into a local buffer and discarded — only the
-// "present" / "empty" verdict surfaces via the boolean return.
+// probeOpsPodIRSA exec's `printenv AWS_WEB_IDENTITY_TOKEN_FILE` against
+// the ops pod and reports whether the env var comes back non-empty.
+// IRSA-injected; the value is a path to a projected SA token (not a
+// secret) but we still discard it locally — only the present/empty
+// verdict surfaces via the boolean return.
 //
-// Sprint 5 doctor extension: catches the failure mode where a stale
-// envFrom or a missing Secret has the pod running but with no
-// IBMCLOUD_API_KEY available — `awsbnkctl ibmcloud --backend k8s`
-// would surface as "auth failed" with a confusing error; this probe
-// surfaces it earlier.
-func probeOpsPodEnv(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config) bool {
+// Sprint 3 (PRD 04 retarget): replaces the v0.x IBMCLOUD_API_KEY env
+// probe with the IRSA shape. Failure modes this catches: the SA
+// annotation missed (webhook had nothing to read); the pod was created
+// before the annotation landed and needs deletion; the eks pod-identity
+// webhook isn't running in the cluster.
+func probeOpsPodIRSA(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config) bool {
 	req := cs.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(execbackend.K8sOpsPodName).
 		Namespace(execbackend.K8sOpsNamespace).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
-			Command: []string{"printenv", "IBMCLOUD_API_KEY"},
+			Command: []string{"printenv", "AWS_WEB_IDENTITY_TOKEN_FILE"},
 			Stdout:  true,
 			Stderr:  true,
 		}, scheme.ParameterCodec)
@@ -352,9 +334,6 @@ func probeOpsPodEnv(ctx context.Context, cs kubernetes.Interface, cfg *rest.Conf
 	}); err != nil {
 		return false
 	}
-	// printenv exits 0 + writes the value+newline when the var is
-	// set; exits 1 + writes nothing when it isn't. Trim whitespace
-	// and check for emptiness — never log the value.
 	val := strings.TrimSpace(stdout.String())
 	return val != ""
 }

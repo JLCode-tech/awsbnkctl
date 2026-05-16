@@ -17,7 +17,7 @@ func withTempHome(t *testing.T) string {
 	t.Setenv(config.ROKSBNKCTLHomeEnv, dir)
 	const name = "ws1"
 	ws := &config.Workspace{
-		IBMCloud: config.IBMCloudCfg{Region: "us-east", ResourceGroup: "default"},
+		AWS:      config.AWSCfg{Region: "us-east-1"},
 		Cluster:  config.ClusterCfg{Name: "c1"},
 		TFSource: config.TFSourceCfg{Type: "embedded"},
 	}
