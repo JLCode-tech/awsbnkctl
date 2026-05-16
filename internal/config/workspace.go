@@ -16,8 +16,26 @@ import (
 // `api_key` field — secrets live in env vars or the OS keychain, never in
 // this struct. Plaintext keys in the YAML are rejected at load time by
 // rejectPlaintextSecrets.
+//
+// Sprint 2 (PRD 04 fold, closes Sprint 1 staff Issue 3) introduces the
+// AWS-shaped block. The legacy IBMCloud field stays as a yaml alias for
+// one release so existing workspaces keep loading; new code reads from
+// AWS, with IBMCloud-region fallback at the awsRegionFromContext seam
+// only. The cred/exec packages still reference IBMCloudCfg for the
+// IBM API-key plumbing; their retarget lands in Sprint 3 per PRD 04.
 type Workspace struct {
-	IBMCloud IBMCloudCfg          `yaml:"ibmcloud"`
+	// AWS is the Sprint 2+ block; new workspaces written by
+	// `awsbnkctl init` populate this. Doctor + tf vars renderer read
+	// from here first, fall back to IBMCloud.Region for back-compat.
+	AWS AWSCfg `yaml:"aws,omitempty"`
+
+	// IBMCloud is the inherited roksbnkctl block. Deprecated as of
+	// Sprint 2 (Sprint 1 staff Issue 3); kept so legacy on-disk
+	// workspaces load and so the cred + exec packages (which still
+	// thread an IBM Cloud API key for the docker/k8s backends) keep
+	// compiling. Sprint 3 retirement is tracked as a Sprint 2 staff
+	// issue.
+	IBMCloud IBMCloudCfg          `yaml:"ibmcloud,omitempty"`
 	Cluster  ClusterCfg           `yaml:"cluster"`
 	BNK      BNKCfg               `yaml:"bnk,omitempty"`
 	Test     TestCfg              `yaml:"test,omitempty"`
@@ -61,6 +79,77 @@ type TargetCfg struct {
 	User      string `yaml:"user"`
 	KeyPath   string `yaml:"key_path,omitempty"`   // file path (PEM)
 	KeySource string `yaml:"key_source,omitempty"` // "agent" | "tf-output:<name>"
+}
+
+// AWSCfg is the AWS-shaped workspace block introduced in Sprint 2
+// (PRD 04 fold + PRD 07/08 inputs). Mirrors the inputs `awsbnkctl init`
+// (AWS path) collects and `internal/tf/vars.go` renders into
+// terraform.tfvars.
+//
+// No credential fields appear here: AWS credentials resolve via the
+// SDK's default chain (env / shared config / profile / instance role /
+// SSO) — never written to config.yaml. The Profile field below is a
+// chain hint, not a secret.
+type AWSCfg struct {
+	// Region is the AWS region (e.g. "us-east-1"). Threaded into the
+	// terraform root module's `region` variable and the SDK Options.
+	Region string `yaml:"region,omitempty"`
+
+	// Profile is an optional AWS_PROFILE override pinned per workspace.
+	// Empty = use the standard chain's default. The doctor's
+	// credentials-configured probe reads this when constructing
+	// aws.Clients.
+	Profile string `yaml:"profile,omitempty"`
+
+	// VPCID is the VPC hosting the cluster. Empty = `awsbnkctl init`
+	// will offer the "create new VPC" path (v1.x; Sprint 2 init
+	// requires an existing VPC ID).
+	VPCID string `yaml:"vpc_id,omitempty"`
+
+	// SubnetIDs is the list of private subnets passed through to the
+	// EKS cluster module. PRD 07 § "Decision" requires >=3 AZs for
+	// HA; the init wizard enforces this.
+	SubnetIDs []string `yaml:"subnet_ids,omitempty"`
+
+	// SupplyChain captures the local FAR archive + JWT paths the
+	// init wizard collected. Sprint 2 staff uploads these to the S3
+	// supply-chain bucket via `internal/aws/s3.go` at workspace save
+	// time (or via terraform `aws_s3_object` on `awsbnkctl up`). The
+	// fields are local paths, not secrets — empty when the operator
+	// skipped the wizard's supply-chain step (e.g. `--dry-run`).
+	SupplyChain SupplyChainCfg `yaml:"supply_chain,omitempty"`
+}
+
+// SupplyChainCfg is the local-path manifest the init wizard collects.
+// Lives under AWS.SupplyChain. Empty for `--dry-run` invocations or
+// when the operator deferred supply-chain bootstrap to a later
+// `awsbnkctl init --supply-chain` flow.
+type SupplyChainCfg struct {
+	// FARArchivePath is the local filesystem path to the
+	// `f5cne-far-auth-*.tar.gz` archive supplied by F5.
+	FARArchivePath string `yaml:"far_archive_path,omitempty"`
+
+	// JWTPath is the local filesystem path to the
+	// `f5cne-subscription-*.jwt` licence file.
+	JWTPath string `yaml:"jwt_path,omitempty"`
+
+	// BucketName overrides the auto-generated supply-chain bucket
+	// name (PRD 08 § "Decision" — `awsbnkctl-<workspace>-<random>`
+	// is the default). Empty = let terraform pick.
+	BucketName string `yaml:"bucket_name,omitempty"`
+
+	// KMSKeyARN pins an existing CMK ARN; empty = the
+	// s3_supply_chain module creates one.
+	KMSKeyARN string `yaml:"kms_key_arn,omitempty"`
+
+	// FLONamespace is the Kubernetes namespace the FLO service
+	// account lives in. Defaults to "flo-system" (PRD 08).
+	FLONamespace string `yaml:"flo_namespace,omitempty"`
+
+	// EnableECRMirror gates the optional ECR mirror module
+	// (PRD 08 § "Decision" v1.0 stretch). Default false; v1.x
+	// promotes to first-class.
+	EnableECRMirror bool `yaml:"enable_ecr_mirror,omitempty"`
 }
 
 type IBMCloudCfg struct {

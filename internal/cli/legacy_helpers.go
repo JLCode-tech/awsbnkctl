@@ -12,22 +12,25 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
-// Sprint 0 carry-overs. The IBM-coupled CLI verbs (cluster.go,
-// cluster_phase.go, init.go's wizard, ops.go) shipped a handful of
-// shared helpers (workspaceEnv, resolveBackendSpecWith, podReady,
-// refDescription) used by surface that survives Sprint 0 (test.go,
-// tfvars.go, doctor_backend.go). The verb files were deleted alongside
-// internal/ibm; these helpers live here in their AWS-tracker-stripped
-// form until Sprint 1+ retargets the AWS credential propagation.
+// Cross-verb helpers shared by test.go + tfvars.go + doctor_backend.go.
 //
-// Each helper is intentionally minimal: existing call sites compile,
-// runtime behaviour is "best-effort + Sprint 1 will replace this".
+// Origin: Sprint 0 split-out from the deleted IBM lifecycle verbs.
+// Sprint 2 (PRD 04 fold) retargets the workspace schema onto AWS;
+// these helpers stay as the smallest cross-package surface that
+// test.go / tfvars.go / doctor_backend.go can share without an import
+// cycle. The IBMCLOUD_API_KEY env propagation that the original
+// helpers carried lives in internal/cred + internal/exec now;
+// retiring those packages' IBM lineage is tracked as a Sprint 3 task
+// per PRD 04. See `issues/issue_sprint2_staff.md` Issue 1 for the
+// retirement plan.
 
 // workspaceEnv composes a child-process env for inherited tool
-// passthroughs. The Sprint 0 stub returns the host env plus KUBECONFIG
-// if a kubeconfig is on disk — the IBM API key / region env vars that
-// the legacy implementation injected are dropped pending the Sprint 2
-// AWS credential adapter (PRD 04 + PRD 08).
+// passthroughs. Returns the host env plus KUBECONFIG if a kubeconfig
+// is on disk. AWS credentials are resolved by the SDK chain (env /
+// profile / instance role) so no cred-shaped env vars are injected
+// here; the IBM API key path moved to internal/cred + internal/exec
+// in the v0.x lineage and stays there until Sprint 3 retargets the
+// docker / k8s execution backends per PRD 04.
 func workspaceEnv() (*config.Context, []string, error) {
 	cctx, err := config.New(flagWorkspace)
 	if err != nil {
@@ -68,9 +71,9 @@ func resolveBackendSpecWith(cctx *config.Context, tool, flagOverride string) str
 }
 
 // perToolDefaultBackend is the per-tool default backend table (PRD 03
-// §"Tool migration plan"). Sprint 0 keeps the inherited shape; the
-// `ibmcloud` row will be replaced with AWS-shaped equivalents in
-// Sprint 1+.
+// §"Tool migration plan"). The IBM `ibmcloud` row retired with the
+// IBM cleanup; AWS doesn't ship a CLI passthrough (the binary uses
+// internal/aws SDK directly per PRD 00 § "Inheritance map").
 var perToolDefaultBackend = map[string]string{
 	"iperf3":    "k8s",
 	"terraform": "local",
@@ -107,8 +110,10 @@ func refDescription(c config.TFSourceCfg) string {
 }
 
 // silenceUnused keeps the cred + context imports referenced even when
-// the test surface is the only caller. Sprint 1+ retires this once the
-// AWS credential adapter calls cred.Resolver directly here.
+// the test surface is the only caller in this file. The cred package
+// still owns the IBM API key resolution (used by docker/k8s exec
+// backends today); Sprint 3 retargets that whole flow per PRD 04 and
+// this stub retires alongside it.
 var _ = func() any {
 	var _ = (*cred.Resolver)(nil)
 	var _ = context.Background

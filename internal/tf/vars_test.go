@@ -8,61 +8,78 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
-func TestRenderTFVars_CreateMode(t *testing.T) {
+// Sprint 2 (PRD 04 fold) retargets the renderer onto Workspace.AWS.
+// Tests below pin the AWS-shaped output and the back-compat region
+// fallback to the IBMCloud block.
+
+func TestRenderTFVars_AWS(t *testing.T) {
 	ws := &config.Workspace{
-		IBMCloud: config.IBMCloudCfg{Region: "us-south", ResourceGroup: "default"},
-		Cluster: config.ClusterCfg{
-			Create:           true,
-			Name:             "bnk-demo",
-			OpenShiftVersion: "4.18",
-			WorkersPerZone:   2,
+		AWS: config.AWSCfg{
+			Region:    "us-east-1",
+			Profile:   "bnk-dev",
+			VPCID:     "vpc-0123abcd",
+			SubnetIDs: []string{"subnet-a", "subnet-b", "subnet-c"},
+			SupplyChain: config.SupplyChainCfg{
+				FARArchivePath: "/tmp/far-auth.tar.gz",
+				JWTPath:        "/tmp/subscription.jwt",
+				KMSKeyARN:      "arn:aws:kms:us-east-1:111122223333:key/abc",
+				FLONamespace:   "flo-system",
+			},
 		},
+		Cluster: config.ClusterCfg{Create: true, Name: "bnk-demo"},
 	}
 	var buf bytes.Buffer
 	if err := RenderTFVars(&buf, ws, "", ""); err != nil {
 		t.Fatalf("RenderTFVars: %v", err)
 	}
+	out := buf.String()
 
 	want := []string{
-		`ibmcloud_cluster_region = "us-south"`,
-		`ibmcloud_resource_group = "default"`,
-		`create_roks_cluster = true`,
-		`openshift_cluster_name = "bnk-demo"`,
-		`openshift_cluster_version = "4.18"`,
-		`roks_workers_per_zone = 2`,
+		`region = "us-east-1"`,
+		`vpc_id = "vpc-0123abcd"`,
+		`subnet_ids = ["subnet-a", "subnet-b", "subnet-c"]`,
+		`cluster_name = "bnk-demo"`,
+		`far_auth_file_local_path = "/tmp/far-auth.tar.gz"`,
+		`jwt_file_local_path = "/tmp/subscription.jwt"`,
+		`kms_key_arn = "arn:aws:kms:us-east-1:111122223333:key/abc"`,
+		`flo_namespace = "flo-system"`,
 	}
-	out := buf.String()
 	for _, w := range want {
 		if !strings.Contains(out, w) {
-			t.Errorf("missing line: %s\noutput:\n%s", w, out)
+			t.Errorf("missing line %q\noutput:\n%s", w, out)
 		}
 	}
 
-	// Critical safety check: no api_key field (env-var path is mandatory).
-	if strings.Contains(out, "api_key") {
-		t.Errorf("api_key leaked into tfvars; must be passed via env var only.\noutput:\n%s", out)
+	// No credentials, ever.
+	for _, banned := range []string{"api_key", "access_key", "secret_access_key", "AKIA"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("forbidden token %q present in tfvars output:\n%s", banned, out)
+		}
 	}
 }
 
-func TestRenderTFVars_AttachMode(t *testing.T) {
+func TestRenderTFVars_BackCompatIBMCloudRegion(t *testing.T) {
+	// Legacy workspace with only the IBMCloud block populated. The
+	// renderer must surface its region under the AWS-shaped tfvar
+	// name so the upstream EKS module still gets a value during the
+	// one-release back-compat window.
 	ws := &config.Workspace{
-		IBMCloud: config.IBMCloudCfg{Region: "us-south"},
-		Cluster:  config.ClusterCfg{Create: false, Name: "existing-cluster"},
+		IBMCloud: config.IBMCloudCfg{Region: "us-east-2"},
+		Cluster:  config.ClusterCfg{Create: false, Name: "legacy"},
 	}
 	var buf bytes.Buffer
 	if err := RenderTFVars(&buf, ws, "", ""); err != nil {
-		t.Fatalf("RenderTFVars: %v", err)
+		t.Fatal(err)
 	}
 	out := buf.String()
-
-	if !strings.Contains(out, `roks_cluster_id_or_name = "existing-cluster"`) {
-		t.Errorf("attach mode missing roks_cluster_id_or_name\noutput:\n%s", out)
+	if !strings.Contains(out, `region = "us-east-2"`) {
+		t.Errorf("expected back-compat region fallback; got:\n%s", out)
 	}
-	if strings.Contains(out, "openshift_cluster_name") {
-		t.Errorf("attach mode should not emit openshift_cluster_name\noutput:\n%s", out)
-	}
-	if !strings.Contains(out, "create_roks_cluster = false") {
-		t.Errorf("missing create_roks_cluster = false\noutput:\n%s", out)
+	// The legacy IBM-shaped tfvar names must not leak through.
+	for _, leaked := range []string{"ibmcloud_cluster_region", "ibmcloud_resource_group", "create_roks_cluster"} {
+		if strings.Contains(out, leaked) {
+			t.Errorf("legacy IBM tfvar %q must not be emitted:\n%s", leaked, out)
+		}
 	}
 }
 
@@ -75,9 +92,12 @@ func TestRenderTFVars_OmitsEmptyFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	// Region/RG were unset — should not appear.
-	if strings.Contains(out, "ibmcloud_cluster_region") {
-		t.Errorf("region should be omitted when empty\noutput:\n%s", out)
+	// Region/VPC/subnets were unset — should not appear.
+	for _, k := range []string{"region", "vpc_id", "subnet_ids"} {
+		// Match as token prefix; cluster_name="demo" must still render.
+		if strings.Contains(out, k+" =") {
+			t.Errorf("%s should be omitted when empty\noutput:\n%s", k, out)
+		}
 	}
 }
 
@@ -99,8 +119,6 @@ func TestRenderTFVars_KubeconfigDir(t *testing.T) {
 		}
 	}
 
-	// Empty strings should NOT emit the lines — keeps tfvars clean for
-	// callers that don't want this rendering.
 	buf.Reset()
 	if err := RenderTFVars(&buf, ws, "", ""); err != nil {
 		t.Fatal(err)
@@ -112,28 +130,19 @@ func TestRenderTFVars_KubeconfigDir(t *testing.T) {
 	}
 }
 
-func TestRenderTFVars_BNKFields(t *testing.T) {
+func TestRenderTFVars_EnableECRMirror(t *testing.T) {
 	ws := &config.Workspace{
-		Cluster: config.ClusterCfg{Create: true, Name: "demo"},
-		BNK: config.BNKCfg{
-			CNEInstanceSize: "Medium",
-			FARRepoURL:      "repo.f5.com",
-			ManifestVersion: "2.3.0-foo",
+		AWS: config.AWSCfg{
+			Region:      "us-west-2",
+			SupplyChain: config.SupplyChainCfg{EnableECRMirror: true},
 		},
+		Cluster: config.ClusterCfg{Create: true, Name: "ecr"},
 	}
 	var buf bytes.Buffer
 	if err := RenderTFVars(&buf, ws, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	out := buf.String()
-	want := []string{
-		`cneinstance_deployment_size = "Medium"`,
-		`far_repo_url = "repo.f5.com"`,
-		`f5_bigip_k8s_manifest_version = "2.3.0-foo"`,
-	}
-	for _, w := range want {
-		if !strings.Contains(out, w) {
-			t.Errorf("missing: %s", w)
-		}
+	if !strings.Contains(buf.String(), "enable_ecr_mirror = true") {
+		t.Errorf("enable_ecr_mirror not rendered\noutput:\n%s", buf.String())
 	}
 }

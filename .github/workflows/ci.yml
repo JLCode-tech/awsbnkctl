@@ -144,20 +144,32 @@ jobs:
     name: integration (aws — mocked sdk)
     needs: test
     # Sprint 1 (PRD 07): exercises `internal/aws/{client,sts,ec2,eks,vpc}.go`
-    # against mocked aws-sdk-go-v2 clients. NO LIVE AWS — the staff agent
-    # injects fake API responders via the aws-sdk-go-v2 middleware-test
-    # pattern (or hand-rolled interfaces in test files). This job runs on
-    # every PR and push because it doesn't need credentials, network egress
-    # to AWS, or a runtime daemon; the only requirement is the Go toolchain.
+    # against mocked aws-sdk-go-v2 clients. Sprint 2 (PRD 08) extends
+    # the same job to cover `internal/aws/{s3,iam}.go` — the S3 supply
+    # chain helpers (`PutObject`, `HeadObject`) and the IRSA / OIDC
+    # readers (`GetOIDCProvider`, `HasIRSARole`) — using the same
+    # aws-sdk-go-v2 middleware-test pattern. NO LIVE AWS — the staff
+    # agent injects fake API responders via the middleware seam (or
+    # hand-rolled interfaces in test files). This job runs on every PR
+    # and push because it doesn't need credentials, network egress to
+    # AWS, or a runtime daemon; the only requirement is the Go toolchain.
     #
     # Live-AWS validation is the operator-run spike (PRD 07 §"Spike
     # protocol"), gating v0.2 outside the agent dispatch lane.
     #
-    # If a future test calls `sts.GetCallerIdentity` (or any other AWS
-    # API) without a mock, this job will time out hitting the real AWS
-    # endpoint with no creds. The validator's task brief calls for an
-    # issue against the staff agent in that scenario rather than a
-    # silent fix here.
+    # If a future test calls `sts.GetCallerIdentity` / `s3.PutObject` /
+    # `iam.GetOpenIDConnectProvider` (or any other AWS API) without a
+    # mock, this job will time out hitting the real AWS endpoint with
+    # no creds. The validator's task brief calls for an issue against
+    # the staff agent in that scenario rather than a silent fix here.
+    #
+    # Sprint 2 deferral (validator Issue 2): a localstack-backed
+    # integration tier (`services: localstack:` step) is the v1.x
+    # follow-up — gives the S3 + IAM helpers a real HTTP endpoint to
+    # round-trip against without needing a real AWS account. For v1.0
+    # the mocked-only path keeps the CI surface free of Docker-in-CI
+    # cost + flake, and the PRD 08 helpers are simple enough that
+    # mocked unit tests catch the regression shape.
     runs-on: ubuntu-latest
     env:
       # Belt-and-braces: if a test path leaks past its mock, these
@@ -180,7 +192,10 @@ jobs:
 
       - name: go test (integration tag — internal/aws)
         # 3m budget covers the mocked-SDK suite — no image pulls, no
-        # network. Bumps if the suite grows; reduce only after measuring.
+        # network. Sprint 2 (PRD 08) adds `internal/aws/{s3,iam}_test.go`
+        # to the same package, so the wildcard `./internal/aws/...`
+        # already picks them up — no per-file invocation needed.
+        # Bumps if the suite grows; reduce only after measuring.
         run: go test -tags integration -timeout 3m ./internal/aws/...
 
   k8s-backend:

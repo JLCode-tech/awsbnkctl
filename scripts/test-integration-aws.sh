@@ -5,12 +5,19 @@
 # Sprint 1 (PRD 07) introduces `internal/aws/{client,sts,ec2,eks,vpc}.go`
 # with companion test files that exercise the helpers against mocked
 # aws-sdk-go-v2 clients (no live AWS — see the staff agent's
-# middleware-test wiring). This script sets the env vars the suite
-# expects so a contributor can run the same matrix CI runs without
-# remembering the incantation:
+# middleware-test wiring). Sprint 2 (PRD 08) extends the same package
+# with `internal/aws/{s3,iam}.go` covering the S3 supply-chain (FAR
+# archive + JWT upload via `PutObject` / `HeadObject`) and the IRSA /
+# OIDC reader paths (`GetOIDCProvider`, `HasIRSARole`). The wildcard
+# `./internal/aws/...` below picks all of them up — no per-file
+# invocation needed.
+#
+# This script sets the env vars the suite expects so a contributor can
+# run the same matrix CI runs without remembering the incantation:
 #
 #   $ ./scripts/test-integration-aws.sh
 #   $ ./scripts/test-integration-aws.sh -run TestIntegration_STS
+#   $ ./scripts/test-integration-aws.sh -run 'TestIntegration_S3|TestIntegration_IAM'
 #
 # Live-AWS validation is a separate operator-run path (PRD 07 §4
 # "Spike protocol"); this script is mocked-only and never touches a

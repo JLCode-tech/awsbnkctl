@@ -46,7 +46,23 @@ type Clients struct {
 	EC2 EC2API
 	EKS EKSAPI
 	VPC VPCAPI
+
+	// s3 / iam are lazily constructed on first use via EnsureS3 /
+	// EnsureIAM. Sprint 2 keeps NewClients's cost identical to
+	// Sprint 1 for the verbs that don't touch S3 or IAM (most
+	// reads). Tests inject fakes by setting these directly before
+	// invoking the consumer method.
+	s3  S3API
+	iam IAMAPI
 }
+
+// SetS3ForTest lets tests inject a fake S3API. Production callers go
+// through EnsureS3; this hook keeps test files independent of the
+// (private) field name.
+func (c *Clients) SetS3ForTest(api S3API) { c.s3 = api }
+
+// SetIAMForTest mirrors SetS3ForTest for the IAM client.
+func (c *Clients) SetIAMForTest(api IAMAPI) { c.iam = api }
 
 // Options configures NewClients. Empty Options uses the standard chain:
 // env vars, shared config (~/.aws/config + ~/.aws/credentials), profile
