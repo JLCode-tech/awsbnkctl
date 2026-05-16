@@ -45,6 +45,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # QEMU is required for emulated cross-arch builds on a single
+      # runner. `tonistiigi/binfmt:latest` registers handlers for every
+      # arch the buildkit daemon advertises; without it the linux/arm64
+      # leg of the matrix below would fail with "exec format error" as
+      # soon as the first `RUN` instruction tries to invoke an arm64
+      # binary on an amd64 host kernel.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -56,12 +66,23 @@ jobs:
       # Tag-push: publish :<tagname> + :latest. The iperf3 Dockerfile
       # is self-contained (no repo-root build context required) — the
       # build-args below are harmlessly ignored.
+      #
+      # Sprint 2 (tech-writer Sprint 1 Issue 6): `platforms` now
+      # advertises a multi-arch manifest list (linux/amd64 +
+      # linux/arm64). The Dockerfile under tools/docker/aws/ branches
+      # on $TARGETARCH to pick the right awscli/kubectl/helm download
+      # URL per arch; both arches are pinned to their own sha256s. The
+      # iperf3 Dockerfile uses apk packages that publish for both
+      # arches in Alpine, so the same multi-arch flag works without
+      # Dockerfile edits there.
       - name: Build and push (tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./tools/docker/${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          provenance: false
           build-args: |
             AWSBNKCTL_VERSION=${{ github.ref_name }}
             AWSBNKCTL_COMMIT=${{ github.sha }}
@@ -81,6 +102,8 @@ jobs:
         with:
           context: .
           file: ./tools/docker/${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          provenance: false
           build-args: |
             AWSBNKCTL_VERSION=dev
             AWSBNKCTL_COMMIT=${{ github.sha }}
@@ -96,6 +119,8 @@ jobs:
         with:
           context: .
           file: ./tools/docker/${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          provenance: false
           build-args: |
             AWSBNKCTL_VERSION=dev
             AWSBNKCTL_COMMIT=${{ github.sha }}

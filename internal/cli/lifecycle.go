@@ -30,12 +30,15 @@ var (
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Interactive setup; writes the workspace config.yaml (Sprint 1)",
+	Short: "Interactive AWS setup; writes the workspace config.yaml + uploads FAR + JWT to S3",
 	Long: `awsbnkctl init walks through the AWS-shaped prompts (region, VPC,
-subnets, instance types, cluster name) and writes the workspace config.
+subnets, instance types, cluster name, FAR archive path, subscription JWT path,
+FLO namespace) and writes the workspace config. With --dry-run, runs the
+wizard offline without touching AWS (no S3 PutObject, no live SDK calls).
 
-Sprint 0 stub: the AWS wizard lands in Sprint 1. See
-docs/prd/07-EKS-CLUSTER-SRIOV.md for the input contract.`,
+See docs/prd/07-EKS-CLUSTER-SRIOV.md (cluster shape) and
+docs/prd/08-S3-SUPPLY-CHAIN-IRSA.md (S3 + IRSA supply chain) for the
+full input contract.`,
 	RunE: runInit,
 }
 

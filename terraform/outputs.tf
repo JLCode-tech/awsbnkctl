@@ -47,3 +47,58 @@ output "cluster_ready_id" {
   description = "Empty-resource ID for downstream depends_on (carries through the roksbnkctl convention)"
   value       = module.eks_cluster.cluster_ready_id
 }
+
+
+# ============================================================
+# s3_supply_chain — Sprint 2 outputs (PRD 08)
+# ============================================================
+
+output "supply_chain_bucket_name" {
+  description = "Supply-chain S3 bucket name (FAR archive + JWT)."
+  value       = module.s3_supply_chain.bucket_name
+}
+
+output "supply_chain_bucket_arn" {
+  description = "Supply-chain S3 bucket ARN."
+  value       = module.s3_supply_chain.bucket_arn
+}
+
+output "supply_chain_far_auth_key" {
+  description = "S3 key of the FAR archive object."
+  value       = module.s3_supply_chain.far_auth_object_key
+}
+
+output "supply_chain_jwt_key" {
+  description = "S3 key of the subscription JWT object."
+  value       = module.s3_supply_chain.jwt_object_key
+}
+
+output "supply_chain_kms_key_arn" {
+  description = "KMS CMK ARN used for SSE-KMS on the supply-chain bucket."
+  value       = module.s3_supply_chain.kms_key_arn
+}
+
+
+# ============================================================
+# iam_irsa — Sprint 2 outputs (PRD 08)
+# ============================================================
+
+output "flo_irsa_role_arn" {
+  description = "IAM role ARN to annotate on FLO's ServiceAccount as eks.amazonaws.com/role-arn."
+  value       = module.iam_irsa.flo_role_arn
+}
+
+output "flo_irsa_role_name" {
+  description = "FLO IRSA role name (inspectable side of flo_irsa_role_arn)."
+  value       = module.iam_irsa.flo_role_name
+}
+
+
+# ============================================================
+# ecr_mirror — Sprint 2 outputs (PRD 08 v1.0 stretch)
+# ============================================================
+
+output "ecr_mirror_repository_uris" {
+  description = "Map of source image to ECR repository URI (empty when enable_ecr_mirror = false)."
+  value       = module.ecr_mirror.repository_uris
+}

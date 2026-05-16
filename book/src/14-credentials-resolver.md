@@ -303,6 +303,12 @@ The implementation is `internal/exec/redact.go` — a wrapping `io.Writer` with 
 
 PRD 04's acceptance criteria require that the API key never appears in `docker inspect`, `ps -ef`, `kubectl get pods/events -o yaml`, or `kubectl describe pod`. The redactor is the defence-in-depth layer; the per-backend cred-propagation rules are the primary control.
 
+## AWS in-cluster credentials (IRSA)
+
+The resolver chain above governs **host-side** AWS credentials — what `awsbnkctl up` sees on the workspace machine when it shells out to `terraform apply`. There's a separate, **in-cluster** credential shape used by BNK's FLO operator to read the S3 supply-chain bucket: **IRSA** (IAM Roles for Service Accounts). EKS issues a projected OIDC token to the FLO pod, AWS STS exchanges it for short-lived AWS credentials, and FLO reads S3 through the resulting role — no static `AWS_ACCESS_KEY_ID` ever lands in a Kubernetes Secret or pod spec. The trust chain is FLO ServiceAccount → IRSA IAM role → EKS OIDC provider → IAM, with the bucket policy scoped to the IRSA role ARN. [Chapter 25](./25-cos-supply-chain.md) is the deep reference; for the resolver-chain frame, the takeaway is that the in-cluster cred shape is decoupled from this chapter's host-side chain — they share the AWS account identity but not the credential mechanism.
+
+A full rewrite of this chapter to mirror the AWS-shaped resolver semantics (env → shared-config → instance role → SSO → IMDS, vs. the IBM-shaped chain documented above) is deferred to Sprint 5. The IRSA paragraph here is the placeholder pointer until the rewrite lands.
+
 ## Cross-references
 
 - [PRD 04 — credential propagation across execution backends](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/04-CREDENTIALS.md) — the full design.
@@ -310,5 +316,6 @@ PRD 04's acceptance criteria require that the API key never appears in `docker i
 - [Chapter 13 — Terraform variables](./13-terraform-variables.md) — why `ibmcloud_api_key` doesn't go in tfvars.
 - [Chapter 15 — SSH targets](./15-ssh-targets.md) — the SSH key sources.
 - [Chapter 17 — Execution backends](./17-execution-backends.md) — backend-specific cred mechanics.
+- [Chapter 25 — S3 (and optional ECR) supply chain](./25-cos-supply-chain.md) — IRSA, the in-cluster cred shape FLO uses to read S3.
 - `internal/cred/resolver.go` — the implementation extracted this sprint: <https://github.com/jgruberf5/roksbnkctl/blob/main/internal/cred/resolver.go>
 - `internal/config/secrets.go` — the keychain + config-b64 helpers: <https://github.com/jgruberf5/roksbnkctl/blob/main/internal/config/secrets.go>

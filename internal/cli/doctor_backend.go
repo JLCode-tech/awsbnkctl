@@ -55,10 +55,16 @@ func runBackendChecks(ctx context.Context, cctx *config.Context, spec string) []
 //   - apiserver reachable (clientset construction succeeds)
 //   - ops pod Ready
 //   - ServiceAccount + ClusterRole + ClusterRoleBinding present
-//   - cred Secret has IBMCLOUD_API_KEY populated
+//   - cred Secret has IBMCLOUD_API_KEY populated (legacy IBM lineage;
+//     PRD 08 § "Decision" §"IRSA" retargets this onto the
+//     IRSA-flavoured FLO role + serviceaccount annotation. Sprint 3
+//     replaces this row with an iam:GetRole probe + a kube-side
+//     check that the FLO SA carries the
+//     `eks.amazonaws.com/role-arn` annotation. Until then the IBM
+//     row stays so the legacy k8s backend keeps doctor coverage.)
 //   - RBAC negative check: ops SA can NOT delete pods cluster-wide
 //
-// PRD 03 §"K8s" §"doctor extensions".
+// PRD 03 §"K8s" §"doctor extensions"; PRD 08 § "Decision" §"IRSA".
 func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 	out := []doctor.Check{}
 	add := func(name string, status doctor.CheckStatus, detail string) {

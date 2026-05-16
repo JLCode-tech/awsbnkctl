@@ -82,3 +82,47 @@ variable "sriov_resource_name" {
   type        = string
   default     = "intel.com/sriov"
 }
+
+
+# ============================================================
+# s3_supply_chain + iam_irsa — Sprint 2 inputs (PRD 08)
+# ============================================================
+
+variable "workspace_name" {
+  description = "awsbnkctl workspace name; threaded into the s3_supply_chain bucket name + iam_irsa role name for inspectability. PRD 08 § \"Decision\"."
+  type        = string
+  default     = "default"
+}
+
+variable "kms_key_arn" {
+  description = "Existing customer-managed KMS CMK for the supply-chain bucket. Empty creates one in-module (PRD 08 § \"Trade-offs accepted\")."
+  type        = string
+  default     = ""
+}
+
+variable "far_auth_file_local_path" {
+  description = "Local path to the FAR pull-key archive (f5cne-far-auth-*.tar.gz). Supplied by `awsbnkctl init`."
+  type        = string
+}
+
+variable "jwt_file_local_path" {
+  description = "Local path to the subscription JWT (f5cne-subscription-*.jwt). Supplied by `awsbnkctl init`."
+  type        = string
+}
+
+variable "flo_namespace" {
+  description = "Kubernetes namespace where the FLO service account lives. PRD 08 default flo-system."
+  type        = string
+  default     = "flo-system"
+}
+
+
+# ============================================================
+# ecr_mirror — Sprint 2 scaffold gate (PRD 08 v1.0 stretch)
+# ============================================================
+
+variable "enable_ecr_mirror" {
+  description = "Enable the optional ECR mirror module (PRD 08 v1.0 stretch). Default false; the module is a no-op when disabled. Set true to mirror FAR images into ECR for air-gapped deployments."
+  type        = bool
+  default     = false
+}

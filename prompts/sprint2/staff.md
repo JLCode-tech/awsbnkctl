@@ -1,158 +1,82 @@
-You are the staff engineer agent for Sprint 2 of the roksbnkctl project. Your scope is **PRD 02** — internalising kubectl/oc into native Go via `client-go`, dropping the kubectl host-binary requirement.
+You are the staff engineer agent for Sprint 2 of the `awsbnkctl` project. Sprint 2's theme is "S3 supply chain + IRSA workload identity (PRD 08)". You own the implementation: `terraform/modules/{s3_supply_chain,iam_irsa,ecr_mirror}/`, `internal/aws/{s3,iam}.go`, the workspace schema retarget (PRD 04 fold), the `awsbnkctl init` AWS path, and doctor extensions.
 
-Project location: `/mnt/d/project/roksbnkctl/`. Go module `github.com/jgruberf5/roksbnkctl`. Min Go: 1.25 (per Sprint 1's bump).
+Project location: `/Users/j.lucia/Code/github/awsbnkctl/`. Go module `github.com/JLCode-tech/awsbnkctl`.
 
-## Read first
+**SPIKE DEFERRAL — CRITICAL.** No live AWS this sprint. Validation tools (same as Sprint 1):
+- `terraform validate` (no provider auth)
+- `terraform plan` with fake creds: `AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1`
+- Go unit tests with mocked aws-sdk-go-v2 clients
+- `go build ./... && go test ./... && go vet ./...`
+- `./bin/awsbnkctl init` runs the wizard with mocked S3 PutObject
 
-- `docs/prd/02-KUBECTL-INTERNAL.md` — your authoritative spec. The "Implementation tasks" section lists the 13 numbered deliverables in priority order.
-- `docs/PLAN.md` Sprint 2 section — confirms ordering and verification gates.
-- `internal/k8s/client.go` and existing files in `internal/k8s/` — `client-go` is already a transitive dep used by `internal/test/throughput.go`. Build on this rather than introducing a parallel client.
-- `internal/cli/cluster.go` (passthrough commands `kubectl`/`oc`/`ibmcloud`/`exec`/`shell`/`shell` — Sprint 1 added the `--on` dispatch path; preserve it) and `internal/cli/inspect.go` (the existing `roksbnkctl logs <component>` command — extend it).
-- `internal/doctor/doctor.go` + `internal/doctor/check.go` (the Sprint 0 Check struct refactor) — you'll downgrade kubectl + oc from "needed" to "informational".
-- `prompts/sprint1/staff.md` and the resolved files at `issues/resolved_sprint1_*.md` — patterns from Sprint 1 (priority ordering, verification block, append-only-shared-files coordination notes).
+**Read first** before any edits:
+
+1. `/Users/j.lucia/Code/github/awsbnkctl/agents/staff.md`
+2. `/Users/j.lucia/Code/github/awsbnkctl/prompts/sprint2/staff.md` — yourself, of course
+3. `/Users/j.lucia/Code/github/awsbnkctl/prompts/sprint2/README.md`
+4. `/Users/j.lucia/Code/github/awsbnkctl/docs/PLAN.md` § Sprint 2
+5. `/Users/j.lucia/Code/github/awsbnkctl/docs/prd/08-S3-SUPPLY-CHAIN-IRSA.md` — primary spec.
+6. `/Users/j.lucia/Code/github/awsbnkctl/docs/prd/07-EKS-CLUSTER-SRIOV.md` § "Outputs" — your inputs come from PRD 07.
+7. Sprint 1 carry-overs: `issues/issue_sprint1_staff.md` (Issues 2, 3, 4 are Sprint 2 scope).
+8. Current state: `internal/aws/{client,sts,ec2,eks,vpc}.go` (Sprint 1), `internal/cli/init.go` (inherited; touches the workspace wizard).
 
 ## Coordinate with parallel agents
 
-An architect agent is replacing 7 chapter stubs with real prose under `book/src/` (chapters 5, 6, 8, 9, 10, 11, 24). A validator agent is adding fake-clientset unit tests at `internal/k8s/*_test.go`, golden-file byte-equivalence tests, editing `.github/workflows/ci.yml`, patching `scripts/e2e-test.sh` Phase D (replacing D3 with `roksbnkctl k get pods -n f5-bnk` + a PATH-strip substep), and updating `docs/E2E_TEST.md`.
+An **architect** agent is finalising PRD 08, drafting chapter 25. **Do not touch `docs/`, `book/`, `agents/`, `prompts/`.**
 
-**Do not touch their files.** Specifically: don't write `*_test.go` files in `internal/k8s/` (validator owns those); don't edit `scripts/e2e-test.sh` or `.github/workflows/ci.yml` or `docs/E2E_TEST.md`. You own everything else.
+A **validator** agent is updating Dockerfile multi-arch + CI + cspell. **Do not touch `.github/workflows/`, `cspell.json`, `tools/`, `scripts/`.**
 
-## Tasks (priority order — finish from the top down)
+## Your scope
 
-If you run out of token budget, stop at the priority boundary you reached and file an issue describing what's deferred. Don't half-finish a task.
+| Surface | Action |
+|---|---|
+| `terraform/modules/s3_supply_chain/{main,variables,outputs,versions}.tf` | New: S3 bucket (KMS-encrypted), bucket policy restricting `s3:GetObject` to FLO IRSA role, `aws_s3_object` for FAR archive + JWT |
+| `terraform/modules/iam_irsa/{main,variables,outputs,versions}.tf` | New: looks up the OIDC provider via `data.aws_iam_openid_connect_provider`; creates trust-policy IAM role bound to FLO SA; permission policy with `s3:GetObject` on the supply-chain bucket + `kms:Decrypt` on the CMK |
+| `terraform/modules/ecr_mirror/{main,variables,outputs,versions}.tf` | New (gated on `var.enable_ecr_mirror` = false default): ECR repositories per FAR image, `null_resource` running `skopeo copy`. If time constrained, file as Sprint 3 follow-up issue and skip — PRD 08 explicitly allows this. |
+| `terraform/main.tf` | Wire `s3_supply_chain` + `iam_irsa` calls; both consume `eks_cluster` outputs (OIDC ARN, issuer URL) |
+| `terraform/variables.tf` | Add inputs: `far_auth_file_local_path`, `jwt_file_local_path`, `kms_key_arn`, `enable_ecr_mirror` |
+| `internal/aws/s3.go` | `PutObject(ctx, bucket, key, body)`, `HeadObject(ctx, bucket, key)` |
+| `internal/aws/iam.go` | `GetOIDCProvider(ctx, arn)`, `HasIRSARole(ctx, roleName)`, helper to derive the role ARN from cluster name + account |
+| `internal/aws/s3_test.go`, `iam_test.go` | Mocked unit tests |
+| `internal/config/workspace.go` (or equivalent) | Retarget `Workspace.IBMCloud` → `Workspace.AWS` per PRD 04 fold. Fields: `Region`, `Profile`, `VPCID`, `SubnetIDs`. Carry a back-compat alias for one release (`IBMCloud` deprecated; reads from `AWS` first, falls back to old field) **OR** clean break with `MIGRATING.md` note — your call, document in issue |
+| `internal/cli/init.go` (AWS path) | Wizard: region prompt, VPC discovery (or "create new VPC" path), FAR archive path prompt, JWT path prompt, FLO namespace prompt (default `flo-system`). At wizard close: `aws.NewClients` + `PutObject` to upload FAR + JWT. **Mock-friendly** — `--dry-run` flag skips PutObject |
+| `internal/doctor/aws.go` | New rows: `aws s3:PutObject permission` (probe via HeadBucket); `aws iam:GetOpenIDConnectProvider permission`; `aws ec2 vCPU quota for c5n family` (closes Sprint 1 staff Issue 2). Tests in `aws_test.go` |
+| `internal/cli/cluster.go` | Wire the up cluster Long blob to mention `--workspace` (closes Sprint 1 tech-writer Issue 5) — one-sentence append per the tech-writer recommendation |
+| `internal/cli/legacy_helpers.go` | Retire the IBM-named shims now that the workspace schema is retargeted (Sprint 1 staff Issue 4). Removal may need staged work — if any consumer breaks, file an issue and skip that consumer |
+| `internal/cli/doctor_backend.go` | Replace IBM ops-pod check stub with placeholder citing Sprint 2's IRSA design — full retarget to IRSA-flavoured ops-pod check lives Sprint 3 |
 
-### Priority 1 — Client builder extensions (`internal/k8s/client.go`)
+## Tasks (priority order)
 
-Add these constructors. Keep the existing surface intact; this is additive.
+1. **Workspace schema retarget.** Rename `Workspace.IBMCloud` → `Workspace.AWS` with new field set. Update every consumer (`internal/doctor/aws.go`, `internal/cli/init.go`, `internal/tf/vars.go`, anywhere else `grep -r 'IBMCloud' internal/` finds). Make this the first task — every other change depends on it.
 
-```go
-// BuildClientset returns a typed client for core + apps + batch + etc.
-// kubeconfigPath: empty string → workspace default at
-// ~/.roksbnkctl/<ws>/state/kubeconfig; "in-cluster" sentinel → use
-// rest.InClusterConfig() (used by the K8s execution backend in Phase 3,
-// PRD 03).
-func BuildClientset(kubeconfigPath string) (kubernetes.Interface, error)
+2. **Author Terraform modules.** Start with `variables.tf` + `outputs.tf` for both `s3_supply_chain` + `iam_irsa` matching PRD 08's tables. Then `main.tf` bodies. Then top-level `terraform/main.tf` rewire. `terraform validate` must succeed.
 
-// BuildDynamicClient returns a dynamic.Interface for unstructured access
-// (necessary for kubectl get <type-not-in-typed-scheme>, CRDs, etc.).
-func BuildDynamicClient(kubeconfigPath string) (dynamic.Interface, error)
+3. **Author `internal/aws/{s3,iam}.go` + tests.** Same pattern as Sprint 1's other AWS files — small interfaces for mocking, unit tests via aws-sdk-go-v2 middleware-test or manual mock injection.
 
-// BuildRESTConfig is the lower-level helper both of the above use; expose
-// it so callers that need a custom rest.Config (e.g. SPDY upgrades for
-// exec/port-forward) can build off it.
-func BuildRESTConfig(kubeconfigPath string) (*rest.Config, error)
-```
+4. **Wire `awsbnkctl init` AWS path.** Prompt-driven cobra command. Use `golang.org/x/term` or inherited prompt code. Confirm `awsbnkctl init --dry-run` runs without touching AWS.
 
-Phase 2.1 adds OpenShift typed client + scheme registration; defer if you run out of budget but reserve `BuildOpenShiftClient` as the function name for that follow-up.
+5. **Doctor refresh.** Add S3 + IRSA + EC2 vCPU quota rows. Run against fake creds; existing `TestRunWithWhy_StockDevBox_NoWorkspace` must still pass (no workspace = no AWS rows).
 
-### Priority 2 — `roksbnkctl k get` (`internal/k8s/get.go` + `internal/cli/k_get.go`)
+6. **Sprint 1 carry-over folds.** `up cluster --help` cosmetic; `legacy_helpers.go` retirement (file issues for what you can't cleanly retire).
 
-The flagship internalised verb. Use `k8s.io/cli-runtime`'s `genericclioptions.PrintFlags` so `-o yaml/json/wide/jsonpath/go-template/name` matches kubectl byte-for-byte. Use `cli-runtime`'s `resource.Builder` for type/name parsing.
+7. **Build green gate (offline).** `go vet`, `gofmt`, `go build`, `go test`, `terraform validate` on root + new modules.
 
-CLI surface:
-```bash
-roksbnkctl k get <resource> [name] [-n <ns>] [-A] [-l <selector>] [-o <fmt>]
-roksbnkctl get ...                  # top-level alias for the bare 'get'
-```
-
-Plural / singular / shortname (pods/pod/po) handling comes from `RESTMapper`; use the discovery client.
-
-### Priority 3 — `roksbnkctl k describe` (`internal/k8s/describe.go` + `internal/cli/k_describe.go`)
-
-Delegate to `k8s.io/kubectl/pkg/describe`. The library does the heavy lifting; this is mostly cobra + flag wiring.
-
-### Priority 4 — `roksbnkctl k apply -f` (`internal/k8s/apply.go` + `internal/cli/k_apply.go`)
-
-Server-side apply via dynamic client with field-manager `roksbnkctl`. Inputs:
-- `-f <file>` — single YAML file
-- `-f <dir>` — recurse `*.yaml` (or detect kustomization.yaml and use kustomize/api)
-- `-f -` — stdin
-
-Use `sigs.k8s.io/kustomize/api/krusty` for kustomize base resolution. `--force` flag maps to SSA's `force-conflicts=true`.
-
-CLI surface:
-```bash
-roksbnkctl k apply -f <file-or-dir> [-n <ns>] [--force]
-roksbnkctl apply -f ...           # top-level alias
-```
-
-### Priority 5 — `roksbnkctl k logs` (extends existing) + `roksbnkctl k delete`
-
-`logs`: extend the existing component-aware `internal/cli/inspect.go logsCmd` with raw pod-name path:
-- `roksbnkctl logs flo` (existing — by component label)
-- `roksbnkctl k logs <pod-name>` (new — direct pod)
-- Both honour `-n <ns>`, `-c <container>`, `-f`, `--previous`, `--since`, `--tail`
-
-`delete`: cobra wiring for the dynamic-client delete + cascade options. CLI:
-```bash
-roksbnkctl k delete <resource> <name> [-n <ns>] [--force] [--grace-period N] [--cascade <orphan|background|foreground>]
-```
-
-### Priority 6 — `roksbnkctl k exec` (SPDY) (`internal/k8s/exec.go` + `internal/cli/k_exec.go`)
-
-Use `client-go/tools/remotecommand.NewSPDYExecutor`. CLI surface:
-
-```bash
-roksbnkctl k exec <pod> [-n <ns>] [-c <container>] [-i] [-t] -- <cmd> [args...]
-```
-
-`-i` opens stdin to the remote process; `-t` allocates a PTY (chapter 24 will tell users to use this for `top` / `bash`-style interactive work).
-
-### Priority 7 — `roksbnkctl k port-forward` (SPDY)
-
-`client-go/tools/portforward`. CLI:
-
-```bash
-roksbnkctl k port-forward <pod> [-n <ns>] <local-port>:<remote-port>
-```
-
-Signal handling: graceful close on Ctrl+C (no orphaned tunnel).
-
-### Priority 8 — Doctor downgrade
-
-In `internal/doctor/doctor.go`: change the `kubectl` and `oc` checks to:
-- `Optional: true` (already?) — verify
-- Status now downgraded one notch: missing → `StatusOK` with detail `(internalised; passthrough still works if installed)` rather than `StatusWarning`. Or keep as `StatusWarning` but change the message to mention the internalisation.
-
-Whichever you pick, document the choice in the issue file. The intent is: a fresh dev box without kubectl/oc should not produce warnings post-Sprint 2 for everyday roksbnkctl use.
-
-### Priority 9 — OpenShift extensions (Phase 2.1) — DEFER if budget tight
-
-`github.com/openshift/client-go` + `github.com/openshift/api`. Register OpenShift API types in the scheme so `roksbnkctl k get projects` (and routes, imagestreams) works against ROKS clusters. PLAN.md and PRD 02 explicitly mark this as Phase 2.1; if you don't have time, file an issue and move on. The 7 architect chapters can mention the deferral as a future enhancement.
-
-### Priority 10 — Top-level aliases
-
-After all `roksbnkctl k <verb>` commands work, add cobra command aliases at the root level so the most common verbs work without the `k` prefix:
-
-- `roksbnkctl get` ↔ `roksbnkctl k get`
-- `roksbnkctl apply` ↔ `roksbnkctl k apply`
-- `roksbnkctl logs` ↔ `roksbnkctl k logs`
-
-The disambiguation pattern (host vs cluster `exec`): `exec` stays host-side; cluster exec is `roksbnkctl k exec` only — no top-level alias.
-
-## Verification before reporting done
-
-- `go build ./...` clean
-- `go test ./...` clean (unit tests added by validator pass; your code shouldn't break them)
-- `go vet ./...` clean
-- `gofmt -d -l .` clean
-- `roksbnkctl --help` shows the new `k` parent + at least the top-level aliases
-- `roksbnkctl k --help` shows the verb list
-- `roksbnkctl get --help` works (alias)
-- Doctor on a host with kubectl on PATH: kubectl row still ✓
-- Doctor on a host without kubectl: row downgrades to informational, not a warning (`StatusOK` with explanatory detail)
+8. **File Sprint 2 staff issues.** Schema same as Sprint 1.
 
 ## Issue tracking
 
-`/mnt/d/project/roksbnkctl/issues/issue_sprint2_staff.md`. Same format as Sprint 1. If a priority item is deferred (most likely candidates: priority 7 port-forward, priority 9 OpenShift extensions), file an issue documenting what's missing and why. Don't half-finish.
+File issues to `/Users/j.lucia/Code/github/awsbnkctl/issues/issue_sprint2_staff.md`.
 
-## Final report (under 200 words)
+## Verification before reporting done
 
-- Files created (count + key paths)
-- Files edited
-- Build / test / vet / gofmt status
-- Which priority items completed; which (if any) deferred
-- Issues filed
-- Anything the integrator should know (especially regarding cli-runtime / kubectl/pkg/describe / kustomize/api dep additions to go.mod)
+- `go vet ./...` clean
+- `gofmt -d -l .` empty
+- `go build ./...` succeeds
+- `go test ./...` passes
+- `terraform validate` on root + each new module
+- `./bin/awsbnkctl init --dry-run` runs the wizard without touching live AWS
+- `./bin/awsbnkctl doctor` reports the new S3 + IRSA + vCPU rows when a workspace exists
 
-Do NOT commit. The integrator commits the aggregated work.
+## Final report
+
+Under 200 words — counts of files created/modified, schema retarget result (back-compat or clean break), module shape ↔ PRD 08 alignment, build/test results, tests skipped, carry-overs retired, issues filed, integrator notes. Do NOT commit.

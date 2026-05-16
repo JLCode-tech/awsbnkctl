@@ -19,6 +19,13 @@
 # expect to write $HOME at first invocation will explode if HOME is
 # unset or unwritable).
 #
+# Sprint 2 (tech-writer Sprint 1 Issue 6): the awscli/kubectl/helm
+# download URLs now branch on $TARGETARCH so this image builds cleanly
+# on linux/amd64 AND linux/arm64. Both arches get their own pinned
+# sha256 checksums — supply-chain protection survives the multi-arch
+# split because each architecture's binary is verified independently
+# against an architecture-specific pin.
+#
 # Multi-stage:
 #   Stage 1 (downloader) — fetches awscli v2 zip, kubectl + helm
 #   binaries from official URLs; verifies sha256 checksums. Build fails
@@ -31,23 +38,37 @@
 # ── Stage 1: downloader ─────────────────────────────────────────────
 FROM alpine:3.19 AS downloader
 
+# TARGETARCH is auto-set by buildx (docker buildx build --platform
+# linux/amd64,linux/arm64 ...). Values seen: `amd64`, `arm64`. The case
+# statement below maps to the per-tool naming conventions:
+#   - awscli:  `x86_64` / `aarch64`
+#   - kubectl: `amd64`  / `arm64`
+#   - helm:    `amd64`  / `arm64`
+ARG TARGETARCH
+
 # Pinned versions. Bumps land in a deliberate commit — supply-chain
 # rotations need a code review pass, never a silent CI auto-bump.
 ARG AWSCLI_VERSION=2.17.52
 ARG KUBECTL_VERSION=v1.30.5
 ARG HELM_VERSION=v3.15.4
 
-# Pinned sha256 checksums for the binaries above. Refreshed when
+# Pinned sha256 checksums per architecture. Refreshed when
 # AWSCLI_VERSION / KUBECTL_VERSION / HELM_VERSION are bumped; mismatch
 # fails the build.
 #
-# Sources:
-#   awscli:  https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip.sha256
-#   kubectl: https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256
-#   helm:    https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum
-ARG AWSCLI_SHA256=11dd0016d93a2e9b5b0f3f13a5d4ee42a09581ef0371461c1c1c1d40c511d81e
-ARG KUBECTL_SHA256=b8aa921a580c3d8ba473236815de5ce5173d6fbfa2ccff453fa5eef46cc5ee7a
-ARG HELM_SHA256=11400fecfc07fd6f034863e4e0c4c4445594673fd2a129e701fe41f31170cfa9
+# Sources (AWS publishes the zip but no .sha256 file — checksum was
+# computed against the official zip at version-pin time; kubectl + helm
+# publish .sha256 / .sha256sum sidecar files that were fetched verbatim):
+#   awscli (amd64):  shasum -a 256 awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip
+#   awscli (arm64):  shasum -a 256 awscli-exe-linux-aarch64-${AWSCLI_VERSION}.zip
+#   kubectl:         https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/<arch>/kubectl.sha256
+#   helm:            https://get.helm.sh/helm-${HELM_VERSION}-linux-<arch>.tar.gz.sha256sum
+ARG AWSCLI_SHA256_AMD64=11dd0016d93a2e9b5b0f3f13a5d4ee42a09581ef0371461c1c1c1d40c511d81e
+ARG AWSCLI_SHA256_ARM64=f9b2b8486dfa45470142129db8e1fa44aa6434bf7a9cd6927e815f6b8b3609aa
+ARG KUBECTL_SHA256_AMD64=b8aa921a580c3d8ba473236815de5ce5173d6fbfa2ccff453fa5eef46cc5ee7a
+ARG KUBECTL_SHA256_ARM64=efc594857f9255fc33bcda9409b8862a3b47ce5f4e09d51c3427b85dd769b9b9
+ARG HELM_SHA256_AMD64=11400fecfc07fd6f034863e4e0c4c4445594673fd2a129e701fe41f31170cfa9
+ARG HELM_SHA256_ARM64=fa419ecb139442e8a594c242343fafb7a46af3af34041c4eac1efcc49d74e626
 
 RUN apk add --no-cache curl unzip tar
 
@@ -56,12 +77,20 @@ WORKDIR /staging
 # awscli v2 — vendored python runtime, no host pip needed. The
 # `aws-cli` zip extracts to ./aws/ with an installer script; we run
 # `./install` into /opt/aws-cli so stage 2 can copy a single tree.
+#
+# Per-arch URL: AWS publishes `awscli-exe-linux-x86_64-<v>.zip` and
+# `awscli-exe-linux-aarch64-<v>.zip` from the same CDN base URL.
 RUN set -eux; \
-    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip" \
+    case "${TARGETARCH}" in \
+        amd64) AWSCLI_ARCH=x86_64;  AWSCLI_SHA256="${AWSCLI_SHA256_AMD64}" ;; \
+        arm64) AWSCLI_ARCH=aarch64; AWSCLI_SHA256="${AWSCLI_SHA256_ARM64}" ;; \
+        *) echo "FATAL: unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWSCLI_ARCH}-${AWSCLI_VERSION}.zip" \
         -o awscli.zip; \
     echo "${AWSCLI_SHA256}  awscli.zip" > awscli.zip.sha256; \
     sha256sum -c awscli.zip.sha256 || { \
-        echo "FATAL: awscli checksum mismatch — supply-chain swap suspected"; \
+        echo "FATAL: awscli (${AWSCLI_ARCH}) checksum mismatch — supply-chain swap suspected"; \
         echo "expected: ${AWSCLI_SHA256}"; \
         echo "got:      $(sha256sum awscli.zip)"; \
         exit 1; }; \
@@ -69,28 +98,43 @@ RUN set -eux; \
     ./aws/install -i /opt/aws-cli -b /opt/aws-cli/bin; \
     rm -rf awscli.zip aws/
 
-# kubectl — single binary, no install step.
+# kubectl — single binary, no install step. Upstream publishes a
+# `linux/amd64/kubectl` and `linux/arm64/kubectl` under the same release
+# tree; both URLs return the same sha256 sidecar pattern.
 RUN set -eux; \
-    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+    case "${TARGETARCH}" in \
+        amd64) KUBECTL_SHA256="${KUBECTL_SHA256_AMD64}" ;; \
+        arm64) KUBECTL_SHA256="${KUBECTL_SHA256_ARM64}" ;; \
+        *) echo "FATAL: unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
         -o /staging/kubectl; \
     echo "${KUBECTL_SHA256}  /staging/kubectl" > kubectl.sha256; \
     sha256sum -c kubectl.sha256 || { \
-        echo "FATAL: kubectl checksum mismatch"; \
+        echo "FATAL: kubectl (${TARGETARCH}) checksum mismatch"; \
         exit 1; }; \
     chmod +x /staging/kubectl
 
-# helm — tarball, extract the linux-amd64/helm binary.
+# helm — tarball, extract the linux-<arch>/helm binary. Upstream tarball
+# layout: `helm-<v>-linux-amd64.tar.gz` extracts to `linux-amd64/helm`;
+# `helm-<v>-linux-arm64.tar.gz` extracts to `linux-arm64/helm`. Same
+# binary name post-extract; the parent directory carries the arch.
 RUN set -eux; \
-    curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+    case "${TARGETARCH}" in \
+        amd64) HELM_SHA256="${HELM_SHA256_AMD64}" ;; \
+        arm64) HELM_SHA256="${HELM_SHA256_ARM64}" ;; \
+        *) echo "FATAL: unsupported TARGETARCH=${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${TARGETARCH}.tar.gz" \
         -o helm.tar.gz; \
     echo "${HELM_SHA256}  helm.tar.gz" > helm.tar.gz.sha256; \
     sha256sum -c helm.tar.gz.sha256 || { \
-        echo "FATAL: helm checksum mismatch"; \
+        echo "FATAL: helm (${TARGETARCH}) checksum mismatch"; \
         exit 1; }; \
     tar -xzf helm.tar.gz; \
-    mv linux-amd64/helm /staging/helm; \
+    mv linux-${TARGETARCH}/helm /staging/helm; \
     chmod +x /staging/helm; \
-    rm -rf helm.tar.gz linux-amd64/
+    rm -rf helm.tar.gz linux-${TARGETARCH}/
 
 
 # ── Stage 2: runtime ────────────────────────────────────────────────

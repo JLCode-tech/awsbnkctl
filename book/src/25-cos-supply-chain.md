@@ -1,246 +1,271 @@
 # S3 (and optional ECR) supply chain
 
-BIG-IP Next for Kubernetes (BNK) pulls its runtime artefacts — the F5 Application Runtime (FAR) container images, the JWT licence used at install + renewal time, the f5-bigip-k8s-manifest Helm chart, and the schematic JSON the deployer renders — from IBM Cloud Object Storage (COS). The COS bucket is the **supply chain**: it's how artefacts produced upstream (F5 build pipeline, licence-issuing service, schematic generator) reach the cluster.
+BIG-IP Next for Kubernetes (BNK) pulls three artefacts at deploy time: an **F5 Application Runtime (FAR) pull-key archive** that lets the FLO operator authenticate against `dev-registry.f5.com` to fetch container images, a **subscription JWT** that proves a valid F5 entitlement, and a **CA cert chain** for the cluster's internal mTLS (cert-manager handles the last one; not in scope here). The first two are what BNK calls the **supply chain**, and `awsbnkctl` stages them in an S3 bucket so FLO can read them at apply time.
 
-`roksbnkctl cos` is the management surface for that supply chain. Three command levels — `cos instance`, `cos bucket`, `cos object` — cover the full CRUD on COS resources without touching the `ibmcloud` CLI; everything (most visibly `cos object put` for uploads and `cos object get` for downloads) goes through the IBM Cloud Go SDKs ([go-sdk-core](https://pkg.go.dev/github.com/IBM/go-sdk-core/v5), [platform-services-go-sdk](https://pkg.go.dev/github.com/IBM/platform-services-go-sdk), [ibm-cos-sdk-go](https://pkg.go.dev/github.com/IBM/ibm-cos-sdk-go)).
+On the upstream `roksbnkctl` fork the same artefacts lived in IBM Cloud Object Storage (COS), with the FLO service account bound to an IBM Trusted Profile. On AWS the equivalent shape is **S3 + IRSA** — IAM Roles for Service Accounts. EKS issues an OIDC token to the FLO pod, AWS STS exchanges it for short-lived AWS credentials, and FLO reads the bucket through the resulting role. No static `AWS_ACCESS_KEY_ID` ever appears in a Kubernetes Secret or pod spec.
 
-## What COS is in this stack
+This chapter walks through how the bucket gets provisioned, how the IRSA trust chain hangs together, how `awsbnkctl init` stages the artefacts, the optional ECR-mirror story for air-gapped customers, and how to rotate the artefacts on day 2 without re-running `awsbnkctl up`. Cross-links: [PRD 07](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/07-EKS-CLUSTER-SRIOV.md) for the cluster + OIDC provider that this chapter consumes, [PRD 08](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/08-S3-SUPPLY-CHAIN-IRSA.md) for the design surface this chapter operationalises, and [Chapter 14](./14-credentials-resolver.md) for how AWS credentials get resolved at the host level (a separate concern from the in-cluster IRSA path).
 
-COS is IBM's S3-compatible object store. Two layers matter here:
+## What's in the supply chain
 
-- **Instance**: a service instance under [Resource Controller](https://cloud.ibm.com/docs/account?topic=account-resource-controller). Instances are global; they don't pin to a region. A workspace typically uses one COS instance per environment (dev, staging, prod) and shares it across multiple buckets.
-- **Bucket**: an S3-style bucket with regional affinity, hosted on a COS instance. Buckets carry the storage class (`standard`, `vault`, `cold`, `smart`) and the access policy (HMAC keys, service-instance creds, public ACLs — the latter are off-limits for BNK supply-chain use).
-
-The BNK supply chain reads from one COS bucket per cluster's BNK install. The bucket holds:
+Two objects, both small (a few kilobytes), both confidential:
 
 | Object | What it is | Consumed by |
 |---|---|---|
-| `f5-far-auth-key.tgz` | FAR repository pull credentials — the F5-internal artefact key that lets FLO download FAR container images | `flo` module at install time |
-| `trial.jwt` (or production equivalent) | BNK subscription JWT — the licence the CNE Instance presents | `flo` and `license` modules |
-| `schematic-<v>.json` | The deployer's schematic JSON for the deployed BNK version | informational, not directly mounted into the cluster |
-| (optional) FAR image tarballs | Pre-pulled FAR images for air-gapped installs | `flo` when running in disconnected mode |
+| `far-auth.tar.gz` | FAR repository pull credentials — the F5-internal artefact key that lets FLO download FAR container images from `dev-registry.f5.com` | `flo` module at install time |
+| `subscription.jwt` | BNK subscription JWT — the licence the `CNEInstance` reconciler validates against F5's entitlement service | `flo` and `license` modules |
 
-The bucket structure is defined by the upstream HCL — concretely by the `ibmcloud_resources_cos_bucket` variable, which defaults to `bnk-schematics-resources`. The instance defaults to `bnk-orchestration`.
+The exact object keys are configurable via Terraform variables; the defaults above match the `s3_supply_chain` module's `aws_s3_object` resource names. Other artefacts (a future schematic JSON, additional CA bundles, per-environment overrides) can sit in the same bucket alongside these two — the bucket policy and IRSA permissions scope to the whole bucket prefix, not to individual object keys, so adding new objects doesn't require any IAM churn.
 
-## The three command levels
+Both objects are **end-user-supplied**. F5 distributes the FAR archive and the subscription JWT separately (subscription portal, sales-engineering hand-off, etc.); `awsbnkctl` doesn't fetch them. The operator points `awsbnkctl init` at local copies of both files at workspace creation time.
+
+## The S3 bucket shape
+
+The `terraform/modules/s3_supply_chain/` module provisions one bucket per workspace:
+
+```
+awsbnkctl-<workspace>-<random-suffix>
+├── far-auth.tar.gz
+└── subscription.jwt
+```
+
+The random suffix is a four-byte `random_id` Terraform resource — bucket names are globally unique across AWS, so a deterministic name (e.g. just `awsbnkctl-prod`) would collide as soon as a second customer tried to deploy. The `<workspace>-<random-suffix>` pattern keeps fresh deployments friction-free while letting operators in governance-bound environments override the name explicitly via `bucket_name_override`.
+
+**Encryption.** The bucket is SSE-KMS-encrypted with a **customer-managed key** (CMK) created in the workspace's region. The default is CMK rather than SSE-S3 (AWS-managed) because the subscription JWT is sensitive enough to want CloudTrail-auditable decrypt operations and per-key rotation policy. The CMK costs about $1/month per region; v1.x evaluates SSE-S3 as a doc'd cost-sensitive alternative.
+
+**Bucket policy.** The policy scopes `s3:GetObject` to the FLO IRSA role ARN. Bucket-policy semantics make a scoped `Allow` sufficient on its own (S3 is default-deny), but v1.0 ships an **explicit `Deny`** on every other principal as defence-in-depth against future hand-edits in the AWS console:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowFLOReadOnly",
+      "Effect": "Allow",
+      "Principal": { "AWS": "<flo_role_arn>" },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::<bucket>/*"
+    },
+    {
+      "Sid": "DenyEveryoneElse",
+      "Effect": "Deny",
+      "NotPrincipal": { "AWS": "<flo_role_arn>" },
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::<bucket>",
+        "arn:aws:s3:::<bucket>/*"
+      ],
+      "Condition": {
+        "StringNotLike": {
+          "aws:PrincipalArn": "arn:aws:iam::<account-id>:role/aws-service-role/*"
+        }
+      }
+    }
+  ]
+}
+```
+
+The `StringNotLike` on `aws-service-role/*` keeps AWS service-linked roles (replication, Inspector, etc.) functional; without it, a `NotPrincipal`-based Deny breaks any future service that wants read access. Operators who don't run any S3 service integrations can drop the condition; v1.x makes that configurable.
+
+**Public access.** All four S3 Block-Public-Access flags are on: `BlockPublicAcls`, `IgnorePublicAcls`, `BlockPublicPolicy`, `RestrictPublicBuckets`. The supply-chain bucket is never reachable from the public internet.
+
+**Versioning.** Off by default. The artefacts are operator-rotated (see [Day-2 ops](#day-2-ops-rotating-the-far-archive--jwt)) and the rotation flow overwrites the existing keys; bucket versioning would accumulate stale-but-still-decryptable copies. Operators who want a rotation audit trail enable versioning via `var.enable_bucket_versioning = true` and accept the storage cost.
+
+## IRSA trust chain
+
+This is the load-bearing piece — the trust hop FLO uses to read the bucket without a static key. Four resources collaborate:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ EKS cluster (PRD 07 — eks_cluster module output)             │
+│                                                              │
+│   ┌────────────────────────────────────────────────────┐     │
+│   │ IAM OIDC provider                                  │     │
+│   │   issuer:  https://oidc.eks.<region>.amazonaws.com │     │
+│   │            /id/<cluster-OIDC-suffix>               │     │
+│   │   thumb:   <SHA-1 of issuer cert>                  │     │
+│   └────────────────────────────────────────────────────┘     │
+│                          ▲                                   │
+│                          │  Trust hop 1:                     │
+│                          │  STS AssumeRoleWithWebIdentity    │
+│                          │  using the projected SA token     │
+│                          │                                   │
+│   ┌──────────────────────┴─────────────────────────────┐     │
+│   │ IAM role  awsbnkctl-<ws>-flo-supply-reader         │     │
+│   │   trust policy: federated principal = OIDC ARN     │     │
+│   │   trust condition:                                 │     │
+│   │     <issuer>:sub = system:serviceaccount:          │     │
+│   │       flo-system:flo-controller                    │     │
+│   │     <issuer>:aud = sts.amazonaws.com               │     │
+│   │   permission policy: s3:GetObject on supply bucket │     │
+│   │                       + kms:Decrypt on the CMK     │     │
+│   └────────────────────────────────────────────────────┘     │
+│                          ▲                                   │
+│                          │  Trust hop 2:                     │
+│                          │  ServiceAccount annotation        │
+│                          │  eks.amazonaws.com/role-arn = …   │
+│                          │                                   │
+│   ┌──────────────────────┴─────────────────────────────┐     │
+│   │ ServiceAccount  flo-system/flo-controller          │     │
+│   │   (created by the flo module, Sprint 3)            │     │
+│   └────────────────────────────────────────────────────┘     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+The hops in plain English:
+
+1. **PRD 07's `eks_cluster` module creates the IAM OIDC provider.** That's the federated identity provider AWS uses to trust tokens issued by the EKS control plane. The `oidc_provider_arn` + `cluster_oidc_issuer_url` outputs flow into Sprint 2's IRSA module.
+2. **The `iam_irsa` module creates the IAM role** with a trust policy whose `Principal.Federated` is the OIDC provider ARN, and whose condition keys lock down which Kubernetes service account is allowed to assume the role. The condition uses `<issuer>:sub` to pin to a specific namespace + SA name (default `flo-system:flo-controller`) and `<issuer>:aud` to pin the audience claim (`sts.amazonaws.com` — the EKS pod-identity webhook sets this).
+3. **The `flo` module (Sprint 3) creates the ServiceAccount** in `flo-system` with an `eks.amazonaws.com/role-arn` annotation pointing at the IRSA role ARN.
+4. **At pod start, the EKS pod-identity webhook** injects two env vars (`AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`) and a projected SA token volume into the FLO pod. The aws-sdk-go-v2 client inside FLO sees those env vars, calls `sts:AssumeRoleWithWebIdentity` with the token, gets back short-lived (one-hour-ish) AWS credentials, and reads the bucket.
+
+The token is auto-rotated by the webhook every hour; FLO re-assumes when its credentials expire. No static key ever lands on disk in the cluster.
+
+The condition keys are the part most likely to bite — a typo in the namespace or SA name produces a silent `AccessDenied` from STS rather than a clear "this SA isn't trusted" error. The `iam_irsa` module's `flo_namespace` + `flo_service_account_name` variables default to `flo-system` / `flo-controller` to match the Sprint 3 `flo` module's defaults; an operator who overrides one must override both.
+
+## Uploading via `awsbnkctl init`
+
+The end-to-end provisioning flow from a fresh dev box, after AWS credentials are set up and the cluster from chapter 8 is `Ready`:
 
 ```bash
-roksbnkctl cos instance {create|delete|list}
-roksbnkctl cos bucket   {create|delete|list} --instance <name-or-CRN>
-roksbnkctl cos object   {put|get|delete|list} --instance <name-or-CRN>
+$ awsbnkctl init
+Workspace name [default]: prod
+AWS region [us-east-1]:
+EKS cluster name [auto-detect from workspace]: prod-bnk
+FAR archive local path: /Users/op/Downloads/f5cne-far-auth-2.3.0.tar.gz
+Subscription JWT local path: /Users/op/Downloads/f5cne-subscription-2026Q2.jwt
+FLO namespace [flo-system]:
+FLO service account name [flo-controller]:
+  ✓ workspace written to ~/.awsbnkctl/prod/
+  ✓ FAR archive path recorded: /Users/op/Downloads/f5cne-far-auth-2.3.0.tar.gz
+  ✓ JWT path recorded: /Users/op/Downloads/f5cne-subscription-2026Q2.jwt
+  • next: awsbnkctl up   (provisions bucket + uploads + IRSA)
 ```
 
-All three layers resolve credentials through the standard [credential resolver chain](./14-credentials-resolver.md) — env var, OS keychain, workspace `api_key_b64`, prompt. There's no separate "COS credential"; the IBM API key authenticates against Resource Controller (instance ops) and IAM-signed S3 requests (bucket and object ops).
+`init` does **not** upload the artefacts itself. It writes the local paths into the workspace's generated `terraform.tfvars` (as `far_auth_file_local_path` and `jwt_file_local_path`) and stops. The actual upload happens during `awsbnkctl up`, which calls `terraform apply` against the `s3_supply_chain` module; the `aws_s3_object` resources stream the local files into S3 with `etag` computed from the file contents.
 
-### `cos instance`
+This split keeps the supply chain **reproducible from `terraform apply` alone**. Anyone who can read the workspace state and the local files can re-create the supply-chain state without re-running `init`; the bucket isn't a side effect of an imperative wizard step.
 
-Manages COS service instances at the account level via [Resource Controller](https://cloud.ibm.com/apidocs/resource-controller).
+The `internal/aws/s3.go` Go helpers (`PutObject`, `HeadObject`, `GetObject`) exist for two adjacent jobs: `doctor` probes that head the bucket to verify the FLO role can actually read it, and a v1.x "rotate one object without re-running `terraform apply`" path. They don't run at init time.
+
+## ECR mirror (optional)
+
+Customers running EKS in fully air-gapped accounts — no outbound HTTPS to `dev-registry.f5.com` — can't have FLO pull FAR container images at apply time. The fall-back is to mirror the FAR images into the customer's own Elastic Container Registry (ECR) before `awsbnkctl up` runs, and rewrite FLO's image references to point at ECR.
+
+`awsbnkctl` ships an optional `terraform/modules/ecr_mirror/` module, gated on `var.enable_ecr_mirror`:
+
+```hcl
+module "ecr_mirror" {
+  source = "./modules/ecr_mirror"
+  count  = var.enable_ecr_mirror ? 1 : 0
+
+  region               = var.aws_region
+  workspace_name       = var.workspace_name
+  far_auth_local_path  = var.far_auth_file_local_path
+  ecr_repository_names = var.far_image_names   # populated by a small helper
+}
+```
+
+The module body creates one `aws_ecr_repository` per FAR image (typically a dozen for a BNK 2.3 release), then runs `skopeo copy` via a `null_resource` `local-exec` provisioner using the project's tools-image:
 
 ```bash
-# Create a Standard-plan instance under the workspace's resource group
-roksbnkctl cos instance create bnk-orchestration --plan standard
-
-# Override the plan by catalog UUID when roksbnkctl hasn't mapped the tier
-roksbnkctl cos instance create bnk-orchestration --plan-id <uuid>
-
-# List instances in the account
-roksbnkctl cos instance list
-
-# Delete an instance (default: recursive — removes bound HMAC keys, service creds)
-roksbnkctl cos instance delete bnk-orchestration
-roksbnkctl cos instance delete bnk-orchestration --no-recursive --auto
+skopeo copy \
+  --src-authfile=<far-auth.tar.gz extracted> \
+  docker://dev-registry.f5.com/<image>:<tag> \
+  docker://<account>.dkr.ecr.<region>.amazonaws.com/<image>:<tag>
 ```
 
-| Flag | Default | Notes |
-|---|---|---|
-| `--plan` | `standard` | Friendly name (`standard`, `lite`); maps to a Resource Controller plan UUID internally. |
-| `--plan-id` | — | Catalog UUID — bypasses the friendly-name mapping. Use when IBM ships a plan tier `roksbnkctl` hasn't seen yet. |
-| `--target` | `global` | COS instances are global; this is left as a flag for forward compatibility. |
-| `--no-recursive` | (off) | On delete, do NOT remove bound HMAC keys and service credentials. Hardly ever what you want. |
-| `--auto` | (off) | On delete, skip the y/N confirmation. |
+`skopeo` is the right tool here because it's a single static binary, supports both Docker and OCI image formats, and doesn't require a running Docker daemon on the workspace host. The tools-image's Dockerfile pins `skopeo` to a known-good version (see `tools/docker/aws/Dockerfile`).
 
-The resource group is read from the workspace's `ibmcloud.resource_group` field (defaulting to `default` when unset).
+ECR mirror is a **v1.0 stretch** feature — the Sprint 2 task brief explicitly allows deferring it to a Sprint 3 follow-up if the bandwidth isn't there. v1.0 ships with the module wired but defaulted off (`enable_ecr_mirror = false`); v1.x makes it first-class for air-gapped customers and adds an automated FAR-image-sync workflow on `awsbnkctl up` re-runs.
 
-### `cos bucket`
+When the mirror is enabled, FLO's image references get rewritten by the `flo` module (Sprint 3) to point at the ECR URIs instead of `dev-registry.f5.com`. The IRSA role gets a second permission policy attached — `ecr:GetDownloadUrlForLayer`, `ecr:BatchGetImage`, `ecr:GetAuthorizationToken` on the mirrored repos — so the same workload identity that reads the supply bucket also pulls the images.
 
-Manages buckets within a named instance. The `--instance` flag is required for every `bucket` and `object` call — buckets aren't globally unique, only unique within an instance.
+## Day-2 ops: rotating the FAR archive / JWT
+
+Three rotation moments. All three are operator-driven; nothing rotates automatically.
+
+### Rotating the subscription JWT
+
+The most common rotation. When a trial JWT expires or a production JWT arrives:
 
 ```bash
-# Create a standard-class bucket
-roksbnkctl cos bucket create bnk-schematics-resources \
-  --instance bnk-orchestration \
-  --class standard
+# Place the new JWT alongside the existing path
+$ cp ~/Downloads/f5cne-subscription-2026Q3.jwt /Users/op/keys/subscription.jwt
 
-# List buckets on the instance
-roksbnkctl cos bucket list --instance bnk-orchestration
+# Re-run apply; the aws_s3_object etag changes, so Terraform sees the
+# file change and re-uploads. Nothing else in the stack changes.
+$ awsbnkctl up
+  ...
+  aws_s3_object.subscription_jwt: Modifying... [id=…]
+  aws_s3_object.subscription_jwt: Modifications complete after 1s
+  ...
 
-# Delete (the bucket must be empty first; cos object delete --recursive isn't implemented yet)
-roksbnkctl cos bucket delete bnk-schematics-resources --instance bnk-orchestration
+# Force FLO to re-read the licence — delete the License CR; FLO's
+# reconciler re-creates it from the new JWT within ~60-90 seconds.
+$ awsbnkctl k delete license -n flo-system --all
 ```
 
-| Flag | Default | Notes |
-|---|---|---|
-| `--instance` | (required) | Instance name or CRN — the CRN starts with `crn:v1:` and is used as-is; a bare name is looked up via Resource Controller. |
-| `--region` | workspace region | The IBM Cloud region the bucket is pinned to. Override only when you're crossing regions deliberately. |
-| `--class` | `standard` | Storage class: `standard` (frequently accessed), `vault` (infrequent), `cold` (archive), `smart` (auto-tiered). The BNK supply chain uses `standard` because FLO reads at install + every restart. |
+If the operator points `subscription.jwt` at a fresh path (different filename), update `jwt_file_local_path` in `terraform.tfvars` before re-running `up`. Same flow either way — the file's content drives the etag, not the path.
 
-### `cos object`
+### Rotating the FAR archive
 
-Manages objects (files) within a bucket. The key syntax is `<bucket>/<key/with/slashes>` — the parser splits on the first slash, so `bucket/dir/file.tgz` parses as bucket `bucket`, key `dir/file.tgz`.
+When F5 rotates the FAR pull credentials (rare — annual-ish):
 
 ```bash
-# Upload (streaming; multipart auto-engages for large files)
-roksbnkctl cos object put bnk-schematics-resources/f5-far-auth-key.tgz \
-  ./local/f5-far-auth-key.tgz \
-  --instance bnk-orchestration
+# Replace the local file
+$ cp ~/Downloads/f5cne-far-auth-2026.tar.gz /Users/op/keys/far-auth.tar.gz
 
-# Download (streaming)
-roksbnkctl cos object get bnk-schematics-resources/f5-far-auth-key.tgz \
-  ./downloaded.tgz \
-  --instance bnk-orchestration
+# Re-apply
+$ awsbnkctl up
 
-# Delete
-roksbnkctl cos object delete bnk-schematics-resources/old-trial.jwt \
-  --instance bnk-orchestration
-
-# List (with an optional key prefix)
-roksbnkctl cos object list bnk-schematics-resources \
-  --instance bnk-orchestration
-
-roksbnkctl cos object list bnk-schematics-resources/schematics/ \
-  --instance bnk-orchestration
+# Force the FLO pods to restart so they re-pull with the new credentials
+$ awsbnkctl k delete pod -n flo-system -l app=flo
 ```
 
-The list output is a tab-separated `KEY SIZE MODIFIED` table — pipe through `column -t` for readability or `cut -f1` to extract just the keys.
+The pod-restart step is necessary because FLO caches the FAR auth in memory after the first successful pull; without the restart, the new credentials only get picked up at the next natural pod reschedule (could be hours).
 
-## The BNK supply chain shape
+### Rotating the IRSA role
 
-A typical `bnk-schematics-resources` bucket after a clean install looks like:
+The role is itself a Terraform resource; rotating its trust policy or permissions is an `awsbnkctl up` after an edit to the `iam_irsa` module's inputs. The role ARN doesn't change unless the role is destroyed and recreated, so FLO's ServiceAccount annotation stays valid across rotations. There's no separate "credential" inside the IRSA role to rotate — the role is the credential, and STS hands out short-lived tokens against it on demand.
 
-```
-$ roksbnkctl cos object list bnk-schematics-resources --instance bnk-orchestration
-KEY                                     SIZE        MODIFIED
-f5-far-auth-key.tgz                     2412        2026-05-08T14:12:33Z
-trial.jwt                               1857        2026-05-08T14:12:34Z
-schematic-2.3.0-3.2598.3-0.0.170.json   18432       2026-05-08T14:13:01Z
-```
+If a customer wants to rotate the CMK that encrypts the bucket: it's a separate `aws_kms_key` resource; either set `var.kms_key_arn` to an existing CMK to swap, or let the module create a new one and re-key the bucket. Both flows are `awsbnkctl up`-driven; no out-of-band kubectl needed.
 
-Three pieces of metadata in the upstream HCL ([`terraform/variables.tf`](https://github.com/jgruberf5/roksbnkctl/blob/main/terraform/variables.tf)) pin the bucket layout:
+## Verifying the supply chain end-to-end
 
-| HCL variable | Default | Object |
-|---|---|---|
-| `f5_cne_far_auth_file` | `f5-far-auth-key.tgz` | FAR pull credentials |
-| `f5_cne_subscription_jwt_file` | `trial.jwt` | Subscription JWT |
-| `f5_bigip_k8s_manifest_version` | `2.3.0-3.2598.3-0.0.170` | Schematic filename inferred from this |
-
-Changing any of these in `terraform.tfvars` (or the workspace `bnk:` block, which renders into tfvars) changes which COS keys FLO will look for. The HCL doesn't auto-discover key names — they're literal.
-
-For air-gapped installs where the cluster can't reach `repo.f5.com`, additional pre-pulled FAR image tarballs go in the same bucket and the `far_repo_url` variable points at a COS-backed proxy. That topology is out of scope for v1.0; the supply chain shape described here is the connected-mode happy path.
-
-## Multipart upload and streaming download
-
-FAR image tarballs run 1-5 GB. `cos object put` streams the input file into the bucket in 5 MB parts using S3-style multipart uploads:
-
-- For files **under 5 MB**, a single-part `PutObject` is used (the SDK's default).
-- For files **over 5 MB**, the SDK auto-engages multipart upload — the file is split into 5 MB parts, each uploaded in parallel (up to 4 concurrent parts), and finalised with a `CompleteMultipartUpload` call.
-
-The split is transparent — there's no `--multipart` flag to set. The SDK handles it under the hood. If you want to verify multipart is happening for a specific file, watch with `roksbnkctl --verbose cos object put …` and the SDK's debug logging surfaces the part count.
-
-`cos object get` is similarly streaming: the SDK pipes the body straight to the destination file without buffering it in memory. Multi-gigabyte downloads on a memory-constrained jumphost are safe.
-
-If a multipart upload is interrupted (network drop, `^C`), the partial-upload state lingers on COS until cleaned up. Today `roksbnkctl` doesn't expose a "list and abort orphan multipart uploads" command — that's a v1.x addition. The workaround is to use `ibmcloud cos list-multipart-uploads` directly via [Chapter 17's docker backend](./17-execution-backends.md#docker-backend) or the IBM Cloud console.
-
-## Workspace config integration
-
-The workspace `cos:` block is optional — if the bucket is already populated (manually, or by an external CI pipeline), the block can be omitted entirely. When set, it triggers an auto-upload at `roksbnkctl up` time so the FAR pull and licence land before FLO needs them.
-
-```yaml
-# ~/.roksbnkctl/<workspace>/config.yaml
-cos:
-  instance: bnk-orchestration
-  bucket: bnk-schematics-resources
-  upload:
-    - source: ./local/f5-far-auth-key.tgz
-      key: f5-far-auth-key.tgz
-    - source: ./local/trial.jwt
-      key: trial.jwt
-```
-
-The block maps directly to [`internal/config/workspace.go::COSCfg`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/config/workspace.go):
-
-| Field | Type | Purpose |
-|---|---|---|
-| `instance` | string | COS instance name or CRN. Looked up via Resource Controller at runtime. |
-| `bucket` | string | Bucket name within the instance. |
-| `upload` | list of `{source, key}` | Optional pre-flight uploads. `source` is a host filesystem path (relative or absolute); `key` is the destination object key in the bucket. |
-
-Pre-flight uploads run before `terraform apply`, so FLO sees the artefacts when it pulls. Idempotent: re-running `up` re-uploads, which COS treats as overwrite — safe.
-
-## When the supply chain matters
-
-Three lifecycle moments where the COS bucket is in play:
-
-### Install time
-
-`roksbnkctl up` provisions FLO, which queries the bucket for `f5-far-auth-key.tgz` and `trial.jwt`. Missing either object → FLO fails to start → `terraform apply` retries (per [`internal/cli/lifecycle.go::applyWithRetry`](https://github.com/jgruberf5/roksbnkctl/blob/main/internal/cli/lifecycle.go)) for ~3 attempts before erroring. The fix is always "put the missing object in the bucket and re-run `up`"; the lifecycle retry hides transient bucket-policy propagation lag but won't paper over a genuinely-empty bucket.
-
-### Upgrade time
-
-When `bnk.manifest_version` (or the `f5_bigip_k8s_manifest_version` HCL variable) bumps, FLO pulls a new FAR image tarball and re-renders the CNE Instance. If the new manifest version references a FAR image that isn't already in `repo.f5.com`'s public registry (rare, but happens for pre-release builds), the bucket holds the air-gapped fallback. Standard upgrades — the connected-mode case — don't touch the bucket; they just pull from `repo.f5.com` using the credentials in `f5-far-auth-key.tgz`.
-
-### Licence rotation
-
-When the trial expires or a production licence arrives, swap `trial.jwt` for the new file:
+After `awsbnkctl up`, four sanity checks confirm the path works:
 
 ```bash
-roksbnkctl cos object put bnk-schematics-resources/trial.jwt \
-  ./new-license.jwt \
-  --instance bnk-orchestration
+# 1. The bucket exists and is encrypted
+$ aws s3api get-bucket-encryption --bucket $(terraform -chdir=.awsbnkctl/prod/state output -raw s3_bucket_name)
+{ "ServerSideEncryptionConfiguration": { "Rules": [...SSE-KMS...] } }
 
-# Force FLO to re-read the licence (delete the CNE Instance's License resource;
-# FLO's reconciler re-creates it from the updated JWT)
-roksbnkctl k delete license -n f5-bnk --all
+# 2. The artefacts are uploaded
+$ aws s3 ls s3://$(terraform … output -raw s3_bucket_name)/
+2026-05-16 10:14:12       2412 far-auth.tar.gz
+2026-05-16 10:14:13       1857 subscription.jwt
+
+# 3. The IRSA role exists and is annotated on the FLO ServiceAccount
+$ awsbnkctl k get sa flo-controller -n flo-system -o yaml | grep role-arn
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/awsbnkctl-prod-flo-supply-reader
+
+# 4. The FLO pod can actually read the bucket — doctor probes this
+$ awsbnkctl doctor
+  ...
+  ✓  aws s3 supply-chain bucket reachable
+  ✓  aws iam:GetOpenIDConnectProvider — OIDC provider matches eks_cluster output
+  ✓  aws irsa flo role assumable from flo-system/flo-controller
 ```
 
-FLO picks up the new JWT within 60-90 seconds. No `roksbnkctl up` re-run required for licence rotation alone.
-
-## Worked example: rotating COS supply-chain assets
-
-End-to-end Part VII scenario: the FAR auth key on file is about to expire, a new one arrived from the F5 distribution side, and you need to rotate it without taking BNK down. The same flow handles licence-JWT rotation (swap `trial.jwt` for the production JWT) and FAR-image-tarball uploads for air-gapped clusters. Cross-link to [Chapter 14](./14-credentials-resolver.md) for the API-key half of the rotation story; this walkthrough focuses on the COS object half.
-
-```bash
-# 1. Sanity-check the current state
-roksbnkctl cos object list bnk-schematics-resources --instance bnk-orchestration
-
-# 2. Upload the new auth key (overwrites the existing file)
-roksbnkctl cos object put bnk-schematics-resources/f5-far-auth-key.tgz \
-  ./new-far-auth-key.tgz \
-  --instance bnk-orchestration
-
-# 3. Verify the upload
-roksbnkctl cos object list bnk-schematics-resources --instance bnk-orchestration
-# Expected: the f5-far-auth-key.tgz row's MODIFIED timestamp is now
-
-# 4. (optional, air-gapped only) Upload the FAR image tarball
-roksbnkctl cos object put bnk-schematics-resources/far-2.3.0-images.tgz \
-  ./far-2.3.0-images.tgz \
-  --instance bnk-orchestration
-
-# 5. Force FLO to re-read the supply chain
-roksbnkctl k delete pod -n f5-bnk -l app=flo
-# (FLO's controller restarts; the new pod re-pulls f5-far-auth-key.tgz on first reconcile)
-
-# 6. Verify FLO is healthy with the new key
-roksbnkctl logs flo
-# Expected: no "failed to pull FAR image: unauthorized" lines
-```
-
-The third step is the verification gate. If FLO's logs still show auth failures after the pod restart, the new auth key was rejected by `repo.f5.com` — re-issue the key on the F5 side, not in the bucket.
+If the doctor row for IRSA assumability fails, the most common cause is a mismatch between the `iam_irsa` module's `flo_namespace` / `flo_service_account_name` defaults and what the Sprint 3 `flo` module actually creates. Compare the trust policy's `<issuer>:sub` value (visible via `aws iam get-role --role-name ...`) against `kubectl get sa -n <ns>` and the ServiceAccount annotation.
 
 ## Cross-references
 
-- [Chapter 12 §"`cos:` — COS supply-chain (optional)"](./12-workspace-config.md#cos--cos-supply-chain-optional) — the workspace-config block this chapter operationalises.
-- [Chapter 13 — Terraform variables](./13-terraform-variables.md) — `f5_cne_far_auth_file`, `f5_cne_subscription_jwt_file`, `ibmcloud_cos_instance_name`, `ibmcloud_resources_cos_bucket` are the HCL handles.
-- [Chapter 14 — Credentials](./14-credentials-resolver.md) — the API-key resolution that auths every `cos` call.
-- [Chapter 24 — Day-2 ops](./24-day-2-ops.md) — `roksbnkctl logs flo` is the post-rotation verification command.
-- [Chapter 26 — Troubleshooting](./26-troubleshooting.md) — bucket-policy propagation lag, missing-object failure shapes.
+- [PRD 07 — EKS cluster + SR-IOV node group](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/07-EKS-CLUSTER-SRIOV.md) — supplies the OIDC issuer URL + provider ARN this chapter consumes.
+- [PRD 08 — S3 supply chain + IRSA workload identity](https://github.com/JLCode-tech/awsbnkctl/blob/main/docs/prd/08-S3-SUPPLY-CHAIN-IRSA.md) — the design surface this chapter operationalises.
+- [Chapter 12 — Workspace config](./12-workspace-config.md) — where `far_auth_file_local_path` + `jwt_file_local_path` land in the workspace YAML.
+- [Chapter 13 — Terraform variables](./13-terraform-variables.md) — the auto-regenerated tfvar reference covering `s3_supply_chain` + `iam_irsa` + `ecr_mirror`.
+- [Chapter 14 — Credentials and the AWS resolver chain](./14-credentials-resolver.md) — the host-side AWS credential chain (env / profile / instance role / SSO). IRSA is the in-cluster cred shape; the host-side chain is what `awsbnkctl up` itself uses to apply Terraform.
+- [Chapter 24 — Day-2 ops](./24-day-2-ops.md) — `awsbnkctl logs flo` and `awsbnkctl k describe cneinstance` are the post-rotation verification surface.
+- [Chapter 26 — Troubleshooting](./26-troubleshooting.md) — `AccessDenied` on IRSA assume, bucket-policy propagation lag, and the "FLO can't reach the bucket but doctor says it can" failure shapes.
+- [AWS IRSA docs](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) — canonical reference for the federated-identity flow.

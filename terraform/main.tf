@@ -1,14 +1,15 @@
 # ============================================================
-# F5 BIG-IP Next for Kubernetes — Root Module (Sprint 1)
+# F5 BIG-IP Next for Kubernetes — Root Module (Sprint 2)
 #
-# Sprint 1 lands `module "eks_cluster"` per PRD 07; downstream modules
-# (s3_supply_chain, iam_irsa, cert_manager, flo, cne_instance, license,
-# testing) stay TODO'd until their consuming sprint.
+# Sprint 2 layers s3_supply_chain + iam_irsa (PRD 08) on top of the
+# Sprint 1 eks_cluster module. The ecr_mirror module is wired here
+# behind var.enable_ecr_mirror (default false) per PRD 08's v1.0
+# stretch posture; the actual skopeo pipeline lands in Sprint 3.
 #
 # Execution-order target (Sprint 3 deliverable):
 #
 #   eks_cluster ──► cert_manager
-#                └─► s3_supply_chain + iam_irsa (Sprint 2, PRD 08)
+#                └─► s3_supply_chain + iam_irsa  (Sprint 2, PRD 08)
 #                       └─► flo
 #                              └─► cne_instance
 #                                     └─► license
@@ -40,23 +41,63 @@ module "eks_cluster" {
 
 
 # ============================================================
-# Sprint 2 — S3 supply chain + IRSA (PRD 08)
+# s3_supply_chain — Sprint 2 deliverable per PRD 08
+# (docs/prd/08-S3-SUPPLY-CHAIN-IRSA.md § "Implementation outline")
+#
+# Holds the FAR pull-key archive + subscription JWT. Encrypted via
+# a customer-managed KMS CMK created in-module (override via
+# var.kms_key_arn for governance scenarios).
 # ============================================================
+
+module "s3_supply_chain" {
+  source = "./modules/s3_supply_chain"
+
+  region                   = var.region
+  workspace_name           = var.workspace_name
+  kms_key_arn              = var.kms_key_arn
+  far_auth_file_local_path = var.far_auth_file_local_path
+  jwt_file_local_path      = var.jwt_file_local_path
+}
+
+
+# ============================================================
+# iam_irsa — Sprint 2 deliverable per PRD 08
+# (docs/prd/08-S3-SUPPLY-CHAIN-IRSA.md § "Implementation outline")
 #
-# TODO(Sprint 2, docs/prd/08-S3-SUPPLY-CHAIN-IRSA.md):
+# Trust-policy IAM role bound to the FLO ServiceAccount via the EKS
+# OIDC provider; permission policy grants s3:GetObject on the
+# s3_supply_chain bucket + kms:Decrypt on the CMK.
+# ============================================================
+
+module "iam_irsa" {
+  source = "./modules/iam_irsa"
+
+  region                   = var.region
+  cluster_name             = var.cluster_name
+  oidc_provider_arn        = module.eks_cluster.oidc_provider_arn
+  cluster_oidc_issuer_url  = module.eks_cluster.cluster_oidc_issuer_url
+  flo_namespace            = var.flo_namespace
+  s3_bucket_arn            = module.s3_supply_chain.bucket_arn
+  kms_key_arn              = module.s3_supply_chain.kms_key_arn
+}
+
+
+# ============================================================
+# ecr_mirror — Sprint 2 scaffold per PRD 08 v1.0 stretch
 #
-#   module "s3_supply_chain" {
-#     source     = "./modules/s3_supply_chain"
-#     bucket_name = ...
-#     kms_key_arn = ...
-#     ...
-#   }
-#
-#   module "iam_irsa" {
-#     source                  = "./modules/iam_irsa"
-#     cluster_oidc_issuer_url = module.eks_cluster.cluster_oidc_issuer_url
-#     oidc_provider_arn       = module.eks_cluster.oidc_provider_arn
-#   }
+# Gated on var.enable_ecr_mirror (default false). Module body is
+# a no-op when disabled; when enabled it creates one ECR repository
+# per image and (Sprint 3 follow-up) runs skopeo copy via
+# null_resource.
+# ============================================================
+
+module "ecr_mirror" {
+  source = "./modules/ecr_mirror"
+
+  region            = var.region
+  workspace_name    = var.workspace_name
+  enable_ecr_mirror = var.enable_ecr_mirror
+}
 
 
 # ============================================================
@@ -69,7 +110,7 @@ module "eks_cluster" {
 # cne_instance, license, testing) and their bodies are mostly pure
 # k8s manifests — only the parameter boundary changes. Until then
 # the call sites are commented out so `terraform validate` against
-# the Sprint 1 tree doesn't fail on undefined wiring.
+# the Sprint 2 tree doesn't fail on undefined wiring.
 #
 #   module "cert_manager" {
 #     source = "./modules/cert_manager"
@@ -79,6 +120,8 @@ module "eks_cluster" {
 #   module "flo" {
 #     source = "./modules/flo"
 #     # AWS-shaped inputs: s3 bucket name, flo IRSA role ARN
+#     flo_role_arn   = module.iam_irsa.flo_role_arn
+#     s3_bucket_name = module.s3_supply_chain.bucket_name
 #   }
 #
 #   module "cne_instance" {

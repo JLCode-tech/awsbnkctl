@@ -40,6 +40,9 @@ var upClusterCmd = &cobra.Command{
 control plane + self-managed node group on ENA-SR-IOV-capable instance
 types per PRD 07 (docs/prd/07-EKS-CLUSTER-SRIOV.md).
 
+Pass --workspace <name> (or -w) to target a specific workspace; the
+verb defaults to the current_workspace pointer (or "default").
+
 Sprint 1 supports --dry-run only (terraform plan). Live apply against
 AWS is gated on the operator-run spike (PRD 07 § "Spike protocol")
 validating the design hypothesis; that validation lands the v0.2 tag
@@ -165,4 +168,3 @@ func ensureEmptyTFVars(path string) error {
 	const body = "# Sprint 1 placeholder. AWS-shaped tfvars renderer lands in Sprint 2 (PRD 04).\n# Pass values via TF_VAR_<name> env vars or terraform.tfvars.user.\n"
 	return os.WriteFile(path, []byte(body), 0o644)
 }
-

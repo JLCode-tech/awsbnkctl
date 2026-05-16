@@ -9,40 +9,42 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
 )
 
-// awsChecks runs the AWS-shaped pre-flight checks introduced in Sprint 1
-// per PRD 07 § "internal/aws/". Replaces the Sprint 0 "AWS support
-// coming in Sprint 1" placeholder in doctor.Run().
+// awsChecks runs the AWS-shaped pre-flight checks introduced in
+// Sprint 1 + extended in Sprint 2 per PRD 07 § "internal/aws/" + PRD
+// 08 § "CLI surface" §"awsbnkctl doctor". Replaces the Sprint 0
+// "AWS support coming in Sprint 1" placeholder in doctor.Run().
 //
-// Three checks, ordered by failure cost (cheapest → most informative):
+// Six checks, ordered by failure cost (cheapest → most informative):
 //
-//  1. credentials configured — no API call; just confirms the cred
-//     chain resolved a key (env / profile / instance role / SSO).
-//  2. STS GetCallerIdentity — one API call; validates the resolved key
-//     is accepted by AWS. AccessDenied here means revoked or
-//     restricted credentials, distinct from "no creds at all".
-//  3. EKS DescribeCluster permission probe — calls DescribeCluster
-//     against a deliberately-bogus cluster name; expects
-//     ResourceNotFound. AccessDenied here means the cred is valid but
-//     lacks the eks:DescribeCluster permission `awsbnkctl up cluster`
-//     will need post-apply.
-//
-// EC2 quota + S3 PutObject probes are deferred to Sprint 2 (per
-// PRD 07 § "Spike protocol" and PRD 08 § "S3 supply chain") — both
-// require workspace-level context (region, bucket name) that doctor
-// doesn't have at pre-flight time on a fresh dev box.
+//  1. credentials configured — no API call.
+//  2. STS GetCallerIdentity — one API call; validates the resolved key.
+//  3. EKS DescribeCluster permission probe — bogus cluster name.
+//  4. EC2 vCPU quota probe — closes Sprint 1 staff Issue 2. Probes
+//     ec2:DescribeAccountAttributes (the cheapest EC2 read that
+//     answers "is the cred allowed to talk to EC2 at all?"); the
+//     actual running-on-demand quota lives in Service Quotas, which
+//     this row points the operator at.
+//  5. S3 PutObject feasibility probe — Sprint 2 (PRD 08). HeadBucket
+//     against the workspace's supply-chain bucket name; NotFound is
+//     OK (bucket not created yet, normal pre-`up`), AccessDenied
+//     surfaces the IAM gap.
+//  6. IAM:GetOpenIDConnectProvider permission probe — Sprint 2 (PRD 08).
+//     GetRole against the FLO IRSA role; NoSuchEntity is informational
+//     (role not yet created), other errors are actionable.
 func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 	var out []withWhy
 
 	// Short timeout — doctor must not block a fresh dev box that
-	// happens to be offline. STS + EKS resolve in <2s on a good
-	// connection; 10s is generous slack.
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// happens to be offline. The six checks total resolve in <5s on
+	// a good connection; 15s is generous slack.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	region := awsRegionFromContext(cctx)
+	profile := awsProfileFromContext(cctx)
 
 	// Check 1: credentials configured (cheap, no API call).
-	credSource, credErr := awspkg.CredentialsConfigured(ctx, awspkg.Options{Region: region})
+	credSource, credErr := awspkg.CredentialsConfigured(ctx, awspkg.Options{Region: region, Profile: profile})
 	if credErr != nil {
 		out = append(out, withWhy{
 			Check: Check{
@@ -53,14 +55,18 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 			Why: "every AWS-side operation needs valid credentials",
 		})
 		// No point running the live checks without creds.
-		out = append(out, withWhy{
-			Check: Check{Name: "aws sts caller-identity", Status: StatusSkipped, Detail: "skipped (no credentials)"},
-			Why:   "validates credentials are accepted by AWS",
-		})
-		out = append(out, withWhy{
-			Check: Check{Name: "aws eks:DescribeCluster permission", Status: StatusSkipped, Detail: "skipped (no credentials)"},
-			Why:   "validates `awsbnkctl up cluster` will have permission to read the cluster post-apply",
-		})
+		for _, name := range []string{
+			"aws sts caller-identity",
+			"aws eks:DescribeCluster permission",
+			"aws ec2 vCPU quota",
+			"aws s3:PutObject feasibility",
+			"aws iam:GetRole (FLO IRSA)",
+		} {
+			out = append(out, withWhy{
+				Check: Check{Name: name, Status: StatusSkipped, Detail: "skipped (no credentials)"},
+				Why:   "skipped because earlier credential check failed",
+			})
+		}
 		return out
 	}
 	out = append(out, withWhy{
@@ -69,10 +75,8 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 	})
 
 	// Build a shared Clients for the remaining live checks.
-	clients, err := awspkg.NewClients(ctx, awspkg.Options{Region: region})
+	clients, err := awspkg.NewClients(ctx, awspkg.Options{Region: region, Profile: profile})
 	if err != nil {
-		// Cred chain resolved but client construction failed — usually
-		// a malformed profile or region. Surface and stop.
 		out = append(out, withWhy{
 			Check: Check{
 				Name:   "aws sts caller-identity",
@@ -95,11 +99,18 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 			},
 			Why: "validates credentials are accepted by AWS",
 		})
-		// No point probing EKS if STS already says no.
-		out = append(out, withWhy{
-			Check: Check{Name: "aws eks:DescribeCluster permission", Status: StatusSkipped, Detail: "skipped (STS failed)"},
-			Why:   "validates `awsbnkctl up cluster` will have permission to read the cluster post-apply",
-		})
+		// No point probing downstream if STS already says no.
+		for _, name := range []string{
+			"aws eks:DescribeCluster permission",
+			"aws ec2 vCPU quota",
+			"aws s3:PutObject feasibility",
+			"aws iam:GetRole (FLO IRSA)",
+		} {
+			out = append(out, withWhy{
+				Check: Check{Name: name, Status: StatusSkipped, Detail: "skipped (STS failed)"},
+				Why:   "skipped because credentials probe failed",
+			})
+		}
 		return out
 	}
 	out = append(out, withWhy{
@@ -108,13 +119,10 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 	})
 
 	// Check 3: EKS DescribeCluster permission probe against a bogus
-	// cluster name. ResourceNotFound = permission OK. AccessDenied =
-	// permission missing. Other errors = unknown; surface verbatim.
+	// cluster name. ResourceNotFound = permission OK.
 	_, err = clients.DescribeCluster(ctx, "awsbnkctl-doctor-permission-probe-does-not-exist")
 	switch {
 	case err == nil:
-		// Cluster with that name actually exists, somehow. Treat as
-		// permission OK (we got a response).
 		out = append(out, withWhy{
 			Check: Check{Name: "aws eks:DescribeCluster permission", Status: StatusOK, Detail: "probe returned (unexpected: a cluster matched the probe name)"},
 			Why:   "validates `awsbnkctl up cluster` will have permission to read the cluster post-apply",
@@ -135,20 +143,160 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 		})
 	}
 
+	// Check 4: EC2 vCPU quota probe — closes Sprint 1 staff Issue 2.
+	// The real "running on-demand" quota lives in Service Quotas; for
+	// the doctor row we probe ec2:DescribeAccountAttributes as the
+	// cheapest "EC2 read works at all" signal and surface a pointer
+	// at where the operator finds the live quota.
+	quota, qerr := clients.VCPUQuotaAttribute(ctx)
+	switch {
+	case qerr == nil:
+		out = append(out, withWhy{
+			Check: Check{
+				Name:   "aws ec2 vCPU quota",
+				Status: StatusOK,
+				Detail: fmt.Sprintf("ec2 read OK (default-vpc=%s); check Service Quotas for the Running On-Demand c5n quota (PRD 07 c5n.4xlarge target = 16 vCPU/node, default 5 instances = 80 vCPU)", quota),
+			},
+			Why: "PRD 07's self-managed node group needs ≥3 c5n.4xlarge (48 vCPU). Many accounts default to 5-instance / 80-vCPU running-on-demand quota — enough for the default node count but flagging the path to lift it.",
+		})
+	default:
+		out = append(out, withWhy{
+			Check: Check{
+				Name:   "aws ec2 vCPU quota",
+				Status: StatusWarning,
+				Detail: fmt.Sprintf("ec2:DescribeAccountAttributes failed: %v (verify ec2:Describe* IAM permissions)", qerr),
+			},
+			Why: "PRD 07's self-managed node group needs EC2 quota headroom; this probe validates the IAM permission path.",
+		})
+	}
+
+	// Check 5: S3 PutObject feasibility probe (PRD 08). HeadBucket
+	// against the workspace's expected supply-chain bucket. We don't
+	// know the exact bucket name until `awsbnkctl up` runs (the
+	// random suffix is generated at terraform apply), so the probe
+	// uses the workspace-recorded bucket (if any) or falls back to
+	// probing the s3 service's general reachability via the public
+	// AWS bucket-name behaviour: HeadBucket on a known-nonexistent
+	// bucket returns NotFound + 404 when permission is OK,
+	// AccessDenied + 403 when the cred can't talk to S3 at all.
+	bucket := supplyChainBucketFromContext(cctx)
+	if bucket == "" {
+		bucket = "awsbnkctl-doctor-s3-probe-does-not-exist"
+	}
+	if herr := clients.HeadBucket(ctx, bucket); herr != nil {
+		switch {
+		case awspkg.IsS3NotFound(herr):
+			out = append(out, withWhy{
+				Check: Check{Name: "aws s3:PutObject feasibility", Status: StatusOK, Detail: "HeadBucket returned NotFound (s3 permission OK; bucket not yet created)"},
+				Why:   "PRD 08 supply-chain bucket holds the FAR archive + JWT; validates `awsbnkctl init` will be able to PutObject when the bucket exists",
+			})
+		case awspkg.IsS3AccessDenied(herr):
+			out = append(out, withWhy{
+				Check: Check{Name: "aws s3:PutObject feasibility", Status: StatusWarning, Detail: "HeadBucket returned AccessDenied — verify the IAM policy attaches s3:HeadBucket + s3:PutObject"},
+				Why:   "PRD 08 supply-chain bucket holds the FAR archive + JWT",
+			})
+		default:
+			out = append(out, withWhy{
+				Check: Check{
+					Name:   "aws s3:PutObject feasibility",
+					Status: StatusWarning,
+					Detail: fmt.Sprintf("probe failed: %v", herr),
+				},
+				Why: "PRD 08 supply-chain bucket holds the FAR archive + JWT",
+			})
+		}
+	} else {
+		out = append(out, withWhy{
+			Check: Check{Name: "aws s3:PutObject feasibility", Status: StatusOK, Detail: "HeadBucket OK (s3 permission + bucket reachable)"},
+			Why:   "PRD 08 supply-chain bucket holds the FAR archive + JWT",
+		})
+	}
+
+	// Check 6: iam:GetRole probe for the FLO IRSA role (PRD 08).
+	// NoSuchEntity is informational (role not yet created via
+	// terraform); other errors surface IAM-permission gaps.
+	roleName := awspkg.IRSARoleNameForCluster(clusterNameFromContext(cctx))
+	if cctx != nil && cctx.Workspace != nil && cctx.Workspace.Cluster.Name == "" {
+		// No cluster name yet — surface as informational, don't
+		// fail the row.
+		out = append(out, withWhy{
+			Check: Check{Name: "aws iam:GetRole (FLO IRSA)", Status: StatusOK, Detail: "no cluster name in workspace yet — probe skipped"},
+			Why:   "validates the FLO IRSA role landed (PRD 08 iam_irsa module output)",
+		})
+	} else {
+		info, rerr := clients.HasIRSARole(ctx, roleName)
+		switch {
+		case rerr == nil && info != nil:
+			out = append(out, withWhy{
+				Check: Check{Name: "aws iam:GetRole (FLO IRSA)", Status: StatusOK, Detail: fmt.Sprintf("role exists: %s", info.ARN)},
+				Why:   "validates the FLO IRSA role landed (PRD 08 iam_irsa module output)",
+			})
+		case rerr == nil && info == nil:
+			out = append(out, withWhy{
+				Check: Check{Name: "aws iam:GetRole (FLO IRSA)", Status: StatusOK, Detail: fmt.Sprintf("role %s not found (normal pre-`awsbnkctl up`)", roleName)},
+				Why:   "validates the FLO IRSA role landed (PRD 08 iam_irsa module output)",
+			})
+		default:
+			out = append(out, withWhy{
+				Check: Check{
+					Name:   "aws iam:GetRole (FLO IRSA)",
+					Status: StatusWarning,
+					Detail: fmt.Sprintf("probe failed: %v (verify IAM policy attaches iam:GetRole)", rerr),
+				},
+				Why: "validates the FLO IRSA role landed (PRD 08 iam_irsa module output)",
+			})
+		}
+	}
+
 	return out
 }
 
 // awsRegionFromContext extracts the AWS region from the workspace
-// config if present. Sprint 1 stub: the workspace schema still carries
-// IBM-named fields (Sprint 2 / PRD 04 retargets), so we fall back to
-// the AWS_REGION env var that the SDK's default chain reads anyway.
-// This intentionally accepts an empty region — internal/aws's default
-// chain will error out with a clear message at API call time.
+// config if present. Sprint 2 (PRD 04 fold) retargets onto the
+// AWS-shaped workspace block (Workspace.AWS.Region); the IBMCloud
+// field stays as a deprecated fallback for one release so legacy
+// on-disk workspaces keep working until the cred + exec retarget
+// (Sprint 3).
+//
+// Empty return falls through to the SDK's default chain, which reads
+// AWS_REGION env / shared config. internal/aws's NewClients surfaces
+// a clear "AWS region is empty" error in that case.
 func awsRegionFromContext(cctx *config.Context) string {
-	if cctx != nil && cctx.Workspace != nil {
-		if r := cctx.Workspace.IBMCloud.Region; r != "" {
-			return r
-		}
+	if cctx == nil || cctx.Workspace == nil {
+		return ""
 	}
-	return ""
+	if r := cctx.Workspace.AWS.Region; r != "" {
+		return r
+	}
+	return cctx.Workspace.IBMCloud.Region
+}
+
+// awsProfileFromContext mirrors awsRegionFromContext for AWS_PROFILE.
+// Empty = use the chain's default profile.
+func awsProfileFromContext(cctx *config.Context) string {
+	if cctx == nil || cctx.Workspace == nil {
+		return ""
+	}
+	return cctx.Workspace.AWS.Profile
+}
+
+// supplyChainBucketFromContext returns the workspace-recorded
+// supply-chain bucket name, or empty if not yet set. The doctor's S3
+// probe falls back to a known-nonexistent bucket name when this is
+// empty so the IAM-permission check still runs.
+func supplyChainBucketFromContext(cctx *config.Context) string {
+	if cctx == nil || cctx.Workspace == nil {
+		return ""
+	}
+	return cctx.Workspace.AWS.SupplyChain.BucketName
+}
+
+// clusterNameFromContext returns the workspace-recorded cluster name.
+// Used to derive the FLO IRSA role name for the doctor's iam:GetRole
+// probe.
+func clusterNameFromContext(cctx *config.Context) string {
+	if cctx == nil || cctx.Workspace == nil {
+		return ""
+	}
+	return cctx.Workspace.Cluster.Name
 }
