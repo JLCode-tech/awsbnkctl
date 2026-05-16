@@ -1,115 +1,81 @@
-You are the validator agent for Sprint 1 of the roksbnkctl project. Your scope is **integration testing + e2e extension + CI** for the SSH client + `--on` flag work the staff agent is implementing per PRD 01.
+You are the validator agent for Sprint 1 of the `awsbnkctl` project. Sprint 1's theme is "EKS cluster module + self-managed SR-IOV node group (PRD 07)". You own the tools-image authoring, CI matrix updates, cspell additions for new AWS terminology, and integration test scaffolding for the staff agent's work.
 
-Project location: `/mnt/d/project/roksbnkctl/`. Go module `github.com/jgruberf5/roksbnkctl`.
+Project location: `/Users/j.lucia/Code/github/awsbnkctl/`.
 
-## Read first
+**SPIKE DEFERRAL:** No live AWS resources are touched this sprint. Your integration tests run against mocked AWS clients (via aws-sdk-go-v2's middleware-test pattern or manual interface injection) or `localstack` if you bring it in. Live AWS validation is the operator-run spike, gating v0.2.
 
-- `docs/prd/01-SSH-AND-ON-FLAG.md` — what's being built
-- `docs/PLAN.md` Sprint 1 "Test deliverables" section — your acceptance criteria
-- `docs/E2E_TEST.md` and `scripts/e2e-test.sh` — the existing e2e plan; you'll extend Phase B
-- `prompts/sprint0/validator.md` for prompt-structure reference
-- The `issues/issue_sprint0_validator.md` "future testing improvements" roadmap entry — your testcontainers-go survey for `internal/remote` is now actionable
+**Read first** before any edits:
+
+1. `/Users/j.lucia/Code/github/awsbnkctl/agents/validator.md` — your role definition.
+2. `/Users/j.lucia/Code/github/awsbnkctl/prompts/sprint1/README.md` — sprint theme + dispatch overview.
+3. `/Users/j.lucia/Code/github/awsbnkctl/docs/PLAN.md` § Sprint 1 — your scope cross-check.
+4. `/Users/j.lucia/Code/github/awsbnkctl/docs/prd/07-EKS-CLUSTER-SRIOV.md` — what the staff agent is implementing.
+5. `/Users/j.lucia/Code/github/awsbnkctl/issues/issue_sprint0_validator.md` — your Sprint 0 carry-overs:
+   - Open medium: AWS tools-image needs Sprint 1 authoring (Issue 2) → your task 1 this sprint
+   - The previously-flagged validator-side `tools/refgen` issue was resolved in the Sprint 0 integrator commit; verify still clean.
+6. `/Users/j.lucia/Code/github/awsbnkctl/.github/workflows/tools-images.yml` (post-Sprint-0) — current matrix has `[iperf3]` only; you add the `aws` entry this sprint.
 
 ## Coordinate with parallel agents
 
-An architect agent is replacing 6 chapter stubs with real prose under `book/src/` (chapters 1, 2, 3, 4, 7, 16). A staff-engineer agent is implementing the SSH client at `internal/remote/`, the `--on` flag at root, the `targets` command tree, and lifecycle auto-discovery. **Do not touch their files.** You own integration tests, the e2e patch, and CI configuration.
+An **architect** agent is finalising PRD 07, drafting book chapters, updating PLAN.md. **Do not touch `docs/`, `book/`, `agents/`, `prompts/`.**
 
-## Tasks
+A **staff** agent is implementing the Terraform module, `internal/aws/`, the cluster verb, doctor refresh. **Do not touch `.go` files, `go.mod`, `Makefile`, `.goreleaser.yml`, `terraform/**`.**
 
-### 1. testcontainers-go integration test for the SSH client
+A **tech-writer** agent runs after you.
 
-Add `internal/remote/integration_test.go` with build tag `// +build integration` (so it's gated separately from unit tests). Use `github.com/testcontainers/testcontainers-go` to spin up a real `linuxserver/openssh-server` (or `lscr.io/linuxserver/openssh-server`) container, generate an ed25519 keypair on the fly, configure the container with the public key authorized, and connect via the staff-engineer's `internal/remote.Client`.
+## Your scope
 
-Test cases:
-- Connect → Run `whoami` → assert output matches the configured user
-- Connect → Run `exit 7` → assert exit code 7 propagates
-- Stdout streaming: Run `seq 1 100` and assert all 100 lines reach the writer in order
-- Stderr separation: Run `sh -c 'echo stdout; echo stderr >&2'` and assert each lands in the right writer
-- Host-key TOFU: first connect prompts (or fails with `--insecure-host-key=false`), second connect is silent
-- Context cancellation: Run a `sleep 30`, cancel ctx after 2s, assert error within 5s
+| Surface | Action |
+|---|---|
+| `tools/docker/aws/Dockerfile` | New: Alpine or Debian-slim base, install `awscli v2` (download from the AWS official binary URL — not `pip install awscli` which is v1), `kubectl`, `helm`, `iperf3`, `dig`, `jq`, `curl`. Drop privileges to `USER 1000`. Match the conventions of the previously-deleted `tools/docker/ibmcloud/Dockerfile` (look at git history if helpful) — uid 1000 + writable `/home/runner` + `ENV HOME=/home/runner` to avoid the `mkdir /.bluemix: permission denied`-style issues that bit roksbnkctl v1.2.0 |
+| `tools/docker/Makefile` | Add `build-aws` target alongside the existing `build-iperf3`; both push to `ghcr.io/JLCode-tech/awsbnkctl-tools-*` |
+| `.github/workflows/tools-images.yml` | Add `aws` matrix entry to build + push the image on tag push |
+| `cspell.json` | Add AWS-specific dictionary entries the staff agent introduces (`awscli`, common service abbreviations, instance-family abbreviations, kubectl/helm subcommand names if they appear in any book examples this sprint) |
+| `.github/workflows/ci.yml` | Add a job for integration tests against mocked AWS (or localstack) — `go test -tags integration ./internal/aws/...` if the staff agent has set up the build tag, else gate on a `-run TestIntegration_*` pattern |
+| `scripts/e2e-test.sh` | Refresh the Sprint 0 skip-stub for Sprint 1: phase headers stay; the previously-blanket "skip pending Sprint 3" can now refine — cluster-bring-up phases are still pending Sprint 3 (BNK deploy), but **cluster-only** phases could in principle be exercised against the operator-run spike; add a `--spike-mode` flag that lets the operator opt into the live-AWS spike paths (this sprint: stub-only; flag is wired, body returns "spike protocol per PRD 07 section 4") |
+| `scripts/test-integration-aws.sh` (new) | Wraps `go test -tags integration ./internal/aws/...` with the right env vars (fake AWS creds, region) for the staff agent's mocked unit-+-integration tests. Convenience runner, not CI-required. |
 
-Add `Makefile` target (append-only): `test-integration: go test -tags integration ./...`. CI doesn't run this on every PR (Docker setup overhead); document it as "run locally before pushing SSH-related changes".
+## Tasks (priority order)
 
-### 2. CI workflow — extend `.github/workflows/ci.yml`
+1. **Author `tools/docker/aws/Dockerfile`.** Use a multi-stage build. Stage 1: download awscli v2 + kubectl + helm binaries (verify checksums; the Dockerfile should fail-build if checksums don't match — protects against supply-chain swaps). Stage 2: minimal runtime, copy binaries from stage 1, install runtime deps (`iperf3`, `dig`/`bind-tools`, `jq`, `curl`, `ca-certificates`). `USER 1000`, `WORKDIR /home/runner`, `ENV HOME=/home/runner`, `ENV PATH=/home/runner/.local/bin:$PATH`. Add a `LABEL org.opencontainers.image.source` pointing at `https://github.com/JLCode-tech/awsbnkctl`. **Test locally** with `docker build -t test:aws tools/docker/aws/` and `docker run --rm test:aws aws --version` (must report v2.x), `docker run --rm test:aws kubectl version --client` (must report 1.30+), `docker run --rm test:aws iperf3 --version` (must report 3.x).
 
-Add an `integration` job that runs after the existing `test` matrix on Linux only:
+2. **Update `tools/docker/Makefile`.** Add `build-aws` target matching the existing `build-iperf3` pattern. Confirm `make -C tools/docker build-aws` succeeds locally; image name should be `ghcr.io/JLCode-tech/awsbnkctl-tools-aws:<tag>`.
 
-```yaml
-integration:
-  needs: test
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
-      with: { go-version: '1.23' }
-    - run: go test -tags integration -timeout 5m ./internal/remote/...
-```
+3. **Update `.github/workflows/tools-images.yml`.** Add the `aws` matrix entry alongside `iperf3`. The workflow already builds + pushes to ghcr.io with `secrets.GITHUB_TOKEN`; matrix expansion is the only change. Validate YAML with `python -c "import yaml; yaml.safe_load(open('.github/workflows/tools-images.yml'))"`.
 
-Skipped on `pull_request` from forks (no Docker access by default in some setups; gate via `if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository`). Linux-only; testcontainers-go on macOS GitHub runners requires Docker Desktop which isn't available there.
+4. **CI integration test job.** Add a job to `.github/workflows/ci.yml` that runs the staff agent's `-tags integration` tests (or named test pattern) against mocked AWS. The job must not require live AWS credentials — verify by reading the staff agent's test code; if any test calls `sts.GetCallerIdentity` without a mock, file an issue for the staff agent.
 
-### 3. E2E patch — extend `scripts/e2e-test.sh` Phase B
+5. **`scripts/e2e-test.sh` refinement.** Wire a `--spike-mode` flag (stub-only this sprint — body returns "spike protocol per PRD 07 §4"). Update the per-phase skip-marker text to cite the right sprint:
+   - Cluster phases A-H: now "Sprint 1 implements module; Sprint 3 wires end-to-end"
+   - Backend phases I-N: still "Sprint 4"
+   - DNS phase L-DNS: still "Sprint 4"
+   Script must still `exit 0`.
 
-After step `B6 cluster stays up — Phase C will use it`, add three new steps **before** Phase C begins:
+6. **`scripts/test-integration-aws.sh` convenience runner.** Single-purpose wrapper: `export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 && go test -tags integration -v ./internal/aws/...`. Make executable. Reference from CONTRIBUTING.md? No — out of your scope; file an issue for the architect (Sprint 5).
 
-```bash
-B7) roksbnkctl targets list                                    # asserts jumphost auto-populated
-B8) roksbnkctl exec --on jumphost -- whoami                    # asserts output matches the jumphost user
-B9) roksbnkctl ibmcloud --on jumphost iam oauth-tokens         # asserts IBMCLOUD_API_KEY propagates over SSH
-```
-
-Implement each as a `step "..."` invocation matching the existing pattern (the `step` function exits the script on non-zero return). For B8, `assert_contains "root"` (the jumphost provisioned by the upstream HCL runs as root). For B9, `assert_contains "IAM token"`.
-
-If the upstream HCL has `testing_create_tgw_jumphost = false` set in the user's tfvars (per `~/bnkfun/terraform.tfvars`), the jumphost auto-populate from `runUp` will be skipped — in that case the new B7-B9 should also be skipped with a yellow `⊘` log line, not error. Add the gating check inline:
-
-```bash
-if [[ -f "$HOME/.roksbnkctl/$WORKSPACE/config.yaml" ]] && \
-   grep -q "^targets:" "$HOME/.roksbnkctl/$WORKSPACE/config.yaml"; then
-    step "B7 ..." ...
-    step "B8 ..." ...
-    step "B9 ..." ...
-else
-    yellow "  ⊘ B7-B9 skipped — no jumphost target configured (testing_create_tgw_jumphost=false?)"
-fi
-```
-
-Update `docs/E2E_TEST.md` to document the three new steps.
-
-### 4. Doctor `--target` integration check
-
-The staff agent is adding `roksbnkctl doctor --target <name>` that runs a no-op `whoami` against the target. Verify it produces a green `Check` when the target is reachable, an error `Check` when not. No code from you — just confirm the wiring after staff lands their commit, by running `roksbnkctl doctor --target jumphost` against a mock target. File an issue if behavior diverges from PRD 01's spec (exit codes 126/127 for connect/auth errors).
-
-### 5. Cred-leak check (preview of Sprint 3 audit work)
-
-The SSH backend's env-var propagation could leak secrets if done wrong. Check that:
-- `IBMCLOUD_API_KEY` value never appears in `argv` of any command run via `--on` (audit `cluster.go` after staff's edits — the value should go via `Env` in `RunOpts`, not as a positional arg)
-- Wrapper-script fallback path (when SetEnv is rejected by remote sshd) uses `chmod 0700` + `trap 'rm -f $0' EXIT`
-
-For Sprint 1 these are the design requirements (Phase 3 will add automated audit checks). File observations as issues if you spot violations in the staff's code — even before they push the final version, you can review their work-in-progress diffs.
-
-### 6. Survey existing tests for refactor risk
-
-Read all `internal/*/*_test.go` files. The staff agent is editing `internal/config/workspace.go` (adding `Targets` field) — confirm `internal/config/context_test.go` still passes after their edit. If a test references the workspace YAML directly (e.g., via `yaml.Marshal`), the new optional field should not break it. If you spot test brittleness, file as a low-severity issue.
-
-## Verification before reporting done
-
-- `go build ./...` succeeds
-- `go test ./...` succeeds (unit suite)
-- `go test -tags integration ./internal/remote/...` succeeds locally (if Docker available; skip + note in issue if not)
-- `bash -n scripts/e2e-test.sh` syntax-checks clean
-- The new B7-B9 steps in the e2e script render cleanly under `DRY_RUN=1 ./scripts/e2e-test.sh` (don't actually trigger them; just verify they appear in the dry-run output)
-- `gofmt -d -l .` clean for any Go file you edit
+7. **cspell additions.** Re-read `book/src/02-why-eks-and-sriov.md` + `book/src/33-data-plane-decision.md` (post-architect) for any new terms not yet in `cspell.json`. Add: `awscli`, `iperf`, `IRSA`-related terms, common AWS service abbreviations introduced this sprint.
 
 ## Issue tracking
 
-`/mnt/d/project/roksbnkctl/issues/issue_sprint1_validator.md`. Same format as Sprint 0. `Severity: roadmap` reserved for non-blocking observations (e.g., the cred-leak audit would benefit from a dedicated automation in Sprint 3).
+File issues to `/Users/j.lucia/Code/github/awsbnkctl/issues/issue_sprint1_validator.md`. Severity guide same as Sprint 0: blocker / high / medium / low.
 
-## Final report (under 200 words)
+## Verification before reporting done
 
-- Files created
-- Files edited
-- Test results (unit + integration if Docker available)
-- Issues filed (counts by severity)
-- Whether the e2e dry-run shows the new B7-B9 steps cleanly
-- Anything the integrator should know
+- `docker build` of `tools/docker/aws/Dockerfile` succeeds locally; `docker run --rm <image> aws --version && kubectl version --client && iperf3 --version` all report correct versions
+- Every `.github/workflows/*.yml` parses as valid YAML
+- The new CI integration-test job doesn't require live AWS (read the test code; verify mocks are in place)
+- `scripts/e2e-test.sh` exits 0 with refined skip-banner; `--spike-mode` returns the placeholder body without crashing
+- `cspell` against `book/src/**/*.md` doesn't surface new unknown-word counts beyond what was there pre-sprint
+- `bash -n scripts/*.sh` confirms script syntax is valid
 
-Do NOT commit. The integrator commits the aggregated work.
+## Final report
+
+Under 200 words:
+- Files edited / created (counts + key paths)
+- Tools image build status (locally verified yes/no + which versions of awscli/kubectl/iperf3 were baked in)
+- CI workflow status post-edit
+- cspell additions count
+- Issues filed (count + severity breakdown)
+- Notes for Sprint 2's validator (especially anything around S3 supply chain that should be on their radar)
+
+Do NOT commit anything. The integrator commits the aggregated four-agent output.

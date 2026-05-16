@@ -142,7 +142,7 @@ Before productising in Terraform, hand-stand-up the target shape:
 1. Create an EKS cluster (1.30+) via `eksctl` or raw `aws` CLI.
 2. Add a self-managed node group on `c5n.4xlarge` (or `m5n.4xlarge`) with a custom launch template that exposes ENA + the SR-IOV-capable ENIs.
 3. Install Multus (`multus-cni`) + SR-IOV CNI + SR-IOV device plugin via the upstream manifests.
-4. Verify VFs appear as `intel.com/intel_sriov_netdevice` (or equivalent vendor key) in `kubectl describe node`.
+4. Verify VFs appear as `intel.com/sriov` (or whatever `sriov_resource_name` the eks_cluster module is configured with) in `kubectl describe node`.
 5. Schedule a test pod that requests one VF; confirm it gets an additional interface from the SR-IOV pool.
 
 If the spike fails or surfaces blockers (e.g., AWS ENI VF semantics don't match BNK's expectations), pause and revisit the data-plane decision in PRD 07.

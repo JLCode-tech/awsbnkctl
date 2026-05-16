@@ -4,7 +4,7 @@ This folder holds the verbatim prompts dispatched to parallel sub-agents during 
 
 The companion folders are:
 - [`docs/PLAN.md`](../docs/PLAN.md) — the 7-sprint roadmap (which sprints exist, what's in scope, release tag mapping)
-- [`docs/prd/`](../docs/prd/) — six PRDs (`00-OVERVIEW.md` through `05-E2E-TEST-PLAN.md`) defining the *what* per phase
+- [`docs/prd/`](../docs/prd/) — eight PRDs (`00-OVERVIEW.md` through `08-S3-SUPPLY-CHAIN-IRSA.md`; PRD 08 lands in Sprint 2) defining the *what* per phase
 - [`issues/`](../issues/) — the per-sprint issue + resolution log produced by agent dispatch
 
 ## The four roles per sprint
@@ -32,7 +32,7 @@ The four roles run **in parallel** when the sprint kicks off. The tech-writer ag
 
 Each prompt file is plain markdown — the same content sent verbatim as the `prompt` parameter on the `Agent` tool call. Sections typically include:
 
-- **Role + sprint identification** (one-line opener: "You are the X agent for Sprint N of the roksbnkctl project")
+- **Role + sprint identification** (one-line opener: "You are the X agent for Sprint N of the awsbnkctl project")
 - **Project context** (where the repo is, key files agents need to read first — typically the relevant PRD + `docs/PLAN.md` Sprint N section)
 - **Coordination notes** (which other agents are running in parallel, which files to leave alone, which files are append-only-shared)
 - **Numbered tasks** (concrete deliverables with target paths and acceptance criteria)
@@ -50,7 +50,7 @@ This is the playbook a contributor or LLM follows on a one-line instruction like
 Before drafting any prompt, read these in order:
 
 1. **`docs/PLAN.md` Sprint N section** — what's in scope, what release tag (if any) it gates, calendar estimate, dependencies on prior sprints, this sprint's testing pyramid additions, this sprint's book chapters
-2. **The PRDs that Sprint N implements** — typically one or two of `docs/prd/01-*` through `docs/prd/05-*`. The PRD's "Implementation tasks" list is the authoritative work breakdown.
+2. **The PRDs that Sprint N implements** — typically one or two of `docs/prd/01-*` through `docs/prd/08-*`. The PRD's "Implementation tasks" list is the authoritative work breakdown.
 3. **The previous sprint's `prompts/sprint<N-1>/<role>.md` files** — the four prompts there are templates worth borrowing structure from. Each subsequent sprint reuses ~80% of the previous sprint's prompt scaffolding (coordination notes, issue format, verification block, final-report shape) and rewrites only the task-specific sections.
 4. **Outstanding issues from prior sprints** — `issues/issue_sprint<M>_*.md` for all M < N. Anything still flagged `Status: open` is fair game to roll into the new sprint's task list.
 
@@ -76,7 +76,7 @@ The `README.md` sidecar is a one-source-of-truth manifest for the sprint. It mus
 _Drafted from `docs/PLAN.md` Sprint <N> section._
 ```
 
-The four role prompts should be self-contained — an agent runs with no memory of this conversation. State the project location (`/mnt/d/project/roksbnkctl/`), point at the PRD it should read, list coordination notes about the other agents, give numbered tasks with concrete target paths.
+The four role prompts should be self-contained — an agent runs with no memory of this conversation. State the project location (the awsbnkctl repo root on the integrator's machine — e.g. `/Users/j.lucia/Code/github/awsbnkctl/`; use a `<repo-root>/` placeholder if drafting on a machine other than where dispatch happens), point at the PRD it should read, list coordination notes about the other agents, give numbered tasks with concrete target paths.
 
 The four prompts together should partition the sprint's deliverables with **no overlap and no gaps**. Shared files (Makefile, CONTRIBUTING.md, README.md) need explicit append-only or section-ownership notes so agents don't clobber each other.
 

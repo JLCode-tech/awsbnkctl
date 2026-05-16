@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # scripts/e2e-test.sh — end-to-end shake-out driver for awsbnkctl.
 #
-# ▶ Sprint 0 status: skip-stub. The inherited driver was IBM-Cloud-shaped
-#   (phases A-H drove ROKS cluster lifecycle, COS object CRUD, oc/ibmcloud
-#   passthroughs). Per docs/PLAN.md Sprint 0 ("identity rewrite + IBM
-#   strip + AWS stub"), every phase below is a header-echo + early-return
-#   citing the sprint that retargets it:
+# ▶ Sprint 1 status: still a skip-stub for every phase. The Sprint 0
+#   IBM-strip emptied every phase body; Sprint 1 has landed the EKS
+#   cluster Terraform module + internal/aws/ helpers + cobra verbs,
+#   but the end-to-end wire-up (a single script driving `awsbnkctl up
+#   cluster` through to BNK deploy) lands later — see retarget calendar
+#   below. The cluster-phase Terraform module is exercised against
+#   mocked aws-sdk-go-v2 clients in the unit-test suite this sprint
+#   instead. Live-AWS validation is operator-run via the Sprint 1 spike
+#   (PRD 07 §"Spike protocol", gating v0.2).
 #
-#     Phases A-H (cluster bring-up)  →  Sprint 3
+#     Phases A-H (cluster bring-up)  →  Sprint 1 implements module;
+#                                       Sprint 3 wires end-to-end
 #     Phases I-N (backend matrix)    →  Sprint 4
 #     Phase L-DNS                    →  Sprint 4
 #     v1.0 sign-off run              →  Sprint 6
@@ -18,10 +23,18 @@
 #   integrator's babysit loop) keep working — they just see "all phases
 #   skipped" instead of a real run.
 #
+#   Sprint 1 adds a `--spike-mode` flag (stub-only this sprint) so the
+#   operator running PRD 07's day-1 / day-2 / day-3 spike against live
+#   AWS has a single entry-point to opt into the spike protocol once
+#   Sprint 3 wires it. With `--spike-mode` set, the script will emit
+#   the PRD 07 §4 protocol as inline guidance (this sprint) or dispatch
+#   to it (Sprint 3+).
+#
 # Usage (when Sprint 3+ rehydrates this driver):
 #   AWS_PROFILE=... ./scripts/e2e-test.sh
 #   AWS_PROFILE=... PHASE_FROM=D ./scripts/e2e-test.sh
 #   AWS_PROFILE=... DRY_RUN=1 ./scripts/e2e-test.sh
+#   AWS_PROFILE=... ./scripts/e2e-test.sh --spike-mode   # PRD 07 spike
 
 set -e
 set -u
@@ -31,8 +44,20 @@ set -o pipefail
 WORKSPACE=${WORKSPACE:-e2e}
 PHASE_FROM=${PHASE_FROM:-A}
 DRY_RUN=${DRY_RUN:-0}
+SPIKE_MODE=0
 LOG_DIR=${LOG_DIR:-/tmp/awsbnkctl-e2e}
 AWSBNKCTL=${AWSBNKCTL:-awsbnkctl}
+
+# ── flag parsing ────────────────────────────────────────────────────
+# --spike-mode opts the operator into PRD 07's spike protocol. Stub
+# this sprint: the body just emits the protocol text. Sprint 3 wires
+# the actual cluster-only bring-down to the matching phases.
+for arg in "$@"; do
+    case "$arg" in
+        --spike-mode) SPIKE_MODE=1 ;;
+        *)            ;;
+    esac
+done
 
 mkdir -p "$LOG_DIR"
 RUN_TS=$(date +%Y%m%d-%H%M%S)
@@ -71,15 +96,21 @@ skip_phase() {
 # pointer to the canonical phase contract — see git history (and the
 # upstream `jgruberf5/roksbnkctl` repo's `scripts/e2e-test.sh`) for the
 # full inherited shape.
+#
+# Sprint 1 skip-marker refinement: phases A-H (cluster bring-up) now
+# cite "Sprint 1 implements module; Sprint 3 wires end-to-end" so the
+# operator running the spike has the right pointer; backend / DNS
+# phases remain Sprint 4. The phase bodies themselves are unchanged —
+# all still return 0 after emitting the skip banner.
 
-phase_A() { skip_phase A "sanity (version + doctor + init + tfvars)"     "Sprint 3"; }
-phase_B() { skip_phase B "cluster up + show + kubectl get nodes"         "Sprint 3"; }
-phase_C() { skip_phase C "register an existing cluster + down"           "Sprint 3"; }
-phase_D() { skip_phase D "full lifecycle: cluster + BNK + test verbs"    "Sprint 3"; }
-phase_E() { skip_phase E "workspace ops (during D's idle window)"        "Sprint 3"; }
-phase_F() { skip_phase F "S3 object CRUD (replaces COS in Sprint 2)"     "Sprint 3"; }
-phase_G() { skip_phase G "passthrough commands (aws / kubectl / exec)"   "Sprint 3"; }
-phase_H() { skip_phase H "final cleanup (workspace teardown)"            "Sprint 3"; }
+phase_A() { skip_phase A "sanity (version + doctor + init + tfvars)"     "Sprint 1 module + Sprint 3 wire-up"; }
+phase_B() { skip_phase B "cluster up + show + kubectl get nodes"         "Sprint 1 module + Sprint 3 wire-up"; }
+phase_C() { skip_phase C "register an existing cluster + down"           "Sprint 1 module + Sprint 3 wire-up"; }
+phase_D() { skip_phase D "full lifecycle: cluster + BNK + test verbs"    "Sprint 1 module + Sprint 3 wire-up"; }
+phase_E() { skip_phase E "workspace ops (during D's idle window)"        "Sprint 1 module + Sprint 3 wire-up"; }
+phase_F() { skip_phase F "S3 object CRUD (replaces COS in Sprint 2)"     "Sprint 1 module + Sprint 3 wire-up"; }
+phase_G() { skip_phase G "passthrough commands (aws / kubectl / exec)"   "Sprint 1 module + Sprint 3 wire-up"; }
+phase_H() { skip_phase H "final cleanup (workspace teardown)"            "Sprint 1 module + Sprint 3 wire-up"; }
 phase_I() { skip_phase I "backend matrix — local execution backend"     "Sprint 4"; }
 phase_J() { skip_phase J "backend matrix — docker execution backend"    "Sprint 4"; }
 phase_K() { skip_phase K "backend matrix — multi-tool docker phase"     "Sprint 4"; }
@@ -87,6 +118,27 @@ phase_L() { skip_phase L "backend matrix — k8s execution backend"       "Sprin
 phase_M() { skip_phase M "backend matrix — ssh execution backend"       "Sprint 4"; }
 phase_N() { skip_phase N "backend matrix — mixed-mode integration"      "Sprint 4"; }
 phase_L_DNS() { skip_phase L-DNS "AWS-hosted GSLB DNS probe"            "Sprint 4"; }
+
+# spike_mode_banner emits the PRD 07 §4 spike protocol as inline text
+# when --spike-mode is set. Sprint 1: stub-only — the operator follows
+# the protocol by hand against live AWS. Sprint 3: wires the same flag
+# to actual cluster-only verbs (`awsbnkctl up cluster --spike` etc.).
+spike_mode_banner() {
+    echo "" >&2
+    bold "════════════════════════════════════════════════════════════"
+    bold "Spike mode — PRD 07 §4 protocol"
+    bold "════════════════════════════════════════════════════════════"
+    yellow "  Spike protocol per PRD 07 §4 (Sprint 1, days 1-3):"
+    yellow "    • Day 1: provision EKS 1.30 + self-managed c5n.4xlarge node group"
+    yellow "    • Day 2: install Multus + SR-IOV CNI + device plugin DaemonSets"
+    yellow "    • Day 3: schedule a pod requesting intel.com/sriov:1 — verify"
+    yellow "             VF surfaces in the pod and BNK CNEInstance accepts it"
+    yellow ""
+    yellow "  Sprint 1 stub: this flag emits the protocol pointer only."
+    yellow "  Sprint 3 wires --spike-mode to actual cluster-only verbs."
+    yellow "  See docs/prd/07-EKS-CLUSTER-SRIOV.md §'Spike protocol'."
+    echo "" >&2
+}
 
 # should_run compares the current phase letter against PHASE_FROM so
 # resume-at-phase semantics (PHASE_FROM=D) keep working even while every
@@ -99,7 +151,11 @@ should_run() {
 main() {
     bold "awsbnkctl E2E test — run-id $RUN_TS"
     log "log: $RUN_LOG"
-    log "Sprint 0 stub: every phase is a skip-marker pending retarget."
+    log "Sprint 1 stub: every phase is a skip-marker pending Sprint 3 wire-up."
+
+    if [[ "$SPIKE_MODE" == "1" ]]; then
+        spike_mode_banner
+    fi
 
     should_run A     && phase_A
     should_run B     && phase_B
@@ -121,8 +177,9 @@ main() {
 
     echo "" >&2
     yellow "════════════════════════════════════════════════════════════"
-    yellow "Sprint 0 stub: all e2e phases skipped pending sprint retargets"
-    yellow "(see docs/PLAN.md for the retarget plan)."
+    yellow "Sprint 1 stub: cluster phases A-H pending Sprint 3 wire-up."
+    yellow "Backend phases I-N + L-DNS pending Sprint 4."
+    yellow "(see docs/PLAN.md for the retarget plan; PRD 07 §4 for the spike.)"
     yellow "════════════════════════════════════════════════════════════"
 }
 

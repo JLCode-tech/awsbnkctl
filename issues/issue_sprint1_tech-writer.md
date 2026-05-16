@@ -1,443 +1,271 @@
-# Sprint 1 — tech writer issues
+# Sprint 1 — tech-writer issues
 
-Format matches Sprint 0. Findings cover the 6 new chapters
-(1, 2, 3, 4, 7, 16), the staff agent's SSH/--on/targets implementation,
-README/CONTRIBUTING drift, and PRD/PLAN cross-document drift. All
-findings are doc/example-correctness only — no code changes proposed.
+End-of-sprint read-only review. Covered: PRD 07 ↔ Terraform module
+reconciliation, chapter 2 (`book/src/02-why-roks.md` — filename retained
+per architect Issue 3) + chapter 33 read-through, build + dry-run + go
+test + go vet + terraform validate dogfood, terraform fmt sweep,
+cross-link audit, cspell verification on new prose, README/CHANGELOG
+alignment, tools image docker build + smoke. Sibling Sprint 1 issue
+files cross-referenced: architect (7), staff (6), validator (5).
 
-## Issue 1: chapter 16 documents auto-discovered jumphost user as `root` but implementation writes `ubuntu`
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 16 § "Auto-discovery from `roksbnkctl up`"
-shows the auto-population output as `(user: root, ...)` and the
-preceding `targets:` example block lists `user: root` for the
-`jumphost` entry (lines 28, 56). PRD 01 § "Auto-discovery from TF
-output" pseudocode also uses `User: "root"`. The staff agent's
-implementation in `internal/cli/lifecycle.go::tryAutoJumphost` (line
-348) writes `User: "ubuntu"` instead, with the inline comment
-"upstream HCL provisions Ubuntu cloud-init users". A reader who
-copies the chapter's `roksbnkctl exec --on jumphost -- whoami`
-example expects `root`; they will get `ubuntu`. Chapter 7 step 3
-also shows `(user: root, key: tf-output:jumphost_shared_key)` in the
-sample `up` output (line 95) — same drift.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/16-on-flag-ssh-jumphosts.md`
-(lines 28, 56, ~80–87 sample output);
-`/mnt/d/project/roksbnkctl/book/src/07-quick-start.md` (line 95).
-**Proposed fix**: either chapter prose updates to `ubuntu` (the
-likely-correct path — the upstream HCL really does provision an
-Ubuntu jumphost), OR staff agent realigns
-`tryAutoJumphost` and PRD 01 to write `root`. PRD 01 alignment is
-the cleaner outcome. File a matching staff follow-up to pick which
-side moves.
-
-## Issue 2: chapter 16 documents `--tty` flag that does not exist
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 16 § "Working examples → Behaviour details"
-(line 218) says: "For other verbs, pass `--tty` if you need a PTY
-(e.g. for `top` or any command that checks `isatty()`)". No `--tty`
-flag is registered anywhere in `internal/cli/*.go` or on
-`internal/remote.RunOpts` plumbed through from a flag. PRD 01 §
-"Scope/in scope" lists `--tty` as a deliverable but the staff agent
-did not implement it (the `RunOpts.TTY` field exists internally but
-no CLI flag binds it; `dispatchRemote` is called with `tty: false`
-for every non-shell verb). A reader who follows the chapter and
-runs `roksbnkctl exec --on jumphost --tty -- top` will get
-`unknown flag: --tty`.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/16-on-flag-ssh-jumphosts.md`
-(line 218).
-**Proposed fix**: either the chapter is corrected to remove the
-`--tty` mention (and explain that PTY is auto-on for `shell --on`
-only in v0.7), OR a follow-up staff issue adds the flag. Removing
-the mention is the lighter touch given the rest of the chapter's
-"What --on doesn't do (yet)" section is already there to absorb
-deferrals.
-
-## Issue 3: chapter 16 `roksbnkctl targets show` output documents fields the implementation does not print
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 16 § "`targets show <name>`" (lines 142–150)
-shows sample output containing two fields that the implementation
-never prints: `host_key:` and `last_seen:`. The actual
-`runTargetsShow` in `internal/cli/targets.go` (lines 97–117) prints
-only `name`, `host`, `port`, `user`, and one of `key_path` /
-`key_source` — there is no host-key fingerprint lookup against
-`~/.roksbnkctl/known_hosts` and no last-seen tracking. A reader
-trusting the chapter would expect `targets show jumphost` to surface
-the recorded fingerprint before they connect; the actual command
-won't show that information. The chapter's prose immediately after
-the sample even leans on the missing field: "Useful for confirming
-what you're trusting before running a command."
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/16-on-flag-ssh-jumphosts.md`
-(lines 141–152).
-**Proposed fix**: trim the sample output and the trailing prose to
-match what the binary actually prints, OR file a small staff
-follow-up to add `host_key` lookup (the data is in
-`~/.roksbnkctl/known_hosts` already; rendering it is a few lines).
-The sample should also drop `last_seen` unless someone wants to
-build the recording infrastructure for it.
-
-## Issue 4: chapter 16 `targets list` KEY column omits the `file:` prefix the binary actually emits
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 16 § "`targets list`" (lines 130–135) shows
-the KEY column with values `tf-output:jumphost_shared_key` and
-`~/.ssh/id_ed25519`. The implementation
-(`internal/remote/targets.go::KeySourceDescription`, lines 143–155)
-returns `file:~/.ssh/id_ed25519` for KeyPath-backed targets — the
-`file:` prefix is intentional, see `targets_test.go::TestKeySourceDescription`
-lines 122–125. So the bastion row in chapter 16's sample should read
-`file:~/.ssh/id_ed25519`. Minor cosmetic drift; doesn't break a
-reader's command but does mismatch what they will see.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/16-on-flag-ssh-jumphosts.md`
-(line 134).
-**Proposed fix**: change the sample row to
-`bastion    ops.example.com:22  jgruber  file:~/.ssh/id_ed25519`.
-
-## Issue 5: chapter 16 first-connect TOFU prompt sample does not match the implementation's actual prompt text
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 16 § "Host-key TOFU on first connect" (lines
-80–87) shows a sample TOFU prompt borrowed from OpenSSH's wording:
-
-```
-The authenticity of host '169.45.91.177:22' can't be established.
-ED25519 key fingerprint is SHA256:abc123def456ghi789jkl0mnopqrstuvwxyz/+=.
-Add this key to ~/.roksbnkctl/known_hosts? [y/N]: y
-```
-
-The implementation's actual prompt (`internal/remote/hostkeys.go`
-line 86) is a single line:
-
-```
-Add 169.45.91.177:22's key (SHA256:...) to ~/.roksbnkctl/known_hosts? [y/N]:
-```
-
-No "authenticity can't be established" line, no "ED25519 key
-fingerprint is" line. The mismatch error sample (lines 95–102) also
-diverges from the real `ErrHostKeyMismatch`-wrapped message
-(`hostkeys.go` line 67–68): the chapter shows a multi-line block
-including `exit code: 126`, but the binary produces a single-line
-`error: host key mismatch: <host> known with <fp1> but server
-presented <fp2>; if the host was rebuilt, edit
-~/.roksbnkctl/known_hosts`. Readers may try to grep for the
-chapter's exact wording in their logs and not find it.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/16-on-flag-ssh-jumphosts.md`
-(lines ~82–87, ~95–102).
-**Proposed fix**: replace the sample blocks with the implementation's
-actual single-line prompt text (run the binary against the
-testcontainers fixture to capture the real string verbatim).
-Alternatively, leave the chapter prose as a sketch but add an "actual
-output may vary in formatting" disclaimer; the latter is weaker but
-defensible given the existing "output blocks are illustrative" note
-in chapter 7.
-
-## Issue 6: chapter 4 documents `roksbnkctl --version` but only `roksbnkctl version` (subcommand) exists
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 4 § "Verifying the install → `roksbnkctl
---version`" (lines 124–136) shows `roksbnkctl --version` as a
-working command. Running it returns `Error: unknown flag: --version`.
-There is no `--version` flag binding; only the `version` subcommand
-exists (`internal/cli/meta.go` lines 17–19). A reader following the
-"first thing after install" verification step will hit an error and
-think the binary is broken. Chapter 7 sidesteps this by using
-`roksbnkctl status` instead, but a fresh install reader is most
-likely to type `roksbnkctl --version` (kubectl/helm/terraform muscle
-memory) and see the failure.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/04-installation.md`
-(lines 124–136).
-**Proposed fix**: change the heading and command from
-`roksbnkctl --version` to `roksbnkctl version` throughout the
-section. Alternatively, file a tiny staff follow-up to add a
-`--version` persistent flag alias that prints the same string and
-exits — five lines of cobra wiring; keeps both forms working and
-matches user expectations from peer tools.
-
-## Issue 7: chapter 4 `roksbnkctl doctor` sample output does not match the implementation's format or check count
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 4 § "Verifying the install → `roksbnkctl
-doctor`" (lines 138–161) describes "an eight-check prereq +
-credentials report" and shows formatted output like:
-
-```
-  ✓ terraform on PATH (terraform 1.7.5)
-  ✓ kubectl on PATH (v1.29.2)        [optional — passthrough only]
-  ...
-8 checks, 7 passed, 1 warning, 0 failed.
-```
-
-The actual binary produces nine lines (terraform, iperf3, kubectl,
-oc, ibmcloud, kubeconfig, workspace, ibmcloud api key, ibm cloud
-auth) in a different format:
-
-```
-✓  terraform         /usr/bin/terraform (Terraform v1.15.2)  (required for `roksbnkctl up`)
-⚠  iperf3            not on PATH  (needed for `roksbnkctl test throughput`)
-...
-```
-
-No trailing summary line ("N checks, P passed, ..."), no `[optional
-— passthrough only]` annotation, the path is shown rather than just
-"on PATH (version)". The numeric "eight-check" count is also wrong —
-nine checks run. Readers who interpret the chapter literally and
-grep for "8 checks" or the trailing summary line will get an empty
-match.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/04-installation.md`
-(lines 138–161).
-**Proposed fix**: re-capture the doctor sample by running
-`/tmp/roksbnkctl-s1 doctor` (or `make build && ./bin/roksbnkctl
-doctor`) into the chapter; update the count from "eight" to "nine"
-or — better — drop the literal count and say "the doctor run". The
-prose's "terraform is the only check that's hard-required" claim is
-still true.
-
-## Issue 8: chapter 4 + README declare Go 1.23+ but go.mod requires Go 1.25.0
-
-**Severity**: high
-**Status**: open
-**Description**: Sprint 1's staff/validator agents bumped the `go`
-directive in `go.mod` from `1.23` → `1.25.0` (forced by
-`gliderlabs/ssh` and `testcontainers-go` transitive deps; documented
-in `issues/resolved_sprint1_staff.md` Issue 5 and
-`issues/issue_sprint1_validator.md` Issue 6). Three docs still
-declare 1.23+ as the build prerequisite:
-
-- `book/src/04-installation.md` line 11: "Go 1.23 or newer if you
-  want a native build"
-- `book/src/04-installation.md` line 18: "If `go version` reports
-  `1.23` or newer"
-- `book/src/04-installation.md` lines 36–43, 55, 68, 76, 79, 84:
-  every `golang:1.23-alpine` invocation and the `make build` failure
-  diagnosis says "Go too old. The module declares `go 1.23` in
-  `go.mod`"
-- `README.md` line 30: "Build requires Go 1.23 or newer"
-- `README.md` line 35: "go version go1.23.x or newer"
-- `README.md` Docker invocations: `golang:1.23-alpine`
-
-A user with Go 1.23 on PATH will hit a `go: module requires Go 1.25`
-error from `make build`, and the chapter's diagnosis ("most likely
-cause is **Go too old**. The module declares `go 1.23`") will be
-self-confirming but version-incorrect. Worse, the suggested Docker
-fallback (`golang:1.23-alpine`) will fail the same way because
-`go.mod` requires 1.25.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/04-installation.md` (multiple
-lines, see above);
-`/mnt/d/project/roksbnkctl/README.md` (lines 30, 35, plus docker
-invocations).
-**Proposed fix**: replace every `1.23` reference with `1.25` in
-chapter 4 and README, including the `golang:1.25-alpine` image tag.
-This is a mechanical search-and-replace; no prose restructuring
-needed. The validator's resolved issue 5 already flagged the bump
-"for v0.7 release notes" — these doc updates are the user-facing
-half of that note.
-
-## Issue 9: chapter 16's PRD 01 link path will 404 in the published book
-
-**Severity**: medium
-**Status**: open
-**Description**: Chapter 16 references PRD 01 with a relative link
-written as `[PRD 01](../../docs/prd/01-SSH-AND-ON-FLAG.md)` (lines 7
-and 235). The link resolves correctly on the filesystem — `book/src/`
-plus `../../docs/prd/...` lands at the repo's `docs/prd/...` — but
-mdBook only publishes the contents of `book/src/` rendered into
-`book/book/`. The rendered HTML
-(`book/book/16-on-flag-ssh-jumphosts.html`) rewrites both occurrences
-to `<a href="../../docs/prd/01-SSH-AND-ON-FLAG.html">PRD 01</a>`,
-which from the published `https://jgruberf5.github.io/roksbnkctl/`
-URL points outside the book and 404s. PRDs are not part of the
-published book tree; they live alongside the source.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/16-on-flag-ssh-jumphosts.md`
-(lines 7, 235);
-`/mnt/d/project/roksbnkctl/book/book/16-on-flag-ssh-jumphosts.html`
-(rendered output).
-**Proposed fix**: rewrite the two links to point at the GitHub
-canonical: `[PRD 01](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/01-SSH-AND-ON-FLAG.md)`.
-Alternative: copy PRD 01 into `book/src/` as e.g. `33-prd-01-ssh.md`
-and link locally. The first option is lighter and matches how
-peer projects (kubebuilder, etc.) link to design docs from rendered
-books.
-
-## Issue 10: README + CONTRIBUTING.md not updated for Sprint 1's flagship `--on` feature
-
-**Severity**: medium
-**Status**: open
-**Description**: M1 / v0.7 ships the `--on` flag and SSH targets as
-the headline feature (PLAN.md line 9 milestone description; chapter
-3 line 92 calls it "the v0.7-flagship feature"). Neither
-`README.md` nor `CONTRIBUTING.md` mention `--on`, SSH, jumphost, or
-`targets`. A casual visitor scanning the README's "Highlights"
-section will not learn that this release exists for SSH/jumphost
-support, even though it's the entire point of the release. Similarly,
-`CONTRIBUTING.md` has no mention of the new
-`scripts/e2e-test.sh` Phase B7-B9 steps, the new
-`internal/remote/integration_test.go`, or the `-tags integration`
-build-tag pattern the validator agent introduced. A new contributor
-who lands in `internal/remote/` or who runs the e2e script won't know
-the integration tests exist or how to run them.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/README.md`,
-`/mnt/d/project/roksbnkctl/CONTRIBUTING.md`.
-**Proposed fix**:
-- Add one bullet to README "Highlights": "**`--on jumphost`** — run
-  any passthrough (`exec`, `shell`, `kubectl`, `oc`, `ibmcloud`)
-  against an auto-discovered SSH jumphost; useful in
-  customer-firewalled or air-gapped environments. See
-  [chapter 16](https://...book/.../16-on-flag-ssh-jumphosts.html)."
-- Add a "Running integration tests" subsection to CONTRIBUTING.md
-  under "Running tests", documenting `go test -tags integration
-  ./internal/remote/...` (or `make test-integration`) and the Docker
-  prerequisite. Tie it back to validator's Issue 6 about the tag-gated
-  `go mod tidy` invocation.
-
-## Issue 11: chapter 7 docker example uses outdated `golang:1.23-alpine` image
-
-**Severity**: low
-**Status**: open
-**Description**: Same root cause as Issue 8 — chapter 4's docker-build
-section uses `golang:1.23-alpine` everywhere, including the
-cross-compile examples. Because the alpine image's bundled Go matches
-the tag, Go 1.25 is required by `go.mod` post-Sprint-1 and the
-1.23 image will fail the build. Filing as a separate issue from the
-prose-version-string fix because the affected line is structurally
-distinct (image tag, not prose) and may be missed by a single-pass
-edit.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/04-installation.md` (lines 55,
-68, 79, 85);
-`/mnt/d/project/roksbnkctl/README.md` (Docker build section).
-**Proposed fix**: bump every `golang:1.23-alpine` to
-`golang:1.25-alpine` in the same pass as Issue 8.
-
-## Issue 12: chapter 16 cross-reference to non-existent `book/src/ssh.md` in `internal/cli/remote.go`
-
-**Severity**: low
-**Status**: open
-**Description**: Found while reviewing staff's code: comment in
-`internal/cli/remote.go` line 36–37 says "users who hit 'ibmcloud
-not logged in' on the remote should configure AcceptEnv on the
-jumphost (documented in book/src/ssh.md, owned by the architect
-agent)". No file `book/src/ssh.md` exists; the relevant chapter is
-`16-on-flag-ssh-jumphosts.md` (and chapter 16's "Behaviour details"
-already does cover `AcceptEnv IBMCLOUD_*`). This is a stale
-codebase-comment pointer rather than a published-doc issue, but it
-will mislead the next person who greps for "ssh.md" expecting to find
-docs.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/internal/cli/remote.go` (lines 36–37).
-**Proposed fix**: either change the comment to point at
-`book/src/16-on-flag-ssh-jumphosts.md`, or drop the path and say
-"see chapter 16". Pure code-comment cleanup; no chapter content
-changes.
-
-## Issue 13: chapter 7 sample `up` output lists 77 resources but the testing module emits a separate jumphost instance — count is plausible but one section header inconsistency
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 7 step 3 sample (lines 70–96) shows the
-`Apply complete! Resources: 77 added, 0 changed, 0 destroyed.` line
-followed by "→ Auto-populating targets.jumphost from terraform
-outputs" and "✓ Wrote target 'jumphost' → 169.45.91.177 (user: root,
-key: tf-output:jumphost_shared_key)". Beyond the user mismatch
-already filed (Issue 1), the implementation's actual log line for
-that step (`internal/cli/lifecycle.go::tryAutoJumphost` line 355)
-reads:
-
-```
-✓ Auto-registered target jumphost (<ip>); use `roksbnkctl --on jumphost ...`
-```
-
-— different verb ("Auto-registered" vs "Wrote") and a different
-trailing hint. Not a correctness break (it still describes the same
-behavior) but readers won't see the chapter's exact strings on their
-own runs. Combined with the fact that there's no "→ Auto-populating
-targets.jumphost from terraform outputs" line in the binary's output
-at all (the implementation goes straight to the ✓ line), the chapter
-is two lines too long for a real session.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/07-quick-start.md`
-(lines 94–96).
-**Proposed fix**: replace the two-line `Auto-populating ... / Wrote
-target ...` block with a single line matching the implementation:
-
-```
-✓ Auto-registered target jumphost (169.45.91.177); use `roksbnkctl --on jumphost ...`
-```
-
-## Issue 14: chapter 16 omits PRD 01's deferred items list (silent gap rather than "What --on doesn't do" mention)
-
-**Severity**: low
-**Status**: open
-**Description**: PRD 01 § "Out of scope" enumerates 5 deliberately
-deferred items: ProxyJump/multi-hop, `~/.ssh/config` parsing,
-password auth, Windows agent, SCP/SFTP. Chapter 16's "What `--on`
-doesn't do (yet)" section covers 4 of those (lifecycle commands,
-ProxyJump, `~/.ssh/config`, password auth, SCP/SFTP) — but it
-specifies "Lifecycle commands ... reject `--on` with a clear error
-in v0.7" as one of the deferred items, which is technically a
-**runtime behaviour** not a Phase 1 scope decision (PRD 01 lists
-this under "in scope" as part of the dispatch surface, just with the
-clear-error gate). The section also doesn't explicitly say
-"Windows ssh-agent named-pipe protocol is not supported in v0.7"
-even though chapter 4 line 173 mentions it in passing as a Windows
-limitation. A reader on Windows reading chapter 16 alone will not
-learn that the agent path won't work for them; they need to
-back-reference chapter 4's compile-only line.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/16-on-flag-ssh-jumphosts.md`
-(§ "What `--on` doesn't do (yet)", lines 222–230).
-**Proposed fix**: add one bullet to the section: "**Windows
-ssh-agent.** The `key_source: agent` path is Linux/macOS only in
-v0.7 — Windows users must use `key_path` to a file. (Already noted
-in the Key sources section, but called out here explicitly so a
-Windows reader who only skimmed §`--on doesn't do` doesn't miss it.)"
-The chapter already mentions this in the Key sources section line
-69, but explicit cross-mention is worth the two lines.
-
-## Issue 15: chapter 3's "v0.9" forward-look paragraph mentions `--backend` but no PRD is cross-linked
-
-**Severity**: low
-**Status**: open
-**Description**: Chapter 3 § "What's coming in future releases" line
-82 describes "v0.9 — four execution backends" with a `--backend`
-flag selectable across `local | docker | k8s | ssh`. The chapter
-links forward to chapter 17 ("Execution backends") but not to PRD
-03 (`docs/prd/03-EXECUTION-BACKENDS.md`) where the design lives.
-Chapter 16, by contrast, links forward to PRD 01 for the SSH design
-rationale (line 7). Inconsistent treatment between sister chapters.
-A reader who cares about the v0.9 design rationale won't find it
-because chapter 17 is a stub for now.
-**Files affected**:
-`/mnt/d/project/roksbnkctl/book/src/03-what-roksbnkctl-does.md`
-(line 82).
-**Proposed fix**: add a parenthetical link to PRD 03 alongside the
-chapter 17 link, e.g. "[Chapter 17](./17-execution-backends.md)
-covers the design (full design rationale in
-[PRD 03](https://github.com/jgruberf5/roksbnkctl/blob/main/docs/prd/03-EXECUTION-BACKENDS.md))."
-Use the GitHub canonical URL per Issue 9's pattern to avoid the
-publishing-path 404.
+PRD 07 ↔ implementation alignment: **yes-with-deltas** (one cosmetic
+fmt nit, one architect-flagged naming-default decision still
+open — see Issues 2 and 3 below; PRD-inputs/outputs ↔ Terraform shape
+otherwise matches). Spike deferral: **yes** (PRD 07's "Resolved in
+spike" placeholder is intentionally operator-fillable; not a Sprint 1
+gap). Ready for integrator commit: **yes-with-followups** (no blockers;
+six low/medium findings listed below for integrator triage or Sprint 2
+fold).
 
 ---
 
-*Total filed: 15 issues — 1 high (Go 1.25 doc drift, blocks
-build-from-source), 6 medium (chapter 16 implementation drift on
-user / `--tty` / `targets show` / TOFU prompt; chapter 4 doctor
-output + `--version`; PRD 01 link 404; README/CONTRIBUTING SSH
-mention), 8 low (cosmetic + cross-reference + tone).*
+## Issue 1: `awsbnkctl doctor` AWS checks invisible on a fresh dev box (workspace-gated)
+
+**Severity**: medium
+**Status**: open
+**Description**: `internal/doctor/doctor.go:130` gates the call to
+`awsChecks(ctx, cctx)` on `cctx.Workspace != nil`. On a fresh dev box
+without `awsbnkctl init` run, the workspace is nil and the three new
+Sprint 1 AWS pre-flight rows (`aws credentials`, `aws sts
+caller-identity`, `aws eks:DescribeCluster permission`) never render
+— even with `AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test
+AWS_REGION=us-east-1` exported. Verified by running:
+
+```
+$ unset AWS_*; ./bin/awsbnkctl doctor       # 8 rows, no AWS lines
+$ AWS_ACCESS_KEY_ID=test ... ./bin/awsbnkctl doctor          # same 8 rows
+$ AWS_ACCESS_KEY_ID=test ... ./bin/awsbnkctl --workspace test doctor   # same
+```
+
+In every case the AWS rows are absent. The tech-writer brief's
+"Build dogfood" gate explicitly expected `doctor` to *"reports
+AWS-shaped checks"* on a fresh dev box, and the "Dry-run dogfood" gate
+expected the no-creds case to "report `aws credentials` as warning,
+`aws sts caller-identity` as skipped, etc." Neither happens, because
+the new check block sits behind the workspace gate.
+
+The doctor logic before the gate is intentional (workspace-specific
+region lookup lives inside `awsRegionFromContext`), but the AWS-side
+checks themselves work fine on an empty `Context` — `CredentialsConfigured`
+and `NewClients` both fall back cleanly to the SDK's default chain.
+Sprint 1 staff Issue 3 already notes the field is read off the
+IBM-shaped struct via `cctx.Workspace.IBMCloud.Region`; that fallback
+masks the visibility issue rather than fixing it.
+
+**Files affected**: `internal/doctor/doctor.go:122-138`,
+`internal/doctor/aws.go:147-154`.
+
+**Proposed fix**: Move the `awsChecks(ctx, cctx)` call outside the
+`cctx.Workspace != nil` block, and let `awsRegionFromContext`
+nil-check `cctx.Workspace` (it already does, mostly — but the call
+site never reaches it without a workspace). One-line refactor;
+preserves the existing region-from-workspace path when a workspace
+exists, surfaces the warning/skipped rows when it doesn't. Without
+this, a fresh-dev-box user has no signal that AWS credentials are
+missing until `awsbnkctl up cluster --dry-run` errors deep in
+terraform.
+
+## Issue 2: `intel.com/sriov` vs `intel.com/intel_sriov_netdevice` naming drift between PLAN.md and PRD 07 / module / chapters — architect Issue 2 unresolved
+
+**Severity**: medium
+**Status**: open (re-filed from architect Issue 2)
+
+**Description**: Sprint 1 architect's Issue 2 flagged that `docs/PLAN.md:145`
+says VFs should appear as `intel.com/intel_sriov_netdevice` while
+PRD 07 (5 places), the eks_cluster module
+(`terraform/modules/eks_cluster/variables.tf:73,75`,
+`sriov.tf:13,23`), the root TF (`terraform/variables.tf:81,83`), and
+both chapters consistently use `intel.com/sriov`. Verified by
+`grep -nE 'intel_sriov_netdevice|intel\.com/sriov' ...`:
+
+- PLAN.md: 1 occurrence (`intel.com/intel_sriov_netdevice`)
+- everything else: `intel.com/sriov` throughout
+
+The drift remains in place after staff completed the Sprint 1
+module. The architect deferred the pick-one decision to the
+integrator. Either is *defensible* (upstream sriov-network-device-plugin
+ships the longer form as its example default; the shorter form
+matches what awsbnkctl ships and what every doc except PLAN.md
+expects). What's wrong is the *cross-document disagreement* —
+a reader who compares PLAN.md's spike-step to PRD 07's spike-protocol
+day-2 step will be confused on which key to look for.
+
+**Files affected**: `docs/PLAN.md:145`.
+
+**Proposed fix**: Align PLAN.md with the implementation. The simplest
+edit is to change PLAN.md line 145 from
+`intel.com/intel_sriov_netdevice` to `intel.com/sriov` (matching the
+module default and PRD 07). Alternative: rename the module default
+to match upstream's longer form, but that touches 5+ files for what
+is effectively a cosmetic convention pick. Integrator decision; the
+single-line PLAN.md edit is the lighter touch.
+
+## Issue 3: `terraform fmt -check` fails on `terraform/modules/eks_cluster/main.tf` — two alignment nits
+
+**Severity**: low
+**Status**: open
+
+**Description**: Running `terraform fmt -check -recursive` against
+`terraform/modules/eks_cluster/` exits with status 3 and flags
+`main.tf`. The diff `terraform fmt -diff` shows two cosmetic
+issues:
+
+```
+- "awsbnkctl.io/role"      = "sriov-data-plane"
+- "awsbnkctl.io/prd"       = "07"
++ "awsbnkctl.io/role" = "sriov-data-plane"
++ "awsbnkctl.io/prd"  = "07"
+
+- sriov       = var.enable_sriov ? "on" : "off"
++ sriov        = var.enable_sriov ? "on" : "off"
+```
+
+Cosmetic only — `terraform validate` succeeds. But a CI fmt-gate (if
+the validator agent's Sprint 1 CI matrix or any future workflow runs
+`terraform fmt -check`) would fail the build. Worth a one-touch
+`terraform fmt` pass at integration time.
+
+**Files affected**: `terraform/modules/eks_cluster/main.tf:157-158,188`.
+
+**Proposed fix**: integrator runs `terraform -chdir=terraform/modules/eks_cluster fmt -recursive`
+before commit. Single file, two trivial diffs.
+
+## Issue 4: cspell.json missing entries for the new SR-IOV / kernel terminology in chapter 33 — validator Issue 4 confirmed open
+
+**Severity**: medium
+**Status**: open (re-filed from validator Issue 4)
+
+**Description**: Validator's Sprint 1 Issue 4 worried the cspell
+additions may not have landed because the validator agent 529'd
+before reaching that task. Re-verified by running `cspell` against
+the two new chapters. Some AWS terms (`multus`, `Multus`, `sriov`,
+`SRIOV`, `c5n`, `m5n`, `IRSA`, `OIDC`, `Karpenter`, `ENA`, etc.)
+*did* land. But the following terms used in `book/src/33-data-plane-decision.md`
+and `book/src/02-why-roks.md` are not in cspell.json:
+
+- `iommu`, `IOMMU` — kernel parameter name (used 5× in chapter 33,
+  also in PRD 07)
+- `VFIO` — kernel SR-IOV machinery (chapter 33 × 2)
+- `Mellanox` — vendor name (chapter 33 × 3)
+- `libfabric` — EFA's API (chapter 33)
+- `Microkernel` — describes TMM (chapter 33)
+- `userspace` — kernel/userspace boundary (chapter 33 × 2)
+- `Virtualisation` — full name of SR-IOV (chapter 33)
+- `schedulable` — used in both chapters (× 2 in 33)
+- `dpubnkctl` — sibling fork name (chapter 33)
+- `snetworkplumbingwg` — partial match from upstream org URL
+  (`k8snetworkplumbingwg`)
+- `xlarge` — c5n.4xlarge etc. (chapter 33 × 4, chapter 2 × 1)
+- `Forkable` — chapter 2
+
+`.github/workflows/spellcheck.yml` runs cspell on `book/src/**/*.md`
+and `docs/**/*.md` on every push touching those paths; the next push
+that touches the book will fail spellcheck. Most of these are
+load-bearing technical terms that should be in cspell.json (not
+ignored).
+
+**Files affected**: `cspell.json` (words list).
+
+**Proposed fix**: Add the 11 entries above to `cspell.json`'s `words`
+array. Alphabetical insertion is the project's convention. One-line
+patch; integrator-fold or Sprint 2 validator picks up.
+
+## Issue 5: `awsbnkctl up cluster --help` does not document the `--workspace` flag (it's a global flag, but absent from the per-command help body)
+
+**Severity**: low
+**Status**: open
+
+**Description**: The brief's Build dogfood gate expected
+`./bin/awsbnkctl up cluster --help` to "document `--dry-run` +
+`--workspace`". `--dry-run` shows up correctly under "Flags";
+`--workspace` only shows up under "Global Flags" (correctly, since
+it's a persistent flag set at the root). Cobra's default rendering
+puts global flags below per-command flags, which the help output
+does. So technically the gate is met (the flag is documented). But
+the per-command Flags section alone doesn't surface it, and a reader
+reading top-to-bottom may stop before the Global Flags section. The
+relevant Long-description blob for `upClusterCmd` (cluster.go:39-46)
+could mention `--workspace` explicitly so the reader doesn't miss it
+on a quick scan. Filing as low because the flag *does* work; it's a
+visibility nit.
+
+**Files affected**: `internal/cli/cluster.go:39-46` (Long blob),
+optionally cluster.go:50-57 (down cluster's Long blob).
+
+**Proposed fix**: append one sentence to each Long block: "Pass
+`--workspace <name>` to target a specific workspace; defaults to
+`default` and synthesises an empty workspace if none exists yet
+(suitable for first-run dry-run before `awsbnkctl init`)." Or punt
+to Sprint 3 when `awsbnkctl init` lands and the workspace story
+becomes load-bearing.
+
+## Issue 6: `tools/docker/aws/` image is linux/amd64-only; `aws --version` fails on darwin_arm64 host runs (rosetta error)
+
+**Severity**: low
+**Status**: open
+
+**Description**: `docker build tools/docker/aws/` succeeded cleanly
+on this host (linux/amd64 + linux/arm64 manifest list emitted —
+multi-arch). But `docker run --rm <img> aws --version` on darwin_arm64
+host fails with `rosetta error: failed to open elf at
+/lib64/ld-linux-x86-64.so.2`, because the Dockerfile downloads the
+linux-x86_64-only awscli v2 zip
+(`awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip` at line 60) regardless
+of the build platform. `kubectl`, `helm`, and `iperf3` work fine
+under emulation (single-platform single-arch download URLs hit the
+linux/amd64 manifest entry). The validator's task brief asked for
+`docker run --rm <img> aws --version` to report v2.x; on a linux
+host this would work, on darwin_arm64 (this tech-writer's host) it
+doesn't.
+
+The Sprint 1 CI matrix runs on `ubuntu-latest` (linux/amd64) per
+`.github/workflows/tools-images.yml:30-44` so the smoke succeeds in
+CI. The user-facing impact is that an awsbnkctl developer on Apple
+Silicon trying to test the docker backend locally hits the rosetta
+error. Filing as low because the CI path works and the docker
+backend is Sprint 4 anyway, but worth tracking for the next pass at
+the Dockerfile.
+
+Smoke results from this host (linux/arm64 manifest under rosetta):
+
+| tool | version reported | status |
+|---|---|---|
+| `aws --version` | rosetta error | fail (host-arch limitation) |
+| `kubectl version --client` | `v1.30.5` | OK (matches PRD 07 cluster_version default) |
+| `helm version --short` | `v3.15.4+gfa9efb0` | OK |
+| `iperf3 --version` | `iperf 3.16` | OK (3.x — matches brief) |
+
+**Files affected**: `tools/docker/aws/Dockerfile:36,60`
+(AWSCLI_VERSION + hardcoded x86_64 zip URL).
+
+**Proposed fix**: detect `TARGETARCH` from the `--platform` build arg
+and pick the matching awscli v2 zip (the bundle is published for
+both `linux-x86_64` and `linux-aarch64`). The pattern is:
+
+```dockerfile
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      amd64) ARCH=x86_64 ;; \
+      arm64) ARCH=aarch64 ;; \
+    esac; \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}-${AWSCLI_VERSION}.zip" ...
+```
+
+The kubectl + helm download URLs already have amd64-specific paths;
+those would need the same TARGETARCH-aware treatment. Pinned sha256
+checksums then need both arches recorded. Probably a half-day pass
+in a Sprint 2 or 3 validator fold rather than an integrator-side
+patch this sprint.
+
+---
+
+*Total filed: 6 issues — 0 blocker, 0 high, 3 medium (doctor
+visibility gate, PLAN.md naming drift, cspell missing terms), 3 low
+(terraform fmt nit, up cluster help cosmetic, Dockerfile arm64
+gap). PRD 07 ↔ Terraform module reconciliation confirms staff
+Issue 5 (architect Issue 1 cross-ref): the 12 PRD inputs all match
+the module's `variables.tf` defaults + types; the 7 PRD outputs all
+wire through `outputs.tf` to either `module.eks.*` or
+`null_resource.cluster_ready.id` as PRD 07 contracts. Spike deferral
+verdict: as designed; PRD 07's "Resolved-in-spike" section is
+expected operator output, not a Sprint 1 gap.*

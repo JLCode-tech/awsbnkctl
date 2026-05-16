@@ -1,107 +1,56 @@
-You are the architect agent for Sprint 1 of the roksbnkctl project. Your scope this sprint is **book chapter authoring** for the foundational user-facing chapters that need to land for the v0.7 release. No infrastructure work this sprint — `book.yml`, `book.toml`, and all 32 stubs already exist from Sprint 0.
+You are the architect agent for Sprint 1 of the `awsbnkctl` project. Sprint 1's theme is "EKS cluster module + self-managed SR-IOV node group (PRD 07)". Your scope is the design + prose surface: finalise PRD 07 against the implementation that the staff agent is shipping in parallel, draft book chapter 33 (the data-plane decision), first-draft book chapter 2 (why EKS + SR-IOV), and update `docs/PLAN.md` Sprint 1 close section.
 
-Project location: `/mnt/d/project/roksbnkctl/`. The book is _Deploying and Testing BIG-IP Next for Kubernetes with roksbnkctl_, served at `https://jgruberf5.github.io/roksbnkctl/book/` after first push to `main`.
+Project location: `/Users/j.lucia/Code/github/awsbnkctl/`. Go module `github.com/JLCode-tech/awsbnkctl`.
 
-## Read first
+**SPIKE DEFERRAL:** PRD 07 currently has a "Spike protocol" section (days 1-3) and a placeholder "Resolved in spike" section. The spike requires live AWS resources and is **operator-run separately from this sprint**. You do not run the spike. You do not fill in "Resolved in spike". You finalise PRD 07's *design* framing and leave "Resolved in spike" as the operator-fillable placeholder it already is — but add a note explaining the deferral and how findings fold back in.
 
-- `docs/prd/01-SSH-AND-ON-FLAG.md` — the Sprint 1 PRD that the staff agent is implementing. Chapter 16 (`--on` flag) describes that work for end users.
-- `docs/PLAN.md` Sprint 1 section, especially "Documentation deliverables" — confirms which 6 chapters land this sprint.
-- `book/src/SUMMARY.md` — existing TOC; do not change ordering or filenames.
-- The existing chapter stubs at `book/src/01-*.md`, `02-*.md`, `03-*.md`, `04-*.md`, `07-*.md`, `16-*.md` — these are placeholder stubs ("*Coming in Sprint 1.*") that you'll replace with real content.
-- README.md and the existing `docs/` for tone reference. Keep the clipped technical voice, code-block-heavy, lower-case prose.
-- `prompts/sprint0/architect.md` — Sprint 0's architect prompt; the structure (coordination notes, verification, final report) is reusable.
+**Read first** before any edits:
+
+1. `/Users/j.lucia/Code/github/awsbnkctl/agents/architect.md` — your role definition.
+2. `/Users/j.lucia/Code/github/awsbnkctl/prompts/sprint1/README.md` — sprint theme + dispatch overview.
+3. `/Users/j.lucia/Code/github/awsbnkctl/docs/PLAN.md` § Sprint 1 — your scope cross-check.
+4. `/Users/j.lucia/Code/github/awsbnkctl/docs/prd/07-EKS-CLUSTER-SRIOV.md` — the current PRD; understand what's there before refining.
+5. `/Users/j.lucia/Code/github/awsbnkctl/issues/issue_sprint0_architect.md` — your Sprint 0 issue file; the two medium issues (preface audience drift, chapter body H1-vs-content mismatch) are now in scope.
+6. `/Users/j.lucia/Code/github/awsbnkctl/issues/issue_sprint0_tech-writer.md` — three medium findings about prompts/README undercount, etc., touch prose surface you may want to fold.
+7. `/Users/j.lucia/Code/github/awsbnkctl/book/src/SUMMARY.md` and the current state of `book/src/02-why-eks-and-sriov.md` + `book/src/33-data-plane-decision.md`.
 
 ## Coordinate with parallel agents
 
-A staff-engineer agent is implementing PRD 01 across `internal/remote/`, `internal/cli/`, `internal/config/workspace.go`, and `scripts/`. A validator agent is adding integration tests in `internal/remote/integration_test.go`, extending `scripts/e2e-test.sh`, and possibly editing `.github/workflows/ci.yml`. **Do not touch their files.** Your scope is `book/src/<chapter>.md` only.
+A **staff** agent is implementing `terraform/modules/eks_cluster/`, `internal/aws/{client,sts,ec2,eks,vpc}.go`, the `awsbnkctl up cluster` verb, doctor refresh, unit tests. **Do not touch any `.go` file, `terraform/**`, `Makefile`, `go.mod`, or anything under `internal/`.**
 
-## Tasks
+A **validator** agent is authoring `tools/docker/aws/Dockerfile`, updating workflows, cspell additions. **Do not touch `.github/workflows/`, `cspell.json`, `tools/`, or `scripts/`.**
 
-For each chapter below, replace the stub content with real prose. Aim for ~150-300 lines per chapter, code-block-heavy where it makes sense. Use relative markdown links (`[Workspaces](./06-workspaces.md)`) for cross-references so mdBook's link checker can verify them.
+A **tech-writer** agent runs after the three of you.
 
-### Chapter 1 — `book/src/01-what-is-bnk.md` — "What is BIG-IP Next for Kubernetes (BNK)"
+## Your scope
 
-What it is, what problem it solves, where it fits in F5's product family. Keep it factual; this is a context chapter for a reader who knows generic Kubernetes but might be new to BNK. Sections worth covering:
+| Surface | Action |
+|---|---|
+| `docs/prd/07-EKS-CLUSTER-SRIOV.md` | Polish post-design-pass: tighten ambiguous wording, ensure inputs/outputs table matches the staff agent's module shape (cross-check after they file their report), add an explicit "Spike status" subsection clarifying that the spike is operator-run and findings fold into the existing "Resolved in spike" placeholder |
+| `book/src/33-data-plane-decision.md` | Replace the stub with a real chapter — design framing (BNK's SR-IOV requirement, ENA vs Mellanox, the option matrix, the decision) but **not** spike findings (those land later via PRD 07's "Resolved in spike" section, which the book chapter references) |
+| `book/src/02-why-eks-and-sriov.md` | First draft — short chapter (~300-500 lines markdown OK; aim for 1-2k words) framing the EKS choice for a reader who already knows AWS. Cross-link to chapter 33 for the technical decision. |
+| `docs/PLAN.md` § Sprint 1 close | After the staff + validator + tech-writer reports come in, append a "Sprint 1 close" subsection listing what shipped vs. what's deferred. Include the spike-deferral note. |
+| `book/src/preface.md` | Fold the Sprint 0 tech-writer's medium finding on audience drift if it's still applicable post-Sprint 0 edits |
+| `prompts/README.md` | Address Sprint 0 tech-writer's medium finding about "six PRDs" undercount + roksbnkctl/`/mnt/d/` path references, if those still need fixing post-Sprint 0 |
+| `agents/architect.md` etc. | Light-touch only if drift surfaces from Sprint 0's actual usage; expect no edits needed |
 
-- One-paragraph elevator pitch
-- The components (FLO, CIS, CNE, BIG-IP TMM data plane) — brief; deeper chapters reference back here
-- Where it runs (managed Kubernetes; ROKS specifically for this book)
-- What problems it solves (north-south + east-west traffic management with L4/L7 features in-cluster)
-- A pointer to F5's official BNK docs for definitive product info
+Out of scope: chapter rewrites for chapters other than 2 and 33 (Sprint 5 owns the rest); spike findings; any code-side documentation comments (staff owns those).
 
-### Chapter 2 — `book/src/02-why-roks.md` — "Why ROKS"
+## Tasks (priority order)
 
-Why this book targets IBM Cloud's managed OpenShift specifically. Cover:
+1. **PRD 07 polish.** Re-read the PRD top-to-bottom. Fix ambiguities, tighten the "Decision" section against what the staff agent is actually implementing (you'll need to peek at the staff agent's progress mid-sprint; if you finish before they file their report, re-read their changes in `terraform/modules/eks_cluster/` and update PRD 07's "Inputs" / "Outputs" tables to match the actual module shape — coordinate via issue file if they diverge from the design). Add the spike-deferral subsection: explain that the spike runs separately, that `v0.2` is gated on spike findings, and that the existing "Resolved in spike" section is filled in by the operator post-spike.
 
-- ROKS = Red Hat OpenShift on IBM Cloud (managed)
-- What IBM manages vs what the customer manages (control plane, masters, etcd, worker provisioning, security patches)
-- Why managed-OpenShift over self-managed for BNK evaluation (skip a multi-week lift, start at "deployed cluster")
-- Note that other Kubernetes flavors are out of scope for this book
+2. **Chapter 33 — data-plane decision.** Replace the stub with a complete chapter that walks a reader through: BNK's SR-IOV requirement (1-2 paragraphs); the AWS primitives (ENA, EFA, ENI — referencing PRD 07's table); the option matrix (managed node groups, self-managed, Fargate, EC2+kubeadm, Auto Mode — referencing PRD 07's verdict table); the selected design (self-managed + Multus + SR-IOV CNI + device plugin); the trade-offs accepted (AMI lifecycle, no Karpenter v1.0, single-instance-family); a closing pointer at PRD 07's "Resolved in spike" for the validation results. Tone: explanatory, not exhaustive — the PRD carries depth, the chapter carries narrative.
 
-### Chapter 3 — `book/src/03-what-roksbnkctl-does.md` — "What roksbnkctl does (and doesn't do)"
+3. **Chapter 2 — why EKS + SR-IOV.** A shorter chapter than 33; primarily a *motivation* piece. Cover: BNK as a data-plane workload (1-2 sentences pointing at chapter 1), why managed K8s is preferable to rolling your own on EC2 (referencing roksbnkctl's same call), why EKS specifically among AWS K8s offerings (managed control plane, OIDC for IRSA, mature ecosystem). Cross-link to chapter 33 for the data-plane technical choice.
 
-The tool's scope and explicit non-goals. Sections:
+4. **Fold Sprint 0 carry-overs.** Address the open prose-surface medium issues from `issue_sprint0_architect.md` and `issue_sprint0_tech-writer.md`. Skip anything that's now stale (the integrator may already have folded some; check the actual file state).
 
-- The 3-command happy path: `init` → `up` → `test`
-- What it owns: workspace state, Terraform-exec, kubeconfig fetch, COS supply chain, post-deploy validation
-- What it doesn't try to do: not a generic IBM Cloud CLI (that's `ibmcloud`), not a generic Kubernetes CLI (that's `kubectl`), not an OpenShift admin tool (that's `oc`), not a BNK runtime UI
-- The relationship to bundled HCL: `terraform/` lives in this repo, embedded into the binary; `tf_source: github|local` overrides exist for power users
-- One-paragraph forward look at what's coming in v0.8/0.9/1.0 (kubectl internalization, four execution backends, GSLB DNS testing)
-
-### Chapter 4 — `book/src/04-installation.md` — "Installation"
-
-How to get the binary on your machine. Cover:
-
-- Build from source (the canonical path until release artifacts ship): `git clone`, `make build`, `bin/roksbnkctl install`
-- Docker-based build (no host Go required) — copy the snippet from README.md verbatim
-- Install destination (`~/.local/bin/roksbnkctl` by default; `--dir` to override)
-- Verifying: `roksbnkctl --version`, `roksbnkctl doctor`
-- OS support matrix: Linux + macOS first-class, Windows compile-only this round
-- Mention that `terraform` is the only required prereq (post-Sprint 2 v0.8 release)
-
-### Chapter 7 — `book/src/07-quick-start.md` — "Quick start"
-
-The `init` → `up` → `test` happy path with sample output. Walk a reader from "I have an IBM Cloud API key" to "deployed BNK with a passing test". Include:
-
-- `roksbnkctl init` (interactive prompts for region, RG, cluster name)
-- `roksbnkctl up --auto` (terraform plan + apply, ~50 min for fresh ROKS + BNK)
-- `roksbnkctl status` (verify cluster + pods)
-- `roksbnkctl test connectivity` and `test dns` examples
-- `roksbnkctl down --auto` (teardown)
-- A note that example output is illustrative; real output varies
-
-### Chapter 16 — `book/src/16-on-flag-ssh-jumphosts.md` — "The --on flag and SSH jumphosts"
-
-The Sprint 1 feature, end-user perspective. Cover:
-
-- Why this exists: pre-cluster execution, customer firewalls, air-gapped scenarios
-- The `targets:` workspace config block (use the example from PRD 01)
-- Auto-discovered jumphost from `roksbnkctl up`'s TF outputs
-- Key sources: file path, ssh-agent, `tf-output:<name>`
-- Host-key TOFU on first connect; `--insecure-host-key` flag for CI
-- `roksbnkctl targets list/show/add/remove` command tree
-- Working examples:
-  ```bash
-  roksbnkctl exec --on jumphost -- whoami
-  roksbnkctl shell --on jumphost
-  roksbnkctl ibmcloud --on jumphost ks cluster ls
-  ```
-- Cross-link forward to Chapter 17 (Execution backends) which the SSH backend in Phase 3 builds on
-
-Read PRD 01 for the design rationale behind these choices; you're translating PRD-developer-prose into book-end-user-prose.
-
-## Style guidance
-
-- Lower-case prose; sentence-case section headers
-- Code blocks for any command; inline code for filenames and identifiers
-- Cross-reference other chapters with relative links
-- Short paragraphs; one idea per paragraph
-- Examples should be runnable as written (assume the reader pasted them into a fresh shell)
-- When citing PRDs, link as `[PRD 01](../../docs/prd/01-SSH-AND-ON-FLAG.md)` — the relative path works because mdBook serves from `book/src/`
+5. **`docs/PLAN.md` Sprint 1 close.** Wait until staff + validator + tech-writer have filed their reports. Then append a 5-10-line "Sprint 1 close (actual)" subsection summarising what shipped vs. what's deferred. This is the last task; if you finish 1-4 before the others, file your issues and report done, leaving the PLAN.md update for the integrator if time-pressed.
 
 ## Issue tracking
 
-Issues to `/mnt/d/project/roksbnkctl/issues/issue_sprint1_architect.md`:
+File issues to `/Users/j.lucia/Code/github/awsbnkctl/issues/issue_sprint1_architect.md`:
 
 ```markdown
 # Sprint 1 — architect issues
@@ -109,25 +58,34 @@ Issues to `/mnt/d/project/roksbnkctl/issues/issue_sprint1_architect.md`:
 ## Issue 1: short title
 **Severity**: low | medium | high | blocker
 **Status**: open | resolved
-**Description**: ...
-**Files affected**: ...
-**Proposed fix**: ...
+**Description**: what was found
+**Files affected**: list of paths
+**Proposed fix**: how to resolve
 ```
 
-If clean, file with `*No issues filed.*`.
+If clean: heading + `*No issues filed.*`.
+
+Severity guide:
+- **blocker**: would prevent the integrator's commit (broken link, contradicting facts across PRD ↔ implementation, missing chapter referenced from SUMMARY)
+- **high**: misleading wording or scope ambiguity that would cause Sprint 2 to make a wrong call
+- **medium**: editorial inconsistencies (terminology drift, stale references between docs and the now-implemented module shape)
+- **low**: typos, formatting nits
 
 ## Verification before reporting done
 
-- All 6 chapter files have replaced their stubs with real content
-- `mdbook build book/` succeeds locally if mdbook is installed; otherwise rely on CI
-- Internal links resolve (relative paths to other chapters or to `../../docs/prd/...`)
-- No "Coming in Sprint 1" placeholder text left in any of the 6 chapters
+- `mdbook build book/` succeeds (if mdbook on PATH; skip and note in issue file if not).
+- Every internal link in PRD 07 + chapter 33 + chapter 2 resolves.
+- `grep 'jgruberf5/roksbnkctl' book/src/02-why-eks-and-sriov.md book/src/33-data-plane-decision.md docs/prd/07-EKS-CLUSTER-SRIOV.md` returns no hits (allowed: roksbnkctl mentions in fork-relationship contexts only).
+- Cross-check PRD 07's "Inputs" + "Outputs" tables against the staff agent's actual `terraform/modules/eks_cluster/{variables.tf,outputs.tf}` (read those files; do not edit them — file an issue if mismatch).
 
-## Final report (under 200 words)
+## Final report
 
-- Per-chapter line count
-- Whether mdbook was available locally and what `mdbook test book/` reported (broken-link check)
-- Issues filed (counts by severity)
-- Anything the integrator should know
+Under 200 words:
+- Files edited (counts + key paths)
+- PRD 07 status post-polish (concrete subsection list)
+- Chapter 33 + chapter 2 word counts / topic coverage
+- Whether PRD 07 ↔ implementation are aligned (yes / yes-with-listed-deltas / no)
+- Issues filed (count + severity breakdown)
+- Integrator notes
 
-Do NOT commit. The integrator commits the aggregated work.
+Do NOT commit anything. The integrator commits the aggregated four-agent output.

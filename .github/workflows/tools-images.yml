@@ -3,12 +3,13 @@ name: Build tools images
 # Builds and publishes the per-tool docker images that PRD 03's docker
 # backend pulls at runtime. Sprint 0 retarget: the ibmcloud-flavoured
 # tools image was deleted alongside `tools/docker/ibmcloud/` (staff
-# Sprint 0 IBM-strip). Only the cloud-agnostic iperf3 image survives
-# here; Sprint 1 will author the AWS-flavoured replacement image
-# (working name: `tools-aws`) carrying `aws` CLI + `kubectl` + `eksctl`
-# for the docker exec-backend's AWS code paths.
+# Sprint 0 IBM-strip). Sprint 1 (this file's last edit) adds the
+# AWS-flavoured replacement (`ghcr.io/JLCode-tech/awsbnkctl-tools-aws`)
+# carrying awscli v2 + kubectl + helm + iperf3 + dig + jq + curl for
+# the docker exec-backend's AWS code paths (Sprint 4 wire-up).
 #
 # Current matrix:
+#   - ghcr.io/JLCode-tech/awsbnkctl-tools-aws     (Sprint 1 added)
 #   - ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3
 #
 # Triggered on tag pushes (e.g. v0.9-rc1), on push to `main` (publishes a
@@ -36,10 +37,11 @@ jobs:
       fail-fast: false
       matrix:
         # Sprint 0 strip: `ibmcloud` matrix entry removed (the underlying
-        # `tools/docker/ibmcloud/Dockerfile` is being deleted by the
-        # staff agent's IBM strip). Sprint 1 will add the AWS-flavoured
-        # entry once `tools/docker/aws/` lands.
-        image: [iperf3]
+        # `tools/docker/ibmcloud/Dockerfile` was deleted in the staff
+        # agent's IBM strip). Sprint 1 adds back the AWS-flavoured
+        # replacement (`tools/docker/aws/Dockerfile`) alongside the
+        # cloud-agnostic iperf3 image.
+        image: [aws, iperf3]
     steps:
       - uses: actions/checkout@v4
 

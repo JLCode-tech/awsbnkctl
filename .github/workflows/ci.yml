@@ -140,6 +140,49 @@ jobs:
         # 5m matches the existing integration job's budget.
         run: go test -tags integration -timeout 5m ./internal/exec/...
 
+  aws-mocked:
+    name: integration (aws — mocked sdk)
+    needs: test
+    # Sprint 1 (PRD 07): exercises `internal/aws/{client,sts,ec2,eks,vpc}.go`
+    # against mocked aws-sdk-go-v2 clients. NO LIVE AWS — the staff agent
+    # injects fake API responders via the aws-sdk-go-v2 middleware-test
+    # pattern (or hand-rolled interfaces in test files). This job runs on
+    # every PR and push because it doesn't need credentials, network egress
+    # to AWS, or a runtime daemon; the only requirement is the Go toolchain.
+    #
+    # Live-AWS validation is the operator-run spike (PRD 07 §"Spike
+    # protocol"), gating v0.2 outside the agent dispatch lane.
+    #
+    # If a future test calls `sts.GetCallerIdentity` (or any other AWS
+    # API) without a mock, this job will time out hitting the real AWS
+    # endpoint with no creds. The validator's task brief calls for an
+    # issue against the staff agent in that scenario rather than a
+    # silent fix here.
+    runs-on: ubuntu-latest
+    env:
+      # Belt-and-braces: if a test path leaks past its mock, these
+      # fake creds let the SDK construct a Signer without panicking on
+      # an empty default-chain resolve, while still failing closed at
+      # the network layer (the fake key would 403 a real AWS endpoint).
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_SESSION_TOKEN: testing
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go test (integration tag — internal/aws)
+        # 3m budget covers the mocked-SDK suite — no image pulls, no
+        # network. Bumps if the suite grows; reduce only after measuring.
+        run: go test -tags integration -timeout 3m ./internal/aws/...
+
   k8s-backend:
     name: integration (k8s backend — kind)
     needs: test
