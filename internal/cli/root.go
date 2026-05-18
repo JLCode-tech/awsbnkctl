@@ -14,6 +14,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
 	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
 )
 
@@ -144,6 +145,12 @@ func init() {
 	// tag-released binary pulls matching tag-released tool images
 	// instead of the :dev tag CI doesn't publish.
 	execbackend.SetToolImageTag(func() string { return Version })
+
+	// Wire the build-time Version into the terraform.applied.tfvars
+	// header so the snapshot records which awsbnkctl produced it.
+	// Same import-cycle-dodging seam pattern as SetToolImageTag above.
+	// Ported from roksbnkctl@6725db1 (sprint11 / PRD 07).
+	config.SetAppliedTFVarsVersion(func() string { return Version })
 }
 
 // RootCommand returns the wired-up root cobra command for tooling that
