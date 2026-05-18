@@ -62,7 +62,7 @@ func iperf3Probe(ctx context.Context, opts ThroughputOptions) ProbeResult {
 	}
 
 	start := time.Now()
-	out, err := exec.CommandContext(ctx, "iperf3", args...).Output()
+	out, err := exec.CommandContext(ctx, "iperf3", args...).Output() // #nosec G204 -- "iperf3" is a hard-coded literal; args are validated CLI flags (--server, --port, --duration, --streams), not user-tainted
 	p.DurationMS = time.Since(start).Milliseconds()
 
 	if err != nil {

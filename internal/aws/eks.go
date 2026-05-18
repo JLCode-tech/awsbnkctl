@@ -104,7 +104,7 @@ func IsResourceNotFound(err error) bool {
 
 // EKSAuthTokenPrefix is the magic prefix EKS expects on the bearer
 // token. See the aws-iam-authenticator reference implementation.
-const EKSAuthTokenPrefix = "k8s-aws-v1."
+const EKSAuthTokenPrefix = "k8s-aws-v1." // #nosec G101 -- documented public EKS bearer-token prefix, not a credential
 
 // PresignedSTSURL returns the presigned sts:GetCallerIdentity URL for
 // the given cluster — the same value the bearer token is derived from.

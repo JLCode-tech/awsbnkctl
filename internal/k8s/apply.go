@@ -126,7 +126,7 @@ func (o *ApplyOptions) loadObjects() ([]*unstructured.Unstructured, error) {
 		if ext != ".yaml" && ext != ".yml" {
 			return nil
 		}
-		f, err := os.Open(p)
+		f, err := os.Open(p) // #nosec G122 G304 -- p comes from filepath.WalkDir over a workspace-controlled YAML dir, not user input
 		if err != nil {
 			return err
 		}

@@ -20,7 +20,7 @@ func AgentClient() (agent.Agent, net.Conn, error) {
 	if sock == "" {
 		return nil, nil, errors.New("SSH_AUTH_SOCK is unset")
 	}
-	conn, err := net.Dial("unix", sock)
+	conn, err := net.Dial("unix", sock) // #nosec G704 -- SSH_AUTH_SOCK is an OS-provided path, not external SSRF surface
 	if err != nil {
 		return nil, nil, err
 	}

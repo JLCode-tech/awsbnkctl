@@ -63,7 +63,7 @@ func signerFromFile(path string) (ssh.Signer, error) {
 	if err != nil {
 		return nil, err
 	}
-	pem, err := os.ReadFile(expanded)
+	pem, err := os.ReadFile(expanded) // #nosec G304 -- key path resolved from workspace targets config (operator-controlled), not user-tainted input
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", expanded, err)
 	}
@@ -90,7 +90,7 @@ func signerFromAgent() (ssh.Signer, error) {
 	if sock == "" {
 		return nil, errors.New("SSH_AUTH_SOCK is unset; start ssh-agent and ssh-add a key, or use key_path")
 	}
-	conn, err := net.Dial("unix", sock)
+	conn, err := net.Dial("unix", sock) // #nosec G704 -- SSH_AUTH_SOCK is an OS-provided path, not external SSRF surface
 	if err != nil {
 		return nil, fmt.Errorf("dial ssh-agent at %s: %w", sock, err)
 	}

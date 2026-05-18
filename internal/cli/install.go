@@ -158,7 +158,7 @@ func dirExists(d string) bool {
 // dir, chmod 0755, then rename onto dest. Same-dir is required for
 // rename to be atomic on most filesystems.
 func copyExecutable(src, dest string) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) // #nosec G304 -- src is the running binary path (os.Executable()), not user-tainted
 	if err != nil {
 		return err
 	}

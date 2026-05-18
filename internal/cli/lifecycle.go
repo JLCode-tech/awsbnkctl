@@ -112,7 +112,7 @@ func init() {
 // operator-run spike per PRD 07 § "Spike protocol".
 func runUp(cmd *cobra.Command, _ []string) error {
 	if !flagLifecycleDryRun {
-		return errors.New("awsbnkctl up requires --dry-run in Sprint 3: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"). v0.2 unlocks the non-dry-run path.")
+		return errors.New("awsbnkctl up requires --dry-run in Sprint 3: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
 	return runFullLifecyclePlan(cmd.Context())
 }
@@ -128,7 +128,7 @@ func runApply(_ *cobra.Command, _ []string) error {
 
 func runDown(cmd *cobra.Command, _ []string) error {
 	if !flagLifecycleDryRun {
-		return errors.New("awsbnkctl down requires --dry-run in Sprint 3: live destroy is gated on the operator-run PRD 07 spike. v0.2 unlocks the non-dry-run path.")
+		return errors.New("awsbnkctl down requires --dry-run in Sprint 3: live destroy is gated on the operator-run PRD 07 spike; v0.2 unlocks the non-dry-run path")
 	}
 	return runFullLifecyclePlan(cmd.Context())
 }

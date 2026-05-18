@@ -210,6 +210,7 @@ func extractTarGz(r io.Reader, dest string, stripComponents int) error {
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
+			// #nosec G115 G304 -- target is sanitized via filepath.Clean + workspace-relative join above; mode masked to 0o777
 			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode)&0o777)
 			if err != nil {
 				return err

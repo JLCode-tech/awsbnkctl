@@ -29,7 +29,7 @@ func LoadGlobal() (*Global, error) {
 	if err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path is ~/.awsbnkctl/config.yaml (hard-coded layout), not user-tainted
 	if errors.Is(err, os.ErrNotExist) {
 		return &Global{}, nil
 	}

@@ -48,7 +48,7 @@ func ReadClusterOutputs(workspace string) (*ClusterOutputs, error) {
 	if err != nil {
 		return nil, err
 	}
-	body, err := os.ReadFile(p)
+	body, err := os.ReadFile(p) // #nosec G304 -- p is the workspace's cluster-outputs.json (config-managed), not user-tainted
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrClusterOutputsMissing

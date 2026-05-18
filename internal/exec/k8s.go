@@ -376,6 +376,7 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 	go func() {
 		select {
 		case <-ctx.Done():
+			// #nosec G118 -- intentional fresh context: this cleanup must outlive ctx (which just got cancelled), so we can't reuse it
 			cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			pp := metav1.DeletePropagationForeground
@@ -437,14 +438,6 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 // through RunOpts.Env. The Credentials struct keeps only the
 // kubeconfig surface (see internal/exec/creds.go).
 //
-// buildJobSpec is preserved for the legacy single-argv shape (image
-// ENTRYPOINT picks the binary; cmd is argv[1:]). The Sprint 5 shim
-// `buildJobSpecWithArgs` adds an explicit args slice for tools like
-// `awsbnkctl` that need to bypass the image's ENTRYPOINT.
-func buildJobSpec(jobName, image string, cmd []string, opts RunOpts, hasFilesSecret bool, filesSecretName string) *batchv1.Job {
-	return buildJobSpecWithArgs(jobName, image, cmd, nil, opts, hasFilesSecret, filesSecretName)
-}
-
 // buildJobSpecWithArgs is buildJobSpec extended for the entrypoint-
 // bypass shape. When `args` is non-nil, the rendered container has
 // `Command=cmd, Args=args`; this overrides the image's Docker

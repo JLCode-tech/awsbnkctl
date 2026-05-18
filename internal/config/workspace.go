@@ -261,7 +261,7 @@ func LoadWorkspace(name string) (*Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path is derived from ValidateName(name) + WorkspaceConfigPath layout, not user-tainted
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %s", ErrWorkspaceNotFound, name)
 	}

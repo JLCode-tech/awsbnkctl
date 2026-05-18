@@ -38,7 +38,7 @@ func LinkPath(workspaceDir string) string {
 // the workspace has never been registered.
 func ReadLink(workspaceDir string) (*Link, error) {
 	p := LinkPath(workspaceDir)
-	b, err := os.ReadFile(p)
+	b, err := os.ReadFile(p) // #nosec G304 -- path is derived from the workspace dir (config-managed), not user-tainted input
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, err
