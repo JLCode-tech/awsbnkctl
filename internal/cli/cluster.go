@@ -73,6 +73,11 @@ func runUpCluster(cmd *cobra.Command, _ []string) error {
 	if !flagClusterDryRun {
 		return errors.New("awsbnkctl up cluster requires --dry-run in Sprint 1: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
+	resolved, err := resolveVarFiles(flagVarFiles)
+	if err != nil {
+		return err
+	}
+	flagVarFiles = resolved
 	return runClusterPlan(cmd.Context())
 }
 
@@ -80,6 +85,11 @@ func runDownCluster(cmd *cobra.Command, _ []string) error {
 	if !flagClusterDryRun {
 		return errors.New("awsbnkctl down cluster requires --dry-run in Sprint 1: live destroy is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
+	resolved, err := resolveVarFiles(flagVarFiles)
+	if err != nil {
+		return err
+	}
+	flagVarFiles = resolved
 	return runClusterPlan(cmd.Context())
 }
 
@@ -146,7 +156,7 @@ func runClusterPlan(ctx context.Context) error {
 	}
 
 	fmt.Fprintln(os.Stderr, "→ terraform plan (dry-run; no apply)")
-	hasChanges, err := tfws.Plan(ctx)
+	hasChanges, err := tfws.Plan(ctx, flagVarFiles...)
 	if err != nil {
 		return fmt.Errorf("terraform plan: %w", err)
 	}
@@ -247,7 +257,7 @@ func runFullLifecyclePlan(ctx context.Context) error {
 	}
 
 	fmt.Fprintln(os.Stderr, "→ terraform plan (dry-run; no apply)")
-	hasChanges, err := tfws.Plan(ctx)
+	hasChanges, err := tfws.Plan(ctx, flagVarFiles...)
 	if err != nil {
 		return translatePlanError(err, cctx.WorkspaceName)
 	}
