@@ -89,6 +89,7 @@ func runTFVars(cmd *cobra.Command, _ []string) error {
 	if _, err := os.Stat(flagTFVarsOutput); err == nil && !flagTFVarsForce {
 		return fmt.Errorf("%s already exists; pass --force to overwrite or -o <other-path>", flagTFVarsOutput)
 	}
+	// #nosec G703 -- flagTFVarsOutput is an explicit operator-supplied output path (`-o`); same UX as kubectl/terraform output flags
 	if err := os.WriteFile(flagTFVarsOutput, body, 0o600); err != nil {
 		return err
 	}
