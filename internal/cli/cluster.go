@@ -71,14 +71,14 @@ func init() {
 
 func runUpCluster(cmd *cobra.Command, _ []string) error {
 	if !flagClusterDryRun {
-		return errors.New("awsbnkctl up cluster requires --dry-run in Sprint 1: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"). v0.2 unlocks the non-dry-run path.")
+		return errors.New("awsbnkctl up cluster requires --dry-run in Sprint 1: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
 	return runClusterPlan(cmd.Context())
 }
 
 func runDownCluster(cmd *cobra.Command, _ []string) error {
 	if !flagClusterDryRun {
-		return errors.New("awsbnkctl down cluster requires --dry-run in Sprint 1: live destroy is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"). v0.2 unlocks the non-dry-run path.")
+		return errors.New("awsbnkctl down cluster requires --dry-run in Sprint 1: live destroy is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
 	return runClusterPlan(cmd.Context())
 }
@@ -167,7 +167,7 @@ func ensureEmptyTFVars(path string) error {
 		return nil
 	}
 	const body = "# Sprint 1 placeholder. AWS-shaped tfvars renderer lands in Sprint 2 (PRD 04).\n# Pass values via TF_VAR_<name> env vars or terraform.tfvars.user.\n"
-	return os.WriteFile(path, []byte(body), 0o644)
+	return os.WriteFile(path, []byte(body), 0o600)
 }
 
 // runFullLifecyclePlan drives the Sprint 3 full-lifecycle terraform

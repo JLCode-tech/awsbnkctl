@@ -77,7 +77,7 @@ func FetchSource(ctx context.Context, src config.TFSourceCfg, baseDir string) (s
 // Returns the resolved source dir for terraform-exec.
 func extractEmbeddedTF(baseDir string) (string, error) {
 	dest := filepath.Join(baseDir, "embedded-terraform")
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+	if err := os.MkdirAll(dest, 0o750); err != nil {
 		return "", fmt.Errorf("creating %s: %w", dest, err)
 	}
 	cleanDest := filepath.Clean(dest)
@@ -98,16 +98,16 @@ func extractEmbeddedTF(baseDir string) (string, error) {
 			return fmt.Errorf("embed entry escapes destination: %s", path)
 		}
 		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
+			return os.MkdirAll(target, 0o750)
 		}
 		body, err := fs.ReadFile(awsbnkctl.EmbeddedTerraform, path)
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 			return err
 		}
-		return os.WriteFile(target, body, 0o644)
+		return os.WriteFile(target, body, 0o600)
 	})
 	if err != nil {
 		return "", fmt.Errorf("extracting embedded terraform: %w", err)
@@ -148,7 +148,7 @@ func downloadGitHubTarball(ctx context.Context, repo, ref, baseDir string) (stri
 		return "", fmt.Errorf("downloading %s: %s", url, resp.Status)
 	}
 
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+	if err := os.MkdirAll(dest, 0o750); err != nil {
 		return "", err
 	}
 
@@ -203,20 +203,33 @@ func extractTarGz(r io.Reader, dest string, stripComponents int) error {
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := os.MkdirAll(target, 0o750); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return err
 			}
+			// #nosec G115 G304 -- target is sanitized via filepath.Clean + workspace-relative join above; mode masked to 0o777
 			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode)&0o777)
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(f, tr); err != nil {
+			// Cap per-entry decompression at 256 MiB so a maliciously
+			// crafted tarball can't exhaust disk. The largest legitimate
+			// entry (full HCL trees) is well under 10 MiB; this leaves
+			// 25x headroom and matches the gosec G110 advisory. Read one
+			// byte past the limit to distinguish "ran out cleanly" from
+			// "would have kept going".
+			const maxEntryBytes int64 = 256 << 20
+			n, err := io.Copy(f, io.LimitReader(tr, maxEntryBytes+1))
+			if err != nil {
 				_ = f.Close()
-				return err
+				return fmt.Errorf("extracting %s: %w", target, err)
+			}
+			if n > maxEntryBytes {
+				_ = f.Close()
+				return fmt.Errorf("extracting %s: entry exceeds %d-byte limit (decompression-bomb guard)", target, maxEntryBytes)
 			}
 			if err := f.Close(); err != nil {
 				return err

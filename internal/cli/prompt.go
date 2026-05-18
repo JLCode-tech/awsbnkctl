@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"golang.org/x/term"
@@ -37,19 +36,6 @@ func promptString(label, def string) string {
 		return def
 	}
 	return s
-}
-
-// promptInt parses the line as an integer. Bad input falls back to def
-// (after a one-line warning) — keeps `awsbnkctl init` from aborting on a
-// fat-finger.
-func promptInt(label string, def int) int {
-	s := promptString(label, strconv.Itoa(def))
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "  (not a number, using %d)\n", def)
-		return def
-	}
-	return n
 }
 
 // promptYesNo accepts y/n (any case, prefix match). Empty returns def.

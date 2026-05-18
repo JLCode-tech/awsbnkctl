@@ -204,7 +204,7 @@ func versionLine(name string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput() // #nosec G204 -- name is a hard-coded probe binary ("kubectl", "aws", etc.); args are version flags
 	if err != nil {
 		return ""
 	}

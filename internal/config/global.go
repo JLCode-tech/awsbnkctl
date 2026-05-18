@@ -29,7 +29,7 @@ func LoadGlobal() (*Global, error) {
 	if err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path is ~/.awsbnkctl/config.yaml (hard-coded layout), not user-tainted
 	if errors.Is(err, os.ErrNotExist) {
 		return &Global{}, nil
 	}
@@ -44,20 +44,20 @@ func LoadGlobal() (*Global, error) {
 }
 
 // SaveGlobal writes ~/.awsbnkctl/config.yaml, creating the directory tree if
-// needed. Permissions: 0644 file, 0755 dir (config is non-secret).
+// needed. Permissions: 0600 file, 0750 dir (user-private; tightened for gosec G301/G306).
 func SaveGlobal(g *Global) error {
 	path, err := GlobalConfigPath()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(path), err)
 	}
 	b, err := yaml.Marshal(g)
 	if err != nil {
 		return fmt.Errorf("encoding global config: %w", err)
 	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
+	if err := os.WriteFile(path, b, 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
