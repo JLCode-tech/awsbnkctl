@@ -156,7 +156,7 @@ func DetectShape(workspace string) (WorkspaceShape, error) {
 // call site (workspace.go) continues to work because we're in the same
 // package.
 func tfstateHasResources(path string) (bool, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path is the workspace's terraform.tfstate (config-managed), not user-tainted
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
@@ -185,7 +185,7 @@ func tfstateHasResources(path string) (bool, error) {
 //
 // Missing file → (false, nil); malformed JSON → (false, error).
 func trialStateHasClusterModules(path string) (bool, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- path is the workspace's trial-phase tfstate (config-managed), not user-tainted
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil

@@ -103,7 +103,7 @@ var variableBlockRe = regexp.MustCompile(`(?m)^variable\s+"([^"]+)"\s*\{`)
 // parsed blocks. Returns an empty slice (not nil) when the file has
 // no variables — keeps downstream rendering branchless.
 func parseFile(path string) ([]Variable, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- build-time docs-generator; path is a hard-coded TF source layout
 	if err != nil {
 		return nil, err
 	}

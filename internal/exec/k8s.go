@@ -373,10 +373,11 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 	// Cleanup goroutine: ctx cancel → delete Job + Secret. Job's
 	// ttlSecondsAfterFinished handles the happy-path cleanup.
 	cancelDone := make(chan struct{})
+	// #nosec G118 -- this goroutine intentionally uses a fresh context.Background(); the parent ctx is what just got cancelled and we still need to delete the Job
 	go func() {
 		select {
 		case <-ctx.Done():
-			cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // #nosec G118
 			defer cancel()
 			pp := metav1.DeletePropagationForeground
 			_ = cs.BatchV1().Jobs(K8sTestNamespace).Delete(cleanCtx, jobName, metav1.DeleteOptions{PropagationPolicy: &pp})
@@ -437,14 +438,6 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 // through RunOpts.Env. The Credentials struct keeps only the
 // kubeconfig surface (see internal/exec/creds.go).
 //
-// buildJobSpec is preserved for the legacy single-argv shape (image
-// ENTRYPOINT picks the binary; cmd is argv[1:]). The Sprint 5 shim
-// `buildJobSpecWithArgs` adds an explicit args slice for tools like
-// `awsbnkctl` that need to bypass the image's ENTRYPOINT.
-func buildJobSpec(jobName, image string, cmd []string, opts RunOpts, hasFilesSecret bool, filesSecretName string) *batchv1.Job {
-	return buildJobSpecWithArgs(jobName, image, cmd, nil, opts, hasFilesSecret, filesSecretName)
-}
-
 // buildJobSpecWithArgs is buildJobSpec extended for the entrypoint-
 // bypass shape. When `args` is non-nil, the rendered container has
 // `Command=cmd, Args=args`; this overrides the image's Docker

@@ -196,11 +196,11 @@ func planDNS(cctx *config.Context, flagDriven bool) testPlan {
 // Surfaces the mode, the iperf3 fixture namespace, the image, and the
 // resolved client backend. Does not deploy the server pod.
 func planThroughput(cctx *config.Context) testPlan {
-	region, cluster, ns := workspacePlanContext(workspaceFrom(cctx))
+	region, cluster, _ := workspacePlanContext(workspaceFrom(cctx))
 	// throughput always lands in the dedicated iperf3 namespace
 	// (k8s.Iperf3Namespace) — the FLO namespace defaulting above is
 	// for connectivity/DNS probes against in-cluster services.
-	ns = k8s.Iperf3Namespace
+	ns := k8s.Iperf3Namespace
 	plan := testPlan{
 		Suite:     "throughput",
 		Workspace: workspaceName(cctx),

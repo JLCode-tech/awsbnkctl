@@ -114,7 +114,7 @@ type hostEntry struct {
 }
 
 func readKnownHosts(path string) ([]hostEntry, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- known_hosts path is resolved from workspace state-dir layout, not user-tainted
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -162,7 +162,7 @@ func appendKnownHost(path string, host string, key ssh.PublicKey) error {
 		return err
 	}
 	line := fmt.Sprintf("%s %s %s\n", host, key.Type(), base64.StdEncoding.EncodeToString(key.Marshal()))
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- known_hosts path is workspace-resolved, not user-tainted
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", path, err)
 	}

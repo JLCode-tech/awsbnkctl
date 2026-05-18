@@ -75,7 +75,7 @@ func DefaultKubeconfigPath() string {
 	if v := os.Getenv("KUBECONFIG"); v != "" {
 		// $KUBECONFIG is a list; pick the first that exists.
 		for _, p := range filepath.SplitList(v) {
-			if _, err := os.Stat(p); err == nil {
+			if _, err := os.Stat(p); err == nil { // #nosec G703 -- $KUBECONFIG is operator-set, follows kubectl's own resolution rules
 				return p
 			}
 		}

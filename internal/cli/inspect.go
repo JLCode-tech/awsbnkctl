@@ -119,7 +119,9 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(tw, "Kubeconfig:\t%s\n", kcPath)
 
 	// Flush so the cluster check can stream its own line cleanly after.
-	tw.Flush()
+	// Flush returns os.Stderr/Stdout-style errors which we can't usefully
+	// recover from here; ignore so the cluster check still runs.
+	_ = tw.Flush()
 
 	clusterStatus := probeCluster(cmd.Context(), kcPath)
 	fmt.Fprintf(os.Stdout, "Cluster:        %s\n", clusterStatus)
