@@ -1,8 +1,8 @@
 # Forge MCP Integration — Plan
 
-**Status:** Draft (planning only — no code yet)
+**Status:** P1 implemented — MCP-only (Option B). REST fallback eliminated by `bnk-forge#114`.
 **Owner:** awsbnkctl maintainers
-**Companion repo:** `bnk-forge-v2` (localhost dev at `http://localhost:8000`)
+**Companion repo:** `bnk-forge-v2` (localhost dev at `http://localhost:8000`; MCP at `http://localhost:8081/mcp/`)
 **Last updated:** 2026-05-18
 
 ## 1 · What we're trying to do
@@ -162,14 +162,15 @@ Flags:
 
 ## 8 · Phasing
 
-| Phase | Scope | Deliverable | Gates |
+| Phase | Scope | Deliverable | Status |
 |---|---|---|---|
-| **P0 — design** *(this doc)* | Define mapping, flow, CLI surface | This file + matching ticket in `prompts/sprint7/` | none |
-| **P1 — REST integration (Option A)** | `awsbnkctl forge {register, status, unregister}` over REST | New `internal/forge/` package + CLI commands; `forge register --dry-run` parity test | localhost forge reachable; admin/changeme creds; one E2E pass against `bnk-forge-v2@main` |
-| **P2 — auto-register on `up`** | `--register-with-forge` flag + workspace config | `awsbnkctl up --register-with-forge` smoke-tested end-to-end against localhost forge | P1 green |
-| **P3 — MCP catalog gap-fill** | Open PR against `bnk-forge-v2` adding the 4 missing endpoints to `mcp_tool_catalog.json` | Forge MCP `register_cluster`, `create_project`, `adopt_module_state`, `detect_eks` ship in a forge release | Forge maintainer review |
-| **P4 — switch to MCP transport (Option B)** | Replace REST calls with MCP-tool calls where available | Same `internal/forge/` surface, MCP backend; flag-gated rollback to REST | Stable Go MCP client; P3 shipped |
-| **P5 — drift / observability hooks** | `awsbnkctl status` learns to query forge for cluster/BNK health; `awsbnkctl doctor` adds a forge-reachability row | Status output shows forge-side health alongside local TF state | P2 + forge `bnk_health` proven stable |
+| **P0 — design** *(this doc)* | Define mapping, flow, CLI surface | This file | ✅ 2026-05-18 |
+| **P3 — MCP catalog gap-fill** | PR against `bnk-forge-v2` adding the missing endpoints | `bnk-forge#114` (initial 4 + Tier A–E = 62 tools; new `cloud_auth` governed module) | ✅ 2026-05-18 (PR open against `staging`) |
+| **P1 — MCP integration (Option B, skipped REST)** | `awsbnkctl forge {register, status, unregister}` over MCP transport | New `internal/forge/` + `internal/forge/mcp/` Go packages; `internal/cli/forge.go` Cobra subcommand | ✅ 2026-05-18 (`feat/forge-mcp-integration` branch) |
+| **P2 — auto-register on `up`** | `--register-with-forge` flag + workspace config | `awsbnkctl up --register-with-forge` calls `forge register` after a successful apply | ⏳ next |
+| **P5 — drift / observability hooks** | `awsbnkctl status` learns to query forge; `awsbnkctl doctor` gains a forge-reachability row | Status output shows forge-side health alongside local TF state | ⏳ deferred |
+
+P0 + P3 + P1 shipped in one session — Option A (REST) was leapfrogged because PR #114 made the MCP surface complete enough to skip it entirely.
 
 P1 + P2 are the meat of the integration. P3-P5 are polish / future work that doesn't block the operator workflow.
 
