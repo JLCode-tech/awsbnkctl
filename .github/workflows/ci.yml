@@ -345,9 +345,26 @@ jobs:
           current_workspace: default
           YAML
 
-          # `|| true` lets terraform's expected AWS-403 errors with the
-          # fake creds land in the log without failing the step — the
-          # grep assertions in the next step are the actual gate.
+          # Drop a terraform *_override.tf next to providers.tf that
+          # turns off the AWS provider's STS / IMDS / account-ID
+          # validation. Without these flags, the provider calls
+          # sts:GetCallerIdentity at plan time, AWS-403s on the fake
+          # creds, and terraform aborts before expanding the
+          # AWS-dependent modules — which is exactly what the next
+          # step asserts on. The override is CI-only: real operators
+          # always have valid creds and don't need this.
+          cat > terraform/_ci_override.tf <<'TF'
+          provider "aws" {
+            skip_credentials_validation = true
+            skip_requesting_account_id  = true
+            skip_metadata_api_check     = true
+          }
+          TF
+
+          # `|| true` lets terraform's expected non-AWS errors (e.g.
+          # data sources that depend on real cluster state) land in
+          # the log without failing the step. The grep assertions in
+          # the next step are the actual gate.
           ./bin/awsbnkctl up --dry-run 2>&1 | tee artifacts/up-dryrun.log || true
 
       - name: Assert plan output mentions all 7 modules
