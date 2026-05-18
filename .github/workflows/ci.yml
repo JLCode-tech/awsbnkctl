@@ -338,6 +338,7 @@ jobs:
             create: true
             name: ci-canary
           tf_source:
+            type: local
             path: ./terraform
           YAML
 
