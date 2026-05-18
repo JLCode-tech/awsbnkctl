@@ -391,7 +391,15 @@ jobs:
             license \
             testing
           do
-            if ! grep -qE "(module\.${mod}\b|\"${mod}\")" "$log"; then
+            # Match either:
+            #  - the plan-time form `module.${mod}.something` (post-init,
+            #    when terraform expands the resource graph)
+            #  - the init-time form `- ${mod} in modules/...` (which
+            #    terraform always prints, even when plan errors at a
+            #    later data source — this is the case under fake creds:
+            #    the plan walks far enough to list every module via init
+            #    but bails before fully expanding each one)
+            if ! grep -qE "(module\.${mod}\b|\"${mod}\"|- ${mod} in modules/)" "$log"; then
               echo "::error::module not found in plan output: ${mod}"
               fail=1
             else
