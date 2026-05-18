@@ -1,22 +1,41 @@
 # Forge MCP Integration — Plan
 
-**Status:** P1 implemented — MCP-only (Option B). REST fallback eliminated by `bnk-forge#114`.
+**Status:** P1 + P2 shipped (PR #1, PR #2). MCP-only (Option B); REST fallback eliminated by `bnk-forge#114`.
 **Owner:** awsbnkctl maintainers
 **Companion repo:** `bnk-forge-v2` (localhost dev at `http://localhost:8000`; MCP at `http://localhost:8081/mcp/`)
 **Last updated:** 2026-05-18
 
+## 0 · Architecture: peer-read model (load-bearing)
+
+**The cloud (AWS / Azure / GCP) is the single source of truth.** Both `*bnkctl` tools and forge read it directly, each using its own credentials. They are peers on the read path, not producer/consumer.
+
+```
+       [cloud — single source of truth]
+            ▲                  ▲
+            │ reads            │ reads (its own auth via cloud_auth MCP module)
+            │                  │
+       [*bnkctl] ── register pointers ──► [forge] ──► [user GUI]
+```
+
+What `*bnkctl` uniquely does: provision the deployment, then call MCP to **create the scaffolding records forge needs** (project, cluster, module pointers, cloud-auth credential template). After that handoff, forge reads cloud state on its own credentials. **`*bnkctl` does not push state mirrors** — no tfstate, no health snapshots, no module status sync. Just pointers.
+
+Consequences:
+- `awsbnkctl status` / `awsbnkctl doctor` always query AWS. They never ask forge "is my cluster healthy?" — that would introduce a stale-cache class of bug.
+- The kubeconfig `awsbnkctl` pushes to `create_cluster` is a **bootstrap seed** (a 15-min presigned STS URL on our identity). Forge swaps it via `refresh_kubeconfig` using its own identity at first refresh; we never re-push.
+- Sibling tools (`azurebnkctl`, `gcpbnkctl`, etc.) follow the same pattern in their own clouds.
+
 ## 1 · What we're trying to do
 
-After `awsbnkctl up` finishes provisioning AWS infra + EKS + BNK, hand the resulting deployment over to **bnk-forge** so the operator can manage and observe it from forge's UI. The handoff happens over forge's **MCP server** (with REST fallback for surfaces that aren't yet exposed as MCP tools).
+After `awsbnkctl up` finishes provisioning AWS infra + EKS + BNK, **register the scaffolding records** forge needs to find and read the deployment. The handoff happens over forge's **MCP server**.
 
 Concretely, after a successful `up`, awsbnkctl will:
 
-1. Create (or attach to) a forge **project** that represents the workspace.
-2. Register the **EKS cluster** under that project so forge has a `cluster_id` it can address.
-3. Adopt the Terraform **state bundles** awsbnkctl produced as forge **project-modules**, so forge sees the deployment topology and can plan/apply/destroy in-place.
-4. Trigger a forge **scan** to seed BNK / namespace / Helm-release state.
+1. Create a forge **project** (metadata: name, region, labels).
+2. Register the **EKS cluster** under that project, seeding a short-lived kubeconfig forge will refresh on its own identity.
+3. (Deferred — see § 8 / P2 footnote) Register each TF module as a **project-module pointer** so forge knows what was deployed and at which path. State is not mirrored; forge reads it itself.
+4. (Optional) Trigger a forge **scan** to populate the operator-facing view promptly rather than waiting for forge's own poll cadence.
 
-From that point forward, forge owns the day-2 view (health, upgrades, license, recovery, drift), and awsbnkctl steps back to a CLI / bootstrapping role.
+From that point forward, forge reads the cloud directly on its own credentials and renders the GUI. `awsbnkctl` steps back to a CLI / bootstrapping role.
 
 ---
 
@@ -155,7 +174,7 @@ Flags:
 
 - **Bearer token:** obtained once per `awsbnkctl forge` invocation via `POST /api/auth/login` with `{username, password}` (returns `{token: "..."}`). Token is held in-memory only — never written to disk. Tokens currently expire after ~hours; awsbnkctl re-logs in for each invocation.
 - **Workspace link:** `<workspace-dir>/forge_link.json` records `{project_id, cluster_id, forge_url, registered_at, forge_version}`. This is what `forge status` and `forge unregister` read. Versioned alongside `terraform.tfstate` bundles.
-- **TF state adoption:** awsbnkctl posts each module's `terraform.tfstate` to forge as an "external state import" (forge's `project_module` schema supports this — verify exact body shape before coding). This is read-only for forge; awsbnkctl remains the owner of the apply path in v1.
+- **TF state adoption:** awsbnkctl does NOT push tfstate to forge. Per the peer-read architecture (§ 0), forge reads state from the cloud directly using its own credentials. The handoff is metadata only (project + cluster + module paths); state is not mirrored.
 - **Idempotency:** all writes are keyed by `(project_name, cluster_slug)`. Re-running `forge register` on an already-registered workspace updates rather than duplicating.
 
 ---
@@ -168,7 +187,7 @@ Flags:
 | **P3 — MCP catalog gap-fill** | PR against `bnk-forge-v2` adding the missing endpoints | `bnk-forge#114` (initial 4 + Tier A–E = 62 tools; new `cloud_auth` governed module) | ✅ 2026-05-18 (PR open against `staging`) |
 | **P1 — MCP integration (Option B, skipped REST)** | `awsbnkctl forge {register, status, unregister}` over MCP transport | New `internal/forge/` + `internal/forge/mcp/` Go packages; `internal/cli/forge.go` Cobra subcommand | ✅ 2026-05-18 (`feat/forge-mcp-integration` branch) |
 | **P2 — auto-register on `up`** | `--register-with-forge` flag + workspace config | `awsbnkctl up --register-with-forge` calls `forge register` after a successful apply (no-op in `--dry-run`). Module-as-project-module adoption deferred to v0.2 (see below). | ✅ 2026-05-18 (`feat/forge-up-auto-register` branch — flag wiring; module adoption blocked on catalog) |
-| **P5 — drift / observability hooks** | `awsbnkctl status` learns to query forge; `awsbnkctl doctor` gains a forge-reachability row | Status output shows forge-side health alongside local TF state | ⏳ deferred |
+| **P5 — observability hooks** | `awsbnkctl doctor` gains a forge-reachability row (separate from AWS rows); `awsbnkctl status` optionally pushes a refresh to forge via `--push-to-forge`. Both stay on AWS for their actual verdict — forge is never authoritative for cluster health per the peer-read thesis (see § 0 below). | doctor row + optional status push | ⏳ deferred |
 
 ### P2 — TF-module-adoption gap
 
