@@ -1,9 +1,17 @@
 package cli
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"os"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	awspkg "github.com/JLCode-tech/awsbnkctl/internal/aws"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 )
 
 // Sprint 3 retarget. The Sprint 0 lifecycle stubs (`up` / `plan` /
@@ -30,6 +38,14 @@ var (
 	// full-graph and cluster-only paths can move at different
 	// cadences as the spike unlocks the live-apply path.
 	flagLifecycleDryRun bool
+
+	// flagRegisterWithForge wires the P2 auto-handoff: after a
+	// successful `awsbnkctl up`, register the resulting EKS cluster
+	// with a running bnk-forge instance over MCP. No-op in dry-run.
+	// Equivalent to running `awsbnkctl forge register` post-apply,
+	// but bundled so operators don't have to remember the second
+	// command.
+	flagRegisterWithForge bool
 )
 
 var initCmd = &cobra.Command{
@@ -93,6 +109,7 @@ func init() {
 	upCmd.Flags().StringVar(&flagTFSource, "tf-source", "", "override TF source for this run only")
 	upCmd.Flags().BoolVar(&flagNoKubeconfig, "no-kubeconfig", false, "skip the post-apply admin kubeconfig fetch")
 	upCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", false, "terraform plan only against the full Sprint 3 graph — never apply against AWS")
+	upCmd.Flags().BoolVar(&flagRegisterWithForge, "register-with-forge", false, "after a successful apply, register the EKS cluster with bnk-forge over MCP (no-op in --dry-run)")
 
 	applyCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the confirmation prompt")
 	applyCmd.Flags().BoolVar(&flagNoKubeconfig, "no-kubeconfig", false, "skip the post-apply admin kubeconfig fetch")
@@ -114,7 +131,86 @@ func runUp(cmd *cobra.Command, _ []string) error {
 	if !flagLifecycleDryRun {
 		return errors.New("awsbnkctl up requires --dry-run in Sprint 3: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
-	return runFullLifecyclePlan(cmd.Context())
+	if err := runFullLifecyclePlan(cmd.Context()); err != nil {
+		return err
+	}
+	// P2: auto-register with forge over MCP after a successful apply.
+	// Dry-run skips because forge.Register needs a real EKS cluster to
+	// describe + generate a kubeconfig for — and there isn't one yet.
+	// The flag still wires through so operators get a single command
+	// once v0.2 unlocks live apply.
+	if flagRegisterWithForge {
+		if flagLifecycleDryRun {
+			fmt.Fprintln(os.Stderr, "→ --register-with-forge: dry-run, skipping forge registration (would run `forge register` after live apply)")
+			return nil
+		}
+		return registerWithForgePostApply(cmd.Context())
+	}
+	return nil
+}
+
+// registerWithForgePostApply runs the same flow as `awsbnkctl forge
+// register` — used by `awsbnkctl up --register-with-forge`. Pulled out
+// of runUp so the dry-run / live-apply branching stays readable, and
+// so it can be unit-tested independently of the lifecycle path.
+func registerWithForgePostApply(ctx context.Context) error {
+	cctx, err := requireWorkspace()
+	if err != nil {
+		return fmt.Errorf("forge register after apply: %w", err)
+	}
+	wsDir, err := config.WorkspaceDir(cctx.WorkspaceName)
+	if err != nil {
+		return fmt.Errorf("forge register after apply: resolving workspace dir: %w", err)
+	}
+
+	clusterName := cctx.Workspace.Cluster.Name
+	if clusterName == "" {
+		return fmt.Errorf("forge register after apply: workspace cluster.name is empty")
+	}
+	region := cctx.Workspace.AWS.Region
+	if region == "" {
+		return fmt.Errorf("forge register after apply: workspace AWS.region is empty")
+	}
+
+	// Generate the kubeconfig in-process via the EKS presigned-URL
+	// flow. Matches what `awsbnkctl forge register` does without a
+	// --kubeconfig override.
+	clients, err := awspkg.NewClients(ctx, awspkg.Options{
+		Region:  region,
+		Profile: cctx.Workspace.AWS.Profile,
+	})
+	if err != nil {
+		return fmt.Errorf("forge register after apply: aws clients: %w", err)
+	}
+	ci, err := clients.DescribeCluster(ctx, clusterName)
+	if err != nil {
+		return fmt.Errorf("forge register after apply: eks describe-cluster %s: %w", clusterName, err)
+	}
+	yaml, err := clients.KubeconfigFromCluster(ci)
+	if err != nil {
+		return fmt.Errorf("forge register after apply: generate kubeconfig: %w", err)
+	}
+
+	fc := forge.NewClient("")
+	if !flagQuiet {
+		fmt.Fprintf(os.Stderr, "→ forge MCP: %s\n", fc.URL())
+	}
+
+	regCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	res, err := forge.Register(regCtx, fc, forge.RegisterRequest{
+		WorkspaceName: cctx.WorkspaceName,
+		WorkspaceDir:  wsDir,
+		ClusterName:   clusterName,
+		Region:        region,
+		Kubeconfig:    []byte(yaml),
+	})
+	if err != nil {
+		return fmt.Errorf("forge register after apply: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "✓ registered with forge (project_id=%d cluster_id=%d)\n",
+		res.Link.ProjectID, res.Link.ClusterID)
+	return nil
 }
 
 func runPlan(cmd *cobra.Command, _ []string) error {
