@@ -55,11 +55,11 @@ func Open(
 		return nil, fmt.Errorf("terraform not found on PATH — install terraform >= 1.5 (https://developer.hashicorp.com/terraform/install)")
 	}
 
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating state dir %s: %w", stateDir, err)
 	}
 	srcRoot := filepath.Join(stateDir, "tf-source")
-	if err := os.MkdirAll(srcRoot, 0o755); err != nil {
+	if err := os.MkdirAll(srcRoot, 0o750); err != nil {
 		return nil, fmt.Errorf("creating tf-source dir %s: %w", srcRoot, err)
 	}
 	// Pre-create the per-module kubeconfig subdirs that the cluster-
@@ -69,7 +69,7 @@ func Open(
 	// idempotent across plan/apply/destroy.
 	kcDir := filepath.Join(stateDir, "kubeconfig")
 	for _, sub := range []string{"cert_manager", "cne_instance", "flo", "license"} {
-		if err := os.MkdirAll(filepath.Join(kcDir, sub), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(kcDir, sub), 0o750); err != nil {
 			return nil, fmt.Errorf("creating %s: %w", filepath.Join(kcDir, sub), err)
 		}
 	}
@@ -79,7 +79,7 @@ func Open(
 	scratchDir := filepath.Join(stateDir, "scratch")
 	for _, sub := range []string{"", "f5-manifest"} {
 		p := filepath.Join(scratchDir, sub)
-		if err := os.MkdirAll(p, 0o755); err != nil {
+		if err := os.MkdirAll(p, 0o750); err != nil {
 			return nil, fmt.Errorf("creating %s: %w", p, err)
 		}
 	}
@@ -109,7 +109,7 @@ terraform {
   }
 }
 `, filepath.Join(stateDir, "terraform.tfstate"))
-	if err := os.WriteFile(backendOverride, []byte(backendBody), 0o644); err != nil {
+	if err := os.WriteFile(backendOverride, []byte(backendBody), 0o600); err != nil {
 		return nil, fmt.Errorf("writing backend override: %w", err)
 	}
 

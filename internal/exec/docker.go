@@ -288,11 +288,11 @@ func (b *DockerBackend) Run(ctx context.Context, argv []string, opts RunOpts) (i
 	// doesn't run on after the parent CLI exits. Use a fresh context
 	// for the kill itself so the kill request isn't itself cancelled.
 	cancelDone := make(chan struct{})
+	// #nosec G118 -- this goroutine intentionally uses a fresh context.Background(); the parent ctx is what just got cancelled and we still need to kill the container
 	go func() {
 		select {
 		case <-ctx.Done():
-			// #nosec G118 -- intentional fresh context: the kill must run AFTER parent ctx was cancelled
-			killCtx, killCancel := context.WithTimeoutCause(context.Background(), 0, nil)
+			killCtx, killCancel := context.WithTimeoutCause(context.Background(), 0, nil) // #nosec G118
 			defer killCancel()
 			_, _ = cli.ContainerKill(killCtx, cid, dockerclient.ContainerKillOptions{Signal: "SIGKILL"})
 		case <-cancelDone:
@@ -389,7 +389,7 @@ func (b *DockerBackend) buildMountsAndEnv(opts RunOpts, tempDir string) ([]mount
 	// Materialise Files into tempDir/files/ then bind-mount each.
 	if len(opts.Files) > 0 {
 		filesDir := filepath.Join(tempDir, "files")
-		if err := os.MkdirAll(filesDir, 0o755); err != nil {
+		if err := os.MkdirAll(filesDir, 0o750); err != nil {
 			cleanup()
 			return nil, nil, nil, fmt.Errorf("creating files dir: %w", err)
 		}

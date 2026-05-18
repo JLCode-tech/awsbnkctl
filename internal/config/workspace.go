@@ -288,21 +288,21 @@ func SaveWorkspace(name string, ws *Workspace) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(cfgPath), err)
 	}
 	stateDir, err := WorkspaceStateDir(name)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", stateDir, err)
 	}
 	b, err := yaml.Marshal(ws)
 	if err != nil {
 		return fmt.Errorf("encoding workspace config: %w", err)
 	}
-	if err := os.WriteFile(cfgPath, b, 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, b, 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", cfgPath, err)
 	}
 	return nil

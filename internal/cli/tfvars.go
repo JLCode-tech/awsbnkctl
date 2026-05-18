@@ -56,7 +56,7 @@ func runTFVars(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	srcRoot := filepath.Join(stateDir, "tf-source")
-	if err := os.MkdirAll(srcRoot, 0o755); err != nil {
+	if err := os.MkdirAll(srcRoot, 0o750); err != nil {
 		return err
 	}
 
@@ -69,7 +69,8 @@ func runTFVars(cmd *cobra.Command, _ []string) error {
 	}
 
 	examplePath := filepath.Join(sourceDir, "terraform.tfvars.example")
-	body, err := os.ReadFile(examplePath) // #nosec G304 G703 -- examplePath is joined from a workspace-resolved TF source dir (config-managed), not user-tainted
+	// #nosec G304,G703 -- examplePath is joined from a workspace-resolved TF source dir (config-managed), not user-tainted
+	body, err := os.ReadFile(examplePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("no terraform.tfvars.example at %s (pinned TF: %s)",
@@ -88,7 +89,7 @@ func runTFVars(cmd *cobra.Command, _ []string) error {
 	if _, err := os.Stat(flagTFVarsOutput); err == nil && !flagTFVarsForce {
 		return fmt.Errorf("%s already exists; pass --force to overwrite or -o <other-path>", flagTFVarsOutput)
 	}
-	if err := os.WriteFile(flagTFVarsOutput, body, 0o644); err != nil {
+	if err := os.WriteFile(flagTFVarsOutput, body, 0o600); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "✓ Wrote %s (%d bytes)\n", flagTFVarsOutput, len(body))

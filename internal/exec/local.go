@@ -94,7 +94,7 @@ func (LocalBackend) Run(ctx context.Context, argv []string, opts RunOpts) (int, 
 	}
 	for name, content := range opts.Files {
 		path := filepath.Join(workDir, name)
-		if derr := os.MkdirAll(filepath.Dir(path), 0o755); derr != nil {
+		if derr := os.MkdirAll(filepath.Dir(path), 0o750); derr != nil {
 			return 0, derr
 		}
 		if werr := os.WriteFile(path, content, 0o600); werr != nil {

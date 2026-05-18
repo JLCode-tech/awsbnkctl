@@ -221,7 +221,7 @@ func runForgeUnregister(cmd *cobra.Command, _ []string) error {
 // the EKS presigned-URL auth flow.
 func buildKubeconfig(ctx context.Context, cctx *config.Context, clusterName, region string) ([]byte, error) {
 	if flagForgeKubeconf != "" {
-		b, err := os.ReadFile(flagForgeKubeconf)
+		b, err := os.ReadFile(flagForgeKubeconf) // #nosec G304 -- explicit operator-supplied --kubeconfig path; matches kubectl's own UX
 		if err != nil {
 			return nil, fmt.Errorf("read --kubeconfig %s: %w", flagForgeKubeconf, err)
 		}
