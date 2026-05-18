@@ -102,7 +102,7 @@ func (LocalBackend) Run(ctx context.Context, argv []string, opts RunOpts) (int, 
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, bin, argv[1:]...)
+	cmd := exec.CommandContext(ctx, bin, argv[1:]...) // #nosec G204 -- bin is resolved from the local-backend tool registry; argv is operator-supplied per the documented exec contract
 	cmd.Env = env
 	if workDir != "" {
 		cmd.Dir = workDir

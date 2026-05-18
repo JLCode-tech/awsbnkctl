@@ -155,7 +155,7 @@ func putFile(ctx context.Context, c *awspkg.Clients, bucket, key, path, kmsKeyID
 	if path == "" {
 		return errors.New("local path is empty")
 	}
-	body, err := os.ReadFile(path)
+	body, err := os.ReadFile(path) // #nosec G304 -- path comes from the init wizard's supply-chain prompts (operator-provided FAR/JWT paths), validated upstream
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", path, err)
 	}

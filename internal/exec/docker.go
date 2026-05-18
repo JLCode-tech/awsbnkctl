@@ -291,6 +291,7 @@ func (b *DockerBackend) Run(ctx context.Context, argv []string, opts RunOpts) (i
 	go func() {
 		select {
 		case <-ctx.Done():
+			// #nosec G118 -- intentional fresh context: the kill must run AFTER parent ctx was cancelled
 			killCtx, killCancel := context.WithTimeoutCause(context.Background(), 0, nil)
 			defer killCancel()
 			_, _ = cli.ContainerKill(killCtx, cid, dockerclient.ContainerKillOptions{Signal: "SIGKILL"})

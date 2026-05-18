@@ -69,7 +69,7 @@ func runTFVars(cmd *cobra.Command, _ []string) error {
 	}
 
 	examplePath := filepath.Join(sourceDir, "terraform.tfvars.example")
-	body, err := os.ReadFile(examplePath)
+	body, err := os.ReadFile(examplePath) // #nosec G304 G703 -- examplePath is joined from a workspace-resolved TF source dir (config-managed), not user-tainted
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("no terraform.tfvars.example at %s (pinned TF: %s)",

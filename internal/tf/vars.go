@@ -17,7 +17,7 @@ import (
 // kubeconfigDir / scratchDir are rendered when non-empty. Both require
 // the upstream TF to declare matching root-level variables.
 func WriteTFVars(path string, ws *config.Workspace, kubeconfigDir, scratchDir string) error {
-	f, err := os.Create(path)
+	f, err := os.Create(path) // #nosec G304 -- path is workspace state-dir + "terraform.tfvars" (config-managed), not user-tainted
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", path, err)
 	}

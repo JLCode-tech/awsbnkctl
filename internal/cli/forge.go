@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -248,19 +249,29 @@ func buildKubeconfig(ctx context.Context, cctx *config.Context, clusterName, reg
 }
 
 // oneLine collapses multi-line tool output to a single line for
-// status-line display. Long JSON payloads get truncated.
+// status-line display. Long JSON payloads get truncated. Uses a
+// strings.Builder so multi-byte runes (e.g. the ellipsis we append on
+// truncation) survive intact.
 func oneLine(s string) string {
 	const max = 160
-	out := make([]byte, 0, len(s))
+	var b strings.Builder
+	b.Grow(len(s))
 	for _, r := range s {
 		if r == '\n' || r == '\r' {
-			out = append(out, ' ')
-		} else {
-			out = append(out, byte(r))
+			b.WriteByte(' ')
+			continue
 		}
+		b.WriteRune(r)
 	}
+	out := b.String()
 	if len(out) > max {
-		return string(out[:max]) + "…"
+		// Walk back to the last rune boundary so we don't slice through
+		// a multi-byte sequence.
+		cut := max
+		for cut > 0 && (out[cut]&0xC0) == 0x80 {
+			cut--
+		}
+		return out[:cut] + "…"
 	}
-	return string(out)
+	return out
 }
