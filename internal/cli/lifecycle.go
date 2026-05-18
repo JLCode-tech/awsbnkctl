@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -124,6 +126,60 @@ func init() {
 	rootCmd.AddCommand(initCmd, upCmd, planCmd, applyCmd, downCmd)
 }
 
+// resolveVarFiles normalises --var-file entries to absolute paths
+// against the invocation CWD. Terraform runs with CWD = the per-phase
+// state directory (~/.awsbnkctl/<workspace>/state/tf-source/), so a
+// user's `--var-file=./terraform.tfvars` would otherwise resolve there
+// instead of in the shell directory they typed it from.
+//
+// Order:
+//  1. `~` / `~/...` expansion via os.UserHomeDir.
+//  2. Absolute paths pass through unchanged (just cleaned).
+//  3. Relative paths join against os.Getwd().
+//  4. os.Stat against the resolved absolute, so a typo or wrong-CWD
+//     surfaces *before* terraform runs with a message that names both
+//     the user-supplied input and the resolved absolute.
+//
+// Idempotent on already-absolute slices — safe to call once at the
+// RunE entry of every lifecycle command.
+//
+// Ported from roksbnkctl@28ccc59 (sprint12 var-file relative-path fix).
+// This codebase has the same bug *plus* a wiring gap: `flagVarFiles`
+// was previously declared but never threaded to tfws.Plan/Apply/Destroy.
+// Both are fixed in this commit.
+func resolveVarFiles(vfs []string) ([]string, error) {
+	if len(vfs) == 0 {
+		return vfs, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("resolve --var-file: %w", err)
+	}
+	out := make([]string, len(vfs))
+	for i, vf := range vfs {
+		expanded := vf
+		if expanded == "~" || strings.HasPrefix(expanded, "~/") {
+			if home, herr := os.UserHomeDir(); herr == nil {
+				if expanded == "~" {
+					expanded = home
+				} else {
+					expanded = filepath.Join(home, expanded[2:])
+				}
+			}
+		}
+		if filepath.IsAbs(expanded) {
+			out[i] = filepath.Clean(expanded)
+			continue
+		}
+		abs := filepath.Join(cwd, expanded)
+		if _, err := os.Stat(abs); err != nil {
+			return nil, fmt.Errorf("--var-file %s (resolved to %s): %w", vf, abs, err)
+		}
+		out[i] = abs
+	}
+	return out, nil
+}
+
 // runUp wires `awsbnkctl up` (no subcommand) — full-lifecycle path.
 // Sprint 3 supports --dry-run only; live apply is gated on the
 // operator-run spike per PRD 07 § "Spike protocol".
@@ -131,6 +187,11 @@ func runUp(cmd *cobra.Command, _ []string) error {
 	if !flagLifecycleDryRun {
 		return errors.New("awsbnkctl up requires --dry-run in Sprint 3: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
+	resolved, err := resolveVarFiles(flagVarFiles)
+	if err != nil {
+		return err
+	}
+	flagVarFiles = resolved
 	if err := runFullLifecyclePlan(cmd.Context()); err != nil {
 		return err
 	}
@@ -215,6 +276,11 @@ func registerWithForgePostApply(ctx context.Context) error {
 
 func runPlan(cmd *cobra.Command, _ []string) error {
 	// `awsbnkctl plan` is always a dry-run alias for `awsbnkctl up --dry-run`.
+	resolved, err := resolveVarFiles(flagVarFiles)
+	if err != nil {
+		return err
+	}
+	flagVarFiles = resolved
 	return runFullLifecyclePlan(cmd.Context())
 }
 
@@ -226,5 +292,10 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	if !flagLifecycleDryRun {
 		return errors.New("awsbnkctl down requires --dry-run in Sprint 3: live destroy is gated on the operator-run PRD 07 spike; v0.2 unlocks the non-dry-run path")
 	}
+	resolved, err := resolveVarFiles(flagVarFiles)
+	if err != nil {
+		return err
+	}
+	flagVarFiles = resolved
 	return runFullLifecyclePlan(cmd.Context())
 }
