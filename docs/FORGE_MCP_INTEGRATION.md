@@ -1,22 +1,47 @@
 # Forge MCP Integration — Plan
 
-**Status:** P1 implemented — MCP-only (Option B). REST fallback eliminated by `bnk-forge#114`.
+**Status:** P1 + P2 shipped (PR #1, PR #2). MCP-only (Option B); REST fallback eliminated by `bnk-forge#114`.
 **Owner:** awsbnkctl maintainers
 **Companion repo:** `bnk-forge-v2` (localhost dev at `http://localhost:8000`; MCP at `http://localhost:8081/mcp/`)
 **Last updated:** 2026-05-18
 
+## 0 · Architecture: peer-read model (load-bearing)
+
+**The cloud (AWS / Azure / GCP) is the single source of truth.** Both `*bnkctl` tools and forge read it directly, each using its own credentials. They are peers on the read path, not producer/consumer.
+
+```
+       [cloud — single source of truth]
+            ▲                  ▲
+            │ reads            │ reads (its own auth via cloud_auth MCP module)
+            │                  │
+       [*bnkctl] ── register pointers ──► [forge] ──► [user GUI]
+```
+
+### Forge plays two different roles depending on who deployed the infrastructure
+
+| Source of the deployment | Forge's role | Operations forge performs |
+|---|---|---|
+| Forge's own **blueprint** | Full IaC manager | terraform plan / apply / destroy, project-module lifecycle, state ownership |
+| `*bnkctl` (this tool, sibling tools) | **GUI + k8s/BNK CRUD only** | Read cluster state; manage k8s objects, BNK CRDs, Helm releases on the running cluster. **Never** touches the IaC layer of these deployments. |
+
+What `*bnkctl` uniquely does: provision the deployment with its own tofu/terraform run (forge has no visibility into this), then call MCP to **create the minimum records forge needs to find the cluster** — project + cluster (+ optional cloud-auth credential template). After that handoff, forge reads cluster state directly and CRUDs k8s/BNK objects. `*bnkctl` retains exclusive ownership of `up` / `down` / state. There is no `create_project_module` call for awsbnkctl's TF modules: forge has no IaC-layer view of them, by design.
+
+Consequences:
+- `awsbnkctl status` / `awsbnkctl doctor` always query AWS. They never ask forge "is my cluster healthy?" — that would introduce a stale-cache class of bug.
+- The kubeconfig `awsbnkctl` pushes to `create_cluster` is a **bootstrap seed** (a 15-min presigned STS URL on our identity). Forge swaps it via `refresh_kubeconfig` using its own identity at first refresh; we never re-push.
+- Sibling tools (`azurebnkctl`, `gcpbnkctl`, etc.) follow the same pattern in their own clouds.
+
 ## 1 · What we're trying to do
 
-After `awsbnkctl up` finishes provisioning AWS infra + EKS + BNK, hand the resulting deployment over to **bnk-forge** so the operator can manage and observe it from forge's UI. The handoff happens over forge's **MCP server** (with REST fallback for surfaces that aren't yet exposed as MCP tools).
+After `awsbnkctl up` finishes provisioning AWS infra + EKS + BNK, **register the scaffolding records** forge needs to find and read the deployment. The handoff happens over forge's **MCP server**.
 
 Concretely, after a successful `up`, awsbnkctl will:
 
-1. Create (or attach to) a forge **project** that represents the workspace.
-2. Register the **EKS cluster** under that project so forge has a `cluster_id` it can address.
-3. Adopt the Terraform **state bundles** awsbnkctl produced as forge **project-modules**, so forge sees the deployment topology and can plan/apply/destroy in-place.
-4. Trigger a forge **scan** to seed BNK / namespace / Helm-release state.
+1. Create a forge **project** (metadata: name, region, labels).
+2. Register the **EKS cluster** under that project, seeding a short-lived kubeconfig forge will refresh on its own identity.
+3. (Optional) Trigger a forge **scan** to populate the operator-facing view promptly rather than waiting for forge's own poll cadence.
 
-From that point forward, forge owns the day-2 view (health, upgrades, license, recovery, drift), and awsbnkctl steps back to a CLI / bootstrapping role.
+From that point forward, forge reads the cluster directly on its own credentials, renders the GUI, and lets the operator CRUD k8s / BNK objects. `awsbnkctl` retains exclusive ownership of the IaC layer (terraform plan / apply / destroy); forge never touches it.
 
 ---
 
@@ -28,7 +53,7 @@ Read directly from `bnk-forge-v2/mcp-server/tools/mcp_tool_catalog.json` (69 too
 |---|---|---|
 | `bnk_operations` (19) | `bnk_health`, `bnk_gateway_topology`, `bnk_data`, `bnk_upgrade_*`, `bnk_license_status`, `bnk_recovery_*` | Post-handoff day-2: forge reads BNK directly once cluster is registered. |
 | `cluster_management` (14) | `list_clusters`, `get_cluster`, `scan_cluster`, `test_cluster_connectivity`, `list_namespaces`, `list_resources`, `get_pod_logs`, … | After registration: forge surfaces the cluster + scans for capabilities. |
-| `iac_operations` (15) | `list_projects`, `get_project`, `list_project_modules`, `project_plan`, `project_apply`, `project_destroy`, `deployment_history`, `list_stacks`, `deploy_stack` | Run + observe the IaC lifecycle once awsbnkctl's state is adopted. |
+| `iac_operations` (15) | `create_project`, `get_project`, `list_projects` | We only call the project-creation paths. We do NOT call `project_plan` / `project_apply` / `project_destroy` / `create_project_module` against awsbnkctl-deployed infra — those are reserved for forge's own blueprints. |
 | `helm` (11) | `helm_list_releases`, `helm_get_release`, `helm_get_values`, `helm_install`, `helm_upgrade`, `helm_rollback`, `helm_uninstall` | Verify FLO / CIS / CNEInstance helm releases that awsbnkctl installed. |
 | `config_management` (4) | `config_export`, `config_diff`, `config_import`, `config_promote` | Snapshot BNK config; promote between environments later. |
 | `system` (6) | `system_health`, `system_version`, `system_settings`, `audit_log`, `system_queue_metrics`, `list_users` | Pre-flight; verify forge is reachable + at compatible version. |
@@ -41,32 +66,37 @@ These are the create-paths we need but which haven't been promoted to MCP tools 
 |---|---|---|
 | Create project | `POST /api/projects` | not exposed |
 | Create cluster under project | `POST /api/projects/{project_id}/k8s/clusters` | not exposed |
-| Auto-detect EKS clusters from project modules | `POST /api/projects/{project_id}/k8s/clusters/detect-eks` | not exposed |
-| Create project-module (adopt external TF state) | `POST /api/project-modules/...` | not exposed |
 | Login (token) | `POST /api/auth/login` | n/a (out-of-band) |
+
+(`create_project_module` and `detect_eks_clusters` exist in PR #114 but **awsbnkctl does not call them** — see § 0 two-roles framing. They're for forge's own blueprint workflows.)
 
 ---
 
 ## 3 · Data model mapping (awsbnkctl → forge)
 
 ```
-awsbnkctl workspace                    forge project
-├── terraform state (root)         →   project-module: "root" (adopted external state)
-├── terraform/modules/eks               project-module: "eks-cluster"
-├── terraform/modules/sriov-nodegroup   project-module: "eks-sriov-nodes"
-├── terraform/modules/irsa-flo          project-module: "flo-irsa"
-├── terraform/modules/irsa-cis          project-module: "cis-irsa"
-├── terraform/modules/irsa-ops          project-module: "ops-irsa"
-├── terraform/modules/ecr_mirror?       project-module: "ecr-mirror" (gated on var.enable_ecr_mirror)
-├── terraform/modules/s3-supply-chain   project-module: "s3-supply-chain"
-└── EKS cluster (live)             →   cluster (under project)
-                                       ├── helm releases: flo, cis, cert-manager, cneinstance
-                                       └── BNK CRDs (discovered by forge scan)
+awsbnkctl workspace                    forge
+                                       ├── project (created via MCP)
+                                       │     • name:   awsbnkctl-<workspace>
+                                       │     • region: <aws-region>
+                                       │
+                                       └── cluster (created under project via MCP)
+EKS cluster (live in AWS)          →           • name:   <eks-cluster-name>
+                                               • region: <aws-region>
+                                               • kubeconfig: bootstrap seed (forge refreshes)
+                                               │
+                                               └─► forge reads from here:
+                                                   • k8s objects via the kubeconfig
+                                                   • helm releases (flo, cis, cert-manager, cneinstance)
+                                                   • BNK CRDs (via scan)
+                                                   ALL using forge's own credentials
 ```
 
 **Project name convention:** `awsbnkctl-<workspace-name>` (e.g. `awsbnkctl-default`, `awsbnkctl-aws-syd-test`).
 
 **Cluster slug:** `<aws-region>-<eks-cluster-name>` (e.g. `us-east-1-bnk-prod`).
+
+**Note what is NOT in this mapping:** the workspace's terraform modules (eks, sriov-nodegroup, irsa-*, ecr-mirror, s3-supply-chain) have no corresponding entry in forge. The IaC layer is invisible to forge — `awsbnkctl` owns it exclusively.
 
 ---
 
@@ -84,20 +114,18 @@ The integration runs as the final step of `awsbnkctl up` (gated behind a new fla
 │       ▼                                                              │
 │  1. POST /api/auth/login                  →  bearer token            │
 │  2. POST /api/projects                    →  project_id              │
-│  3. POST /api/project-modules (×N)        →  one per TF module,      │
-│         body includes adopted state bundle   adopting state from     │
-│                                              workspace/state-bundle  │
-│  4. POST /api/projects/{id}/k8s/clusters  →  cluster_id              │
-│         (or /detect-eks if forge can autodiscover from modules)      │
-│  5. MCP scan_cluster(cluster_id)          →  populate namespaces +   │
-│                                              helm releases + BNK     │
-│  6. MCP bnk_health(cluster_id)            →  smoke-test the handoff  │
-│  7. Write forge_link.json to workspace dir:                          │
+│  3. POST /api/projects/{id}/k8s/clusters  →  cluster_id              │
+│         (with a 15-min presigned-STS kubeconfig as bootstrap seed)   │
+│  4. MCP scan_cluster(cluster_id)          →  populate namespaces +   │
+│         (optional)                            helm releases + BNK    │
+│  5. MCP bnk_health(cluster_id)            →  smoke-test the handoff  │
+│         (optional)                                                   │
+│  6. Write forge_link.json to workspace dir:                          │
 │         { project_id, cluster_id, forge_url, registered_at }         │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-After step 7, the operator opens forge at `http://localhost:8000/projects/<id>` and sees the freshly-deployed stack with live state.
+After step 6, the operator opens forge at `http://localhost:8000/projects/<id>` and sees the cluster. Forge reads it directly using its own AWS credentials (configured via the `cloud_auth` MCP module out-of-band — not part of this handoff).
 
 ---
 
@@ -155,7 +183,7 @@ Flags:
 
 - **Bearer token:** obtained once per `awsbnkctl forge` invocation via `POST /api/auth/login` with `{username, password}` (returns `{token: "..."}`). Token is held in-memory only — never written to disk. Tokens currently expire after ~hours; awsbnkctl re-logs in for each invocation.
 - **Workspace link:** `<workspace-dir>/forge_link.json` records `{project_id, cluster_id, forge_url, registered_at, forge_version}`. This is what `forge status` and `forge unregister` read. Versioned alongside `terraform.tfstate` bundles.
-- **TF state adoption:** awsbnkctl posts each module's `terraform.tfstate` to forge as an "external state import" (forge's `project_module` schema supports this — verify exact body shape before coding). This is read-only for forge; awsbnkctl remains the owner of the apply path in v1.
+- **TF state adoption:** awsbnkctl does NOT push tfstate to forge. Per the peer-read architecture (§ 0), forge reads state from the cloud directly using its own credentials. The handoff is metadata only (project + cluster + module paths); state is not mirrored.
 - **Idempotency:** all writes are keyed by `(project_name, cluster_slug)`. Re-running `forge register` on an already-registered workspace updates rather than duplicating.
 
 ---
@@ -167,21 +195,10 @@ Flags:
 | **P0 — design** *(this doc)* | Define mapping, flow, CLI surface | This file | ✅ 2026-05-18 |
 | **P3 — MCP catalog gap-fill** | PR against `bnk-forge-v2` adding the missing endpoints | `bnk-forge#114` (initial 4 + Tier A–E = 62 tools; new `cloud_auth` governed module) | ✅ 2026-05-18 (PR open against `staging`) |
 | **P1 — MCP integration (Option B, skipped REST)** | `awsbnkctl forge {register, status, unregister}` over MCP transport | New `internal/forge/` + `internal/forge/mcp/` Go packages; `internal/cli/forge.go` Cobra subcommand | ✅ 2026-05-18 (`feat/forge-mcp-integration` branch) |
-| **P2 — auto-register on `up`** | `--register-with-forge` flag + workspace config | `awsbnkctl up --register-with-forge` calls `forge register` after a successful apply (no-op in `--dry-run`). Module-as-project-module adoption deferred to v0.2 (see below). | ✅ 2026-05-18 (`feat/forge-up-auto-register` branch — flag wiring; module adoption blocked on catalog) |
-| **P5 — drift / observability hooks** | `awsbnkctl status` learns to query forge; `awsbnkctl doctor` gains a forge-reachability row | Status output shows forge-side health alongside local TF state | ⏳ deferred |
+| **P2 — auto-register on `up`** | `--register-with-forge` flag | `awsbnkctl up --register-with-forge` calls `forge register` after a successful apply (no-op in `--dry-run`). | ✅ 2026-05-18 (PR #2 merged at `d03bc03`) |
+| **P5 — observability hooks** | `awsbnkctl doctor` gains a forge-reachability row (separate from AWS rows); `awsbnkctl status` optionally pushes a refresh to forge via `--push-to-forge`. Both stay on AWS for their actual verdict — forge is never authoritative for cluster health per the peer-read thesis (see § 0). | doctor row + optional status push | ⏳ deferred |
 
-### P2 — TF-module-adoption gap
-
-`create_project_module` requires a `module_library_id` that points at forge's module catalog. awsbnkctl's TF modules live in the repo's `terraform/modules/` tree — they're not registered in forge's catalog. Two paths to close the gap, both follow-up work:
-
-1. **Catalog awsbnkctl's modules in `bnk-forge-modules`** so they have IDs forge can reference. Sequential: catalog change → forge release → awsbnkctl adoption code can look up IDs via `list_module_catalog`.
-2. **Add a new MCP tool for "register external project module"** that accepts a `path_in_project` + `state_blob` without requiring a catalog ID. This is what the original plan §4 step 3 envisioned. Needs a new PR against `bnk-forge-v2`.
-
-Cluster registration via `create_cluster` works without this, so P2's primary value (one-command handoff) ships today.
-
-P0 + P3 + P1 shipped in one session — Option A (REST) was leapfrogged because PR #114 made the MCP surface complete enough to skip it entirely.
-
-P1 + P2 are the meat of the integration. P3-P5 are polish / future work that doesn't block the operator workflow.
+P0 + P3 + P1 + P2 shipped in one session — Option A (REST) was leapfrogged because PR #114 made the MCP surface complete enough to skip it entirely.
 
 ---
 
@@ -198,20 +215,20 @@ P1 + P2 are the meat of the integration. P3-P5 are polish / future work that doe
 
 These don't block writing the code, but worth resolving before P1 lands.
 
-1. **State adoption shape.** Does `POST /api/project-modules` accept a `terraform.tfstate` blob inline, or does forge expect a URL/path to fetch? *Verify by reading `services/project_module_service.py` in forge.*
-2. **Cluster identity collision.** What happens if two awsbnkctl workspaces register the same EKS cluster name under different projects? *Probably an error from forge's unique constraint — define UX.*
-3. **EKS auth flow.** Forge needs an EKS-compatible kubeconfig. Does awsbnkctl push its `aws eks update-kubeconfig` result up, or does forge `refresh-kubeconfig` it independently (which requires AWS creds inside forge)? *Lean toward the former — push, don't fetch.*
-4. **Multi-tenant credentials.** Localhost forge runs as admin/changeme. In a shared / prod forge, awsbnkctl needs scoped creds. Define credential provisioning UX (likely: forge issues a service-account API key per workspace).
-5. **`forge unregister` semantics.** Does it `project_destroy_all` + delete cluster, or does it only sever the link and leave forge's records intact? Default to "sever link, keep records" (safer); add `--purge` for full delete.
+1. **Cluster identity collision.** What happens if two awsbnkctl workspaces register the same EKS cluster name under different projects? *Probably an error from forge's unique constraint — define UX.*
+2. **EKS auth flow handoff.** awsbnkctl pushes a 15-min presigned-STS kubeconfig as bootstrap seed; forge refreshes via `refresh_kubeconfig` using its own AWS credentials. Confirm forge has its own AWS auth configured (via the `cloud_auth` MCP module) BEFORE the bootstrap seed expires — otherwise the first refresh fails and the operator has to recover manually.
+3. **Multi-tenant credentials.** Localhost forge runs as admin/changeme. In a shared / prod forge, awsbnkctl needs scoped creds. Define credential provisioning UX (likely: forge issues a service-account API key per workspace).
+4. **`forge unregister` semantics.** Sever-the-link (cluster delete only) vs full purge (cluster + project). Implemented today as "sever by default, `--purge` for full delete." Consider whether `down` should auto-unregister on success.
 
 ---
 
 ## 11 · Out of scope (explicit)
 
-- **Migrating forge to manage the *apply* path.** awsbnkctl keeps owning `up` / `down` in v1. Forge observes; it doesn't run TF for us.
-- **Multi-cloud parity.** This plan is AWS-only. The cross-cloud abstraction lives in forge, not here.
+- **Forge managing the IaC layer for awsbnkctl deployments.** Permanent non-goal. Forge has no `project_module` record of awsbnkctl's TF modules, no state, no plan/apply/destroy access. `awsbnkctl up` and `awsbnkctl down` own that lifecycle exclusively. Forge's IaC capabilities (`project_plan` / `project_apply` / `project_destroy` / `create_project_module`) are reserved for forge's own blueprint workflow.
+- **Pushing tfstate or any IaC state to forge.** Doc once contemplated `project-module` records with adopted state bundles; that was the wrong model. See § 0.
+- **Multi-cloud parity in this repo.** AWS-only. Sibling tools (`azurebnkctl`, `gcpbnkctl`, …) follow the same pattern in their own clouds; the cross-cloud abstraction surfaces in forge, not here.
 - **Replacing `awsbnkctl test` with forge-side tests.** Some overlap (forge has `test_cluster_connectivity`), but `awsbnkctl test dns` / `awsbnkctl test bandwidth` stay in the CLI because they need workspace-local context.
-- **MCP server *exposed by awsbnkctl*.** That would be Option B-prime: awsbnkctl-mcp surfaces awsbnkctl's own commands as MCP tools. Worth doing eventually (e.g. `claude` agents could orchestrate awsbnkctl + forge over MCP), but not required for the forge integration this doc describes.
+- **MCP server *exposed by awsbnkctl*.** That would be Option B-prime: awsbnkctl-mcp surfaces awsbnkctl's own commands as MCP tools so `claude` agents could orchestrate awsbnkctl + forge over MCP. Worth doing eventually, not required for the integration this doc describes.
 
 ---
 

@@ -4,9 +4,12 @@
   "words": [
     "autodiscover",
     "awsbnkctl",
+    "azurebnkctl",
+    "bnkctl",
     "changeme",
     "dpubnkctl",
     "Forkable",
+    "gcpbnkctl",
     "govulncheck",
     "misresolves",
     "modelcontextprotocol",
