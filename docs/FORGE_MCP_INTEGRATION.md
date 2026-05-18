@@ -167,8 +167,17 @@ Flags:
 | **P0 — design** *(this doc)* | Define mapping, flow, CLI surface | This file | ✅ 2026-05-18 |
 | **P3 — MCP catalog gap-fill** | PR against `bnk-forge-v2` adding the missing endpoints | `bnk-forge#114` (initial 4 + Tier A–E = 62 tools; new `cloud_auth` governed module) | ✅ 2026-05-18 (PR open against `staging`) |
 | **P1 — MCP integration (Option B, skipped REST)** | `awsbnkctl forge {register, status, unregister}` over MCP transport | New `internal/forge/` + `internal/forge/mcp/` Go packages; `internal/cli/forge.go` Cobra subcommand | ✅ 2026-05-18 (`feat/forge-mcp-integration` branch) |
-| **P2 — auto-register on `up`** | `--register-with-forge` flag + workspace config | `awsbnkctl up --register-with-forge` calls `forge register` after a successful apply | ⏳ next |
+| **P2 — auto-register on `up`** | `--register-with-forge` flag + workspace config | `awsbnkctl up --register-with-forge` calls `forge register` after a successful apply (no-op in `--dry-run`). Module-as-project-module adoption deferred to v0.2 (see below). | ✅ 2026-05-18 (`feat/forge-up-auto-register` branch — flag wiring; module adoption blocked on catalog) |
 | **P5 — drift / observability hooks** | `awsbnkctl status` learns to query forge; `awsbnkctl doctor` gains a forge-reachability row | Status output shows forge-side health alongside local TF state | ⏳ deferred |
+
+### P2 — TF-module-adoption gap
+
+`create_project_module` requires a `module_library_id` that points at forge's module catalog. awsbnkctl's TF modules live in the repo's `terraform/modules/` tree — they're not registered in forge's catalog. Two paths to close the gap, both follow-up work:
+
+1. **Catalog awsbnkctl's modules in `bnk-forge-modules`** so they have IDs forge can reference. Sequential: catalog change → forge release → awsbnkctl adoption code can look up IDs via `list_module_catalog`.
+2. **Add a new MCP tool for "register external project module"** that accepts a `path_in_project` + `state_blob` without requiring a catalog ID. This is what the original plan §4 step 3 envisioned. Needs a new PR against `bnk-forge-v2`.
+
+Cluster registration via `create_cluster` works without this, so P2's primary value (one-command handoff) ships today.
 
 P0 + P3 + P1 shipped in one session — Option A (REST) was leapfrogged because PR #114 made the MCP surface complete enough to skip it entirely.
 
