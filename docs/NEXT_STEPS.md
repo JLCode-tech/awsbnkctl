@@ -33,6 +33,8 @@ Verification state (last green check on commit `e2debed`):
 
 - **`v0.9.0-rc1` cut + published.** Annotated tag pushed to `main`; release workflow built and attached 6 binary archives + `checksums.txt`; release flagged as prerelease. Note: tag pattern in `.github/workflows/release.yml` is `"v*.*.*"` (three-dot), so the original `v0.9-rc1` plan was renamed to `v0.9.0-rc1`.
 - **Fork-Actions gotcha resolved.** GitHub disables Actions on new forks by default; had to enable them via Settings → Actions UI before workflows fired (operator-side click; no API path). First release was triggered manually via `workflow_dispatch` after enabling. Subsequent pushes auto-fire normally.
+- **Functional fork detachment (2026-05-18).** Removed `upstream` git remote; deleted 11 inherited tags (`v0.7-rc1`, `v0.8-rc1`, `v0.9.0`, `v1.0.0`, `v1.0.1`, `v1.0.2`, `v1.1.0`, `v1.1.1`, `v1.1.2`, `v1.2.0`, `v1.2.1`) from local and origin. Only `v0.9.0-rc1` remains. `go install github.com/JLCode-tech/awsbnkctl@vX.Y.Z` no longer misresolves to a roksbnkctl commit. GitHub platform-level fork badge intentionally kept — operator chose to skip the support-ticket / delete-and-recreate path.
+- **Forge MCP integration plan written (2026-05-18).** Canonical plan at `docs/FORGE_MCP_INTEGRATION.md`. Defines the post-`up` handoff to `bnk-forge-v2` (localhost dev at `:8000`): awsbnkctl creates a forge project, registers the EKS cluster, adopts TF state as project-modules, triggers a forge scan. Phased P0 → P5 (start with REST in P1; switch to MCP transport in P4 after gap-fill PR against forge lands in P3).
 
 ## Immediate next actions
 
@@ -108,7 +110,8 @@ Consolidated in `docs/PLAN.md` § "What's deferred to post-v1.0". Highlights:
 - **Homebrew tap** — same as roksbnkctl's v1.x roadmap.
 - **Doctor visibility on stock dev box** — Sprint 1 tech-writer Issue 1: AWS rows currently workspace-gated to preserve inherited test contract. v1.x relaxes the contract.
 - **Book PDF in releases** — `.goreleaser.yml` doesn't attach `awsbnkctl-book-<tag>.pdf` today. Either extend goreleaser to invoke `make book-pdf` + add an archive entry, or run the build locally pre-tag and `gh release upload`. v1.0 candidate decision.
-- **Inherited roksbnkctl release tags on the fork** — `v0.9.0` through `v1.2.1` still exist as refs (from upstream). They don't conflict with our `v0.9.0-rc1` but `go install …@v1.0.0` resolves to the inherited (roksbnkctl) commit which won't build under the `awsbnkctl` module path. Decide pre-v1.0 whether to delete those tags (`git push --delete origin v1.0.0` etc.) or leave them as historical noise.
+- ~~**Inherited roksbnkctl release tags on the fork**~~ — resolved 2026-05-18. All 11 inherited tags deleted from local + origin.
+- **Forge MCP integration (P1–P5)** — `docs/FORGE_MCP_INTEGRATION.md` is the plan. Next concrete work is P1 — implement `awsbnkctl forge {register, status, unregister}` over REST against `bnk-forge-v2` localhost (`:8000`, admin/changeme). New Go package `internal/forge/`. Tests: unit + `forge register --dry-run` golden + opt-in `FORGE_E2E=1` script.
 
 ## Open issue files worth a read before resuming
 
