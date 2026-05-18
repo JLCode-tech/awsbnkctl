@@ -373,11 +373,11 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 	// Cleanup goroutine: ctx cancel → delete Job + Secret. Job's
 	// ttlSecondsAfterFinished handles the happy-path cleanup.
 	cancelDone := make(chan struct{})
+	// #nosec G118 -- this goroutine intentionally uses a fresh context.Background(); the parent ctx is what just got cancelled and we still need to delete the Job
 	go func() {
 		select {
 		case <-ctx.Done():
-			// #nosec G118 -- intentional fresh context: this cleanup must outlive ctx (which just got cancelled), so we can't reuse it
-			cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // #nosec G118
 			defer cancel()
 			pp := metav1.DeletePropagationForeground
 			_ = cs.BatchV1().Jobs(K8sTestNamespace).Delete(cleanCtx, jobName, metav1.DeleteOptions{PropagationPolicy: &pp})

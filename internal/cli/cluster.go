@@ -167,7 +167,7 @@ func ensureEmptyTFVars(path string) error {
 		return nil
 	}
 	const body = "# Sprint 1 placeholder. AWS-shaped tfvars renderer lands in Sprint 2 (PRD 04).\n# Pass values via TF_VAR_<name> env vars or terraform.tfvars.user.\n"
-	return os.WriteFile(path, []byte(body), 0o644)
+	return os.WriteFile(path, []byte(body), 0o600)
 }
 
 // runFullLifecyclePlan drives the Sprint 3 full-lifecycle terraform

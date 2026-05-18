@@ -56,7 +56,7 @@ func ReadLink(workspaceDir string) (*Link, error) {
 // The write goes to a sibling temp file first to avoid leaving a
 // half-written link visible to a concurrent `forge status`.
 func WriteLink(workspaceDir string, l *Link) error {
-	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+	if err := os.MkdirAll(workspaceDir, 0o750); err != nil {
 		return fmt.Errorf("ensure workspace dir: %w", err)
 	}
 	b, err := json.MarshalIndent(l, "", "  ")
@@ -71,16 +71,16 @@ func WriteLink(workspaceDir string, l *Link) error {
 	}
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()        // best-effort cleanup; the write error is the real one
+		_ = os.Remove(tmpPath) // best-effort cleanup
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // best-effort cleanup
 		return fmt.Errorf("close temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, final); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // best-effort cleanup
 		return fmt.Errorf("rename %s -> %s: %w", tmpPath, final, err)
 	}
 	return nil

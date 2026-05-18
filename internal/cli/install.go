@@ -77,7 +77,7 @@ func runInstall(_ *cobra.Command, _ []string) error {
 			destDir = filepath.Join(home, destDir[2:])
 		}
 	}
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+	if err := os.MkdirAll(destDir, 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w (try --dir DIR or sudo)", destDir, err)
 	}
 
