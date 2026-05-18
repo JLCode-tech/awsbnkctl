@@ -82,7 +82,7 @@ func TestCallTool_Success(t *testing.T) {
 
 	c := New(srv.URL+"/mcp/", 5*time.Second)
 	res, err := c.CallTool(context.Background(), "create_project", map[string]any{
-		"name":          "awsbnkctl-default",
+		"name":           "awsbnkctl-default",
 		"cloud_provider": "aws",
 	})
 	if err != nil {
