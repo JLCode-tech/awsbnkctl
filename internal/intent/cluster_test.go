@@ -471,6 +471,94 @@ bnk:
 	}
 }
 
+// ─── AddonsSpec + FloSpec tests (slice 6) ─────────────────────────────────────
+
+func TestLoad_AddonsBlockOmittedWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", minimalYAML)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Addons != nil {
+		t.Errorf("Addons: got %+v, want nil when addons block absent", c.Addons)
+	}
+}
+
+func TestLoad_AddonsFloBlock(t *testing.T) {
+	dir := t.TempDir()
+	withAddons := minimalYAML + `
+addons:
+  flo:
+    version: "v2.21.13-0.0.28"
+`
+	p := writeFile(t, dir, "cluster.yaml", withAddons)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load with addons: %v", err)
+	}
+	if c.Addons == nil {
+		t.Fatal("Addons: nil, want populated struct")
+	}
+	if c.Addons.Flo == nil {
+		t.Fatal("Addons.Flo: nil, want populated struct")
+	}
+	if c.Addons.Flo.Version != "v2.21.13-0.0.28" {
+		t.Errorf("Addons.Flo.Version: got %q", c.Addons.Flo.Version)
+	}
+}
+
+func TestLoad_AddonsFloEnabled_ExplicitlyFalse(t *testing.T) {
+	dir := t.TempDir()
+	withDisabledFLO := minimalYAML + `
+addons:
+  flo:
+    enabled: false
+`
+	p := writeFile(t, dir, "cluster.yaml", withDisabledFLO)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load with flo.enabled=false: %v", err)
+	}
+	if c.Addons == nil || c.Addons.Flo == nil {
+		t.Fatal("expected Addons.Flo to be populated")
+	}
+	if c.Addons.Flo.FloEnabled() {
+		t.Error("FloEnabled() should return false when enabled: false")
+	}
+}
+
+func TestFloSpec_FloEnabled_NilSpec(t *testing.T) {
+	var f *FloSpec
+	if !f.FloEnabled() {
+		t.Error("FloEnabled() on nil FloSpec should return true (default enabled)")
+	}
+}
+
+func TestFloSpec_FloEnabled_NilEnabled(t *testing.T) {
+	f := &FloSpec{} // Enabled field is nil
+	if !f.FloEnabled() {
+		t.Error("FloEnabled() with nil Enabled field should return true")
+	}
+}
+
+func TestFloSpec_FLOVersion_Default(t *testing.T) {
+	var f *FloSpec
+	if got := f.FLOVersion(); got != DefaultFLOVersion {
+		t.Errorf("FLOVersion() on nil spec = %q, want %q", got, DefaultFLOVersion)
+	}
+}
+
+func TestFloSpec_FLOVersion_Override(t *testing.T) {
+	f := &FloSpec{Version: "v2.99.0"}
+	if got := f.FLOVersion(); got != "v2.99.0" {
+		t.Errorf("FLOVersion() = %q, want v2.99.0", got)
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsRune(s, sub))
 }
