@@ -1,3 +1,4 @@
+//lint:file-ignore SA1019 k8sfake.NewSimpleClientset is still functional — NewClientset requires --with-applyconfig codegen
 package phases
 
 import (
