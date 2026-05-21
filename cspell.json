@@ -443,7 +443,18 @@
     "eipalloc",
     "spkvlan",
     "gatewayclass",
-    "envsubst"
+    "envsubst",
+    "kindbnkctl",
+    "aisemcache",
+    "aitokencount",
+    "clusterwidewatch",
+    "corefiles",
+    "cwcadminaccess",
+    "extrespool",
+    "httproutee2e",
+    "proxyprotocol",
+    "bgppeer",
+    "kindest"
   ],
   "ignorePaths": [
     "book/book/**",

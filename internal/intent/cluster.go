@@ -28,6 +28,10 @@ type Cluster struct {
 	// Pattern selects internal/k8s/manifests/<pattern>/ (not used in slice 1).
 	// Loaded here for forward-compat so later slices don't change the struct.
 	Pattern string `yaml:"pattern,omitempty"`
+	// Forge declares the bnk-forge integration shape (slice 4+). Optional;
+	// when omitted the new Go-SDK phased path skips the forge handoff
+	// silently. Shape inspired by mwiget/kindbnkctl examples/two-node.yaml.
+	Forge *ForgeSpec `yaml:"forge,omitempty"`
 	// Tags are merged into every AWS resource created by awsbnkctl alongside
 	// the required awsbnkctl:* keys.
 	Tags map[string]string `yaml:"tags,omitempty"`
@@ -61,6 +65,27 @@ type Subnets struct {
 type SubnetSpec struct {
 	CIDR string `yaml:"cidr"`
 	AZ   string `yaml:"az"`
+}
+
+// ForgeSpec captures the operator-declared forge integration for slice 4+.
+// When Enabled is false (or the whole block is omitted), the phased path
+// skips the forge handoff entirely. When Enabled is true, slice 4 registers
+// the cluster with a running bnk-forge instance via MCP (preferred) or
+// REST (fallback). awsbnkctl NEVER auto-installs forge — if Enabled is
+// true and the URL is unreachable, the soft-fail-with-retry path writes
+// a `pending` link file and exits 0.
+//
+// See docs/FORGE_MCP_INTEGRATION.md for the handoff details. Shape borrowed
+// from mwiget/kindbnkctl's bnk_forge: block (camelCase here to match the
+// rest of our schema).
+type ForgeSpec struct {
+	// Enabled is the master switch. Default false (omitted block = disabled).
+	Enabled bool `yaml:"enabled"`
+	// URL is the forge REST base. Default http://localhost:8000.
+	URL string `yaml:"url,omitempty"`
+	// MCPURL is the forge MCP endpoint. Default http://localhost:8081/mcp/.
+	// Slice 4 prefers MCP and falls back to REST at URL on capability gaps.
+	MCPURL string `yaml:"mcpUrl,omitempty"`
 }
 
 // StateDir returns the path to the IDs-cache directory for this cluster

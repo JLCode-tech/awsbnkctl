@@ -58,6 +58,47 @@ func TestLoad_HappyPath(t *testing.T) {
 	}
 }
 
+func TestLoad_OmitsForgeWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", minimalYAML)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Forge != nil {
+		t.Errorf("Forge: got %+v, want nil for cluster.yaml without forge block", c.Forge)
+	}
+}
+
+func TestLoad_ForgeBlockEnabled(t *testing.T) {
+	dir := t.TempDir()
+	withForge := minimalYAML + `
+forge:
+  enabled: true
+  url: http://localhost:8000
+  mcpUrl: http://localhost:8081/mcp/
+`
+	p := writeFile(t, dir, "cluster.yaml", withForge)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load with forge: %v", err)
+	}
+	if c.Forge == nil {
+		t.Fatal("Forge: nil, want populated struct")
+	}
+	if !c.Forge.Enabled {
+		t.Errorf("Forge.Enabled: got false, want true")
+	}
+	if c.Forge.URL != "http://localhost:8000" {
+		t.Errorf("Forge.URL: got %q", c.Forge.URL)
+	}
+	if c.Forge.MCPURL != "http://localhost:8081/mcp/" {
+		t.Errorf("Forge.MCPURL: got %q", c.Forge.MCPURL)
+	}
+}
+
 func TestLoad_RejectsUnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	bad := minimalYAML + "\nunknownField: boom\n"
