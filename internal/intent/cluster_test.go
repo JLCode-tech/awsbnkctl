@@ -345,3 +345,141 @@ func TestLoad_ClusterSpecOmittedWhenAbsent(t *testing.T) {
 		t.Errorf("ClusterSpec: got %+v, want nil when cluster block absent", c.ClusterSpec)
 	}
 }
+
+// ─── BnkSpec tests (slice 5) ──────────────────────────────────────────────────
+
+func TestLoad_BnkBlockOmittedWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", minimalYAML)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Bnk != nil {
+		t.Errorf("Bnk: got %+v, want nil when bnk block absent", c.Bnk)
+	}
+}
+
+func TestLoad_BnkBlockParsed(t *testing.T) {
+	dir := t.TempDir()
+	// Write placeholder files so path-existence validation passes.
+	farPath := writeFile(t, dir, "far.json", `{"auths":{}}`)
+	jwtPath := writeFile(t, dir, "license.jwt", "jwt-token")
+
+	yaml := minimalYAML + `
+bnk:
+  farArchive: ` + farPath + `
+  jwt: ` + jwtPath + `
+  certManagerVersion: "1.16.1"
+`
+	p := writeFile(t, dir, "cluster.yaml", yaml)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load with bnk block: %v", err)
+	}
+	if c.Bnk == nil {
+		t.Fatal("Bnk: nil, want populated struct")
+	}
+	if c.Bnk.FARArchive != farPath {
+		t.Errorf("Bnk.FARArchive: got %q, want %q", c.Bnk.FARArchive, farPath)
+	}
+	if c.Bnk.JWT != jwtPath {
+		t.Errorf("Bnk.JWT: got %q, want %q", c.Bnk.JWT, jwtPath)
+	}
+	if c.Bnk.CertManagerVersion != "1.16.1" {
+		t.Errorf("Bnk.CertManagerVersion: got %q, want 1.16.1", c.Bnk.CertManagerVersion)
+	}
+}
+
+func TestLoad_BnkBlockDefaultCertManagerVersion(t *testing.T) {
+	dir := t.TempDir()
+	farPath := writeFile(t, dir, "far.json", `{"auths":{}}`)
+	jwtPath := writeFile(t, dir, "license.jwt", "jwt-token")
+
+	// certManagerVersion omitted — should default to 1.16.1.
+	yaml := minimalYAML + `
+bnk:
+  farArchive: ` + farPath + `
+  jwt: ` + jwtPath + `
+`
+	p := writeFile(t, dir, "cluster.yaml", yaml)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load with bnk (no version): %v", err)
+	}
+	if c.Bnk.CertManagerVersion != EmbeddedCertManagerVersion {
+		t.Errorf("default CertManagerVersion: got %q, want %q", c.Bnk.CertManagerVersion, EmbeddedCertManagerVersion)
+	}
+}
+
+func TestLoad_BnkBlockRejectsMismatchedVersion(t *testing.T) {
+	dir := t.TempDir()
+	farPath := writeFile(t, dir, "far.json", `{"auths":{}}`)
+	jwtPath := writeFile(t, dir, "license.jwt", "jwt-token")
+
+	yaml := minimalYAML + `
+bnk:
+  farArchive: ` + farPath + `
+  jwt: ` + jwtPath + `
+  certManagerVersion: "1.15.0"
+`
+	p := writeFile(t, dir, "cluster.yaml", yaml)
+
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("expected error for mismatched certManagerVersion, got nil")
+	}
+	if !containsStr(err.Error(), "certManagerVersion") {
+		t.Errorf("error should mention 'certManagerVersion': %v", err)
+	}
+}
+
+func TestLoad_BnkBlockRejectsMissingFARArchive(t *testing.T) {
+	dir := t.TempDir()
+	jwtPath := writeFile(t, dir, "license.jwt", "jwt-token")
+
+	yaml := minimalYAML + `
+bnk:
+  farArchive: ""
+  jwt: ` + jwtPath + `
+`
+	p := writeFile(t, dir, "cluster.yaml", yaml)
+
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("expected error for empty farArchive, got nil")
+	}
+}
+
+func TestLoad_BnkBlockRejectsMissingJWT(t *testing.T) {
+	dir := t.TempDir()
+	farPath := writeFile(t, dir, "far.json", `{"auths":{}}`)
+
+	yaml := minimalYAML + `
+bnk:
+  farArchive: ` + farPath + `
+  jwt: ""
+`
+	p := writeFile(t, dir, "cluster.yaml", yaml)
+
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("expected error for empty jwt, got nil")
+	}
+}
+
+func containsStr(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsRune(s, sub))
+}
+
+func containsRune(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

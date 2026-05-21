@@ -84,6 +84,24 @@ cluster:
       maxSize: 2
       diskSize: 50
 
+# bnk: BNK supply-chain credentials (slice 5+, required for phase 12).
+# The operator MUST update farArchive and jwt to point at real files before running
+# `awsbnkctl up`. Placeholder paths below will cause phase 12 to error at entry.
+#
+# farArchive: path to F5's FAR pull credentials JSON (from the F5 portal).
+#             Type in k8s: kubernetes.io/dockerconfigjson secret named 'far-secret'.
+#             F5 ships this file pre-formatted as a dockerconfigjson.
+#
+# jwt: path to F5's subscription JWT (from the F5 portal / entitlement email).
+#      Type in k8s: Opaque secret named 'bnk-license-jwt', key 'license.jwt'.
+#
+# certManagerVersion: pinned to match the embedded upstream YAML (1.16.1).
+#                     Omit to use the default. Mismatch is a hard error.
+bnk:
+  farArchive: ./cne_pull_64.json     # REPLACE: path to your F5 FAR pull credentials JSON
+  jwt: ./license.jwt                  # REPLACE: path to your F5 subscription JWT
+  # certManagerVersion: "1.16.1"     # optional; defaults to 1.16.1 (the embedded version)
+
 # tags merged into every AWS resource alongside the mandatory awsbnkctl:* keys.
 tags:
   cost-center: RnD-AI

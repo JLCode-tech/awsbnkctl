@@ -464,6 +464,26 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 		return fmt.Errorf("up: %w", err)
 	}
 
+	// Attach k8s clients now that Phase11 has written the kubeconfig.
+	// In dry-run, the kubeconfig file doesn't exist — skip AttachK8s (phases 12/13
+	// handle dryRun=true internally without needing a real k8s connection).
+	if !dryRun {
+		kubeconfigPath := st.Get("KUBECONFIG_PATH")
+		if kubeconfigPath == "" {
+			return fmt.Errorf("up: KUBECONFIG_PATH not in state after phase 11")
+		}
+		if err := clients.AttachK8s(kubeconfigPath); err != nil {
+			return fmt.Errorf("up: attaching k8s clients: %w", err)
+		}
+	}
+
+	if err := phases.Phase12K8sFoundation(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase13Postflight(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+
 	if dryRun {
 		fmt.Fprintln(os.Stderr, "→ dry-run complete")
 	} else {
@@ -509,7 +529,19 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool) error {
 		}
 	}
 
-	// Reverse phase order: 11 → 10 → 09 → 08 → 07 → 06 → 05 → 04 → 03 → 02.
+	// Reverse phase order: 12 → 11 → 10 → 09 → 08 → 07 → 06 → 05 → 04 → 03 → 02.
+	// Phase 12 k8s teardown runs FIRST (while kubeconfig is still valid).
+	// Attach k8s clients using the kubeconfig path from state before Phase12Down.
+	kubeconfigPath := st.Get("KUBECONFIG_PATH")
+	if kubeconfigPath != "" {
+		if err := clients.AttachK8s(kubeconfigPath); err != nil {
+			// Log and continue — kubeconfig may be absent if phase 11 never ran.
+			fmt.Fprintf(os.Stderr, "down: warning: could not attach k8s clients (%v) — phase 12 down will log warning and skip\n", err)
+		}
+	}
+	if err := phases.Phase12K8sFoundationDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
 	if err := phases.Phase11KubeconfigDown(ctx, cl, st, clients); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
