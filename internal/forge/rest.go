@@ -3,6 +3,7 @@ package forge
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -134,16 +135,17 @@ func restCreateProject(ctx context.Context, base, token string, req RegisterRequ
 		"environment":    "dev",
 		"description":    fmt.Sprintf("Created by awsbnkctl for workspace %q", req.WorkspaceName),
 	}
-	// Forge can return either a flat shape `{id, name, ...}` or a wrapped
-	// shape `{project: {id, name, ...}, success: true}`. The MCP tool docs
-	// suggest the wrapped form but localhost forge's REST returns flat.
-	// Try wrapped first; fall back to flat. (Live test on 2026-05-21
-	// produced the flat form — wrapped form is forge >=2.10.x.)
+	// Forge has THREE response shapes in the wild for POST /api/projects:
+	//   A. wrapped:     {project: {id, name, ...}, success: true}  (>=2.10.x MCP tool docs)
+	//   B. flat-id:     {id, name, ...}
+	//   C. flat-prefix: {success, project_id, name, message}       (localhost dev, verified 2026-05-21)
+	// Probe all three and use whichever has a non-zero ID.
 	var resp struct {
-		ID      int         `json:"id"`
-		Name    string      `json:"name"`
-		Project restProject `json:"project"`
-		Success bool        `json:"success"`
+		ID        int         `json:"id"`
+		ProjectID int         `json:"project_id"`
+		Name      string      `json:"name"`
+		Project   restProject `json:"project"`
+		Success   bool        `json:"success"`
 	}
 	if err := restPost(ctx, base+"/api/projects", token, body, &resp); err != nil {
 		return restProject{}, err
@@ -154,7 +156,10 @@ func restCreateProject(ctx context.Context, base, token string, req RegisterRequ
 	if resp.ID != 0 {
 		return restProject{ID: resp.ID, Name: resp.Name}, nil
 	}
-	return restProject{}, fmt.Errorf("forge REST create project: no project ID in response (tried flat + wrapped shapes)")
+	if resp.ProjectID != 0 {
+		return restProject{ID: resp.ProjectID, Name: resp.Name}, nil
+	}
+	return restProject{}, fmt.Errorf("forge REST create project: no project ID in response (tried wrapped, flat-id, project_id shapes)")
 }
 
 type restCluster struct {
@@ -163,18 +168,25 @@ type restCluster struct {
 }
 
 func restCreateCluster(ctx context.Context, base, token string, projectID int, req RegisterRequest) (restCluster, error) {
+	// Forge REST expects the kubeconfig BASE64-ENCODED (verified against
+	// localhost forge 2026-05-21: raw YAML returns "Invalid base64
+	// kubeconfig: Incorrect padding"). Encode here, not at the caller,
+	// so the MCP path (which sends raw bytes per the existing client)
+	// is unaffected.
 	body := map[string]any{
 		"name":           req.ClusterName,
 		"cloud_provider": "aws",
 		"region":         req.Region,
-		"kubeconfig":     string(req.Kubeconfig),
+		"kubeconfig":     base64.StdEncoding.EncodeToString(req.Kubeconfig),
 	}
-	// Same flat-or-wrapped tolerance as restCreateProject.
+	// Same three-shape tolerance as restCreateProject (wrapped, flat-id,
+	// flat-prefix).
 	var resp struct {
-		ID      int         `json:"id"`
-		Name    string      `json:"name"`
-		Cluster restCluster `json:"cluster"`
-		Success bool        `json:"success"`
+		ID        int         `json:"id"`
+		ClusterID int         `json:"cluster_id"`
+		Name      string      `json:"name"`
+		Cluster   restCluster `json:"cluster"`
+		Success   bool        `json:"success"`
 	}
 	url := fmt.Sprintf("%s/api/projects/%d/k8s/clusters", base, projectID)
 	if err := restPost(ctx, url, token, body, &resp); err != nil {
@@ -186,7 +198,10 @@ func restCreateCluster(ctx context.Context, base, token string, projectID int, r
 	if resp.ID != 0 {
 		return restCluster{ID: resp.ID, Name: resp.Name}, nil
 	}
-	return restCluster{}, fmt.Errorf("forge REST create cluster: no cluster ID in response (tried flat + wrapped shapes)")
+	if resp.ClusterID != 0 {
+		return restCluster{ID: resp.ClusterID, Name: resp.Name}, nil
+	}
+	return restCluster{}, fmt.Errorf("forge REST create cluster: no cluster ID in response (tried wrapped, flat-id, cluster_id shapes)")
 }
 
 func restDeleteCluster(ctx context.Context, base, token string, projectID, clusterID int) error {
