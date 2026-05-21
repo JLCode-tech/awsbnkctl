@@ -99,6 +99,55 @@ func TestRegisterREST_HappyPath(t *testing.T) {
 	}
 }
 
+// TestRegisterREST_FlatProjectIDShape verifies the parser handles the
+// localhost-forge response shape `{success, project_id, name, message}`
+// (verified live on 2026-05-21).
+func TestRegisterREST_FlatProjectIDShape(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": "tok"})
+	})
+	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success":    true,
+			"project_id": 30,
+			"name":       "awsbnkctl-default",
+			"message":    "Project created successfully",
+		})
+	})
+	mux.HandleFunc("/api/projects/30/k8s/clusters", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success":    true,
+			"cluster_id": 77,
+			"name":       "bnk-prod",
+			"message":    "Cluster created successfully",
+		})
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	dir := t.TempDir()
+	res, err := RegisterREST(context.Background(), ts.URL, RegisterRequest{
+		WorkspaceName: "default",
+		WorkspaceDir:  dir,
+		ClusterName:   "bnk-prod",
+		Region:        "us-east-1",
+		Kubeconfig:    []byte("apiVersion: v1\nkind: Config\n"),
+	})
+	if err != nil {
+		t.Fatalf("RegisterREST (flat project_id shape): %v", err)
+	}
+	if res.Link.ProjectID != 30 {
+		t.Errorf("ProjectID = %d, want 30", res.Link.ProjectID)
+	}
+	if res.Link.ClusterID != 77 {
+		t.Errorf("ClusterID = %d, want 77", res.Link.ClusterID)
+	}
+}
+
 func TestRegisterREST_AuthFailure(t *testing.T) {
 	srv := &forgeRESTServer{authFail: true}
 	ts := httptest.NewServer(http.HandlerFunc(srv.handler))
