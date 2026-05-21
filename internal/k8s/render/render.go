@@ -98,6 +98,7 @@ type OTELCertsVars struct {
 // cluster intent. Names match aws-gpu-setup's vars.env OTEL_* constants.
 func OTELCertsVarsFromCluster(cl *intent.Cluster) OTELCertsVars {
 	cvars := CertChainVarsFromCluster(cl)
+	// #nosec G101 -- these are k8s resource names, not credential values
 	return OTELCertsVars{
 		OTELSvrCert:     "external-otelsvr",
 		OTELSvrSecret:   "external-otelsvr-secret",

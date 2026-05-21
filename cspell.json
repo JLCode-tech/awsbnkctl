@@ -455,7 +455,9 @@
     "proxyprotocol",
     "bgppeer",
     "kindest",
-    "dockerconfigjson"
+    "dockerconfigjson",
+    "otelsvr",
+    "ingotelsvr"
   ],
   "ignorePaths": [
     "book/book/**",
