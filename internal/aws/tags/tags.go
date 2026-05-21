@@ -14,6 +14,7 @@ package tags
 
 import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 )
 
 // Tag key constants.
@@ -33,6 +34,11 @@ const (
 	CompNAT           = "nat"
 	CompEIP           = "eip"
 	CompRTB           = "rtb"
+
+	// IAM component constants (slice 2).
+	CompIAMClusterRole = "iam-cluster-role"
+	CompIAMNodeRole    = "iam-node-role"
+	CompIAMNodeProfile = "iam-node-profile"
 )
 
 // Required returns the four mandatory awsbnkctl tags for a resource.
@@ -89,4 +95,25 @@ func ClusterFilter(clusterName string) ec2types.Filter {
 // ComponentFilter returns the EC2 filter for a specific component tag value.
 func ComponentFilter(component string) ec2types.Filter {
 	return Filter(KeyComponent, component)
+}
+
+// IAMTags returns the same merged tag set as Merge but as []iamtypes.Tag,
+// which the IAM SDK requires (different type from []ec2types.Tag).
+//
+// Usage:
+//
+//	IAMTags(Required(name, CompIAMClusterRole), cluster.Tags, cluster.Metadata.Labels)
+func IAMTags(maps ...map[string]string) []iamtypes.Tag {
+	merged := make(map[string]string)
+	for _, m := range maps {
+		for k, v := range m {
+			merged[k] = v
+		}
+	}
+	out := make([]iamtypes.Tag, 0, len(merged))
+	for k, v := range merged {
+		k, v := k, v
+		out = append(out, iamtypes.Tag{Key: &k, Value: &v})
+	}
+	return out
 }
