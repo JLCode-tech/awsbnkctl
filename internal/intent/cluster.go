@@ -14,6 +14,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// BnkSpec holds the operator-supplied BNK supply-chain credentials required by
+// Phase 12 (k8s install foundation). The bnk: block is optional at schema load
+// time (slices 1–4 don't need it); Phase 12 returns a clear error if absent.
+//
+// certManagerVersion is validated at phase entry to match the pinned embedded
+// YAML version (1.16.1). Mismatch → clear error.
+type BnkSpec struct {
+	// FARArchive is the path to F5's FAR pull credentials JSON file.
+	// Type: kubernetes.io/dockerconfigjson. File must be readable + non-empty.
+	FARArchive string `yaml:"farArchive"`
+	// JWT is the path to F5's subscription JWT file.
+	// Type: Opaque, key: license.jwt. File must be readable + non-empty.
+	JWT string `yaml:"jwt"`
+	// CertManagerVersion pins the embedded cert-manager YAML version.
+	// Default "1.16.1". Must match the embedded YAML or phase 12 errors.
+	CertManagerVersion string `yaml:"certManagerVersion,omitempty"`
+}
+
 // nodeGroupNameRE enforces Kubernetes label/name rules for node group names:
 // lowercase alphanumeric + hyphens, must start/end with alphanumeric.
 var nodeGroupNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$`)
@@ -40,6 +58,11 @@ type Cluster struct {
 	// when omitted the new Go-SDK phased path skips the forge handoff
 	// silently. Shape inspired by mwiget/kindbnkctl examples/two-node.yaml.
 	Forge *ForgeSpec `yaml:"forge,omitempty"`
+	// Bnk declares the BNK supply-chain credentials (slice 5+). Optional at
+	// schema load time; required when running phase 12+. When present, FARArchive
+	// and JWT paths are shape-validated at Load time (files exist + readable);
+	// file-content validation (non-empty) is deferred to phase 12 entry.
+	Bnk *BnkSpec `yaml:"bnk,omitempty"`
 	// Tags are merged into every AWS resource created by awsbnkctl alongside
 	// the required awsbnkctl:* keys.
 	Tags map[string]string `yaml:"tags,omitempty"`
@@ -184,32 +207,38 @@ func (r *byteReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// EmbeddedCertManagerVersion is the cert-manager version baked into the binary.
+// Phase 12 validates that bnk.certManagerVersion (if set) matches this exactly.
+const EmbeddedCertManagerVersion = "1.16.1"
+
 // applyDefaults fills in zero-value fields with their documented defaults.
 // Called before validate so validation sees the post-default values.
 func applyDefaults(c *Cluster) {
-	if c.ClusterSpec == nil {
-		return
+	if c.ClusterSpec != nil {
+		if c.ClusterSpec.KubernetesVersion == "" {
+			c.ClusterSpec.KubernetesVersion = "1.30"
+		}
+		for i := range c.ClusterSpec.NodeGroups {
+			ng := &c.ClusterSpec.NodeGroups[i]
+			if ng.InstanceType == "" {
+				ng.InstanceType = "t3.medium"
+			}
+			if ng.DesiredSize == 0 {
+				ng.DesiredSize = 1
+			}
+			if ng.MinSize == 0 {
+				ng.MinSize = 1
+			}
+			if ng.MaxSize == 0 {
+				ng.MaxSize = 2
+			}
+			if ng.DiskSize == 0 {
+				ng.DiskSize = 50
+			}
+		}
 	}
-	if c.ClusterSpec.KubernetesVersion == "" {
-		c.ClusterSpec.KubernetesVersion = "1.30"
-	}
-	for i := range c.ClusterSpec.NodeGroups {
-		ng := &c.ClusterSpec.NodeGroups[i]
-		if ng.InstanceType == "" {
-			ng.InstanceType = "t3.medium"
-		}
-		if ng.DesiredSize == 0 {
-			ng.DesiredSize = 1
-		}
-		if ng.MinSize == 0 {
-			ng.MinSize = 1
-		}
-		if ng.MaxSize == 0 {
-			ng.MaxSize = 2
-		}
-		if ng.DiskSize == 0 {
-			ng.DiskSize = 50
-		}
+	if c.Bnk != nil && c.Bnk.CertManagerVersion == "" {
+		c.Bnk.CertManagerVersion = EmbeddedCertManagerVersion
 	}
 }
 
@@ -242,6 +271,35 @@ func validate(c *Cluster) error {
 				return fmt.Errorf("cluster.nodeGroups[].name %q must be lowercase alphanumeric + hyphens", ng.Name)
 			}
 		}
+	}
+	if c.Bnk != nil {
+		if err := validateBnk(c.Bnk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateBnk shape-validates the bnk: block. File-content validation (non-empty
+// check, dockerconfigjson parse) is deferred to phase 12 entry so operators can
+// construct and validate cluster.yaml without having the supply-chain files
+// present (e.g. during dry-run prep on a laptop before a lab session).
+//
+// Rules:
+//   - farArchive must be a non-empty path string
+//   - jwt must be a non-empty path string
+//   - certManagerVersion must match the embedded YAML version (1.16.1)
+func validateBnk(b *BnkSpec) error {
+	if b.FARArchive == "" {
+		return fmt.Errorf("bnk.farArchive is required when the bnk: block is present")
+	}
+	if b.JWT == "" {
+		return fmt.Errorf("bnk.jwt is required when the bnk: block is present")
+	}
+	if b.CertManagerVersion != "" && b.CertManagerVersion != EmbeddedCertManagerVersion {
+		return fmt.Errorf("bnk.certManagerVersion %q does not match the embedded cert-manager version %q; "+
+			"slice 6+ may add multi-version support — for now omit the field to use the default",
+			b.CertManagerVersion, EmbeddedCertManagerVersion)
 	}
 	return nil
 }
