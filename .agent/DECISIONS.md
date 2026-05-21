@@ -128,6 +128,52 @@ Last Updated: 2026-05-21
 
 ---
 
+### D-008 — `awsbnkctl validate <cluster.yaml>` subcommand (2026-05-21)
+
+**Context.** Operators iterating on a cluster.yaml want to confirm it parses + validates without burning an SSO session or running `up --dry-run` (which requires AWS auth even though no resources are mutated, because Phase00Preflight calls `sts.GetCallerIdentity`). mwiget/kindbnkctl has the same shape (`kindbnkctl validate poc.yaml`), confirming this is a useful ergonomic.
+
+**Decision.** Add `awsbnkctl validate <path>` — reads the file, runs `intent.Load` (strict YAML decode + regex + non-empty checks), exits non-zero on failure, prints a one-line success summary otherwise. **Makes zero AWS API calls.**
+
+**Consequences.**
+- New `internal/cli/validate.go` (~50 LOC) + tests. No new dependencies.
+- Useful as a CI gate for any cluster.yaml committed under `examples/`.
+- Lives outside the phased path entirely — no preflight, no AWS auth, no state.env touched.
+- Forward-compat: when more fields land (`cluster:` block in slice 3, addons in slice 5), the validator picks up the new validation rules automatically via `intent.Load`.
+
+**See:** `internal/cli/validate.go`. Pattern inspiration: `mwiget/kindbnkctl/internal/cli/validate.go`.
+
+---
+
+### D-009 — Treat mwiget/kindbnkctl as a peer-reference for the *bnkctl family (2026-05-21)
+
+**Context.** `mwiget/kindbnkctl` is a sibling Go CLI that deploys BNK 2.3 onto a 2-node `kind` cluster. Same author as dpubnkctl ([[reference_dpubnkctl_architecture]]). Architecture is consistent with the direction we adopted in D-001..D-007: single-binary Go CLI, Kubernetes-style YAML manifest (`apiVersion: kindbnkctl.f5.com/v1alpha1, kind: PoC`), peer-read forge integration, embedded assets, scenarios framework.
+
+**Decision.** Treat `mwiget/kindbnkctl` (and `mwiget/dpubnkctl`) as **peer references** for the *bnkctl family. Specifically:
+
+1. **Adopt `forge:` block in cluster.yaml** (this PR — `ForgeSpec` in `internal/intent/cluster.go`). Operator-declared forge integration in the intent file rather than per-invocation flags. Matches kindbnkctl's `bnk_forge:` block shape.
+
+2. **Adopt `ErrNotRunning` + soft-skip pattern when slice 4 implements the forge handoff.** kindbnkctl's `internal/bnkforge/launcher.go` returns a sentinel error when forge isn't reachable; the caller decides whether to soft-skip (auto-hook from `cluster up`) or hard-fail (explicit `bnk-forge launch`). awsbnkctl will use this pattern in slice 4 + retry the 3 attempts per [[D-006]] before writing `pending` to the link file.
+
+3. **REST fallback is canonical, not exceptional.** kindbnkctl uses REST (`POST /api/auth/login`, `POST /api/projects`) — never MCP. Our spec ([[project_forge_mcp_integration]]) prefers MCP but allows REST when the MCP catalog is behind. The user's slice 3/4 /goal explicitly endorsed REST fallback. Slice 4 should ship both paths from day one, MCP-first.
+
+4. **Capture the scenarios framework** (`internal/scenarios/{aisemcache,aitokencount,bgppeer,clusterwidewatch,corefiles,cwcadminaccess,extrespool,httproutee2e,proxyprotocol}/` + `runner.go` + Green/Amber/Red rating) **as the reference for slice 5+ when we add variant patterns / e2e scenarios**. Apply()/Verify() interface + rating-by-environment is a clean pattern. Don't port the code now (slice 5+ scope); just keep the link.
+
+5. **Verb-split (`cluster up/down` infra vs `deploy/destroy` BNK) is worth considering for a future major version**, but DOES NOT block our current `up/down` flow. Captured here so we don't reinvent it later. Slice 6 or beyond.
+
+**Consequences.**
+- Schema gains an optional `forge:` block now (this commit).
+- Slice 4 has a clear reference implementation pattern.
+- Slice 5+ has named patterns to crib from when designing the manifest-variant + scenario layer.
+- `mwiget/kindbnkctl` joins `mwiget/dpubnkctl` as a peer-architecture-reference in the *bnkctl family. Not a fork relationship — independent Go CLIs sharing patterns.
+
+**See:**
+- `mwiget/kindbnkctl` repo on GitHub
+- `mwiget/dpubnkctl` (already covered in [[reference_dpubnkctl_architecture]])
+- `docs/FORGE_MCP_INTEGRATION.md` §0 (peer-read model)
+- `internal/intent/cluster.go` `ForgeSpec` (this commit)
+
+---
+
 ## Superseded Decisions
 
 (None)
