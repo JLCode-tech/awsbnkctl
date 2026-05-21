@@ -19,6 +19,8 @@ Last Updated: 2026-05-21
 - **D-005** SSO sentinel pattern from aws-gpu-setup ported to Go SDK middleware — `.agent/DECISIONS.md`
 - **D-006** Forge register fires on EKS-Active (not end of `up`); soft-fail with retry — `.agent/DECISIONS.md`
 - **D-007** Tracer-bullet first slice: cluster.yaml → tagged VPC + subnets only — `.agent/DECISIONS.md`
+- **D-008** `awsbnkctl validate <cluster.yaml>` subcommand (AWS-free schema check) — `.agent/DECISIONS.md`
+- **D-009** mwiget/kindbnkctl as peer-reference for *bnkctl family (forge: block + REST-fallback + scenarios pattern) — `.agent/DECISIONS.md`
 
 ## Conventions (Index)
 
