@@ -163,10 +163,10 @@ func ensureNodeGroup(
 	if ng.DiskSize > 1<<30 || ng.DesiredSize > 1<<30 || ng.MinSize > 1<<30 || ng.MaxSize > 1<<30 {
 		return fmt.Errorf("nodegroup %s: scaling/disk value too large", ngName)
 	}
-	diskSize := int32(ng.DiskSize)              // #nosec G115 -- bounded above
-	desiredSize := int32(ng.DesiredSize)        // #nosec G115 -- bounded above
-	minSize := int32(ng.MinSize)                // #nosec G115 -- bounded above
-	maxSize := int32(ng.MaxSize)                // #nosec G115 -- bounded above
+	diskSize := int32(ng.DiskSize)       // #nosec G115 -- bounded above
+	desiredSize := int32(ng.DesiredSize) // #nosec G115 -- bounded above
+	minSize := int32(ng.MinSize)         // #nosec G115 -- bounded above
+	maxSize := int32(ng.MaxSize)         // #nosec G115 -- bounded above
 	_, err = eksc.CreateNodegroup(ctx, &eks.CreateNodegroupInput{
 		ClusterName:   ptr(clusterName),
 		NodegroupName: ptr(ngName),
