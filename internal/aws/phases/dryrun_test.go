@@ -119,6 +119,21 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 		t.Fatalf("Phase11Kubeconfig: %v", err)
 	}
 
+	// Phase 12: requires bnk: block — add it with temp FAR/JWT files.
+	farPath := writeDryRunFile(t, dir, "far.json", `{"auths":{}}`)
+	jwtPath := writeDryRunFile(t, dir, "license.jwt", "jwt-token")
+	cl.Bnk = &intent.BnkSpec{
+		FARArchive:         farPath,
+		JWT:                jwtPath,
+		CertManagerVersion: "1.16.1",
+	}
+	if err := Phase12K8sFoundation(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase12K8sFoundation dry-run: %v", err)
+	}
+	if err := Phase13Postflight(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase13Postflight dry-run: %v", err)
+	}
+
 	// Zero mutating AWS calls — EC2.
 	if ec2m.createVpcCalls != 0 {
 		t.Errorf("createVpcCalls = %d, want 0", ec2m.createVpcCalls)
@@ -231,6 +246,33 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 	if _, err := os.Stat(kubeconfigPath); err == nil {
 		t.Error("kubeconfig was written to disk during dry-run; must not persist")
 	}
+
+	// Phase 12 dry-run placeholder state values.
+	p12DryRunChecks := []string{
+		"BNK_NAMESPACES_CREATED",
+		"BNK_FAR_SECRET_NAME",
+		"BNK_LICENSE_JWT_SECRET",
+		"CERT_MANAGER_VERSION",
+		"BNK_SELFSIGNED_ISSUER",
+		"BNK_CA_CERT_NAME",
+		"BNK_CA_SECRET_NAME",
+		"BNK_CA_ISSUER",
+	}
+	for _, key := range p12DryRunChecks {
+		if v := st.Get(key); v == "" {
+			t.Errorf("dry-run: state[%s] is empty (phase 12 should set placeholders)", key)
+		}
+	}
+}
+
+// writeDryRunFile writes a file for use in dry-run tests and returns its path.
+func writeDryRunFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatalf("writeDryRunFile %s: %v", name, err)
+	}
+	return p
 }
 
 // TestDryRun_Phase09ForgeEnabled verifies that Phase09 in dry-run mode with

@@ -242,12 +242,17 @@ up
 │       wait until ACTIVE (~7 min); subnets: public only; AMI: AL2_x86_64
 ├─ 11. kubeconfig (Phase11Kubeconfig)        ◄── slice 3 (shipped)
 │       write .awsbnkctl/<name>/kubeconfig (exec-auth via `aws eks get-token`)
+├─ 12. k8s install foundation (Phase12K8sFoundation) ◄── slice 5 (shipped)
+│       12.1 create namespaces: cert-manager, f5-cne-core, f5-bnk-instance, f5-utils
+│       12.2 load FAR archive + license JWT as k8s Secrets (4× dockerconfigjson + 1× opaque)
+│       12.3 apply cert-manager v1.16.1 via embedded upstream YAML; wait Deployments + CRD
+│       12.4 apply BNK cert chain (ClusterIssuer → Certificate → CAIssuer); wait CA cert Ready
+│       variant manifest scaffold: internal/k8s/manifests/{shared,host-device,sr-iov-tmm}/
+│       deferred to slice 6+: FLO Helm, CNEInstance CR, F5SPKVlan, License CR, DNS-warmup
+└─ 13. postflight smoke (Phase13Postflight) ◄── slice 5 (shipped)
+│       verify: namespaces, cert-manager ready, CA cert Ready, FAR secrets present
+│       optional: forge scan_cluster (best-effort, cluster-ID lookup deferred to slice 6)
 │       ◄── CURRENT IMPLEMENTATION ENDS HERE
-├─ 12. k8s: load BNK supply-chain Secrets + apply manifests/shared/,
-│       then manifests/<pattern>/ (cert chain → far-pull-secret → license CR → CNEInstance → FLO)
-│       slice 5 — loads cl.Bnk.FARArchive + cl.Bnk.JWT from local files
-│       directly into k8s Secrets; NO S3, NO ECR mirror (matches aws-gpu-setup)
-└─ 13. postflight smoke + optional forge scan_cluster
 ```
 
 > **Removed from the roadmap:** the original TF graph had `terraform/modules/ecr_mirror/`
@@ -286,8 +291,9 @@ down
 │   ├─ load state.env; if missing, tag-discovery / name-based fallback
 │   └─ unless --keep-forge-link: forge unregister
 │
-│   ◄── Future slice 5 inserts phase 12 down here (k8s teardown)
-│
+├─ 12. k8s foundation down (Phase12K8sFoundationDown) ◄── slice 5 (shipped)
+│       cert chain CRs → cert-manager resources → FAR secret from default ns → F5 namespaces
+│       (runs FIRST while kubeconfig is still valid; tolerates NotFound everywhere)
 ├─ 11. kubeconfig down (Phase11KubeconfigDown) ◄── slice 3 (shipped)
 │       delete .awsbnkctl/<name>/kubeconfig (best-effort; tolerates absent)
 ├─ 10. node group down (Phase10NodeGroupDown) ◄── slice 3 (shipped)
@@ -507,7 +513,7 @@ internal/k8s/manifests/
 - ✅ Slice 2 — IAM cluster role + node role + instance profile **[shipped, PR #8]**
 - ✅ Slice 3 — EKS cluster + node group + kubeconfig **[shipped, PR #11]**
 - ✅ Slice 4 — Phase 09 forge register (MCP-first, REST fallback, soft-fail) **[shipped, PR #11]**
-- ⏳ Slice 5 — K8s manifest variants: load BNK supply-chain Secrets (FAR archive + JWT from local files); apply `manifests/shared/` + `manifests/<pattern>/` (cert chain → far-pull-secret → license CR → CNEInstance → FLO). Phase 12 in the up order; phase 12 down in destroy order. **No ECR mirror, no S3 supply chain** — those were TF holdovers from a different use case (air-gap) and are not in the slice 5 scope.
+- ✅ Slice 5 — K8s install foundation (shipped): namespaces + FAR/JWT Secrets + cert-manager v1.16.1 + BNK cert chain. Phase 12 (foundation) + Phase 13 (postflight) in up order; Phase12K8sFoundationDown first in destroy order. Variant manifest scaffold `internal/k8s/manifests/{shared,host-device,sr-iov-tmm}/` in place. Deferred: FLO Helm, CNEInstance CR, F5SPKVlan, License CR, DNS-warmup heal, 20-min CNEInstance+License polling (slice 6+).
 - ⏳ Slice 6 — Polish: `inspect` / `doctor` / `status` reading the new state.env + tag scheme. Deletion of `terraform/` + `internal/tf/` + `embedded.go`. Optionally split commands per kindbnkctl pattern (D-009).
 - ⏳ Future (separately scoped, not in the slice plan):
   - Air-gap / ECR mirror — opt-in via cluster.yaml `airGap: true`; only build if/when a deployment requires it.
