@@ -138,9 +138,14 @@ func TestIdempotency_SecondRunProducesZeroCreateCalls(t *testing.T) {
 	dir := t.TempDir()
 	cl := testCluster()
 	imock := &idempotencyMockEC2{}
-	clients := testClients(imock)
+	iamMock := newMockIAM()
+	clients := &Clients{
+		EC2:     imock,
+		STS:     &mockSTSImpl{accountID: "111122223333"},
+		IAM:     iamMock,
+		Profile: "test",
+	}
 
-	// Seed state with VPC_ID (normally set by phase02) for first run.
 	run := func(label string) {
 		st, err := state.Load(dir)
 		if err != nil {
@@ -164,6 +169,9 @@ func TestIdempotency_SecondRunProducesZeroCreateCalls(t *testing.T) {
 		if err := Phase06RouteTables(ctx, cl, st, clients, false); err != nil {
 			t.Fatalf("%s Phase06RouteTables: %v", label, err)
 		}
+		if err := Phase07IAM(ctx, cl, st, clients, false); err != nil {
+			t.Fatalf("%s Phase07IAM: %v", label, err)
+		}
 	}
 
 	// First run — all resources created.
@@ -173,11 +181,15 @@ func TestIdempotency_SecondRunProducesZeroCreateCalls(t *testing.T) {
 	if createCallsAfterRun1 == 0 {
 		t.Fatal("run1: expected some create calls, got 0")
 	}
+	if iamMock.createRoleCalls == 0 {
+		t.Fatal("run1: expected IAM create role calls, got 0")
+	}
 
 	// Snapshot create counts after run1.
-	snap := struct{ vpc, subnet, igw, eip, nat, rtb int }{
+	snap := struct{ vpc, subnet, igw, eip, nat, rtb, roles, profiles, addRole int }{
 		imock.createVpcCalls, imock.createSubnetCalls, imock.createIGWCalls,
 		imock.allocAddrCalls, imock.createNATCalls, imock.createRTBCalls,
+		iamMock.createRoleCalls, iamMock.createInstanceProfileCalls, iamMock.addRoleToInstanceProfileCalls,
 	}
 
 	// Second run — all resources already exist, so create calls must not increase.
@@ -199,5 +211,14 @@ func TestIdempotency_SecondRunProducesZeroCreateCalls(t *testing.T) {
 	}
 	if imock.createRTBCalls != snap.rtb {
 		t.Errorf("run2: createRTBCalls increased from %d to %d", snap.rtb, imock.createRTBCalls)
+	}
+	if iamMock.createRoleCalls != snap.roles {
+		t.Errorf("run2: createRoleCalls increased from %d to %d", snap.roles, iamMock.createRoleCalls)
+	}
+	if iamMock.createInstanceProfileCalls != snap.profiles {
+		t.Errorf("run2: createInstanceProfileCalls increased from %d to %d", snap.profiles, iamMock.createInstanceProfileCalls)
+	}
+	if iamMock.addRoleToInstanceProfileCalls != snap.addRole {
+		t.Errorf("run2: addRoleToInstanceProfileCalls increased from %d to %d", snap.addRole, iamMock.addRoleToInstanceProfileCalls)
 	}
 }

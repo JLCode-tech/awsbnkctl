@@ -88,3 +88,58 @@ func TestComponentFilter(t *testing.T) {
 		t.Errorf("ComponentFilter Values: got %v", f.Values)
 	}
 }
+
+func TestIAMTags_ContainsMandatoryKeys(t *testing.T) {
+	result := IAMTags(Required("my-cluster", CompIAMClusterRole))
+
+	got := make(map[string]string, len(result))
+	for _, tag := range result {
+		got[*tag.Key] = *tag.Value
+	}
+
+	if got[KeyCluster] != "my-cluster" {
+		t.Errorf("IAMTags: cluster tag got %q, want %q", got[KeyCluster], "my-cluster")
+	}
+	if got[KeyComponent] != CompIAMClusterRole {
+		t.Errorf("IAMTags: component tag got %q, want %q", got[KeyComponent], CompIAMClusterRole)
+	}
+	if got[KeyManaged] != "true" {
+		t.Errorf("IAMTags: managed tag got %q, want true", got[KeyManaged])
+	}
+	if got[KeyName] != "my-cluster-iam-cluster-role" {
+		t.Errorf("IAMTags: Name tag got %q", got[KeyName])
+	}
+}
+
+func TestIAMTags_MergesExtraMaps(t *testing.T) {
+	extra := map[string]string{"env": "dev"}
+	result := IAMTags(Required("tracer", CompIAMNodeRole), extra)
+
+	got := make(map[string]string, len(result))
+	for _, tag := range result {
+		got[*tag.Key] = *tag.Value
+	}
+
+	if got["env"] != "dev" {
+		t.Errorf("IAMTags: extra tag env got %q, want dev", got["env"])
+	}
+	// Required keys must still be present.
+	if got[KeyCluster] != "tracer" {
+		t.Errorf("IAMTags: required key %q lost after merge", KeyCluster)
+	}
+}
+
+func TestIAMTagsConstants(t *testing.T) {
+	// Verify the three IAM component constants are defined and distinct.
+	constants := []string{CompIAMClusterRole, CompIAMNodeRole, CompIAMNodeProfile}
+	seen := make(map[string]bool)
+	for _, c := range constants {
+		if c == "" {
+			t.Errorf("IAM component constant is empty")
+		}
+		if seen[c] {
+			t.Errorf("duplicate IAM component constant: %q", c)
+		}
+		seen[c] = true
+	}
+}

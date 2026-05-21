@@ -14,6 +14,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	smithymw "github.com/aws/smithy-go/middleware"
 
@@ -70,11 +71,34 @@ type STSAPI interface {
 	GetCallerIdentity(ctx context.Context, in *sts.GetCallerIdentityInput, opts ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
 }
 
+// IAMAPI is the subset of iam.Client surface used by phase07. Tests inject a
+// fake implementation. Only methods used in this slice are listed here.
+type IAMAPI interface {
+	CreateRole(ctx context.Context, in *iam.CreateRoleInput, opts ...func(*iam.Options)) (*iam.CreateRoleOutput, error)
+	GetRole(ctx context.Context, in *iam.GetRoleInput, opts ...func(*iam.Options)) (*iam.GetRoleOutput, error)
+	DeleteRole(ctx context.Context, in *iam.DeleteRoleInput, opts ...func(*iam.Options)) (*iam.DeleteRoleOutput, error)
+	ListAttachedRolePolicies(ctx context.Context, in *iam.ListAttachedRolePoliciesInput, opts ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error)
+	AttachRolePolicy(ctx context.Context, in *iam.AttachRolePolicyInput, opts ...func(*iam.Options)) (*iam.AttachRolePolicyOutput, error)
+	DetachRolePolicy(ctx context.Context, in *iam.DetachRolePolicyInput, opts ...func(*iam.Options)) (*iam.DetachRolePolicyOutput, error)
+	ListRolePolicies(ctx context.Context, in *iam.ListRolePoliciesInput, opts ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error)
+	PutRolePolicy(ctx context.Context, in *iam.PutRolePolicyInput, opts ...func(*iam.Options)) (*iam.PutRolePolicyOutput, error)
+	DeleteRolePolicy(ctx context.Context, in *iam.DeleteRolePolicyInput, opts ...func(*iam.Options)) (*iam.DeleteRolePolicyOutput, error)
+	CreateInstanceProfile(ctx context.Context, in *iam.CreateInstanceProfileInput, opts ...func(*iam.Options)) (*iam.CreateInstanceProfileOutput, error)
+	GetInstanceProfile(ctx context.Context, in *iam.GetInstanceProfileInput, opts ...func(*iam.Options)) (*iam.GetInstanceProfileOutput, error)
+	DeleteInstanceProfile(ctx context.Context, in *iam.DeleteInstanceProfileInput, opts ...func(*iam.Options)) (*iam.DeleteInstanceProfileOutput, error)
+	AddRoleToInstanceProfile(ctx context.Context, in *iam.AddRoleToInstanceProfileInput, opts ...func(*iam.Options)) (*iam.AddRoleToInstanceProfileOutput, error)
+	RemoveRoleFromInstanceProfile(ctx context.Context, in *iam.RemoveRoleFromInstanceProfileInput, opts ...func(*iam.Options)) (*iam.RemoveRoleFromInstanceProfileOutput, error)
+	ListInstanceProfilesForRole(ctx context.Context, in *iam.ListInstanceProfilesForRoleInput, opts ...func(*iam.Options)) (*iam.ListInstanceProfilesForRoleOutput, error)
+	TagRole(ctx context.Context, in *iam.TagRoleInput, opts ...func(*iam.Options)) (*iam.TagRoleOutput, error)
+	TagInstanceProfile(ctx context.Context, in *iam.TagInstanceProfileInput, opts ...func(*iam.Options)) (*iam.TagInstanceProfileOutput, error)
+}
+
 // Clients bundles the AWS service clients needed by phases in this slice.
-// Later slices add EKS/IAM/S3 fields here without changing existing phases.
+// Later slices add EKS/S3 fields here without changing existing phases.
 type Clients struct {
 	EC2     EC2API
 	STS     STSAPI
+	IAM     IAMAPI
 	Profile string // the AWS profile used — passed to CheckAuthOrDie hints
 }
 
@@ -105,6 +129,7 @@ func NewClients(ctx context.Context, region, profile string) (*Clients, error) {
 	return &Clients{
 		EC2:     ec2.NewFromConfig(cfg),
 		STS:     sts.NewFromConfig(cfg),
+		IAM:     iam.NewFromConfig(cfg),
 		Profile: profile,
 	}, nil
 }

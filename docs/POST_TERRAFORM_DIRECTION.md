@@ -179,28 +179,32 @@ Sequential phases, each a Go function. Each phase calls `checkAuthOrDie()` at it
 
 ```
 up
-├─ 00. preflight
+├─ 00. preflight (Phase00Preflight)
 │   ├─ load cluster.yaml + validate schema
 │   ├─ sts.GetCallerIdentity (auth check, account verification)
 │   ├─ ensure .awsbnkctl/<name>/ exists; load state.env if present
 │   └─ servicequotas spot-check (vCPU, EIPs, NAT GW count for region)
-├─ 01. vpc
-├─ 02. subnets (public + private, one per AZ)
-├─ 03. igw + public route table + default route
-├─ 04. nat gateway + EIP + private route table
-├─ 05. route table associations
-│   ◄── TRACER-BULLET SLICE ENDS HERE
-├─ 06. iam: cluster role, node instance role, IRSA prerequisites
-├─ 07. eks cluster (wait until ACTIVE; ~10 min)
-├─ 08. forge register (project + cluster + STS-bootstrap kubeconfig + retry/soft-fail)
+├─ 02. vpc (Phase02VPC)               ◄── slice 1 (shipped)
+├─ 03. subnets (Phase03Subnets)       ◄── slice 1
+├─ 04. igw (Phase04IGW)               ◄── slice 1
+├─ 05. nat gateway + EIP (Phase05NAT) ◄── slice 1
+├─ 06. route tables (Phase06RouteTables) ◄── slice 1
+├─ 07. iam: cluster role, node instance role, node instance profile (Phase07IAM) ◄── slice 2 (shipped)
+│       ◄── CURRENT IMPLEMENTATION ENDS HERE
+├─ 08. eks cluster (slice 3: wait until ACTIVE; ~10 min)
+├─ 09. forge register (slice 3: project + cluster + STS-bootstrap kubeconfig + retry/soft-fail)
 │   ◄── forge sees cluster while node group + BNK install proceed
-├─ 09. eks node group (wait until ACTIVE)
-├─ 10. update kubeconfig (write .awsbnkctl/<name>/kubeconfig via Go SDK eks:DescribeCluster + GenerateToken)
-├─ 11. ecr mirror + s3 supply chain
-├─ 12. k8s: apply manifests/shared/, then manifests/<pattern>/
+├─ 10. eks node group (slice 3: wait until ACTIVE)
+├─ 11. update kubeconfig (write .awsbnkctl/<name>/kubeconfig via Go SDK eks:DescribeCluster + GenerateToken)
+├─ 12. ecr mirror + s3 supply chain
+├─ 13. k8s: apply manifests/shared/, then manifests/<pattern>/
 │       (cert chain → license CR → CNEInstance → FLO)
-└─ 13. postflight smoke + optional forge scan_cluster
+└─ 14. postflight smoke + optional forge scan_cluster
 ```
+
+> **Phase numbering note:** Phase 01 is reserved; the network phases are 02–06; IAM is 07.
+> The original spec had IAM at §6.06 — the actual code uses 07 to leave room for future
+> additions between network and IAM without renumbering existing phases.
 
 Each phase function signature:
 
@@ -221,23 +225,21 @@ Reverse of `up`, with destructive guardrails:
 
 ```
 down
-├─ 00. preflight
+├─ 00. preflight (interactive confirm unless --yes)
 │   ├─ sts.GetCallerIdentity
-│   ├─ load state.env; if missing, tag-discovery fallback
-│   ├─ interactive confirm (unless --yes / -y)
+│   ├─ load state.env; if missing, tag-discovery / name-based fallback
 │   └─ unless --keep-forge-link: forge unregister
-├─ 01. k8s: helm uninstall / kubectl delete for manifests in reverse
-├─ 02. node group (wait until gone)
-├─ 03. ecr mirror + s3 supply chain (with empty bucket first)
-├─ 04. eks cluster (wait until gone)
-├─ 05. iam roles (unless --keep-iam)
-├─ 06. route table associations
-├─ 07. nat gateway (wait for EIP unassociation — port aws-gpu-setup's wait_gone pattern)
-├─ 08. EIP release
-├─ 09. igw detach + delete
-├─ 10. subnets
-├─ 11. vpc
-└─ 12. clear state.env (or delete .awsbnkctl/<name>/ entirely on --purge)
+│
+│   ◄── Future slices (slice 3+) insert here in reverse order
+│
+├─ 07. iam down (Phase07IAMDown) ◄── slice 2 (shipped)
+│       remove role from profile → delete profile → detach + delete inline
+│       policies on node role → delete node role → same for cluster role
+├─ 06. route tables down (Phase06RouteTablesDown) ◄── slice 1
+├─ 05. nat gateway + EIP down (Phase05NATDown)    ◄── slice 1
+├─ 04. igw down (Phase04IGWDown)                  ◄── slice 1
+├─ 03. subnets down (Phase03SubnetsDown)          ◄── slice 1
+└─ 02. vpc down (Phase02VPCDown)                  ◄── slice 1
 ```
 
 **Idempotency:** every phase tolerates "already gone" by swallowing the relevant AWS error codes:

@@ -436,6 +436,9 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 	if err := phases.Phase06RouteTables(ctx, cl, st, clients, dryRun); err != nil {
 		return fmt.Errorf("up: %w", err)
 	}
+	if err := phases.Phase07IAM(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
 
 	if dryRun {
 		fmt.Fprintln(os.Stderr, "→ dry-run complete")
@@ -478,7 +481,12 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool) error {
 		}
 	}
 
-	// Reverse phase order: 06 → 05 → 04 → 03 → 02.
+	// Reverse phase order: 07 → 06 → 05 → 04 → 03 → 02.
+	// IAM (phase 07) destroys first — no AWS-side VPC dependency, and reverse
+	// create order keeps the down log readable.
+	if err := phases.Phase07IAMDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
 	if err := phases.Phase06RouteTablesDown(ctx, cl, st, clients); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}

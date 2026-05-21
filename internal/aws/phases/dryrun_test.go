@@ -34,7 +34,7 @@ func sydTracerCluster() *intent.Cluster {
 	}
 }
 
-// TestDryRun_AllPhasesEndToEnd verifies that running phases 00–06 with
+// TestDryRun_AllPhasesEndToEnd verifies that running phases 00–07 with
 // dryRun=true:
 //   - makes zero mutating AWS API calls
 //   - all phases return nil
@@ -49,7 +49,13 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 	}
 
 	ec2m := &mockEC2{}
-	clients := testClients(ec2m)
+	iamm := newMockIAM()
+	clients := &Clients{
+		EC2:     ec2m,
+		STS:     &mockSTSImpl{accountID: "111122223333"},
+		IAM:     iamm,
+		Profile: "test",
+	}
 	cl := sydTracerCluster()
 	ctx := context.Background()
 
@@ -72,8 +78,11 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 	if err := Phase06RouteTables(ctx, cl, st, clients, true); err != nil {
 		t.Fatalf("Phase06RouteTables: %v", err)
 	}
+	if err := Phase07IAM(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase07IAM: %v", err)
+	}
 
-	// Zero mutating AWS calls.
+	// Zero mutating AWS calls — EC2.
 	if ec2m.createVpcCalls != 0 {
 		t.Errorf("createVpcCalls = %d, want 0", ec2m.createVpcCalls)
 	}
@@ -93,7 +102,18 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 		t.Errorf("createRTBCalls = %d, want 0", ec2m.createRTBCalls)
 	}
 
-	// Placeholder state values must be present.
+	// Zero mutating AWS calls — IAM.
+	if iamm.createRoleCalls != 0 {
+		t.Errorf("createRoleCalls = %d, want 0", iamm.createRoleCalls)
+	}
+	if iamm.createInstanceProfileCalls != 0 {
+		t.Errorf("createInstanceProfileCalls = %d, want 0", iamm.createInstanceProfileCalls)
+	}
+	if iamm.addRoleToInstanceProfileCalls != 0 {
+		t.Errorf("addRoleToInstanceProfileCalls = %d, want 0", iamm.addRoleToInstanceProfileCalls)
+	}
+
+	// Placeholder state values must be present — EC2 phases.
 	checks := map[string]string{
 		"VPC_ID":          "dry-run-vpc",
 		"PUBLIC_SUBNETS":  "dry-run-subnet-pub-1,dry-run-subnet-pub-2",
@@ -107,6 +127,20 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 	for key, want := range checks {
 		if got := st.Get(key); got != want {
 			t.Errorf("state[%s] = %q, want %q", key, got, want)
+		}
+	}
+
+	// Placeholder state values — IAM phase 07.
+	name := cl.Metadata.Name
+	iamChecks := map[string]string{
+		"EKS_CLUSTER_ROLE_ARN":       "arn:aws:iam::dry-run:role/" + name + "-eks-cluster-role",
+		"EKS_NODE_ROLE_ARN":          "arn:aws:iam::dry-run:role/" + name + "-eks-node-role",
+		"NODE_INSTANCE_PROFILE_NAME": name + "-node-instance-profile",
+		"NODE_INSTANCE_PROFILE_ARN":  "arn:aws:iam::dry-run:instance-profile/" + name + "-node-instance-profile",
+	}
+	for key, want := range iamChecks {
+		if got := st.Get(key); got != want {
+			t.Errorf("dry-run state[%s] = %q, want %q", key, got, want)
 		}
 	}
 
