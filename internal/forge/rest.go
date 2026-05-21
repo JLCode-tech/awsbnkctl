@@ -134,17 +134,27 @@ func restCreateProject(ctx context.Context, base, token string, req RegisterRequ
 		"environment":    "dev",
 		"description":    fmt.Sprintf("Created by awsbnkctl for workspace %q", req.WorkspaceName),
 	}
+	// Forge can return either a flat shape `{id, name, ...}` or a wrapped
+	// shape `{project: {id, name, ...}, success: true}`. The MCP tool docs
+	// suggest the wrapped form but localhost forge's REST returns flat.
+	// Try wrapped first; fall back to flat. (Live test on 2026-05-21
+	// produced the flat form — wrapped form is forge >=2.10.x.)
 	var resp struct {
+		ID      int         `json:"id"`
+		Name    string      `json:"name"`
 		Project restProject `json:"project"`
 		Success bool        `json:"success"`
 	}
 	if err := restPost(ctx, base+"/api/projects", token, body, &resp); err != nil {
 		return restProject{}, err
 	}
-	if resp.Project.ID == 0 {
-		return restProject{}, fmt.Errorf("forge REST create project: no project ID in response")
+	if resp.Project.ID != 0 {
+		return resp.Project, nil
 	}
-	return resp.Project, nil
+	if resp.ID != 0 {
+		return restProject{ID: resp.ID, Name: resp.Name}, nil
+	}
+	return restProject{}, fmt.Errorf("forge REST create project: no project ID in response (tried flat + wrapped shapes)")
 }
 
 type restCluster struct {
@@ -159,7 +169,10 @@ func restCreateCluster(ctx context.Context, base, token string, projectID int, r
 		"region":         req.Region,
 		"kubeconfig":     string(req.Kubeconfig),
 	}
+	// Same flat-or-wrapped tolerance as restCreateProject.
 	var resp struct {
+		ID      int         `json:"id"`
+		Name    string      `json:"name"`
 		Cluster restCluster `json:"cluster"`
 		Success bool        `json:"success"`
 	}
@@ -167,10 +180,13 @@ func restCreateCluster(ctx context.Context, base, token string, projectID int, r
 	if err := restPost(ctx, url, token, body, &resp); err != nil {
 		return restCluster{}, err
 	}
-	if resp.Cluster.ID == 0 {
-		return restCluster{}, fmt.Errorf("forge REST create cluster: no cluster ID in response")
+	if resp.Cluster.ID != 0 {
+		return resp.Cluster, nil
 	}
-	return resp.Cluster, nil
+	if resp.ID != 0 {
+		return restCluster{ID: resp.ID, Name: resp.Name}, nil
+	}
+	return restCluster{}, fmt.Errorf("forge REST create cluster: no cluster ID in response (tried flat + wrapped shapes)")
 }
 
 func restDeleteCluster(ctx context.Context, base, token string, projectID, clusterID int) error {

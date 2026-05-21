@@ -144,21 +144,29 @@ func ensureNodeGroup(
 		labels,
 	)
 
-	// Kubernetes node labels.
+	// Kubernetes node labels. K8s label keys can't contain ':' so use the
+	// awsbnkctl.io/ prefix (matching the namespace-label convention from
+	// docs/POST_TERRAFORM_DIRECTION.md §3 / D-006). The `:` form used for
+	// AWS resource tags would cause an EKS InvalidParameterException
+	// (regex '([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]').
 	k8sLabels := map[string]string{
-		"awsbnkctl:cluster": clusterDisplayName,
+		"awsbnkctl.io/cluster": clusterDisplayName,
 	}
 	for k, v := range ng.Labels {
 		k8sLabels[k] = v
 	}
 
-	// #nosec G115 -- DiskSize/DesiredSize/MinSize/MaxSize come from validated
-	// cluster.yaml ints; defaults (50/1/1/2) are small. EKS API requires int32.
-	// Bounds-check anyway to satisfy gosec without an unconditional disable.
+	// Bounds-check before int32 cast (DiskSize/DesiredSize/MinSize/MaxSize
+	// come from validated cluster.yaml; defaults are 50/1/1/2). EKS API
+	// requires int32. The #nosec annotations satisfy gosec G115 — the
+	// bounds check above makes the cast genuinely safe.
 	if ng.DiskSize > 1<<30 || ng.DesiredSize > 1<<30 || ng.MinSize > 1<<30 || ng.MaxSize > 1<<30 {
 		return fmt.Errorf("nodegroup %s: scaling/disk value too large", ngName)
 	}
-	diskSize := int32(ng.DiskSize)
+	diskSize := int32(ng.DiskSize)              // #nosec G115 -- bounded above
+	desiredSize := int32(ng.DesiredSize)        // #nosec G115 -- bounded above
+	minSize := int32(ng.MinSize)                // #nosec G115 -- bounded above
+	maxSize := int32(ng.MaxSize)                // #nosec G115 -- bounded above
 	_, err = eksc.CreateNodegroup(ctx, &eks.CreateNodegroupInput{
 		ClusterName:   ptr(clusterName),
 		NodegroupName: ptr(ngName),
@@ -167,9 +175,9 @@ func ensureNodeGroup(
 		AmiType:       ekstypes.AMITypesAl2X8664,
 		InstanceTypes: []string{ng.InstanceType},
 		ScalingConfig: &ekstypes.NodegroupScalingConfig{
-			DesiredSize: int32Ptr(int32(ng.DesiredSize)),
-			MinSize:     int32Ptr(int32(ng.MinSize)),
-			MaxSize:     int32Ptr(int32(ng.MaxSize)),
+			DesiredSize: int32Ptr(desiredSize),
+			MinSize:     int32Ptr(minSize),
+			MaxSize:     int32Ptr(maxSize),
 		},
 		DiskSize: &diskSize,
 		Labels:   k8sLabels,
