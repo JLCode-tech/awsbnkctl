@@ -138,6 +138,8 @@ func writeKubeconfig(path string, data kubeconfigData) error {
 
 	// Atomic write: write to .tmp then rename.
 	tmpPath := path + ".tmp"
+	// #nosec G304 -- tmpPath derives from .awsbnkctl/<cluster.metadata.name>/kubeconfig.tmp;
+	// cluster name is regex-validated at intent load. Same pattern as state.env writes.
 	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening kubeconfig tmp file: %w", err)

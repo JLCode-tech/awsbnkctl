@@ -152,7 +152,13 @@ func ensureNodeGroup(
 		k8sLabels[k] = v
 	}
 
-	diskSize := int32(ng.DiskSize) //nolint:gosec
+	// #nosec G115 -- DiskSize/DesiredSize/MinSize/MaxSize come from validated
+	// cluster.yaml ints; defaults (50/1/1/2) are small. EKS API requires int32.
+	// Bounds-check anyway to satisfy gosec without an unconditional disable.
+	if ng.DiskSize > 1<<30 || ng.DesiredSize > 1<<30 || ng.MinSize > 1<<30 || ng.MaxSize > 1<<30 {
+		return fmt.Errorf("nodegroup %s: scaling/disk value too large", ngName)
+	}
+	diskSize := int32(ng.DiskSize)
 	_, err = eksc.CreateNodegroup(ctx, &eks.CreateNodegroupInput{
 		ClusterName:   ptr(clusterName),
 		NodegroupName: ptr(ngName),
@@ -161,9 +167,9 @@ func ensureNodeGroup(
 		AmiType:       ekstypes.AMITypesAl2X8664,
 		InstanceTypes: []string{ng.InstanceType},
 		ScalingConfig: &ekstypes.NodegroupScalingConfig{
-			DesiredSize: int32Ptr(int32(ng.DesiredSize)), //nolint:gosec
-			MinSize:     int32Ptr(int32(ng.MinSize)),     //nolint:gosec
-			MaxSize:     int32Ptr(int32(ng.MaxSize)),     //nolint:gosec
+			DesiredSize: int32Ptr(int32(ng.DesiredSize)),
+			MinSize:     int32Ptr(int32(ng.MinSize)),
+			MaxSize:     int32Ptr(int32(ng.MaxSize)),
 		},
 		DiskSize: &diskSize,
 		Labels:   k8sLabels,
