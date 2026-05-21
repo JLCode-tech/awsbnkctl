@@ -360,7 +360,7 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 		fmt.Fprintln(os.Stderr, "→ dry-run: printing plan, no AWS mutations will be made")
 	}
 
-	if err := phases.Phase00Preflight(ctx, cl, st, clients); err != nil {
+	if err := phases.Phase00Preflight(ctx, cl, st, clients, dryRun); err != nil {
 		return fmt.Errorf("up: %w", err)
 	}
 	if err := phases.Phase02VPC(ctx, cl, st, clients, dryRun); err != nil {

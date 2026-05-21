@@ -37,6 +37,7 @@ func Phase04IGW(ctx context.Context, cl *intent.Cluster, st *state.State, client
 		igwID = existing
 	} else if dryRun {
 		fmt.Fprintf(os.Stderr, "[phase 04] dry-run: would create IGW and attach to %s\n", vpcID)
+		st.Set("IGW_ID", "dry-run-igw")
 		return nil
 	} else {
 		resourceTags := tags.Merge(
