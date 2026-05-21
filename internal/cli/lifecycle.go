@@ -45,6 +45,13 @@ var (
 	// cadences as the spike unlocks the live-apply path.
 	flagLifecycleDryRun bool
 
+	// flagUpDryRun is bound ONLY to upCmd's --dry-run. Cobra/pflag's BoolVar
+	// initialises the backing variable to the default at registration time;
+	// because planCmd.BoolVar binds the same name with default=true on the
+	// SHARED flagLifecycleDryRun var, upCmd's --dry-run cannot use that var
+	// without inheriting planCmd's true default. Split it.
+	flagUpDryRun bool
+
 	// flagRegisterWithForge wires the P2 auto-handoff: after a
 	// successful `awsbnkctl up`, register the resulting EKS cluster
 	// with a running bnk-forge instance over MCP. No-op in dry-run.
@@ -125,7 +132,9 @@ func init() {
 	upCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the confirmation prompt before apply")
 	upCmd.Flags().StringVar(&flagTFSource, "tf-source", "", "override TF source for this run only")
 	upCmd.Flags().BoolVar(&flagNoKubeconfig, "no-kubeconfig", false, "skip the post-apply admin kubeconfig fetch")
-	upCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", false, "terraform plan only against the full Sprint 3 graph — never apply against AWS")
+	// upCmd has its OWN dry-run variable; planCmd binds to flagLifecycleDryRun
+	// with default=true and that shared-var design poisoned upCmd's default.
+	upCmd.Flags().BoolVar(&flagUpDryRun, "dry-run", false, "for --config: print the phased plan and exit 0 with no AWS mutations; for legacy TF path: terraform plan only")
 	upCmd.Flags().BoolVar(&flagRegisterWithForge, "register-with-forge", false, "after a successful apply, register the EKS cluster with bnk-forge over MCP (no-op in --dry-run)")
 	upCmd.Flags().StringVar(&flagConfig, "config", "", "path to cluster.yaml; activates Go-SDK phased path (bypasses TF)")
 
@@ -206,11 +215,19 @@ func resolveVarFiles(vfs []string) ([]string, error) {
 func runUp(cmd *cobra.Command, _ []string) error {
 	// --- New Go-SDK phased path ---
 	if flagConfig != "" {
-		return runPhasedUp(cmd.Context(), flagConfig, flagLifecycleDryRun)
+		// flagUpDryRun is upCmd-only so planCmd's shared-var poisoning of
+		// flagLifecycleDryRun cannot affect us.
+		return runPhasedUp(cmd.Context(), flagConfig, flagUpDryRun)
 	}
 
-	// --- Legacy Terraform path (unchanged) ---
-	if !flagLifecycleDryRun {
+	// --- Legacy Terraform path ---
+	// flagUpDryRun is upCmd's own --dry-run var; flagLifecycleDryRun is
+	// owned by planCmd and is poisoned to `true` at init time, so we must
+	// not read it here. (The original code used flagLifecycleDryRun and
+	// happened to work because upCmd's BoolVar reset it to false; that
+	// binding is now gone because we split the var to fix --dry-run leakage
+	// into the phased path.)
+	if !flagUpDryRun {
 		return errors.New("awsbnkctl up requires --dry-run in Sprint 3: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
 	resolved, err := resolveVarFiles(flagVarFiles)
@@ -227,7 +244,7 @@ func runUp(cmd *cobra.Command, _ []string) error {
 	// The flag still wires through so operators get a single command
 	// once v0.2 unlocks live apply.
 	if flagRegisterWithForge {
-		if flagLifecycleDryRun {
+		if flagUpDryRun {
 			fmt.Fprintln(os.Stderr, "→ --register-with-forge: dry-run, skipping forge registration (would run `forge register` after live apply)")
 			return nil
 		}
