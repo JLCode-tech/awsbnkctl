@@ -2,6 +2,9 @@ package phases
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -9,6 +12,8 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	"github.com/JLCode-tech/awsbnkctl/internal/forge"
+	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
 
 // idempotencyMockEC2 extends mockEC2 to behave like a real API: after the
@@ -137,12 +142,21 @@ func TestIdempotency_SecondRunProducesZeroCreateCalls(t *testing.T) {
 	awsmw.ResetForTest()
 	dir := t.TempDir()
 	cl := testCluster()
+	// Add ClusterSpec for EKS phases.
+	cl.ClusterSpec = &intent.ClusterSpec{
+		KubernetesVersion: "1.30",
+		NodeGroups: []intent.NodeGroupSpec{
+			{Name: "default", InstanceType: "t3.medium", DesiredSize: 1, MinSize: 1, MaxSize: 2, DiskSize: 50},
+		},
+	}
 	imock := &idempotencyMockEC2{}
 	iamMock := newMockIAM()
+	eksMock := newMockEKS()
 	clients := &Clients{
 		EC2:     imock,
 		STS:     &mockSTSImpl{accountID: "111122223333"},
 		IAM:     iamMock,
+		EKS:     eksMock,
 		Profile: "test",
 	}
 
@@ -172,6 +186,12 @@ func TestIdempotency_SecondRunProducesZeroCreateCalls(t *testing.T) {
 		if err := Phase07IAM(ctx, cl, st, clients, false); err != nil {
 			t.Fatalf("%s Phase07IAM: %v", label, err)
 		}
+		if err := Phase08EKSCluster(ctx, cl, st, clients, false); err != nil {
+			t.Fatalf("%s Phase08EKSCluster: %v", label, err)
+		}
+		if err := Phase10NodeGroup(ctx, cl, st, clients, false); err != nil {
+			t.Fatalf("%s Phase10NodeGroup: %v", label, err)
+		}
 	}
 
 	// First run — all resources created.
@@ -184,15 +204,25 @@ func TestIdempotency_SecondRunProducesZeroCreateCalls(t *testing.T) {
 	if iamMock.createRoleCalls == 0 {
 		t.Fatal("run1: expected IAM create role calls, got 0")
 	}
+	if eksMock.createClusterCalls == 0 {
+		t.Fatal("run1: expected EKS create cluster calls, got 0")
+	}
+	if eksMock.createNodegroupCalls == 0 {
+		t.Fatal("run1: expected EKS create nodegroup calls, got 0")
+	}
 
 	// Snapshot create counts after run1.
-	snap := struct{ vpc, subnet, igw, eip, nat, rtb, roles, profiles, addRole int }{
+	snap := struct{ vpc, subnet, igw, eip, nat, rtb, roles, profiles, addRole, clusters, nodegroups int }{
 		imock.createVpcCalls, imock.createSubnetCalls, imock.createIGWCalls,
 		imock.allocAddrCalls, imock.createNATCalls, imock.createRTBCalls,
 		iamMock.createRoleCalls, iamMock.createInstanceProfileCalls, iamMock.addRoleToInstanceProfileCalls,
+		eksMock.createClusterCalls, eksMock.createNodegroupCalls,
 	}
 
 	// Second run — all resources already exist, so create calls must not increase.
+	// Phase 09 is not called in this test because the cluster has no forge block —
+	// it returns immediately at the enabled check. See
+	// TestIdempotency_Phase09_RegisteredLinkSkipsForge for the forge-specific case.
 	run("run2")
 	if imock.createVpcCalls != snap.vpc {
 		t.Errorf("run2: createVpcCalls increased from %d to %d", snap.vpc, imock.createVpcCalls)
@@ -220,5 +250,70 @@ func TestIdempotency_SecondRunProducesZeroCreateCalls(t *testing.T) {
 	}
 	if iamMock.addRoleToInstanceProfileCalls != snap.addRole {
 		t.Errorf("run2: addRoleToInstanceProfileCalls increased from %d to %d", snap.addRole, iamMock.addRoleToInstanceProfileCalls)
+	}
+	if eksMock.createClusterCalls != snap.clusters {
+		t.Errorf("run2: createClusterCalls increased from %d to %d", snap.clusters, eksMock.createClusterCalls)
+	}
+	if eksMock.createNodegroupCalls != snap.nodegroups {
+		t.Errorf("run2: createNodegroupCalls increased from %d to %d", snap.nodegroups, eksMock.createNodegroupCalls)
+	}
+}
+
+// TestIdempotency_Phase09_RegisteredLinkSkipsForge verifies that when
+// forge-link.json already exists with Status="registered", Phase09ForgeRegister
+// returns nil without making any forge HTTP calls (zero calls to the forge server).
+func TestIdempotency_Phase09_RegisteredLinkSkipsForge(t *testing.T) {
+	awsmw.ResetForTest()
+
+	callCount := 0
+	// A forge server that tracks any call made — should receive zero calls.
+	forgeHitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer forgeHitSrv.Close()
+
+	dir := t.TempDir()
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	cl := testCluster()
+	cl.Forge = &intent.ForgeSpec{
+		Enabled: true,
+		MCPURL:  forgeHitSrv.URL + "/mcp/",
+		URL:     forgeHitSrv.URL,
+	}
+	cl.ClusterSpec = &intent.ClusterSpec{
+		KubernetesVersion: "1.30",
+		NodeGroups: []intent.NodeGroupSpec{
+			{Name: "default", InstanceType: "t3.medium", DesiredSize: 1, MinSize: 1, MaxSize: 2, DiskSize: 50},
+		},
+	}
+
+	// Pre-write a registered link so idempotency path fires.
+	if err := forge.WriteLink(cl.StateDir(), &forge.Link{
+		ProjectID: 11, ClusterID: 99, Status: "registered",
+	}); err != nil {
+		t.Fatalf("WriteLink: %v", err)
+	}
+
+	st, _ := state.Load(dir)
+	clients := &Clients{
+		Profile:     "test",
+		ForgeClient: forge.NewClient(forgeHitSrv.URL + "/mcp/"),
+	}
+
+	if err := Phase09ForgeRegister(context.Background(), cl, st, clients, false); err != nil {
+		t.Fatalf("Phase09ForgeRegister: %v", err)
+	}
+	if callCount > 0 {
+		t.Errorf("expected zero forge HTTP calls on second run with registered link, got %d", callCount)
 	}
 }

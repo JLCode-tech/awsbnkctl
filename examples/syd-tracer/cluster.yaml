@@ -72,6 +72,18 @@ network:
   # For HA multi-AZ, set to len(azs). Per-AZ NAT is a slice 2+ option.
   natGateways: 1
 
+# cluster: EKS control plane + managed node group configuration (slice 3+).
+# Phases 08 (EKS cluster), 10 (node group), 11 (kubeconfig) require this block.
+cluster:
+  kubernetesVersion: "1.30"
+  nodeGroups:
+    - name: default
+      instanceType: t3.medium
+      desiredSize: 1
+      minSize: 1
+      maxSize: 2
+      diskSize: 50
+
 # tags merged into every AWS resource alongside the mandatory awsbnkctl:* keys.
 tags:
   cost-center: RnD-AI
