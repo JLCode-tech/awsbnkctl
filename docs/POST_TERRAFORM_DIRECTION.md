@@ -248,11 +248,23 @@ up
 │       12.3 apply cert-manager v1.16.1 via embedded upstream YAML; wait Deployments + CRD
 │       12.4 apply BNK cert chain (ClusterIssuer → Certificate → CAIssuer); wait CA cert Ready
 │       variant manifest scaffold: internal/k8s/manifests/{shared,host-device,sr-iov-tmm}/
-│       deferred to slice 6+: FLO Helm, CNEInstance CR, F5SPKVlan, License CR, DNS-warmup
-└─ 13. postflight smoke (Phase13Postflight) ◄── slice 5 (shipped)
-│       verify: namespaces, cert-manager ready, CA cert Ready, FAR secrets present
-│       optional: forge scan_cluster (best-effort, cluster-ID lookup deferred to slice 6)
-│       ◄── CURRENT IMPLEMENTATION ENDS HERE
+│       deferred to slice 7+: CNEInstance CR, F5SPKVlan, License CR, DNS-warmup
+├─ 14. FLO Helm install (Phase14FLOHelm) ◄── slice 6 (shipped)
+│       OCI registry login → oci://repo.f5.com/charts/f5-lifecycle-operator v2.21.13-0.0.28
+│       Helm install-or-upgrade (idempotent); --wait 15 min timeout
+│       wait cneinstances.k8s.f5.com CRD (5 min)
+│       values from shared/flo-values.yaml.tmpl; skip when addons.flo.enabled: false
+├─ 15. OTEL Certificate CRs (Phase15OTELCerts) ◄── slice 6 (shipped)
+│       external-otelsvr + external-f5ingotelsvr in f5-cne-core
+│       signed by <cluster>-ca-cluster-issuer; wait Ready=True
+└─ 13. postflight smoke (Phase13Postflight) ◄── slice 5 (shipped); extended slice 6
+        verify: namespaces, cert-manager ready, CA cert Ready, FAR secrets present
+        + FLO Deployment ready, cneinstances.k8s.f5.com CRD, OTEL certs Ready
+        optional: forge scan_cluster (best-effort)
+        NOTE: Phase 13 runs LAST in the up chain (after 14 + 15) so postflight
+              covers the full installed set. Phase numbering is identity-stable;
+              call-site ordering is Phase12 → Phase14 → Phase15 → Phase13.
+        ◄── CURRENT IMPLEMENTATION ENDS HERE (slice 6)
 ```
 
 > **Removed from the roadmap:** the original TF graph had `terraform/modules/ecr_mirror/`
@@ -513,7 +525,8 @@ internal/k8s/manifests/
 - ✅ Slice 2 — IAM cluster role + node role + instance profile **[shipped, PR #8]**
 - ✅ Slice 3 — EKS cluster + node group + kubeconfig **[shipped, PR #11]**
 - ✅ Slice 4 — Phase 09 forge register (MCP-first, REST fallback, soft-fail) **[shipped, PR #11]**
-- ✅ Slice 5 — K8s install foundation (shipped): namespaces + FAR/JWT Secrets + cert-manager v1.16.1 + BNK cert chain. Phase 12 (foundation) + Phase 13 (postflight) in up order; Phase12K8sFoundationDown first in destroy order. Variant manifest scaffold `internal/k8s/manifests/{shared,host-device,sr-iov-tmm}/` in place. Deferred: FLO Helm, CNEInstance CR, F5SPKVlan, License CR, DNS-warmup heal, 20-min CNEInstance+License polling (slice 6+).
+- ✅ Slice 5 — K8s install foundation (shipped): namespaces + FAR/JWT Secrets + cert-manager v1.16.1 + BNK cert chain. Phase 12 (foundation) + Phase 13 (postflight) in up order; Phase12K8sFoundationDown first in destroy order. Variant manifest scaffold `internal/k8s/manifests/{shared,host-device,sr-iov-tmm}/` in place.
+- ✅ Slice 6 — FLO Helm install + OTEL certs (shipped): Phase 14 (FLO Helm install via OCI FAR-key auth) + Phase 15 (OTEL Certificate CRs). Phase ordering: Phase12 → Phase14 → Phase15 → Phase13. Down order: Phase15Down → Phase14Down → Phase12Down. Adds `helm.sh/helm/v3` as a direct dep. Deferred to slice 7+: CNEInstance CR, F5SPKVlan, License CR, DNS-warmup heal, 20-min polling, cloud-network-mapping, NADs, IRSA SA.
 - ⏳ Slice 6 — Polish: `inspect` / `doctor` / `status` reading the new state.env + tag scheme. Deletion of `terraform/` + `internal/tf/` + `embedded.go`. Optionally split commands per kindbnkctl pattern (D-009).
 - ⏳ Future (separately scoped, not in the slice plan):
   - Air-gap / ECR mirror — opt-in via cluster.yaml `airGap: true`; only build if/when a deployment requires it.

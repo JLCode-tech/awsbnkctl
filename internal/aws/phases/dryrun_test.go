@@ -8,7 +8,7 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
-	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	"github.com/JLCode-tech/awsbnkctl/internal/intent" //nolint:revive // used for cluster spec + DefaultFLOVersion
 )
 
 // sydTracerCluster returns a cluster matching the syd-tracer shape:
@@ -130,6 +130,13 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 	if err := Phase12K8sFoundation(ctx, cl, st, clients, true); err != nil {
 		t.Fatalf("Phase12K8sFoundation dry-run: %v", err)
 	}
+	if err := Phase14FLOHelm(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase14FLOHelm dry-run: %v", err)
+	}
+	if err := Phase15OTELCerts(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase15OTELCerts dry-run: %v", err)
+	}
+	// Phase 13 runs LAST per the new ordering in lifecycle.go.
 	if err := Phase13Postflight(ctx, cl, st, clients, true); err != nil {
 		t.Fatalf("Phase13Postflight dry-run: %v", err)
 	}
@@ -262,6 +269,25 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 		if v := st.Get(key); v == "" {
 			t.Errorf("dry-run: state[%s] is empty (phase 12 should set placeholders)", key)
 		}
+	}
+
+	// Phase 14 dry-run placeholder state values.
+	if st.Get("FLO_RELEASE_NAME") != floReleaseName {
+		t.Errorf("dry-run: FLO_RELEASE_NAME = %q, want %q", st.Get("FLO_RELEASE_NAME"), floReleaseName)
+	}
+	if st.Get("FLO_VERSION") != intent.DefaultFLOVersion {
+		t.Errorf("dry-run: FLO_VERSION = %q, want %q", st.Get("FLO_VERSION"), intent.DefaultFLOVersion)
+	}
+	if st.Get("FLO_NAMESPACE") != "dry-run" {
+		t.Errorf("dry-run: FLO_NAMESPACE = %q, want dry-run", st.Get("FLO_NAMESPACE"))
+	}
+
+	// Phase 15 dry-run placeholder state values.
+	if st.Get("OTEL_SVR_CERT_NAME") != "dry-run" {
+		t.Errorf("dry-run: OTEL_SVR_CERT_NAME = %q, want dry-run", st.Get("OTEL_SVR_CERT_NAME"))
+	}
+	if st.Get("OTEL_F5ING_CERT_NAME") != "dry-run" {
+		t.Errorf("dry-run: OTEL_F5ING_CERT_NAME = %q, want dry-run", st.Get("OTEL_F5ING_CERT_NAME"))
 	}
 }
 
