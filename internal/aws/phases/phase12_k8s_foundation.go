@@ -2,6 +2,8 @@ package phases
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -323,9 +325,34 @@ func applyLicenseJWTSecret(ctx context.Context, clients *Clients, ns string, jwt
 }
 
 // buildFARSecret constructs the dockerconfigjson Secret object for the FAR archive.
-// The FAR archive file IS the dockerconfigjson — F5 ships it pre-formatted.
-// We base64-encode it as required by the Secret data field.
+//
+// IMPORTANT: F5's FAR archive (`cne_pull_64.json`) is NOT a raw dockerconfigjson.
+// It is a base64-encoded GCP service-account JSON used as the password for
+// repo.f5.com (helm registry login -u _json_key_base64). We must wrap it as a
+// dockerconfigjson before stuffing into Secret.Data.
+//
+// Wrapping per aws-gpu-setup/deploy-bnk.sh lines 61-63:
+//
+//	FAR_KEY_B64   = strings.TrimSpace(file_contents)              // already base64
+//	AUTH_B64      = base64("_json_key_base64:" + FAR_KEY_B64)     // docker-auth value
+//	DOCKER_CFG_JSON = {"auths":{"repo.f5.com":{"auth":"$AUTH_B64"}}}
+//
+// Secret.Data is map[string][]byte — client-go base64-encodes for the wire.
+// We pass DOCKER_CFG_JSON as raw bytes; the API server sees decoded JSON and
+// validates it.
 func buildFARSecret(ns string, farData []byte) *corev1.Secret {
+	farKeyB64 := strings.TrimSpace(string(farData))
+	authValue := base64.StdEncoding.EncodeToString([]byte("_json_key_base64:" + farKeyB64))
+	dockerCfg := map[string]any{
+		"auths": map[string]any{
+			"repo.f5.com": map[string]any{
+				"auth": authValue,
+			},
+		},
+	}
+	// Marshal can't fail for this static shape, but check anyway.
+	dockerCfgJSON, _ := json.Marshal(dockerCfg)
+
 	return &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
@@ -337,7 +364,7 @@ func buildFARSecret(ns string, farData []byte) *corev1.Secret {
 		},
 		Type: corev1.SecretTypeDockerConfigJson,
 		Data: map[string][]byte{
-			corev1.DockerConfigJsonKey: farData,
+			corev1.DockerConfigJsonKey: dockerCfgJSON,
 		},
 	}
 }
