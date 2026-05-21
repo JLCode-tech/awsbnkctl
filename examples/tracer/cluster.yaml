@@ -1,0 +1,71 @@
+# cluster.yaml — tracer-bullet example for the awsbnkctl post-Terraform direction.
+#
+# This topology provisions the minimum viable network for BNK: a VPC with
+# two public subnets and two private subnets across two AZs, one NAT gateway,
+# and the necessary route tables. No EKS, no IAM, no BNK install — this is
+# the "does the plumbing work?" validation topology.
+#
+# Usage:
+#   awsbnkctl up   --config examples/tracer/cluster.yaml
+#   awsbnkctl down --config examples/tracer/cluster.yaml --yes
+#
+# See examples/tracer/README.md for a step-by-step walkthrough.
+
+apiVersion: awsbnkctl/v1
+kind: Cluster
+
+metadata:
+  # name is load-bearing — it becomes the value of the awsbnkctl:cluster=<name>
+  # tag applied to every AWS resource, and the directory name used for the IDs
+  # cache: .awsbnkctl/tracer/state.env
+  # Must match: ^[a-z][a-z0-9-]{0,38}[a-z0-9]$
+  name: tracer
+
+  # region where all resources are created. Must be set explicitly — awsbnkctl
+  # does not pick a default region to avoid silent surprises.
+  region: ap-southeast-2
+
+  # labels are propagated to every AWS resource tag alongside the four
+  # mandatory awsbnkctl:* tags. Use them for cost-centre tracking or
+  # environment markers.
+  labels:
+    owner: jarrod
+    purpose: tracer-bullet
+
+network:
+  # vpcCidr is the IPv4 CIDR block for the VPC. Use a /16 for headroom.
+  vpcCidr: 10.0.0.0/16
+
+  # azs is the explicit list of availability zones. Explicit by design —
+  # awsbnkctl will not pick AZs automatically, because that produces
+  # non-deterministic infra across re-runs.
+  azs:
+    - ap-southeast-2a
+    - ap-southeast-2b
+
+  subnets:
+    public:
+      # Public subnets get map-public-ip-on-launch so instances here have
+      # a directly-routable public IP (used for EKS control-plane endpoint
+      # and jump hosts). Route: 0.0.0.0/0 → IGW.
+      - cidr: 10.0.1.0/24
+        az: ap-southeast-2a
+      - cidr: 10.0.2.0/24
+        az: ap-southeast-2b
+
+    private:
+      # Private subnets have no public IP. Egress via NAT gateway.
+      # Route: 0.0.0.0/0 → NAT GW. BNK worker nodes will live here.
+      - cidr: 10.0.11.0/24
+        az: ap-southeast-2a
+      - cidr: 10.0.12.0/24
+        az: ap-southeast-2b
+
+  # natGateways: 1 = cost-optimised (single NAT in the first public subnet).
+  # For HA multi-AZ, set to the number of AZs. Adding more NAT GWs is slice 2+.
+  natGateways: 1
+
+# tags are merged into every AWS resource tag map alongside the four
+# mandatory awsbnkctl:* tags.
+tags:
+  cost-center: RnD-AI
