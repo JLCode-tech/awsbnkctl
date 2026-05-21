@@ -40,12 +40,23 @@ func Phase03Subnets(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 		return fmt.Errorf("phase03: private subnets: %w", err)
 	}
 
-	if !dryRun {
+	if dryRun {
+		// In dry-run, provisionSubnets skips creation and returns empty slices for
+		// subnets that don't already exist. Populate placeholder IDs so downstream
+		// phases can render their plan.
+		if len(publicIDs) == 0 {
+			publicIDs = makeDryRunSubnetIDs("pub", len(cl.Network.Subnets.Public))
+		}
+		if len(privateIDs) == 0 {
+			privateIDs = makeDryRunSubnetIDs("priv", len(cl.Network.Subnets.Private))
+		}
 		st.Set("PUBLIC_SUBNETS", strings.Join(publicIDs, ","))
 		st.Set("PRIVATE_SUBNETS", strings.Join(privateIDs, ","))
-		return st.Save()
+		return nil
 	}
-	return nil
+	st.Set("PUBLIC_SUBNETS", strings.Join(publicIDs, ","))
+	st.Set("PRIVATE_SUBNETS", strings.Join(privateIDs, ","))
+	return st.Save()
 }
 
 // Phase03SubnetsDown deletes all subnets tagged for this cluster (reverse
@@ -153,6 +164,17 @@ func findSubnetByCIDR(ctx context.Context, ec2c EC2API, clusterName, vpcID, cidr
 		return "", nil
 	}
 	return *out.Subnets[0].SubnetId, nil
+}
+
+// makeDryRunSubnetIDs returns n placeholder subnet IDs for a given visibility
+// label (e.g. "pub", "priv"). Used in dry-run mode to populate state so
+// downstream phases can render their plan.
+func makeDryRunSubnetIDs(label string, n int) []string {
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("dry-run-subnet-%s-%d", label, i+1)
+	}
+	return ids
 }
 
 // collectSubnetIDs returns all subnet IDs for the cluster from state first,
