@@ -194,3 +194,154 @@ func TestStateDir(t *testing.T) {
 		t.Errorf("StateDir: got %q, want %q", got, want)
 	}
 }
+
+const clusterWithEKSYAML = `
+apiVersion: awsbnkctl/v1
+kind: Cluster
+metadata:
+  name: my-cluster
+  region: ap-southeast-2
+network:
+  vpcCidr: 10.0.0.0/16
+  azs:
+    - ap-southeast-2a
+    - ap-southeast-2b
+  subnets:
+    public:
+      - cidr: 10.0.1.0/24
+        az: ap-southeast-2a
+    private:
+      - cidr: 10.0.11.0/24
+        az: ap-southeast-2a
+  natGateways: 1
+cluster:
+  kubernetesVersion: "1.30"
+  nodeGroups:
+    - name: default
+      instanceType: t3.medium
+      desiredSize: 1
+      minSize: 1
+      maxSize: 2
+      diskSize: 50
+`
+
+func TestLoad_ClusterSpecParsed(t *testing.T) {
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", clusterWithEKSYAML)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.ClusterSpec == nil {
+		t.Fatal("ClusterSpec: nil, want populated struct")
+	}
+	if c.ClusterSpec.KubernetesVersion != "1.30" {
+		t.Errorf("KubernetesVersion: got %q, want 1.30", c.ClusterSpec.KubernetesVersion)
+	}
+	if len(c.ClusterSpec.NodeGroups) != 1 {
+		t.Fatalf("NodeGroups len: got %d, want 1", len(c.ClusterSpec.NodeGroups))
+	}
+	ng := c.ClusterSpec.NodeGroups[0]
+	if ng.Name != "default" {
+		t.Errorf("NodeGroup.Name: got %q, want default", ng.Name)
+	}
+	if ng.InstanceType != "t3.medium" {
+		t.Errorf("NodeGroup.InstanceType: got %q, want t3.medium", ng.InstanceType)
+	}
+	if ng.DesiredSize != 1 {
+		t.Errorf("NodeGroup.DesiredSize: got %d, want 1", ng.DesiredSize)
+	}
+	if ng.DiskSize != 50 {
+		t.Errorf("NodeGroup.DiskSize: got %d, want 50", ng.DiskSize)
+	}
+}
+
+func TestLoad_ClusterSpecDefaults(t *testing.T) {
+	yaml := minimalYAML + `
+cluster:
+  nodeGroups:
+    - name: ng
+`
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", yaml)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.ClusterSpec.KubernetesVersion != "1.30" {
+		t.Errorf("default KubernetesVersion: got %q, want 1.30", c.ClusterSpec.KubernetesVersion)
+	}
+	ng := c.ClusterSpec.NodeGroups[0]
+	if ng.InstanceType != "t3.medium" {
+		t.Errorf("default InstanceType: got %q, want t3.medium", ng.InstanceType)
+	}
+	if ng.DesiredSize != 1 {
+		t.Errorf("default DesiredSize: got %d, want 1", ng.DesiredSize)
+	}
+	if ng.MinSize != 1 {
+		t.Errorf("default MinSize: got %d, want 1", ng.MinSize)
+	}
+	if ng.MaxSize != 2 {
+		t.Errorf("default MaxSize: got %d, want 2", ng.MaxSize)
+	}
+	if ng.DiskSize != 50 {
+		t.Errorf("default DiskSize: got %d, want 50", ng.DiskSize)
+	}
+}
+
+func TestLoad_ClusterSpecRejectsEmptyNodeGroups(t *testing.T) {
+	yaml := minimalYAML + `
+cluster:
+  kubernetesVersion: "1.30"
+  nodeGroups: []
+`
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", yaml)
+
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("expected error for empty nodeGroups with cluster block, got nil")
+	}
+}
+
+func TestLoad_ClusterSpecRejectsInvalidNodeGroupName(t *testing.T) {
+	cases := []struct {
+		name string
+		desc string
+	}{
+		{"UPPER", "uppercase not allowed"},
+		{"-starts-dash", "starts with dash"},
+		{"ends-dash-", "ends with dash"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.desc, func(t *testing.T) {
+			yaml := minimalYAML + `
+cluster:
+  nodeGroups:
+    - name: ` + tc.name + `
+`
+			dir := t.TempDir()
+			p := writeFile(t, dir, "cluster.yaml", yaml)
+			_, err := Load(p)
+			if err == nil {
+				t.Fatalf("expected error for node group name %q (%s), got nil", tc.name, tc.desc)
+			}
+		})
+	}
+}
+
+func TestLoad_ClusterSpecOmittedWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", minimalYAML)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.ClusterSpec != nil {
+		t.Errorf("ClusterSpec: got %+v, want nil when cluster block absent", c.ClusterSpec)
+	}
+}

@@ -59,6 +59,67 @@ func TestRemoveLink_Idempotent(t *testing.T) {
 	}
 }
 
+func TestLink_IsRegistered(t *testing.T) {
+	cases := []struct {
+		status string
+		want   bool
+	}{
+		{"", true},           // backward compat: empty = registered
+		{"registered", true}, // explicit registered
+		{"pending", false},   // pending = not registered
+		{"other", false},     // unknown = not registered
+	}
+	for _, tc := range cases {
+		l := &Link{Status: tc.status}
+		if got := l.IsRegistered(); got != tc.want {
+			t.Errorf("IsRegistered(%q) = %v, want %v", tc.status, got, tc.want)
+		}
+	}
+}
+
+func TestWriteReadLink_StatusRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	want := &Link{
+		ProjectID: 5,
+		ClusterID: 10,
+		Workspace: "test",
+		Status:    "pending",
+	}
+	if err := WriteLink(dir, want); err != nil {
+		t.Fatalf("WriteLink: %v", err)
+	}
+	got, err := ReadLink(dir)
+	if err != nil {
+		t.Fatalf("ReadLink: %v", err)
+	}
+	if got.Status != "pending" {
+		t.Errorf("Status = %q, want %q", got.Status, "pending")
+	}
+	if got.IsRegistered() {
+		t.Error("IsRegistered() should return false for pending link")
+	}
+}
+
+func TestReadLink_BackwardCompatNoStatus(t *testing.T) {
+	// Simulate a link file written before slice 4 (no "status" field).
+	dir := t.TempDir()
+	// Write a JSON blob without a status field.
+	legacyJSON := []byte(`{"project_id":7,"cluster_id":42,"workspace":"default"}` + "\n")
+	if err := os.WriteFile(LinkPath(dir), legacyJSON, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := ReadLink(dir)
+	if err != nil {
+		t.Fatalf("ReadLink: %v", err)
+	}
+	if got.Status != "" {
+		t.Errorf("Status = %q, want empty string for backward compat", got.Status)
+	}
+	if !got.IsRegistered() {
+		t.Error("IsRegistered() should return true for link with no status field")
+	}
+}
+
 func TestWriteLink_Atomic(t *testing.T) {
 	// No half-written file: the temp file is renamed into place.
 	// We can't easily simulate a crash mid-write, but we can verify

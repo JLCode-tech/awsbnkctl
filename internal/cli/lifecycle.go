@@ -106,6 +106,13 @@ var (
 	// in `awsbnkctl down --config <file>`. Equivalent to the --yes/-y
 	// flag in aws-gpu-setup/down.sh.
 	flagYes bool
+
+	// flagKeepForgeLink is bound ONLY to downCmd (single-owner per the
+	// cobra shared-flag-variable anti-pattern rules above). When true,
+	// Phase09ForgeRegisterDown skips forge unregister and preserves
+	// forge-link.json so the operator can manage the forge project manually.
+	// Default false (unregister on down).
+	flagKeepForgeLink bool
 )
 
 var initCmd = &cobra.Command{
@@ -180,6 +187,7 @@ func init() {
 	downCmd.Flags().BoolVar(&flagDownDryRun, "dry-run", false, "terraform plan -destroy only — never destroy against AWS")
 	downCmd.Flags().StringVar(&flagConfig, "config", "", "path to cluster.yaml; activates Go-SDK phased path (bypasses TF)")
 	downCmd.Flags().BoolVar(&flagYes, "yes", false, "skip the interactive destroy confirmation (required with --config)")
+	downCmd.Flags().BoolVar(&flagKeepForgeLink, "keep-forge-link", false, "preserve forge-link.json on down (skips Phase 09 forge unregister)")
 	planCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", true, "alias for `awsbnkctl up --dry-run` (always plans, never applies)")
 
 	for _, c := range []*cobra.Command{upCmd, planCmd, applyCmd, downCmd} {
@@ -407,6 +415,10 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 	if err != nil {
 		return fmt.Errorf("up: aws clients: %w", err)
 	}
+	// Attach forge client when forge is enabled in cluster.yaml.
+	if cl.Forge != nil {
+		clients.AttachForgeClient(cl.Forge.Enabled, cl.Forge.MCPURL)
+	}
 
 	stateDir := cl.StateDir()
 	st, err := state.Load(stateDir)
@@ -439,6 +451,18 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 	if err := phases.Phase07IAM(ctx, cl, st, clients, dryRun); err != nil {
 		return fmt.Errorf("up: %w", err)
 	}
+	if err := phases.Phase08EKSCluster(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase09ForgeRegister(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase10NodeGroup(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase11Kubeconfig(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
 
 	if dryRun {
 		fmt.Fprintln(os.Stderr, "→ dry-run complete")
@@ -464,6 +488,10 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool) error {
 	if err != nil {
 		return fmt.Errorf("down: aws clients: %w", err)
 	}
+	// Attach forge client when forge is enabled in cluster.yaml.
+	if cl.Forge != nil {
+		clients.AttachForgeClient(cl.Forge.Enabled, cl.Forge.MCPURL)
+	}
 
 	stateDir := cl.StateDir()
 	st, err := state.Load(stateDir)
@@ -481,9 +509,19 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool) error {
 		}
 	}
 
-	// Reverse phase order: 07 → 06 → 05 → 04 → 03 → 02.
-	// IAM (phase 07) destroys first — no AWS-side VPC dependency, and reverse
-	// create order keeps the down log readable.
+	// Reverse phase order: 11 → 10 → 09 → 08 → 07 → 06 → 05 → 04 → 03 → 02.
+	if err := phases.Phase11KubeconfigDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase10NodeGroupDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase09ForgeRegisterDown(ctx, cl, st, clients, flagKeepForgeLink); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase08EKSClusterDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
 	if err := phases.Phase07IAMDown(ctx, cl, st, clients); err != nil {
 		return fmt.Errorf("down: %w", err)
 	}
