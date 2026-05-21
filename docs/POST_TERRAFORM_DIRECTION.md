@@ -173,7 +173,7 @@ cluster:                            # OPTIONAL for slices 1+2 (network + IAM onl
       diskSize: 50                  # GiB; default 50
       labels:                       # optional Kubernetes node labels
         node-role: worker
-    # For GPU workloads (slice 5+):
+    # For GPU workloads (future slice):
     # - name: gpu
     #   instanceType: p5.48xlarge
     #   desiredSize: 1
@@ -186,12 +186,18 @@ cluster:                            # OPTIONAL for slices 1+2 (network + IAM onl
 pattern: host-device                # selects internal/k8s/manifests/host-device/
                                     # alternatives: sr-iov-tmm (planned)
 
+# BNK supply-chain artefacts loaded as k8s Secrets by slice 5.
+# Paths are local files on the operator's machine; awsbnkctl reads and
+# creates the Secrets directly (NO S3 round-trip, matching aws-gpu-setup).
+bnk:                                # REQUIRED for slice 5 (k8s install)
+  farArchive: ./cne_pull_64.json    # F5 FAR pull credentials (JSON)
+  jwt: ./license.jwt                # F5 subscription JWT
+  manifestVersion: "2.3.0-3.2598.3-0.0.170"   # default — overrides come per pattern
+
 addons:                             # OMITTED for tracer-bullet slice
   flo:
     enabled: true
-    version: "1.5.0"
-  license:
-    jwt: file://./license.jwt
+    version: "v2.21.13-0.0.28"
   cneInstance:
     cisVersion: "3.9.0"
 
@@ -229,18 +235,28 @@ up
 ├─ 07. iam: cluster role, node instance role, node instance profile (Phase07IAM) ◄── slice 2 (shipped)
 ├─ 08. eks cluster (Phase08EKSCluster)       ◄── slice 3 (shipped)
 │       wait until ACTIVE (~10 min); capture endpoint/CA/OIDC URL/security group
-├─ 09. forge register (slice 4: RESERVED — NOT YET IMPLEMENTED)
-│       fires on EKS-Active, before node group; forge sees cluster while node group + BNK install proceed
+├─ 09. forge register (Phase09ForgeRegister) ◄── slice 4 (shipped)
+│       fires on EKS-Active, before node group; MCP-first with REST fallback;
+│       soft-fail with 4-attempt 1s/3s/9s backoff; pending-link on give-up
 ├─ 10. eks node group (Phase10NodeGroup)     ◄── slice 3 (shipped)
 │       wait until ACTIVE (~7 min); subnets: public only; AMI: AL2_x86_64
 ├─ 11. kubeconfig (Phase11Kubeconfig)        ◄── slice 3 (shipped)
 │       write .awsbnkctl/<name>/kubeconfig (exec-auth via `aws eks get-token`)
 │       ◄── CURRENT IMPLEMENTATION ENDS HERE
-├─ 12. ecr mirror + s3 supply chain
-├─ 13. k8s: apply manifests/shared/, then manifests/<pattern>/
-│       (cert chain → license CR → CNEInstance → FLO)
-└─ 14. postflight smoke + optional forge scan_cluster
+├─ 12. k8s: load BNK supply-chain Secrets + apply manifests/shared/,
+│       then manifests/<pattern>/ (cert chain → far-pull-secret → license CR → CNEInstance → FLO)
+│       slice 5 — loads cl.Bnk.FARArchive + cl.Bnk.JWT from local files
+│       directly into k8s Secrets; NO S3, NO ECR mirror (matches aws-gpu-setup)
+└─ 13. postflight smoke + optional forge scan_cluster
 ```
+
+> **Removed from the roadmap:** the original TF graph had `terraform/modules/ecr_mirror/`
+> and `terraform/modules/s3_supply_chain/` (~281 LOC combined). aws-gpu-setup
+> demonstrates BNK works without either — FAR archive + JWT load as k8s Secrets
+> from local files, and EKS pulls F5 images directly via the FAR pull secret.
+> If a future deployment needs air-gap or image mirroring, model it as an
+> opt-in cluster.yaml field (`airGap: true`) in a separate slice — don't
+> pre-build it.
 
 > **Phase numbering note:** Phase 01 is reserved; the network phases are 02–06; IAM is 07.
 > The original spec had IAM at §6.06 — the actual code uses 07 to leave room for future
@@ -270,8 +286,17 @@ down
 │   ├─ load state.env; if missing, tag-discovery / name-based fallback
 │   └─ unless --keep-forge-link: forge unregister
 │
-│   ◄── Future slices (slice 3+) insert here in reverse order
+│   ◄── Future slice 5 inserts phase 12 down here (k8s teardown)
 │
+├─ 11. kubeconfig down (Phase11KubeconfigDown) ◄── slice 3 (shipped)
+│       delete .awsbnkctl/<name>/kubeconfig (best-effort; tolerates absent)
+├─ 10. node group down (Phase10NodeGroupDown) ◄── slice 3 (shipped)
+│       delete EKS managed node group; wait until gone
+├─ 09. forge unregister (Phase09ForgeRegisterDown) ◄── slice 4 (shipped)
+│       MCP delete first; REST fallback on catalog gap; --keep-forge-link
+│       opt-out preserves the project record
+├─ 08. eks cluster down (Phase08EKSClusterDown) ◄── slice 3 (shipped)
+│       delete EKS control plane; wait until ResourceNotFoundException
 ├─ 07. iam down (Phase07IAMDown) ◄── slice 2 (shipped)
 │       remove role from profile → delete profile → detach + delete inline
 │       policies on node role → delete node role → same for cluster role
@@ -289,8 +314,6 @@ down
 | ec2 | `InvalidVpcID.NotFound`, `InvalidSubnetID.NotFound`, `InvalidRouteTableID.NotFound`, `InvalidInternetGatewayID.NotFound`, `InvalidNatGatewayID.NotFound`, `InvalidAllocationID.NotFound`, `InvalidNetworkInterfaceID.NotFound` |
 | eks | `ResourceNotFoundException` |
 | iam | `NoSuchEntity` |
-| s3 | `NoSuchBucket` |
-| ecr | `RepositoryNotFoundException` |
 
 **Post-condition waits** (port from aws-gpu-setup's `lib/lab-core.sh: wait_gone`):
 - NAT GW deletion → wait for `State == deleted`
@@ -364,7 +387,7 @@ Every AWS resource created by awsbnkctl carries:
 | Key | Value | Purpose |
 |---|---|---|
 | `awsbnkctl:cluster` | `<cluster.metadata.name>` | **Required.** Identifies the cluster a resource belongs to. Drives `down` discovery. |
-| `awsbnkctl:component` | `vpc`, `subnet-public`, `subnet-private`, `igw`, `nat`, `rtb`, `eks`, `nodegroup`, `iam-role`, `s3`, `ecr` | Per-resource category. Lets `inspect` produce structured output. |
+| `awsbnkctl:component` | `vpc`, `subnet-public`, `subnet-private`, `igw`, `nat`, `rtb`, `eks-cluster`, `eks-nodegroup`, `iam-cluster-role`, `iam-node-role`, `iam-node-profile` | Per-resource category. Lets `inspect` produce structured output. |
 | `awsbnkctl:pattern` | `host-device`, `sr-iov-tmm`, … | The data-path pattern used. Stamped on cluster-level resources. |
 | `awsbnkctl:managed` | `true` | Marker for any future bulk-listing tool. |
 | `Name` | `<cluster.metadata.name>-<component>` | Human-readable AWS console label. |
@@ -479,12 +502,17 @@ internal/k8s/manifests/
 - `awsbnkctl down --yes` removes everything; second `down` is a no-op.
 - Mid-run SSO expiry produces the auth-sentinel hard-exit with the `aws sso login` hint, not silent no-op.
 
-**Out of scope for the tracer slice (subsequent slices):**
-- IAM roles (slice 2)
-- EKS cluster + node group (slice 3)
-- forge register call (slice 4)
-- k8s manifests + variants (slice 5)
-- `inspect` / `doctor` / `status` polish (slice 6)
+**Slice roadmap (updated 2026-05-21 post slice-04 merge):**
+- ✅ Slice 1 — VPC + subnets + IGW + NAT + RTs (tracer bullet) **[shipped, PR #8]**
+- ✅ Slice 2 — IAM cluster role + node role + instance profile **[shipped, PR #8]**
+- ✅ Slice 3 — EKS cluster + node group + kubeconfig **[shipped, PR #11]**
+- ✅ Slice 4 — Phase 09 forge register (MCP-first, REST fallback, soft-fail) **[shipped, PR #11]**
+- ⏳ Slice 5 — K8s manifest variants: load BNK supply-chain Secrets (FAR archive + JWT from local files); apply `manifests/shared/` + `manifests/<pattern>/` (cert chain → far-pull-secret → license CR → CNEInstance → FLO). Phase 12 in the up order; phase 12 down in destroy order. **No ECR mirror, no S3 supply chain** — those were TF holdovers from a different use case (air-gap) and are not in the slice 5 scope.
+- ⏳ Slice 6 — Polish: `inspect` / `doctor` / `status` reading the new state.env + tag scheme. Deletion of `terraform/` + `internal/tf/` + `embedded.go`. Optionally split commands per kindbnkctl pattern (D-009).
+- ⏳ Future (separately scoped, not in the slice plan):
+  - Air-gap / ECR mirror — opt-in via cluster.yaml `airGap: true`; only build if/when a deployment requires it.
+  - Multi-cluster workspace
+  - Scenarios framework port from kindbnkctl (D-009 reference)
 
 ---
 
