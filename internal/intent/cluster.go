@@ -63,6 +63,9 @@ type Cluster struct {
 	// and JWT paths are shape-validated at Load time (files exist + readable);
 	// file-content validation (non-empty) is deferred to phase 12 entry.
 	Bnk *BnkSpec `yaml:"bnk,omitempty"`
+	// Addons declares optional add-on configuration (slice 6+). When absent,
+	// all add-ons run with their built-in defaults (FLO enabled at pinned version).
+	Addons *AddonsSpec `yaml:"addons,omitempty"`
 	// Tags are merged into every AWS resource created by awsbnkctl alongside
 	// the required awsbnkctl:* keys.
 	Tags map[string]string `yaml:"tags,omitempty"`
@@ -146,6 +149,49 @@ type ForgeSpec struct {
 	// MCPURL is the forge MCP endpoint. Default http://localhost:8081/mcp/.
 	// Slice 4 prefers MCP and falls back to REST at URL on capability gaps.
 	MCPURL string `yaml:"mcpUrl,omitempty"`
+}
+
+// AddonsSpec holds optional add-on configuration for slice 6+.
+// When the block is absent, all add-ons run with their built-in defaults
+// (e.g. FLO enabled at the pinned version).
+type AddonsSpec struct {
+	// Flo configures the F5 Lifecycle Operator installation. When absent,
+	// FLO is installed with the pinned chart version.
+	Flo *FloSpec `yaml:"flo,omitempty"`
+}
+
+// FloSpec configures the FLO (F5 Lifecycle Operator) Helm install in Phase 14.
+type FloSpec struct {
+	// Version overrides the default pinned chart version ("v2.21.13-0.0.28").
+	// Omit to use the default.
+	Version string `yaml:"version,omitempty"`
+	// Enabled is the master switch. Nil or true means FLO is installed.
+	// Explicitly false → Phase 14/15 log a skip and return nil immediately.
+	Enabled *bool `yaml:"enabled,omitempty"`
+}
+
+// FloEnabled returns true when FLO should be installed. The zero value (nil
+// Enabled field) is treated as true so that existing cluster.yaml files without
+// an addons: block still get FLO installed.
+func (f *FloSpec) FloEnabled() bool {
+	if f == nil {
+		return true
+	}
+	if f.Enabled == nil {
+		return true
+	}
+	return *f.Enabled
+}
+
+// FLOVersion returns the chart version to install. Falls back to the pinned
+// default when not overridden.
+const DefaultFLOVersion = "v2.21.13-0.0.28"
+
+func (f *FloSpec) FLOVersion() string {
+	if f == nil || f.Version == "" {
+		return DefaultFLOVersion
+	}
+	return f.Version
 }
 
 // StateDir returns the path to the IDs-cache directory for this cluster

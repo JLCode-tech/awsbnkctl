@@ -83,6 +83,109 @@ func TestRender_MissingFieldStillRenders(t *testing.T) {
 	t.Logf("Render with missing field produced: %s", out)
 }
 
+// ─── FLO values render tests ─────────────────────────────────────────────────
+
+func TestRenderFLOValues_Substitution(t *testing.T) {
+	cl := clusterFixture("syd-tracer")
+	jwt := "test-jwt-content"
+	tmpl := []byte(`caIssuer: {{ .CAIssuer }}
+farSecret: {{ .FARSecretName }}
+jwt: {{ .JWT }}
+cluster: {{ .ClusterName }}`)
+
+	out, err := RenderFLOValues(tmpl, cl, jwt)
+	if err != nil {
+		t.Fatalf("RenderFLOValues: %v", err)
+	}
+	rendered := string(out)
+
+	checks := map[string]string{
+		"caIssuer":  "syd-tracer-ca-cluster-issuer",
+		"farSecret": "far-secret",
+		"jwt":       jwt,
+		"cluster":   "syd-tracer",
+	}
+	for field, want := range checks {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered FLO values missing %s=%q:\n%s", field, want, rendered)
+		}
+	}
+}
+
+func TestFLOValuesVarsFromCluster_Names(t *testing.T) {
+	cl := clusterFixture("my-cluster")
+	v := FLOValuesVarsFromCluster(cl, "my-jwt")
+
+	if v.CAIssuer != "my-cluster-ca-cluster-issuer" {
+		t.Errorf("CAIssuer: got %q", v.CAIssuer)
+	}
+	if v.FARSecretName != "far-secret" {
+		t.Errorf("FARSecretName: got %q", v.FARSecretName)
+	}
+	if v.JWT != "my-jwt" {
+		t.Errorf("JWT: got %q", v.JWT)
+	}
+	if v.ClusterName != "my-cluster" {
+		t.Errorf("ClusterName: got %q", v.ClusterName)
+	}
+}
+
+// ─── OTEL certs render tests ─────────────────────────────────────────────────
+
+func TestRenderOTELCerts_Substitution(t *testing.T) {
+	cl := clusterFixture("syd-tracer")
+	tmpl := []byte(`otelSvr: {{ .OTELSvrCert }}
+otelSvrSecret: {{ .OTELSvrSecret }}
+otelF5Ing: {{ .OTELF5IngCert }}
+otelF5IngSecret: {{ .OTELF5IngSecret }}
+ns: {{ .OperatorNS }}
+issuer: {{ .CAIssuer }}`)
+
+	out, err := RenderOTELCerts(tmpl, cl)
+	if err != nil {
+		t.Fatalf("RenderOTELCerts: %v", err)
+	}
+	rendered := string(out)
+
+	checks := map[string]string{
+		"otelSvr":         "external-otelsvr",
+		"otelSvrSecret":   "external-otelsvr-secret",
+		"otelF5Ing":       "external-f5ingotelsvr",
+		"otelF5IngSecret": "external-f5ingotelsvr-secret",
+		"ns":              "f5-cne-core",
+		"issuer":          "syd-tracer-ca-cluster-issuer",
+	}
+	for field, want := range checks {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered OTEL certs missing %s=%q:\n%s", field, want, rendered)
+		}
+	}
+}
+
+func TestOTELCertsVarsFromCluster_Names(t *testing.T) {
+	cl := clusterFixture("my-cluster")
+	v := OTELCertsVarsFromCluster(cl)
+
+	if v.OTELSvrCert != "external-otelsvr" {
+		t.Errorf("OTELSvrCert: got %q", v.OTELSvrCert)
+	}
+	if v.OTELSvrSecret != "external-otelsvr-secret" {
+		t.Errorf("OTELSvrSecret: got %q", v.OTELSvrSecret)
+	}
+	if v.OTELF5IngCert != "external-f5ingotelsvr" {
+		t.Errorf("OTELF5IngCert: got %q", v.OTELF5IngCert)
+	}
+	if v.OTELF5IngSecret != "external-f5ingotelsvr-secret" {
+		t.Errorf("OTELF5IngSecret: got %q", v.OTELF5IngSecret)
+	}
+	if v.OperatorNS != "f5-cne-core" {
+		t.Errorf("OperatorNS: got %q", v.OperatorNS)
+	}
+	if v.CAIssuer != "my-cluster-ca-cluster-issuer" {
+		t.Errorf("CAIssuer: got %q", v.CAIssuer)
+	}
+}
+
 func TestRender_DefaultValues(t *testing.T) {
 	// Verify that CertChainVarsFromCluster applies the correct naming defaults
 	// even when cluster has minimal spec.
