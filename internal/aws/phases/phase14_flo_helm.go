@@ -35,8 +35,15 @@ const (
 	cneCRDWaitTimeout     = 5 * time.Minute
 	floDeployTimeout      = 60 * time.Second
 
-	cneCRDName    = "cneinstances.k8s.f5.com"
-	floDeployName = "f5-lifecycle-operator-f5-spk-cnf-flo"
+	cneCRDName = "cneinstances.k8s.f5.com"
+	// floDeployName is the primary FLO Deployment name produced by the
+	// f5-lifecycle-operator Helm chart. Verified live on 2026-05-21
+	// against chart v2.21.13-0.0.28: the Deployment is named
+	// "f5-lifecycle-operator" (matches the Helm release name; no
+	// chart-subchart suffix). Builder's initial guess included a
+	// "-f5-spk-cnf-flo" suffix which produced a not-found error in
+	// Phase 13 postflight.
+	floDeployName = "f5-lifecycle-operator"
 )
 
 // helmInstaller is the testability interface wrapping the four Helm SDK actions
