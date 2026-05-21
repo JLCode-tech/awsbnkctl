@@ -428,7 +428,22 @@
     "validatable",
     "zerolog",
     "subverb",
-    "subverbs"
+    "subverbs",
+    "awsmw",
+    "routetables",
+    "mwiget",
+    "rebuildable",
+    "regenerable",
+    "unassociation",
+    "keypair",
+    "postflight",
+    "preflight",
+    "Fprintln",
+    "Fprintf",
+    "eipalloc",
+    "spkvlan",
+    "gatewayclass",
+    "envsubst"
   ],
   "ignorePaths": [
     "book/book/**",

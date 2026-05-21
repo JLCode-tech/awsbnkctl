@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -12,8 +13,11 @@ import (
 	"github.com/spf13/cobra"
 
 	awspkg "github.com/JLCode-tech/awsbnkctl/internal/aws"
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
+	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
 
 // Sprint 3 retarget. The Sprint 0 lifecycle stubs (`up` / `plan` /
@@ -34,12 +38,55 @@ var (
 	flagNoKubeconfig bool
 	flagVarFiles     []string
 
-	// flagLifecycleDryRun gates `awsbnkctl up` (no subcommand) +
-	// `awsbnkctl down` (no subcommand). Distinct from the
-	// cluster-phase flagClusterDryRun in cluster.go so the
-	// full-graph and cluster-only paths can move at different
-	// cadences as the spike unlocks the live-apply path.
+	// ── Cobra shared-flag-variable anti-pattern (READ BEFORE ADDING FLAGS) ──
+	//
+	// cobra/pflag's `Flags().BoolVar(&x, "name", default, ...)` does TWO things:
+	//   1. Registers the flag on the command's FlagSet with the given default
+	//      (held as metadata on the flag definition itself).
+	//   2. Writes `*p = default` to the backing variable AT init() TIME.
+	//
+	// If two commands BoolVar the SAME variable with DIFFERENT defaults, the
+	// LAST init() call wins for the variable's runtime value. The flag's
+	// metadata default is per-command — but cobra reads the value through the
+	// flag's Value interface which dereferences the shared pointer, so
+	// `cmd.Flags().GetBool("name")` returns whatever the last writer set.
+	//
+	// Slice-01 integration testing hit this:
+	//   upCmd.Flags().BoolVar(&flagLifecycleDryRun,  "dry-run", false, ...)
+	//   downCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", false, ...)
+	//   planCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", TRUE,  ...)
+	// — `awsbnkctl up` (no --dry-run) silently ran in dry-run mode because
+	// planCmd's BoolVar set the shared var to `true` at init.
+	//
+	// Rule: a shared package-level var is safe ONLY when every command's
+	// BoolVar/StringVar/etc. uses the SAME default. If you need different
+	// defaults, give each command its own variable (see flagUpDryRun and
+	// flagDownDryRun below).
+	//
+	// Currently-shared vars with matching defaults (safe today, fragile if
+	// defaults diverge):
+	//   flagAuto         — upCmd, applyCmd, downCmd     (all false)
+	//   flagNoKubeconfig — upCmd, applyCmd              (all false)
+	//   flagTFSource     — initCmd, upCmd               (all "")
+	//   flagConfig       — upCmd, downCmd               (all "") — legitimate
+	//   flagVarFiles     — upCmd, planCmd, applyCmd, downCmd (all nil)
+	//   flagClusterDryRun (cluster.go) — upClusterCmd, downClusterCmd (false)
+	// If you change ANY of those defaults, split the variable per command.
+
+	// flagLifecycleDryRun is bound ONLY to planCmd (default true). Was once
+	// shared with upCmd/downCmd; the split happened in two stages:
+	//   slice-01: upCmd → flagUpDryRun     (commit e3d70a8)
+	//   audit:    downCmd → flagDownDryRun (this commit)
 	flagLifecycleDryRun bool
+
+	// flagUpDryRun is bound ONLY to upCmd's --dry-run.
+	flagUpDryRun bool
+
+	// flagDownDryRun is bound ONLY to downCmd's --dry-run. Same anti-pattern
+	// fix as flagUpDryRun: planCmd's planCmd.BoolVar(&flagLifecycleDryRun,
+	// "dry-run", true, ...) would otherwise poison downCmd's legacy TF
+	// dry-run check — a destroy-semantics bug worse than the up case.
+	flagDownDryRun bool
 
 	// flagRegisterWithForge wires the P2 auto-handoff: after a
 	// successful `awsbnkctl up`, register the resulting EKS cluster
@@ -48,6 +95,17 @@ var (
 	// but bundled so operators don't have to remember the second
 	// command.
 	flagRegisterWithForge bool
+
+	// flagConfig activates the new Go-SDK phased path when set.
+	// When empty, up/down fall through to the existing TF path unchanged.
+	// This is the dispatch gate for the post-Terraform direction
+	// (docs/POST_TERRAFORM_DIRECTION.md).
+	flagConfig string
+
+	// flagYes skips the interactive "type 'destroy' to proceed" prompt
+	// in `awsbnkctl down --config <file>`. Equivalent to the --yes/-y
+	// flag in aws-gpu-setup/down.sh.
+	flagYes bool
 )
 
 var initCmd = &cobra.Command{
@@ -110,13 +168,18 @@ func init() {
 	upCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the confirmation prompt before apply")
 	upCmd.Flags().StringVar(&flagTFSource, "tf-source", "", "override TF source for this run only")
 	upCmd.Flags().BoolVar(&flagNoKubeconfig, "no-kubeconfig", false, "skip the post-apply admin kubeconfig fetch")
-	upCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", false, "terraform plan only against the full Sprint 3 graph — never apply against AWS")
+	// upCmd has its OWN dry-run variable; planCmd binds to flagLifecycleDryRun
+	// with default=true and that shared-var design poisoned upCmd's default.
+	upCmd.Flags().BoolVar(&flagUpDryRun, "dry-run", false, "for --config: print the phased plan and exit 0 with no AWS mutations; for legacy TF path: terraform plan only")
 	upCmd.Flags().BoolVar(&flagRegisterWithForge, "register-with-forge", false, "after a successful apply, register the EKS cluster with bnk-forge over MCP (no-op in --dry-run)")
+	upCmd.Flags().StringVar(&flagConfig, "config", "", "path to cluster.yaml; activates Go-SDK phased path (bypasses TF)")
 
 	applyCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the confirmation prompt")
 	applyCmd.Flags().BoolVar(&flagNoKubeconfig, "no-kubeconfig", false, "skip the post-apply admin kubeconfig fetch")
 	downCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the destroy confirmation")
-	downCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", false, "terraform plan -destroy only — never destroy against AWS")
+	downCmd.Flags().BoolVar(&flagDownDryRun, "dry-run", false, "terraform plan -destroy only — never destroy against AWS")
+	downCmd.Flags().StringVar(&flagConfig, "config", "", "path to cluster.yaml; activates Go-SDK phased path (bypasses TF)")
+	downCmd.Flags().BoolVar(&flagYes, "yes", false, "skip the interactive destroy confirmation (required with --config)")
 	planCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", true, "alias for `awsbnkctl up --dry-run` (always plans, never applies)")
 
 	for _, c := range []*cobra.Command{upCmd, planCmd, applyCmd, downCmd} {
@@ -181,10 +244,26 @@ func resolveVarFiles(vfs []string) ([]string, error) {
 }
 
 // runUp wires `awsbnkctl up` (no subcommand) — full-lifecycle path.
-// Sprint 3 supports --dry-run only; live apply is gated on the
-// operator-run spike per PRD 07 § "Spike protocol".
+//
+// When --config is provided, dispatches to the new Go-SDK phased path
+// (docs/POST_TERRAFORM_DIRECTION.md). Otherwise falls through to the
+// existing Terraform path (unchanged).
 func runUp(cmd *cobra.Command, _ []string) error {
-	if !flagLifecycleDryRun {
+	// --- New Go-SDK phased path ---
+	if flagConfig != "" {
+		// flagUpDryRun is upCmd-only so planCmd's shared-var poisoning of
+		// flagLifecycleDryRun cannot affect us.
+		return runPhasedUp(cmd.Context(), flagConfig, flagUpDryRun)
+	}
+
+	// --- Legacy Terraform path ---
+	// flagUpDryRun is upCmd's own --dry-run var; flagLifecycleDryRun is
+	// owned by planCmd and is poisoned to `true` at init time, so we must
+	// not read it here. (The original code used flagLifecycleDryRun and
+	// happened to work because upCmd's BoolVar reset it to false; that
+	// binding is now gone because we split the var to fix --dry-run leakage
+	// into the phased path.)
+	if !flagUpDryRun {
 		return errors.New("awsbnkctl up requires --dry-run in Sprint 3: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
 	resolved, err := resolveVarFiles(flagVarFiles)
@@ -201,7 +280,7 @@ func runUp(cmd *cobra.Command, _ []string) error {
 	// The flag still wires through so operators get a single command
 	// once v0.2 unlocks live apply.
 	if flagRegisterWithForge {
-		if flagLifecycleDryRun {
+		if flagUpDryRun {
 			fmt.Fprintln(os.Stderr, "→ --register-with-forge: dry-run, skipping forge registration (would run `forge register` after live apply)")
 			return nil
 		}
@@ -289,7 +368,18 @@ func runApply(_ *cobra.Command, _ []string) error {
 }
 
 func runDown(cmd *cobra.Command, _ []string) error {
-	if !flagLifecycleDryRun {
+	// --- New Go-SDK phased path ---
+	if flagConfig != "" {
+		return runPhasedDown(cmd.Context(), flagConfig, flagYes)
+	}
+
+	// --- Legacy Terraform path ---
+	// flagDownDryRun is downCmd's own --dry-run var; the previous code read
+	// flagLifecycleDryRun which planCmd poisons to `true` at init, causing
+	// `awsbnkctl down` (no --dry-run) to silently skip this guard and run
+	// a live `terraform destroy`. Destroy-semantics-affecting bug, fixed in
+	// the cobra-flag-poisoning audit.
+	if !flagDownDryRun {
 		return errors.New("awsbnkctl down requires --dry-run in Sprint 3: live destroy is gated on the operator-run PRD 07 spike; v0.2 unlocks the non-dry-run path")
 	}
 	resolved, err := resolveVarFiles(flagVarFiles)
@@ -298,4 +388,121 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	}
 	flagVarFiles = resolved
 	return runFullLifecyclePlan(cmd.Context())
+}
+
+// runPhasedUp is the Go-SDK phased provisioning path activated by
+// `awsbnkctl up --config <file>`. It reads the cluster.yaml intent,
+// constructs AWS clients with the SSO sentinel middleware, then runs
+// phases 00 → 06 in order.
+//
+// When dryRun is true the phase functions print planned actions but make
+// zero AWS API mutations.
+func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
+	cl, err := intent.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+
+	clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
+	if err != nil {
+		return fmt.Errorf("up: aws clients: %w", err)
+	}
+
+	stateDir := cl.StateDir()
+	st, err := state.Load(stateDir)
+	if err != nil {
+		return fmt.Errorf("up: loading state: %w", err)
+	}
+
+	if dryRun {
+		fmt.Fprintln(os.Stderr, "→ dry-run: printing plan, no AWS mutations will be made")
+	}
+
+	if err := phases.Phase00Preflight(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase02VPC(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase03Subnets(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase04IGW(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase05NAT(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase06RouteTables(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase07IAM(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+
+	if dryRun {
+		fmt.Fprintln(os.Stderr, "→ dry-run complete")
+	} else {
+		fmt.Fprintf(os.Stderr, "✓ up complete: cluster=%s state=%s\n", cl.Metadata.Name, stateDir)
+	}
+	return nil
+}
+
+// runPhasedDown is the Go-SDK phased destroy path activated by
+// `awsbnkctl down --config <file>`. It reads the cluster.yaml intent,
+// loads the IDs cache (with tag-discovery fallback), then destroys
+// resources in reverse phase order.
+//
+// When yes is false the operator is prompted to type 'destroy' to proceed.
+func runPhasedDown(ctx context.Context, configPath string, yes bool) error {
+	cl, err := intent.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+
+	clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
+	if err != nil {
+		return fmt.Errorf("down: aws clients: %w", err)
+	}
+
+	stateDir := cl.StateDir()
+	st, err := state.Load(stateDir)
+	if err != nil {
+		return fmt.Errorf("down: loading state: %w", err)
+	}
+
+	if !yes {
+		fmt.Fprintf(os.Stderr, "About to DESTROY cluster %q in %s.\n", cl.Metadata.Name, cl.Metadata.Region)
+		fmt.Fprintln(os.Stderr, "Type 'destroy' to proceed:")
+		scanner := bufio.NewScanner(os.Stdin)
+		if scanner.Scan() && scanner.Text() != "destroy" {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return nil
+		}
+	}
+
+	// Reverse phase order: 07 → 06 → 05 → 04 → 03 → 02.
+	// IAM (phase 07) destroys first — no AWS-side VPC dependency, and reverse
+	// create order keeps the down log readable.
+	if err := phases.Phase07IAMDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase06RouteTablesDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase05NATDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase04IGWDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase03SubnetsDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase02VPCDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "✓ down complete: cluster=%s\n", cl.Metadata.Name)
+	return nil
 }
