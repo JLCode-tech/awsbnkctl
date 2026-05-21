@@ -23,6 +23,9 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
+	k8sclient "github.com/JLCode-tech/awsbnkctl/internal/k8s"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 )
 
 // EC2API is the subset of ec2.Client surface used by the phase functions.
@@ -120,6 +123,16 @@ type Clients struct {
 	// AttachForgeClient after NewClients to avoid changing the existing
 	// NewClients signature.
 	ForgeClient *forge.Client
+
+	// K8s is the typed Kubernetes client used by Phase12/13. Nil until
+	// AttachK8s is called (after Phase11 writes the kubeconfig). Phase 12
+	// returns a clear error if K8s is nil.
+	K8s kubernetes.Interface
+
+	// Dynamic is the unstructured Kubernetes client used for cert-manager CRs
+	// (Certificate, ClusterIssuer) which are not in the typed client-go scheme.
+	// Constructed alongside K8s by AttachK8s.
+	Dynamic dynamic.Interface
 }
 
 // AttachForgeClient constructs and attaches a forge MCP client when forge is
@@ -134,6 +147,26 @@ func (c *Clients) AttachForgeClient(enabled bool, mcpURL string) {
 		return
 	}
 	c.ForgeClient = forge.NewClient(mcpURL)
+}
+
+// AttachK8s builds a typed kubernetes.Interface and a dynamic.Interface from
+// the kubeconfig file written by Phase11. Called by runPhasedUp AFTER
+// Phase11Kubeconfig completes. Phase 12 returns a clear error if K8s is nil.
+//
+// Uses internal/k8s.BuildClientset and BuildDynamicClient so the kubeconfig
+// resolution logic is consistent with the rest of the k8s package.
+func (c *Clients) AttachK8s(kubeconfigPath string) error {
+	cs, err := k8sclient.BuildClientset(kubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("AttachK8s: build typed clientset: %w", err)
+	}
+	dyn, err := k8sclient.BuildDynamicClient(kubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("AttachK8s: build dynamic client: %w", err)
+	}
+	c.K8s = cs
+	c.Dynamic = dyn
+	return nil
 }
 
 // NewClients constructs real AWS SDK clients wrapped with the SSO sentinel
