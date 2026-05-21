@@ -26,6 +26,16 @@ type Link struct {
 	ClusterName  string    `json:"cluster_name"`
 	RegisteredAt time.Time `json:"registered_at"`
 	Workspace    string    `json:"workspace"`
+	// Status records the registration state. Empty string is equivalent to
+	// "registered" for backward compatibility with link files written before
+	// slice 4. "pending" means the forge handoff failed and should be retried.
+	Status string `json:"status,omitempty"`
+}
+
+// IsRegistered reports whether the link represents a completed registration.
+// An empty Status is treated as "registered" for backward compatibility.
+func (l *Link) IsRegistered() bool {
+	return l.Status == "" || l.Status == "registered"
 }
 
 // LinkPath returns the absolute path to the forge_link.json inside a

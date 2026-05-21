@@ -14,6 +14,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// nodeGroupNameRE enforces Kubernetes label/name rules for node group names:
+// lowercase alphanumeric + hyphens, must start/end with alphanumeric.
+var nodeGroupNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$`)
+
 // clusterNameRE enforces EKS cluster name rules: lowercase alphanumeric +
 // hyphens, 2–40 chars, must start with a letter and end with a letter or digit.
 var clusterNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,38}[a-z0-9]$`)
@@ -25,6 +29,10 @@ type Cluster struct {
 	Kind       string   `yaml:"kind"`
 	Metadata   Metadata `yaml:"metadata"`
 	Network    Network  `yaml:"network"`
+	// ClusterSpec holds the EKS control plane + node group configuration
+	// (slice 3+). Optional for slices 1+2 (network + IAM only). Required
+	// when running phases 08+.
+	ClusterSpec *ClusterSpec `yaml:"cluster,omitempty"`
 	// Pattern selects internal/k8s/manifests/<pattern>/ (not used in slice 1).
 	// Loaded here for forward-compat so later slices don't change the struct.
 	Pattern string `yaml:"pattern,omitempty"`
@@ -35,6 +43,35 @@ type Cluster struct {
 	// Tags are merged into every AWS resource created by awsbnkctl alongside
 	// the required awsbnkctl:* keys.
 	Tags map[string]string `yaml:"tags,omitempty"`
+}
+
+// ClusterSpec holds the EKS control plane and node group configuration.
+// Corresponds to the `cluster:` block in cluster.yaml.
+type ClusterSpec struct {
+	// KubernetesVersion is the EKS Kubernetes version to deploy. Default "1.30".
+	KubernetesVersion string `yaml:"kubernetesVersion,omitempty"`
+	// NodeGroups defines one or more managed node groups. At least one is required
+	// when the cluster block is present.
+	NodeGroups []NodeGroupSpec `yaml:"nodeGroups,omitempty"`
+}
+
+// NodeGroupSpec configures one managed node group.
+type NodeGroupSpec struct {
+	// Name is required; used to form the node group name <cluster>-ng-<name>.
+	// Must be lowercase alphanumeric + hyphens.
+	Name string `yaml:"name"`
+	// InstanceType for the Auto Scaling group. Default "t3.medium".
+	InstanceType string `yaml:"instanceType,omitempty"`
+	// DesiredSize is the initial node count. Default 1.
+	DesiredSize int `yaml:"desiredSize,omitempty"`
+	// MinSize for the Auto Scaling group. Default 1.
+	MinSize int `yaml:"minSize,omitempty"`
+	// MaxSize for the Auto Scaling group. Default 2.
+	MaxSize int `yaml:"maxSize,omitempty"`
+	// DiskSize in GiB for each node's root volume. Default 50.
+	DiskSize int `yaml:"diskSize,omitempty"`
+	// Labels are additional Kubernetes node labels.
+	Labels map[string]string `yaml:"labels,omitempty"`
 }
 
 // Metadata carries the cluster identity fields.
@@ -116,6 +153,7 @@ func Load(path string) (*Cluster, error) {
 		return nil, fmt.Errorf("parsing cluster.yaml %s: %w", path, err)
 	}
 
+	applyDefaults(&c)
 	if err := validate(&c); err != nil {
 		return nil, fmt.Errorf("validating cluster.yaml %s: %w", path, err)
 	}
@@ -146,6 +184,35 @@ func (r *byteReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// applyDefaults fills in zero-value fields with their documented defaults.
+// Called before validate so validation sees the post-default values.
+func applyDefaults(c *Cluster) {
+	if c.ClusterSpec == nil {
+		return
+	}
+	if c.ClusterSpec.KubernetesVersion == "" {
+		c.ClusterSpec.KubernetesVersion = "1.30"
+	}
+	for i := range c.ClusterSpec.NodeGroups {
+		ng := &c.ClusterSpec.NodeGroups[i]
+		if ng.InstanceType == "" {
+			ng.InstanceType = "t3.medium"
+		}
+		if ng.DesiredSize == 0 {
+			ng.DesiredSize = 1
+		}
+		if ng.MinSize == 0 {
+			ng.MinSize = 1
+		}
+		if ng.MaxSize == 0 {
+			ng.MaxSize = 2
+		}
+		if ng.DiskSize == 0 {
+			ng.DiskSize = 50
+		}
+	}
+}
+
 // validate checks semantic constraints on the loaded cluster.
 func validate(c *Cluster) error {
 	if !clusterNameRE.MatchString(c.Metadata.Name) {
@@ -165,6 +232,16 @@ func validate(c *Cluster) error {
 	}
 	if c.Network.VPCCidr == "" {
 		return fmt.Errorf("network.vpcCidr is required")
+	}
+	if c.ClusterSpec != nil {
+		if len(c.ClusterSpec.NodeGroups) == 0 {
+			return fmt.Errorf("cluster.nodeGroups must contain at least one node group when cluster block is present")
+		}
+		for _, ng := range c.ClusterSpec.NodeGroups {
+			if !nodeGroupNameRE.MatchString(ng.Name) {
+				return fmt.Errorf("cluster.nodeGroups[].name %q must be lowercase alphanumeric + hyphens", ng.Name)
+			}
+		}
 	}
 	return nil
 }
