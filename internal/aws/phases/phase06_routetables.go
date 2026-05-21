@@ -45,6 +45,7 @@ func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State
 	if pubRTBID == "" {
 		if dryRun {
 			fmt.Fprintf(os.Stderr, "[phase 06] dry-run: would create public route table → IGW\n")
+			pubRTBID = "dry-run-rtb-pub"
 		} else {
 			pubRTBID, err = createRTB(ctx, clients.EC2, name, vpcID, "public", cl.Tags, cl.Metadata.Labels)
 			if err != nil {
@@ -56,7 +57,9 @@ func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State
 		fmt.Fprintf(os.Stderr, "[phase 06] public RTB %s already exists, skipping\n", pubRTBID)
 	}
 
-	if !dryRun && pubRTBID != "" {
+	if dryRun {
+		st.Set("PUBLIC_RTB", pubRTBID)
+	} else if pubRTBID != "" {
 		// Default route → IGW.
 		if err := ensureRoute(ctx, clients.EC2, pubRTBID, "0.0.0.0/0", igwID, ""); err != nil {
 			return fmt.Errorf("phase06: public route → IGW: %w", err)
@@ -79,6 +82,7 @@ func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State
 		if privRTBID == "" {
 			if dryRun {
 				fmt.Fprintf(os.Stderr, "[phase 06] dry-run: would create private route table → NAT\n")
+				privRTBID = "dry-run-rtb-priv"
 			} else {
 				privRTBID, err = createRTB(ctx, clients.EC2, name, vpcID, "private", cl.Tags, cl.Metadata.Labels)
 				if err != nil {
@@ -90,7 +94,9 @@ func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State
 			fmt.Fprintf(os.Stderr, "[phase 06] private RTB %s already exists, skipping\n", privRTBID)
 		}
 
-		if !dryRun && privRTBID != "" {
+		if dryRun {
+			st.Set("PRIVATE_RTB", privRTBID)
+		} else if privRTBID != "" {
 			// Default route → NAT GW.
 			if err := ensureRoute(ctx, clients.EC2, privRTBID, "0.0.0.0/0", "", natID); err != nil {
 				return fmt.Errorf("phase06: private route → NAT: %w", err)

@@ -41,6 +41,8 @@ func Phase05NAT(ctx context.Context, cl *intent.Cluster, st *state.State, client
 	if eipAllocID == "" {
 		if dryRun {
 			fmt.Fprintf(os.Stderr, "[phase 05] dry-run: would allocate EIP and create NAT GW in %s\n", firstPublicSubnet)
+			st.Set("NAT_EIP_ALLOC", "dry-run-eip")
+			st.Set("NAT_GW_ID", "dry-run-nat")
 			return nil
 		}
 		eipTags := tags.Merge(

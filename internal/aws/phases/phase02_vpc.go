@@ -36,6 +36,7 @@ func Phase02VPC(ctx context.Context, cl *intent.Cluster, st *state.State, client
 
 	if dryRun {
 		fmt.Fprintf(os.Stderr, "[phase 02] dry-run: would create VPC cidr=%s\n", cl.Network.VPCCidr)
+		st.Set("VPC_ID", "dry-run-vpc")
 		return nil
 	}
 
