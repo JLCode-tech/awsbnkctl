@@ -39,6 +39,10 @@ const (
 	CompIAMClusterRole = "iam-cluster-role"
 	CompIAMNodeRole    = "iam-node-role"
 	CompIAMNodeProfile = "iam-node-profile"
+
+	// EKS component constants (slice 3).
+	CompEKSCluster   = "eks-cluster"
+	CompEKSNodeGroup = "eks-nodegroup"
 )
 
 // Required returns the four mandatory awsbnkctl tags for a resource.
@@ -116,4 +120,20 @@ func IAMTags(maps ...map[string]string) []iamtypes.Tag {
 		out = append(out, iamtypes.Tag{Key: &k, Value: &v})
 	}
 	return out
+}
+
+// EKSTags returns the merged tag set as map[string]string for EKS resources.
+// EKS CreateCluster and CreateNodegroup accept map[string]string, not a slice.
+//
+// Usage:
+//
+//	EKSTags(Required(name, CompEKSCluster), cluster.Tags, cluster.Metadata.Labels)
+func EKSTags(maps ...map[string]string) map[string]string {
+	merged := make(map[string]string)
+	for _, m := range maps {
+		for k, v := range m {
+			merged[k] = v
+		}
+	}
+	return merged
 }
