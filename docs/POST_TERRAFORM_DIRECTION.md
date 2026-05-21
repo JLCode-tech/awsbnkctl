@@ -237,7 +237,7 @@ up
 │       wait until ACTIVE (~10 min); capture endpoint/CA/OIDC URL/security group
 ├─ 09. forge register (Phase09ForgeRegister) ◄── slice 4 (shipped)
 │       fires on EKS-Active, before node group; MCP-first with REST fallback;
-│       soft-fail with 4-attempt 1s/3s/9s backoff; pending-link on giveup
+│       soft-fail with 4-attempt 1s/3s/9s backoff; pending-link on give-up
 ├─ 10. eks node group (Phase10NodeGroup)     ◄── slice 3 (shipped)
 │       wait until ACTIVE (~7 min); subnets: public only; AMI: AL2_x86_64
 ├─ 11. kubeconfig (Phase11Kubeconfig)        ◄── slice 3 (shipped)
