@@ -45,7 +45,8 @@ var farSecretNamespaces = []string{
 }
 
 const (
-	farSecretName     = "far-secret"
+	farSecretName = "far-secret"
+	// #nosec G101 -- this is a k8s Secret RESOURCE NAME, not a credential value
 	licenseSecretName = "bnk-license-jwt"
 	certManagerNS     = "cert-manager"
 	operatorNS        = "f5-cne-core"
