@@ -33,22 +33,6 @@ func buildP15ReadyClients(t *testing.T) *Clients {
 	return &Clients{K8s: cs, Dynamic: dyn, Profile: "test"}
 }
 
-// buildP15NotReadyClients builds a Clients with otelSvr Not-Ready.
-func buildP15NotReadyClients(t *testing.T) *Clients {
-	t.Helper()
-	cs := k8sfake.NewSimpleClientset()
-	scheme := buildScheme()
-	// One cert not ready, one ready.
-	otelSvr := buildNotReadyCertificate(otelSvrCertName, operatorNS)
-	otelF5Ing := buildReadyCertificate(otelF5IngCertName, operatorNS)
-
-	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
-		k8swait.CertificateGVR: "CertificateList",
-	}, otelSvr, otelF5Ing)
-
-	return &Clients{K8s: cs, Dynamic: dyn, Profile: "test"}
-}
-
 // ─── Test 1: Dry-run ─────────────────────────────────────────────────────────
 
 func TestPhase15_DryRun_ReturnsNil(t *testing.T) {
