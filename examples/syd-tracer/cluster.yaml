@@ -102,6 +102,15 @@ bnk:
   jwt: ./license.jwt                  # REPLACE: path to your F5 subscription JWT
   # certManagerVersion: "1.16.1"     # optional; defaults to 1.16.1 (the embedded version)
 
+# addons: optional add-on configuration (slice 6+).
+# When omitted, FLO is installed at the pinned default version (v2.21.13-0.0.28).
+# Uncomment to pin a version or disable FLO explicitly:
+#
+# addons:
+#   flo:
+#     version: "v2.21.13-0.0.28"  # optional; defaults to pinned version
+#     enabled: true                 # optional; default true; set false to skip FLO + OTEL install
+
 # tags merged into every AWS resource alongside the mandatory awsbnkctl:* keys.
 tags:
   cost-center: RnD-AI

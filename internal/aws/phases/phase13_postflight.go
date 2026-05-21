@@ -6,6 +6,7 @@ import (
 	"os"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
@@ -31,7 +32,7 @@ func Phase13Postflight(ctx context.Context, cl *intent.Cluster, st *state.State,
 	fmt.Fprintf(os.Stderr, "[phase 13] postflight: cluster=%s\n", name)
 
 	if dryRun {
-		fmt.Fprintln(os.Stderr, "[phase 13] dry-run: would verify: namespaces, cert-manager Deployments, CA cert, FAR secrets")
+		fmt.Fprintln(os.Stderr, "[phase 13] dry-run: would verify: namespaces, cert-manager Deployments, CA cert, FAR secrets, FLO Deployment, CNEInstance CRD, OTEL certs")
 		return nil
 	}
 
@@ -86,6 +87,47 @@ func Phase13Postflight(ctx context.Context, cl *intent.Cluster, st *state.State,
 			fmt.Fprintf(os.Stderr, "[phase 13] forge scan_cluster: warning (non-fatal): %v\n", err)
 		} else {
 			fmt.Fprintln(os.Stderr, "[phase 13] forge scan_cluster triggered OK")
+		}
+	}
+
+	// 6–8. FLO + CNEInstance CRD + OTEL cert checks (only when FLO is enabled).
+	var floSpec *intent.FloSpec
+	if cl.Addons != nil {
+		floSpec = cl.Addons.Flo
+	}
+	if floSpec.FloEnabled() {
+		// 6. Verify FLO Deployment is Available.
+		avail, desired, err := k8swait.DeploymentReplicaStatus(ctx, clients.K8s, operatorNS, floDeployName)
+		if err != nil {
+			return fmt.Errorf("phase13: FLO deployment %s/%s: %w", operatorNS, floDeployName, err)
+		}
+		if desired == 0 || avail != desired {
+			return fmt.Errorf("phase13: FLO deployment %s/%s not ready: available=%d desired=%d",
+				operatorNS, floDeployName, avail, desired)
+		}
+		fmt.Fprintf(os.Stderr, "[phase 13] FLO deployment %s OK\n", floDeployName)
+
+		// 7. Verify cneinstances.k8s.f5.com CRD exists.
+		crdGVR := schema.GroupVersionResource{
+			Group:    "apiextensions.k8s.io",
+			Version:  "v1",
+			Resource: "customresourcedefinitions",
+		}
+		if _, err := clients.Dynamic.Resource(crdGVR).Get(ctx, cneCRDName, metav1.GetOptions{}); err != nil {
+			return fmt.Errorf("phase13: CRD %s: %w", cneCRDName, err)
+		}
+		fmt.Fprintf(os.Stderr, "[phase 13] CRD %s OK\n", cneCRDName)
+
+		// 8. Verify both OTEL certs Ready.
+		for _, certName := range []string{otelSvrCertName, otelF5IngCertName} {
+			obj, err := clients.Dynamic.Resource(k8swait.CertificateGVR).Namespace(operatorNS).Get(ctx, certName, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("phase13: OTEL Certificate %s/%s: %w", operatorNS, certName, err)
+			}
+			if !k8swait.IsCertificateReady(obj.Object) {
+				return fmt.Errorf("phase13: OTEL Certificate %s/%s Ready condition is not True", operatorNS, certName)
+			}
+			fmt.Fprintf(os.Stderr, "[phase 13] OTEL Certificate %s/%s Ready\n", operatorNS, certName)
 		}
 	}
 
