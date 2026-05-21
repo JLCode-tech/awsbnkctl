@@ -143,3 +143,44 @@ func TestIAMTagsConstants(t *testing.T) {
 		seen[c] = true
 	}
 }
+
+func TestEKSTags_ReturnsMergedMapStringString(t *testing.T) {
+	result := EKSTags(Required("my-cluster", CompEKSCluster))
+
+	if result[KeyCluster] != "my-cluster" {
+		t.Errorf("EKSTags: cluster tag got %q, want %q", result[KeyCluster], "my-cluster")
+	}
+	if result[KeyComponent] != CompEKSCluster {
+		t.Errorf("EKSTags: component tag got %q, want %q", result[KeyComponent], CompEKSCluster)
+	}
+	if result[KeyManaged] != "true" {
+		t.Errorf("EKSTags: managed tag got %q, want true", result[KeyManaged])
+	}
+}
+
+func TestEKSTags_MergesExtraMaps(t *testing.T) {
+	extra := map[string]string{"env": "lab"}
+	result := EKSTags(Required("tracer", CompEKSNodeGroup), extra)
+
+	if result["env"] != "lab" {
+		t.Errorf("EKSTags: extra tag env got %q, want lab", result["env"])
+	}
+	if result[KeyCluster] != "tracer" {
+		t.Errorf("EKSTags: required key %q lost", KeyCluster)
+	}
+}
+
+func TestEKSTagsConstants(t *testing.T) {
+	// Verify EKS component constants are defined and distinct.
+	constants := []string{CompEKSCluster, CompEKSNodeGroup}
+	seen := make(map[string]bool)
+	for _, c := range constants {
+		if c == "" {
+			t.Errorf("EKS component constant is empty")
+		}
+		if seen[c] {
+			t.Errorf("duplicate EKS component constant: %q", c)
+		}
+		seen[c] = true
+	}
+}

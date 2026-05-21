@@ -43,6 +43,20 @@ func sydTracerCluster() *intent.Cluster {
 func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 	awsmw.ResetForTest()
 	dir := t.TempDir()
+
+	// Phase11Kubeconfig resolves the kubeconfig path via cl.StateDir(), which
+	// is relative to the process CWD (".awsbnkctl/<name>/kubeconfig"). Chdir
+	// to the temp dir so StateDir() resolves under dir — matching the pattern
+	// used by phase11_kubeconfig_test.go.
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
 	st, err := state.Load(dir)
 	if err != nil {
 		t.Fatalf("state.Load: %v", err)
@@ -50,13 +64,22 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 
 	ec2m := &mockEC2{}
 	iamm := newMockIAM()
+	eksm := newMockEKS()
 	clients := &Clients{
 		EC2:     ec2m,
 		STS:     &mockSTSImpl{accountID: "111122223333"},
 		IAM:     iamm,
+		EKS:     eksm,
 		Profile: "test",
 	}
 	cl := sydTracerCluster()
+	// Add cluster spec for phases 08/10/11.
+	cl.ClusterSpec = &intent.ClusterSpec{
+		KubernetesVersion: "1.30",
+		NodeGroups: []intent.NodeGroupSpec{
+			{Name: "default", InstanceType: "t3.medium", DesiredSize: 1, MinSize: 1, MaxSize: 2, DiskSize: 50},
+		},
+	}
 	ctx := context.Background()
 
 	// Run all phases with dryRun=true.
@@ -80,6 +103,20 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 	}
 	if err := Phase07IAM(ctx, cl, st, clients, true); err != nil {
 		t.Fatalf("Phase07IAM: %v", err)
+	}
+	if err := Phase08EKSCluster(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase08EKSCluster: %v", err)
+	}
+	// Phase 09: forge disabled on sydTracerCluster (no forge block) — must
+	// return nil immediately without any forge HTTP calls.
+	if err := Phase09ForgeRegister(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase09ForgeRegister (disabled): %v", err)
+	}
+	if err := Phase10NodeGroup(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase10NodeGroup: %v", err)
+	}
+	if err := Phase11Kubeconfig(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase11Kubeconfig: %v", err)
 	}
 
 	// Zero mutating AWS calls — EC2.
@@ -113,6 +150,14 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 		t.Errorf("addRoleToInstanceProfileCalls = %d, want 0", iamm.addRoleToInstanceProfileCalls)
 	}
 
+	// Zero mutating AWS calls — EKS.
+	if eksm.createClusterCalls != 0 {
+		t.Errorf("EKS createClusterCalls = %d, want 0", eksm.createClusterCalls)
+	}
+	if eksm.createNodegroupCalls != 0 {
+		t.Errorf("EKS createNodegroupCalls = %d, want 0", eksm.createNodegroupCalls)
+	}
+
 	// Placeholder state values must be present — EC2 phases.
 	checks := map[string]string{
 		"VPC_ID":          "dry-run-vpc",
@@ -144,9 +189,114 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 		}
 	}
 
+	// Placeholder state values — EKS phase 08.
+	eksChecks := map[string]string{
+		"EKS_CLUSTER_NAME":   name,
+		"EKS_CLUSTER_ARN":    "arn:aws:eks:dry-run:cluster/" + name,
+		"EKS_ENDPOINT":       "https://dry-run.eks",
+		"EKS_CA":             "dry-run-ca",
+		"EKS_OIDC_URL":       "https://oidc.eks.dry-run/id/dry-run",
+		"EKS_SECURITY_GROUP": "sg-dry-run",
+		"EKS_VERSION":        "1.30",
+	}
+	for key, want := range eksChecks {
+		if got := st.Get(key); got != want {
+			t.Errorf("dry-run state[%s] = %q, want %q", key, got, want)
+		}
+	}
+
+	// Node group dry-run state.
+	if st.Get("NODEGROUP_DEFAULT_NAME") == "" {
+		t.Error("dry-run: NODEGROUP_DEFAULT_NAME not set")
+	}
+	if st.Get("NODEGROUP_DEFAULT_ARN") == "" {
+		t.Error("dry-run: NODEGROUP_DEFAULT_ARN not set")
+	}
+
+	// Kubeconfig dry-run state.
+	if st.Get("KUBECONFIG_PATH") == "" {
+		t.Error("dry-run: KUBECONFIG_PATH not set")
+	}
+
 	// state.env must NOT have been written to disk.
 	stateEnvPath := filepath.Join(dir, "state.env")
 	if _, err := os.Stat(stateEnvPath); err == nil {
 		t.Error("state.env was written to disk during dry-run; must not persist")
+	}
+
+	// No kubeconfig file written in dry-run.
+	// Phase11Kubeconfig writes to cl.StateDir()/kubeconfig which (after Chdir
+	// to dir above) resolves to dir/.awsbnkctl/<name>/kubeconfig.
+	kubeconfigPath := filepath.Join(dir, ".awsbnkctl", cl.Metadata.Name, "kubeconfig")
+	if _, err := os.Stat(kubeconfigPath); err == nil {
+		t.Error("kubeconfig was written to disk during dry-run; must not persist")
+	}
+}
+
+// TestDryRun_Phase09ForgeEnabled verifies that Phase09 in dry-run mode with
+// forge enabled sets the FORGE_* placeholder state keys and writes no files
+// (no link file, no HTTP calls).
+func TestDryRun_Phase09ForgeEnabled(t *testing.T) {
+	awsmw.ResetForTest()
+	dir := t.TempDir()
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	st, err := state.Load(dir)
+	if err != nil {
+		t.Fatalf("state.Load: %v", err)
+	}
+
+	// Seed EKS state (normally written by Phase08).
+	st.Set("EKS_CLUSTER_ARN", "arn:aws:eks:ap-southeast-2:111122223333:cluster/syd-tracer")
+	st.Set("EKS_ENDPOINT", "https://dry-run.eks")
+	st.Set("EKS_CA", "dry-run-ca")
+
+	// Cluster with forge enabled pointing at a non-existent server — must not
+	// be contacted in dry-run mode.
+	cl := sydTracerCluster()
+	cl.Forge = &intent.ForgeSpec{
+		Enabled: true,
+		MCPURL:  "http://127.0.0.1:19999/mcp/", // no server listening here
+		URL:     "http://127.0.0.1:19998",
+	}
+	cl.ClusterSpec = &intent.ClusterSpec{
+		KubernetesVersion: "1.30",
+		NodeGroups: []intent.NodeGroupSpec{
+			{Name: "default", InstanceType: "t3.medium", DesiredSize: 1, MinSize: 1, MaxSize: 2, DiskSize: 50},
+		},
+	}
+
+	clients := &Clients{Profile: "test"}
+
+	if err := Phase09ForgeRegister(context.Background(), cl, st, clients, true); err != nil {
+		t.Fatalf("Phase09ForgeRegister dry-run: %v", err)
+	}
+
+	// Must have placeholder state keys.
+	if st.Get("FORGE_PROJECT_ID") != "dry-run-project" {
+		t.Errorf("FORGE_PROJECT_ID = %q, want dry-run-project", st.Get("FORGE_PROJECT_ID"))
+	}
+	if st.Get("FORGE_CLUSTER_ID") != "dry-run-cluster" {
+		t.Errorf("FORGE_CLUSTER_ID = %q, want dry-run-cluster", st.Get("FORGE_CLUSTER_ID"))
+	}
+	if st.Get("FORGE_LINK_PATH") == "" {
+		t.Error("FORGE_LINK_PATH not set in dry-run")
+	}
+	if st.Get("FORGE_STATUS") != "dry-run" {
+		t.Errorf("FORGE_STATUS = %q, want dry-run", st.Get("FORGE_STATUS"))
+	}
+
+	// No forge_link.json written in dry-run.
+	linkPath := filepath.Join(dir, ".awsbnkctl", cl.Metadata.Name, "forge_link.json")
+	if _, err := os.Stat(linkPath); err == nil {
+		t.Error("forge_link.json was written to disk during dry-run; must not persist")
 	}
 }

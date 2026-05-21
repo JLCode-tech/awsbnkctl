@@ -14,6 +14,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	smithymw "github.com/aws/smithy-go/middleware"
@@ -21,6 +22,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
+	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 )
 
 // EC2API is the subset of ec2.Client surface used by the phase functions.
@@ -71,6 +73,17 @@ type STSAPI interface {
 	GetCallerIdentity(ctx context.Context, in *sts.GetCallerIdentityInput, opts ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
 }
 
+// EKSAPI is the subset of eks.Client surface used by phases 08 and 10.
+// Tests inject a fake implementation. Only methods used in slice 3 are listed.
+type EKSAPI interface {
+	CreateCluster(ctx context.Context, in *eks.CreateClusterInput, opts ...func(*eks.Options)) (*eks.CreateClusterOutput, error)
+	DescribeCluster(ctx context.Context, in *eks.DescribeClusterInput, opts ...func(*eks.Options)) (*eks.DescribeClusterOutput, error)
+	DeleteCluster(ctx context.Context, in *eks.DeleteClusterInput, opts ...func(*eks.Options)) (*eks.DeleteClusterOutput, error)
+	CreateNodegroup(ctx context.Context, in *eks.CreateNodegroupInput, opts ...func(*eks.Options)) (*eks.CreateNodegroupOutput, error)
+	DescribeNodegroup(ctx context.Context, in *eks.DescribeNodegroupInput, opts ...func(*eks.Options)) (*eks.DescribeNodegroupOutput, error)
+	DeleteNodegroup(ctx context.Context, in *eks.DeleteNodegroupInput, opts ...func(*eks.Options)) (*eks.DeleteNodegroupOutput, error)
+}
+
 // IAMAPI is the subset of iam.Client surface used by phase07. Tests inject a
 // fake implementation. Only methods used in this slice are listed here.
 type IAMAPI interface {
@@ -99,7 +112,28 @@ type Clients struct {
 	EC2     EC2API
 	STS     STSAPI
 	IAM     IAMAPI
+	EKS     EKSAPI
 	Profile string // the AWS profile used — passed to CheckAuthOrDie hints
+
+	// ForgeClient is the forge MCP client used by Phase09. Nil when forge is
+	// disabled (cl.Forge == nil || !cl.Forge.Enabled). Set via
+	// AttachForgeClient after NewClients to avoid changing the existing
+	// NewClients signature.
+	ForgeClient *forge.Client
+}
+
+// AttachForgeClient constructs and attaches a forge MCP client when forge is
+// enabled in the cluster intent. Call this after NewClients — it is the only
+// acceptable addition to the Clients construction path that avoids a signature
+// change (see spec gotcha #9 option (c): least invasive approach).
+//
+// If mcpURL is empty the forge.Client uses its DefaultMCPURL.
+func (c *Clients) AttachForgeClient(enabled bool, mcpURL string) {
+	if !enabled {
+		c.ForgeClient = nil
+		return
+	}
+	c.ForgeClient = forge.NewClient(mcpURL)
 }
 
 // NewClients constructs real AWS SDK clients wrapped with the SSO sentinel
@@ -130,6 +164,7 @@ func NewClients(ctx context.Context, region, profile string) (*Clients, error) {
 		EC2:     ec2.NewFromConfig(cfg),
 		STS:     sts.NewFromConfig(cfg),
 		IAM:     iam.NewFromConfig(cfg),
+		EKS:     eks.NewFromConfig(cfg),
 		Profile: profile,
 	}, nil
 }

@@ -62,6 +62,31 @@ Forge integration model is **locked in [`FORGE_MCP_INTEGRATION.md`](FORGE_MCP_IN
 | **Down + forge** | `awsbnkctl down` calls `forge unregister` **by default**. `--keep-forge-link` preserves the project record. Matches the `--keep-iam` / `--keep-keypair` flag family. |
 | **Pattern variant visibility** | Stamp namespace label/annotation: `awsbnkctl.io/pattern: host-device`. No bnk-forge schema change required. Forge GUI can surface it later if it grows the feature. |
 
+### Implementation status (slice 4, 2026-05-21)
+
+Phase 09 (`Phase09ForgeRegister` / `Phase09ForgeRegisterDown`) is **implemented** in
+`internal/aws/phases/phase09_forge_register.go` and wired into `runPhasedUp` /
+`runPhasedDown` in `internal/cli/lifecycle.go`.
+
+Key implementation notes:
+- **MCP-first, REST fallback.** `forge.Register()` (MCP) is tried first. On a catalog-gap
+  error (`IsMCPCatalogGapErr` in `internal/forge/rest.go`) the phase retries via
+  `forge.RegisterREST()` which speaks directly to the forge REST API. This mirrors the
+  kindbnkctl precedent (D-009): MCP is preferred but REST is the canonical fallback, not
+  exceptional.
+- **REST fallback credentials.** Hardcoded `admin/changeme` matching the localhost
+  bnk-forge dev stack. Real forge auth is out of scope for slice 4.
+- **Soft-fail retry loop.** 3 iterations × exponential backoff (1s → 3s → 9s). Uses
+  `select { case <-time.After(d): case <-ctx.Done() }` so `ctx` cancellation propagates.
+- **`Link.Status` field.** `internal/forge/link.go` `Link` struct gains a `Status` field
+  (`"registered"` or `"pending"`). Empty string = `"registered"` for backward compat.
+  `IsRegistered()` helper method used by Phase09 idempotency check.
+- **`--keep-forge-link` flag.** Added to `downCmd` only; bound to `flagKeepForgeLink`
+  (single-owner per the cobra anti-pattern comment in lifecycle.go).
+- **`Clients.ForgeClient`.** Added to `internal/aws/phases/clients.go`. Populated via
+  `AttachForgeClient(enabled, mcpURL)` called in `runPhasedUp` / `runPhasedDown` after
+  `NewClients`, keeping the existing constructor signature unchanged.
+
 ---
 
 ## 4 · Repository layout — what changes
@@ -136,18 +161,27 @@ network:
         az: ap-southeast-2b
   natGateways: 1                    # 1 (cost-optimized) or per-az (HA)
 
-cluster:                            # OMITTED for tracer-bullet slice
-  kubernetesVersion: "1.30"
+cluster:                            # OPTIONAL for slices 1+2 (network + IAM only)
+                                    # REQUIRED for slices 3+ (EKS phases 08/10/11)
+  kubernetesVersion: "1.30"         # default "1.30" if omitted
   nodeGroups:
-    - name: gpu
-      instanceType: p5.48xlarge
-      desiredSize: 1
-      minSize: 0
-      maxSize: 2
-      diskSize: 200
-      labels:
-        node-role: gpu
-      taints: []
+    - name: default                 # required; forms <cluster>-ng-<name>; lowercase alphanumeric + hyphens
+      instanceType: t3.medium       # default t3.medium
+      desiredSize: 1                # default 1
+      minSize: 1                    # default 1
+      maxSize: 2                    # default 2
+      diskSize: 50                  # GiB; default 50
+      labels:                       # optional Kubernetes node labels
+        node-role: worker
+    # For GPU workloads (slice 5+):
+    # - name: gpu
+    #   instanceType: p5.48xlarge
+    #   desiredSize: 1
+    #   minSize: 0
+    #   maxSize: 2
+    #   diskSize: 200
+    #   labels:
+    #     node-role: gpu
 
 pattern: host-device                # selects internal/k8s/manifests/host-device/
                                     # alternatives: sr-iov-tmm (planned)
@@ -168,6 +202,9 @@ tags:                               # additional tags applied to all AWS resourc
 Field-level notes:
 - `metadata.name` is **load-bearing**: it becomes the value of the `awsbnkctl:cluster=<name>` tag and the directory name under `.awsbnkctl/`. Must match regex `^[a-z][a-z0-9-]{0,38}[a-z0-9]$` (EKS cluster name rules).
 - `network.azs` is **explicit by design** — we will not "pick N AZs from the region" for you, because that produces non-deterministic infra across runs.
+- `cluster` block is **optional for slices 1+2** (network + IAM only); **required for slice 3+** (phases 08/10/11 error clearly if it's absent).
+- `cluster.nodeGroups` must be **non-empty** when the `cluster` block is present.
+- `cluster.nodeGroups[].name` must match `^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$` (lowercase alphanumeric + hyphens).
 - `pattern` is **required** when the cluster.yaml drives k8s manifests. For the tracer-bullet slice (VPC + subnets only), it is ignored.
 - Unknown fields are **errors**, not warnings, in v1.
 
@@ -190,12 +227,15 @@ up
 ├─ 05. nat gateway + EIP (Phase05NAT) ◄── slice 1
 ├─ 06. route tables (Phase06RouteTables) ◄── slice 1
 ├─ 07. iam: cluster role, node instance role, node instance profile (Phase07IAM) ◄── slice 2 (shipped)
+├─ 08. eks cluster (Phase08EKSCluster)       ◄── slice 3 (shipped)
+│       wait until ACTIVE (~10 min); capture endpoint/CA/OIDC URL/security group
+├─ 09. forge register (slice 4: RESERVED — NOT YET IMPLEMENTED)
+│       fires on EKS-Active, before node group; forge sees cluster while node group + BNK install proceed
+├─ 10. eks node group (Phase10NodeGroup)     ◄── slice 3 (shipped)
+│       wait until ACTIVE (~7 min); subnets: public only; AMI: AL2_x86_64
+├─ 11. kubeconfig (Phase11Kubeconfig)        ◄── slice 3 (shipped)
+│       write .awsbnkctl/<name>/kubeconfig (exec-auth via `aws eks get-token`)
 │       ◄── CURRENT IMPLEMENTATION ENDS HERE
-├─ 08. eks cluster (slice 3: wait until ACTIVE; ~10 min)
-├─ 09. forge register (slice 3: project + cluster + STS-bootstrap kubeconfig + retry/soft-fail)
-│   ◄── forge sees cluster while node group + BNK install proceed
-├─ 10. eks node group (slice 3: wait until ACTIVE)
-├─ 11. update kubeconfig (write .awsbnkctl/<name>/kubeconfig via Go SDK eks:DescribeCluster + GenerateToken)
 ├─ 12. ecr mirror + s3 supply chain
 ├─ 13. k8s: apply manifests/shared/, then manifests/<pattern>/
 │       (cert chain → license CR → CNEInstance → FLO)
