@@ -38,19 +38,55 @@ var (
 	flagNoKubeconfig bool
 	flagVarFiles     []string
 
-	// flagLifecycleDryRun gates `awsbnkctl up` (no subcommand) +
-	// `awsbnkctl down` (no subcommand). Distinct from the
-	// cluster-phase flagClusterDryRun in cluster.go so the
-	// full-graph and cluster-only paths can move at different
-	// cadences as the spike unlocks the live-apply path.
+	// ── Cobra shared-flag-variable anti-pattern (READ BEFORE ADDING FLAGS) ──
+	//
+	// cobra/pflag's `Flags().BoolVar(&x, "name", default, ...)` does TWO things:
+	//   1. Registers the flag on the command's FlagSet with the given default
+	//      (held as metadata on the flag definition itself).
+	//   2. Writes `*p = default` to the backing variable AT init() TIME.
+	//
+	// If two commands BoolVar the SAME variable with DIFFERENT defaults, the
+	// LAST init() call wins for the variable's runtime value. The flag's
+	// metadata default is per-command — but cobra reads the value through the
+	// flag's Value interface which dereferences the shared pointer, so
+	// `cmd.Flags().GetBool("name")` returns whatever the last writer set.
+	//
+	// Slice-01 integration testing hit this:
+	//   upCmd.Flags().BoolVar(&flagLifecycleDryRun,  "dry-run", false, ...)
+	//   downCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", false, ...)
+	//   planCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", TRUE,  ...)
+	// — `awsbnkctl up` (no --dry-run) silently ran in dry-run mode because
+	// planCmd's BoolVar set the shared var to `true` at init.
+	//
+	// Rule: a shared package-level var is safe ONLY when every command's
+	// BoolVar/StringVar/etc. uses the SAME default. If you need different
+	// defaults, give each command its own variable (see flagUpDryRun and
+	// flagDownDryRun below).
+	//
+	// Currently-shared vars with matching defaults (safe today, fragile if
+	// defaults diverge):
+	//   flagAuto         — upCmd, applyCmd, downCmd     (all false)
+	//   flagNoKubeconfig — upCmd, applyCmd              (all false)
+	//   flagTFSource     — initCmd, upCmd               (all "")
+	//   flagConfig       — upCmd, downCmd               (all "") — legitimate
+	//   flagVarFiles     — upCmd, planCmd, applyCmd, downCmd (all nil)
+	//   flagClusterDryRun (cluster.go) — upClusterCmd, downClusterCmd (false)
+	// If you change ANY of those defaults, split the variable per command.
+
+	// flagLifecycleDryRun is bound ONLY to planCmd (default true). Was once
+	// shared with upCmd/downCmd; the split happened in two stages:
+	//   slice-01: upCmd → flagUpDryRun     (commit e3d70a8)
+	//   audit:    downCmd → flagDownDryRun (this commit)
 	flagLifecycleDryRun bool
 
-	// flagUpDryRun is bound ONLY to upCmd's --dry-run. Cobra/pflag's BoolVar
-	// initialises the backing variable to the default at registration time;
-	// because planCmd.BoolVar binds the same name with default=true on the
-	// SHARED flagLifecycleDryRun var, upCmd's --dry-run cannot use that var
-	// without inheriting planCmd's true default. Split it.
+	// flagUpDryRun is bound ONLY to upCmd's --dry-run.
 	flagUpDryRun bool
+
+	// flagDownDryRun is bound ONLY to downCmd's --dry-run. Same anti-pattern
+	// fix as flagUpDryRun: planCmd's planCmd.BoolVar(&flagLifecycleDryRun,
+	// "dry-run", true, ...) would otherwise poison downCmd's legacy TF
+	// dry-run check — a destroy-semantics bug worse than the up case.
+	flagDownDryRun bool
 
 	// flagRegisterWithForge wires the P2 auto-handoff: after a
 	// successful `awsbnkctl up`, register the resulting EKS cluster
@@ -141,7 +177,7 @@ func init() {
 	applyCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the confirmation prompt")
 	applyCmd.Flags().BoolVar(&flagNoKubeconfig, "no-kubeconfig", false, "skip the post-apply admin kubeconfig fetch")
 	downCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the destroy confirmation")
-	downCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", false, "terraform plan -destroy only — never destroy against AWS")
+	downCmd.Flags().BoolVar(&flagDownDryRun, "dry-run", false, "terraform plan -destroy only — never destroy against AWS")
 	downCmd.Flags().StringVar(&flagConfig, "config", "", "path to cluster.yaml; activates Go-SDK phased path (bypasses TF)")
 	downCmd.Flags().BoolVar(&flagYes, "yes", false, "skip the interactive destroy confirmation (required with --config)")
 	planCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", true, "alias for `awsbnkctl up --dry-run` (always plans, never applies)")
@@ -337,8 +373,13 @@ func runDown(cmd *cobra.Command, _ []string) error {
 		return runPhasedDown(cmd.Context(), flagConfig, flagYes)
 	}
 
-	// --- Legacy Terraform path (unchanged) ---
-	if !flagLifecycleDryRun {
+	// --- Legacy Terraform path ---
+	// flagDownDryRun is downCmd's own --dry-run var; the previous code read
+	// flagLifecycleDryRun which planCmd poisons to `true` at init, causing
+	// `awsbnkctl down` (no --dry-run) to silently skip this guard and run
+	// a live `terraform destroy`. Destroy-semantics-affecting bug, fixed in
+	// the cobra-flag-poisoning audit.
+	if !flagDownDryRun {
 		return errors.New("awsbnkctl down requires --dry-run in Sprint 3: live destroy is gated on the operator-run PRD 07 spike; v0.2 unlocks the non-dry-run path")
 	}
 	resolved, err := resolveVarFiles(flagVarFiles)
