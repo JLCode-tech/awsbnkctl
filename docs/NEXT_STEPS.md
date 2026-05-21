@@ -2,6 +2,37 @@
 
 Snapshot of where the awsbnkctl AWS-retarget left off, and what to do when picking it back up.
 
+## 🎯 Picking this up cold? Read this first (2026-05-19)
+
+Most recent session's work, in order:
+
+1. **Detached the fork from `jgruberf5/roksbnkctl`** — `upstream` remote removed, 11 inherited tags deleted from local + origin. GitHub platform-level fork badge intentionally kept.
+2. **Wrote `docs/FORGE_MCP_INTEGRATION.md`** — canonical plan for the awsbnkctl → bnk-forge handoff over MCP.
+3. **Opened `bnk-forge#114`** — companion PR adding 62 MCP tools (`create_project`, `create_cluster`, full Tier A–E lifecycle + new `cloud_auth` governed module). Still open against forge `staging` last we checked.
+4. **Shipped PR #1 + PR #2** — `awsbnkctl forge {register, status, unregister}` over MCP; `awsbnkctl up --register-with-forge` post-apply hook.
+5. **Shipped PR #3** — `docs/FORGE_MCP_INTEGRATION.md` correction: peer-read model + two-roles framing (forge is GUI + k8s/BNK CRUD for awsbnkctl-deployed infra; forge owns IaC ONLY for its own blueprints).
+6. **Backports from `jgruberf5/roksbnkctl`** — three small ports re-implemented (not cherry-picked due to codebase divergence): PR #4 = `--var-file` relative-path resolution + threading the flag through to `tfws.Plan` (it was a silent no-op on our side post-retarget); PR #5 = `terraform.applied.tfvars` snapshot after a successful apply; PR #6 = `awsbnkctl status` per-phase deployment lines. PRs #4 + #5 merged. **PR #6 still open** last we checked.
+7. **Interrogated `mwiget/dpubnkctl`** — sibling *bnkctl tool for BlueField DPUs. **This is the architectural direction we want awsbnkctl to evolve toward.** Memory entry at `reference_dpubnkctl_architecture.md` carries the ranked port-priority list; the load-bearing item is **PoC-as-repo state model** (replaces `~/.awsbnkctl/<workspace>/` with a local git dir containing `poc.yaml`, `keys/`, `inventory/`, `artifacts/`, `journal/`, `AGENTS.md`, `personas/`). User endorsed direction 2026-05-19.
+
+**Where awsbnkctl's open work sits:**
+
+| Item | State |
+|---|---|
+| `bnk-forge#114` (62 MCP tools) | open on forge side, waiting on review |
+| PoC-as-repo migration | not started — needs a PRD draft first |
+| AGENTS.md + personas via `init` | not started — small, good first item |
+| `forge:` block in workspace.yaml | not started — small, replaces `--register-with-forge` flag with persistent config |
+| Named topology examples dir | not started — small |
+| `validate` command | not started — small |
+| `--yolo` + `--confirm-cluster` two-factor gate | not started — small, infrastructure for live destroy |
+| PRD 07 spike | operator-driven, $5–15 AWS cost, gates v1.0 |
+| `awsbnkctl status` / `doctor` push-to-forge | deferred (was originally P5 of forge integration plan) |
+
+Architectural memory entries worth reading before changing anything load-bearing:
+- `project_forge_role_in_architecture.md` — peer-read thesis, scaffolding-not-state-mirror, two-roles framing
+- `project_forge_mcp_integration.md` — phasing of the forge integration work
+- `reference_dpubnkctl_architecture.md` — direction we're heading
+
 ## State as of last session
 
 All six AWS-retarget sprints (Sprint 0 → Sprint 6) committed and pushed to `JLCode-tech/awsbnkctl@main`. **`v0.9.0-rc1` cut, published as prerelease, and live at https://github.com/JLCode-tech/awsbnkctl/releases/tag/v0.9.0-rc1** with 6 binary archives + checksums (linux/macOS/windows × amd64/arm64). v1.0 awaits the operator-run PRD 07 spike.
