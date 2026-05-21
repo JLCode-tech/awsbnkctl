@@ -42,6 +42,9 @@ func Load(dir string) (*State, error) {
 	s := &State{dir: dir, data: make(map[string]string)}
 
 	path := s.path()
+	// #nosec G304 -- path is derived from the operator-supplied state dir
+	// (which is .awsbnkctl/<cluster.metadata.name>); cluster name is
+	// regex-validated at intent load. No untrusted input reaches this open.
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return s, nil
@@ -87,11 +90,14 @@ func (s *State) Set(key, value string) {
 // created if it does not exist. The file is written to a temp name and
 // renamed so a partial write never corrupts the existing file.
 func (s *State) Save() error {
-	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+	if err := os.MkdirAll(s.dir, 0o750); err != nil {
 		return fmt.Errorf("mkdir %s: %w", s.dir, err)
 	}
 
 	tmp := s.path() + ".tmp"
+	// #nosec G304 -- tmp path is derived from the operator-supplied state dir
+	// (.awsbnkctl/<cluster.metadata.name>/state.env.tmp); cluster name is
+	// regex-validated at intent load.
 	f, err := os.Create(tmp)
 	if err != nil {
 		return fmt.Errorf("creating temp state: %w", err)

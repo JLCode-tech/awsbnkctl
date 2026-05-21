@@ -78,6 +78,9 @@ func (c *Cluster) StateDir() string {
 //   - network.azs must be non-empty.
 //   - network.subnets.public and network.subnets.private must be non-empty.
 func Load(path string) (*Cluster, error) {
+	// #nosec G304 -- path is operator-supplied via --config flag; awsbnkctl is
+	// a CLI tool so reading a user-named config file is intentional behaviour,
+	// not a directory-traversal risk.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading cluster.yaml %s: %w", path, err)

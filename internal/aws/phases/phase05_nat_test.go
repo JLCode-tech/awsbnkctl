@@ -17,8 +17,7 @@ import (
 //     returns the new NAT as available.
 type natCreationMock struct {
 	mockEC2
-	natID       string
-	createCalls int
+	natID string
 }
 
 func (m *natCreationMock) DescribeNatGateways(_ context.Context, _ *ec2.DescribeNatGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
