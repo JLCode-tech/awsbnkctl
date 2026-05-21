@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -12,8 +13,11 @@ import (
 	"github.com/spf13/cobra"
 
 	awspkg "github.com/JLCode-tech/awsbnkctl/internal/aws"
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
+	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
 
 // Sprint 3 retarget. The Sprint 0 lifecycle stubs (`up` / `plan` /
@@ -48,6 +52,17 @@ var (
 	// but bundled so operators don't have to remember the second
 	// command.
 	flagRegisterWithForge bool
+
+	// flagConfig activates the new Go-SDK phased path when set.
+	// When empty, up/down fall through to the existing TF path unchanged.
+	// This is the dispatch gate for the post-Terraform direction
+	// (docs/POST_TERRAFORM_DIRECTION.md).
+	flagConfig string
+
+	// flagYes skips the interactive "type 'destroy' to proceed" prompt
+	// in `awsbnkctl down --config <file>`. Equivalent to the --yes/-y
+	// flag in aws-gpu-setup/down.sh.
+	flagYes bool
 )
 
 var initCmd = &cobra.Command{
@@ -112,11 +127,14 @@ func init() {
 	upCmd.Flags().BoolVar(&flagNoKubeconfig, "no-kubeconfig", false, "skip the post-apply admin kubeconfig fetch")
 	upCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", false, "terraform plan only against the full Sprint 3 graph — never apply against AWS")
 	upCmd.Flags().BoolVar(&flagRegisterWithForge, "register-with-forge", false, "after a successful apply, register the EKS cluster with bnk-forge over MCP (no-op in --dry-run)")
+	upCmd.Flags().StringVar(&flagConfig, "config", "", "path to cluster.yaml; activates Go-SDK phased path (bypasses TF)")
 
 	applyCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the confirmation prompt")
 	applyCmd.Flags().BoolVar(&flagNoKubeconfig, "no-kubeconfig", false, "skip the post-apply admin kubeconfig fetch")
 	downCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the destroy confirmation")
 	downCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", false, "terraform plan -destroy only — never destroy against AWS")
+	downCmd.Flags().StringVar(&flagConfig, "config", "", "path to cluster.yaml; activates Go-SDK phased path (bypasses TF)")
+	downCmd.Flags().BoolVar(&flagYes, "yes", false, "skip the interactive destroy confirmation (required with --config)")
 	planCmd.Flags().BoolVar(&flagLifecycleDryRun, "dry-run", true, "alias for `awsbnkctl up --dry-run` (always plans, never applies)")
 
 	for _, c := range []*cobra.Command{upCmd, planCmd, applyCmd, downCmd} {
@@ -181,9 +199,17 @@ func resolveVarFiles(vfs []string) ([]string, error) {
 }
 
 // runUp wires `awsbnkctl up` (no subcommand) — full-lifecycle path.
-// Sprint 3 supports --dry-run only; live apply is gated on the
-// operator-run spike per PRD 07 § "Spike protocol".
+//
+// When --config is provided, dispatches to the new Go-SDK phased path
+// (docs/POST_TERRAFORM_DIRECTION.md). Otherwise falls through to the
+// existing Terraform path (unchanged).
 func runUp(cmd *cobra.Command, _ []string) error {
+	// --- New Go-SDK phased path ---
+	if flagConfig != "" {
+		return runPhasedUp(cmd.Context(), flagConfig, flagLifecycleDryRun)
+	}
+
+	// --- Legacy Terraform path (unchanged) ---
 	if !flagLifecycleDryRun {
 		return errors.New("awsbnkctl up requires --dry-run in Sprint 3: live apply is gated on the operator-run PRD 07 spike (see docs/prd/07-EKS-CLUSTER-SRIOV.md § \"Spike protocol\"); v0.2 unlocks the non-dry-run path")
 	}
@@ -289,6 +315,12 @@ func runApply(_ *cobra.Command, _ []string) error {
 }
 
 func runDown(cmd *cobra.Command, _ []string) error {
+	// --- New Go-SDK phased path ---
+	if flagConfig != "" {
+		return runPhasedDown(cmd.Context(), flagConfig, flagYes)
+	}
+
+	// --- Legacy Terraform path (unchanged) ---
 	if !flagLifecycleDryRun {
 		return errors.New("awsbnkctl down requires --dry-run in Sprint 3: live destroy is gated on the operator-run PRD 07 spike; v0.2 unlocks the non-dry-run path")
 	}
@@ -298,4 +330,113 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	}
 	flagVarFiles = resolved
 	return runFullLifecyclePlan(cmd.Context())
+}
+
+// runPhasedUp is the Go-SDK phased provisioning path activated by
+// `awsbnkctl up --config <file>`. It reads the cluster.yaml intent,
+// constructs AWS clients with the SSO sentinel middleware, then runs
+// phases 00 → 06 in order.
+//
+// When dryRun is true the phase functions print planned actions but make
+// zero AWS API mutations.
+func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
+	cl, err := intent.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+
+	clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
+	if err != nil {
+		return fmt.Errorf("up: aws clients: %w", err)
+	}
+
+	stateDir := cl.StateDir()
+	st, err := state.Load(stateDir)
+	if err != nil {
+		return fmt.Errorf("up: loading state: %w", err)
+	}
+
+	if dryRun {
+		fmt.Fprintln(os.Stderr, "→ dry-run: printing plan, no AWS mutations will be made")
+	}
+
+	if err := phases.Phase00Preflight(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase02VPC(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase03Subnets(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase04IGW(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase05NAT(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase06RouteTables(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+
+	if dryRun {
+		fmt.Fprintln(os.Stderr, "→ dry-run complete")
+	} else {
+		fmt.Fprintf(os.Stderr, "✓ up complete: cluster=%s state=%s\n", cl.Metadata.Name, stateDir)
+	}
+	return nil
+}
+
+// runPhasedDown is the Go-SDK phased destroy path activated by
+// `awsbnkctl down --config <file>`. It reads the cluster.yaml intent,
+// loads the IDs cache (with tag-discovery fallback), then destroys
+// resources in reverse phase order.
+//
+// When yes is false the operator is prompted to type 'destroy' to proceed.
+func runPhasedDown(ctx context.Context, configPath string, yes bool) error {
+	cl, err := intent.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+
+	clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
+	if err != nil {
+		return fmt.Errorf("down: aws clients: %w", err)
+	}
+
+	stateDir := cl.StateDir()
+	st, err := state.Load(stateDir)
+	if err != nil {
+		return fmt.Errorf("down: loading state: %w", err)
+	}
+
+	if !yes {
+		fmt.Fprintf(os.Stderr, "About to DESTROY cluster %q in %s.\n", cl.Metadata.Name, cl.Metadata.Region)
+		fmt.Fprintln(os.Stderr, "Type 'destroy' to proceed:")
+		scanner := bufio.NewScanner(os.Stdin)
+		if scanner.Scan() && scanner.Text() != "destroy" {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return nil
+		}
+	}
+
+	// Reverse phase order: 06 → 05 → 04 → 03 → 02.
+	if err := phases.Phase06RouteTablesDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase05NATDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase04IGWDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase03SubnetsDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase02VPCDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "✓ down complete: cluster=%s\n", cl.Metadata.Name)
+	return nil
 }
