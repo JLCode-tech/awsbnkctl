@@ -480,6 +480,13 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool) error {
 	if err := phases.Phase12K8sFoundation(ctx, cl, st, clients, dryRun); err != nil {
 		return fmt.Errorf("up: %w", err)
 	}
+	if err := phases.Phase14FLOHelm(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	if err := phases.Phase15OTELCerts(ctx, cl, st, clients, dryRun); err != nil {
+		return fmt.Errorf("up: %w", err)
+	}
+	// Phase 13 postflight runs LAST so it can verify FLO + OTEL state installed by 14/15.
 	if err := phases.Phase13Postflight(ctx, cl, st, clients, dryRun); err != nil {
 		return fmt.Errorf("up: %w", err)
 	}
@@ -529,15 +536,21 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool) error {
 		}
 	}
 
-	// Reverse phase order: 12 → 11 → 10 → 09 → 08 → 07 → 06 → 05 → 04 → 03 → 02.
-	// Phase 12 k8s teardown runs FIRST (while kubeconfig is still valid).
-	// Attach k8s clients using the kubeconfig path from state before Phase12Down.
+	// Reverse phase order: 15 → 14 → 12 → 11 → 10 → 09 → 08 → 07 → 06 → 05 → 04 → 03 → 02.
+	// Phase 15/14/12 k8s teardown runs FIRST (while kubeconfig is still valid).
+	// Attach k8s clients using the kubeconfig path from state before k8s down phases.
 	kubeconfigPath := st.Get("KUBECONFIG_PATH")
 	if kubeconfigPath != "" {
 		if err := clients.AttachK8s(kubeconfigPath); err != nil {
 			// Log and continue — kubeconfig may be absent if phase 11 never ran.
-			fmt.Fprintf(os.Stderr, "down: warning: could not attach k8s clients (%v) — phase 12 down will log warning and skip\n", err)
+			fmt.Fprintf(os.Stderr, "down: warning: could not attach k8s clients (%v) — phase 12/14/15 down will log warning and skip\n", err)
 		}
+	}
+	if err := phases.Phase15OTELCertsDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
+	}
+	if err := phases.Phase14FLOHelmDown(ctx, cl, st, clients); err != nil {
+		return fmt.Errorf("down: %w", err)
 	}
 	if err := phases.Phase12K8sFoundationDown(ctx, cl, st, clients); err != nil {
 		return fmt.Errorf("down: %w", err)
