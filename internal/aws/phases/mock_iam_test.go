@@ -5,7 +5,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
-	smithy "github.com/aws/smithy-go"
 )
 
 // mockIAM is a test double for IAMAPI.
@@ -48,15 +47,6 @@ func newMockIAM() *mockIAM {
 func mkNoSuchEntity(msg string) error {
 	return &iamtypes.NoSuchEntityException{Message: &msg}
 }
-
-// noSuchEntityAPIErr implements smithy.APIError for cases where we need the
-// interface (distinct from the concrete type path).
-type noSuchEntityAPIErr struct{ msg string }
-
-func (e *noSuchEntityAPIErr) Error() string                 { return e.msg }
-func (e *noSuchEntityAPIErr) ErrorCode() string             { return "NoSuchEntity" }
-func (e *noSuchEntityAPIErr) ErrorMessage() string          { return e.msg }
-func (e *noSuchEntityAPIErr) ErrorFault() smithy.ErrorFault { return smithy.FaultClient }
 
 func (m *mockIAM) GetRole(_ context.Context, in *iam.GetRoleInput, _ ...func(*iam.Options)) (*iam.GetRoleOutput, error) {
 	if m.getRoleErr != nil {
