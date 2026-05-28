@@ -22,21 +22,21 @@
 #   aws sts get-caller-identity     # sanity check
 #
 # Usage:
-#   awsbnkctl up   --config examples/syd-tracer/cluster.yaml --dry-run
-#   awsbnkctl up   --config examples/syd-tracer/cluster.yaml
-#   awsbnkctl down --config examples/syd-tracer/cluster.yaml --yes
-#   awsbnkctl down --config examples/syd-tracer/cluster.yaml --yes --keep-irsa
+#   awsbnkctl up   --config examples/full-cluster/cluster.yaml --dry-run
+#   awsbnkctl up   --config examples/full-cluster/cluster.yaml
+#   awsbnkctl down --config examples/full-cluster/cluster.yaml --yes
+#   awsbnkctl down --config examples/full-cluster/cluster.yaml --yes --keep-irsa
 #
-# State written to: .awsbnkctl/syd-tracer/state.env
+# State written to: .awsbnkctl/full-cluster/state.env
 
 apiVersion: awsbnkctl/v1
 kind: Cluster
 
 metadata:
-  # syd-tracer = "Sydney tracer-bullet". Distinct from aws-gpu-setup's
+  # full-cluster — full BNK-on-EKS deploy reference. Distinct from aws-gpu-setup's
   # syd-test-lab so the two can coexist in the same AWS account without
   # tag-discovery collisions.
-  name: syd-tracer
+  name: full-cluster
   region: ap-southeast-2
   labels:
     owner: jarrod
