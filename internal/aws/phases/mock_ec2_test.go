@@ -111,6 +111,7 @@ type mockEC2 struct {
 	createLTOut    *ec2.CreateLaunchTemplateOutput
 	createLTErr    error
 	createLTCalls  int
+	createLTInputs []*ec2.CreateLaunchTemplateInput
 	deleteLTCalls  int
 	deleteLTErr    error
 
@@ -229,6 +230,9 @@ func (m *mockEC2) ReleaseAddress(_ context.Context, _ *ec2.ReleaseAddressInput, 
 }
 func (m *mockEC2) CreateTags(_ context.Context, _ *ec2.CreateTagsInput, _ ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error) {
 	return &ec2.CreateTagsOutput{}, nil
+}
+func (m *mockEC2) DeleteTags(_ context.Context, _ *ec2.DeleteTagsInput, _ ...func(*ec2.Options)) (*ec2.DeleteTagsOutput, error) {
+	return &ec2.DeleteTagsOutput{}, nil
 }
 
 func (m *mockEC2) DescribeRouteTables(_ context.Context, _ *ec2.DescribeRouteTablesInput, _ ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
@@ -385,15 +389,16 @@ func (m *mockEC2) DescribeLaunchTemplates(_ context.Context, _ *ec2.DescribeLaun
 	}
 	return m.describeLTsOut, m.describeLTsErr
 }
-func (m *mockEC2) CreateLaunchTemplate(_ context.Context, _ *ec2.CreateLaunchTemplateInput, _ ...func(*ec2.Options)) (*ec2.CreateLaunchTemplateOutput, error) {
+func (m *mockEC2) CreateLaunchTemplate(_ context.Context, in *ec2.CreateLaunchTemplateInput, _ ...func(*ec2.Options)) (*ec2.CreateLaunchTemplateOutput, error) {
 	m.createLTCalls++
+	m.createLTInputs = append(m.createLTInputs, in)
 	if m.createLTErr != nil {
 		return nil, m.createLTErr
 	}
 	if m.createLTOut != nil {
 		return m.createLTOut, nil
 	}
-	id := "lt-mock-1"
+	id := fmt.Sprintf("lt-mock-%d", m.createLTCalls)
 	ver := int64(1)
 	return &ec2.CreateLaunchTemplateOutput{LaunchTemplate: &ec2types.LaunchTemplate{LaunchTemplateId: &id, LatestVersionNumber: &ver}}, nil
 }

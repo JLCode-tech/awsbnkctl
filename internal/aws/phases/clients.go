@@ -13,9 +13,11 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/sagemaker"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	smithymw "github.com/aws/smithy-go/middleware"
@@ -62,6 +64,7 @@ type EC2API interface {
 	AllocateAddress(ctx context.Context, in *ec2.AllocateAddressInput, opts ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error)
 	ReleaseAddress(ctx context.Context, in *ec2.ReleaseAddressInput, opts ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error)
 	CreateTags(ctx context.Context, in *ec2.CreateTagsInput, opts ...func(*ec2.Options)) (*ec2.CreateTagsOutput, error)
+	DeleteTags(ctx context.Context, in *ec2.DeleteTagsInput, opts ...func(*ec2.Options)) (*ec2.DeleteTagsOutput, error)
 
 	// Route tables
 	DescribeRouteTables(ctx context.Context, in *ec2.DescribeRouteTablesInput, opts ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error)
@@ -143,6 +146,31 @@ type EKSAPI interface {
 	DeleteAddon(ctx context.Context, in *eks.DeleteAddonInput, opts ...func(*eks.Options)) (*eks.DeleteAddonOutput, error)
 }
 
+// AutoScalingAPI is the subset of autoscaling.Client used by phase10's GPU
+// AZ-sweep fallback. Only two methods are needed: one to discover the ASG
+// backing a managed node group (via tag filter), and one to read recent
+// scaling activities so capacity-error messages can be detected quickly.
+// Tests inject a fake implementation (mockAutoScaling).
+type AutoScalingAPI interface {
+	DescribeAutoScalingGroups(ctx context.Context, in *autoscaling.DescribeAutoScalingGroupsInput, opts ...func(*autoscaling.Options)) (*autoscaling.DescribeAutoScalingGroupsOutput, error)
+	DescribeScalingActivities(ctx context.Context, in *autoscaling.DescribeScalingActivitiesInput, opts ...func(*autoscaling.Options)) (*autoscaling.DescribeScalingActivitiesOutput, error)
+}
+
+// SageMakerAPI is the subset of sagemaker.Client used by the SageMaker
+// lifecycle phase. Tests inject a fake implementation.
+type SageMakerAPI interface {
+	CreateModel(ctx context.Context, in *sagemaker.CreateModelInput, opts ...func(*sagemaker.Options)) (*sagemaker.CreateModelOutput, error)
+	DescribeModel(ctx context.Context, in *sagemaker.DescribeModelInput, opts ...func(*sagemaker.Options)) (*sagemaker.DescribeModelOutput, error)
+	DeleteModel(ctx context.Context, in *sagemaker.DeleteModelInput, opts ...func(*sagemaker.Options)) (*sagemaker.DeleteModelOutput, error)
+	CreateEndpointConfig(ctx context.Context, in *sagemaker.CreateEndpointConfigInput, opts ...func(*sagemaker.Options)) (*sagemaker.CreateEndpointConfigOutput, error)
+	DescribeEndpointConfig(ctx context.Context, in *sagemaker.DescribeEndpointConfigInput, opts ...func(*sagemaker.Options)) (*sagemaker.DescribeEndpointConfigOutput, error)
+	DeleteEndpointConfig(ctx context.Context, in *sagemaker.DeleteEndpointConfigInput, opts ...func(*sagemaker.Options)) (*sagemaker.DeleteEndpointConfigOutput, error)
+	CreateEndpoint(ctx context.Context, in *sagemaker.CreateEndpointInput, opts ...func(*sagemaker.Options)) (*sagemaker.CreateEndpointOutput, error)
+	DescribeEndpoint(ctx context.Context, in *sagemaker.DescribeEndpointInput, opts ...func(*sagemaker.Options)) (*sagemaker.DescribeEndpointOutput, error)
+	DeleteEndpoint(ctx context.Context, in *sagemaker.DeleteEndpointInput, opts ...func(*sagemaker.Options)) (*sagemaker.DeleteEndpointOutput, error)
+	ListTags(ctx context.Context, in *sagemaker.ListTagsInput, opts ...func(*sagemaker.Options)) (*sagemaker.ListTagsOutput, error)
+}
+
 // IAMAPI is the subset of iam.Client surface used by phase07. Tests inject a
 // fake implementation. Only methods used in this slice are listed here.
 type IAMAPI interface {
@@ -174,17 +202,24 @@ type IAMAPI interface {
 	GetOpenIDConnectProvider(ctx context.Context, in *iam.GetOpenIDConnectProviderInput, opts ...func(*iam.Options)) (*iam.GetOpenIDConnectProviderOutput, error)
 	DeleteOpenIDConnectProvider(ctx context.Context, in *iam.DeleteOpenIDConnectProviderInput, opts ...func(*iam.Options)) (*iam.DeleteOpenIDConnectProviderOutput, error)
 	TagOpenIDConnectProvider(ctx context.Context, in *iam.TagOpenIDConnectProviderInput, opts ...func(*iam.Options)) (*iam.TagOpenIDConnectProviderOutput, error)
+
+	// Customer-managed policies (Phase 14b — AWS Load Balancer Controller IRSA)
+	CreatePolicy(ctx context.Context, in *iam.CreatePolicyInput, opts ...func(*iam.Options)) (*iam.CreatePolicyOutput, error)
+	GetPolicy(ctx context.Context, in *iam.GetPolicyInput, opts ...func(*iam.Options)) (*iam.GetPolicyOutput, error)
+	DeletePolicy(ctx context.Context, in *iam.DeletePolicyInput, opts ...func(*iam.Options)) (*iam.DeletePolicyOutput, error)
 }
 
 // Clients bundles the AWS service clients needed by phases in this slice.
 // Later slices add EKS/S3 fields here without changing existing phases.
 type Clients struct {
-	EC2     EC2API
-	STS     STSAPI
-	IAM     IAMAPI
-	EKS     EKSAPI
-	SSM     SSMAPI
-	Profile string // the AWS profile used — passed to CheckAuthOrDie hints
+	EC2         EC2API
+	STS         STSAPI
+	IAM         IAMAPI
+	EKS         EKSAPI
+	SSM         SSMAPI
+	SageMaker   SageMakerAPI
+	AutoScaling AutoScalingAPI
+	Profile     string // the AWS profile used — passed to CheckAuthOrDie hints
 
 	// ForgeClient is the forge MCP client used by Phase09. Nil when forge is
 	// disabled (cl.Forge == nil || !cl.Forge.Enabled). Set via
@@ -287,12 +322,14 @@ func NewClients(ctx context.Context, region, profile string) (*Clients, error) {
 	}
 
 	return &Clients{
-		EC2:     ec2.NewFromConfig(cfg),
-		STS:     sts.NewFromConfig(cfg),
-		IAM:     iam.NewFromConfig(cfg),
-		EKS:     eks.NewFromConfig(cfg),
-		SSM:     ssm.NewFromConfig(cfg),
-		Profile: profile,
+		EC2:         ec2.NewFromConfig(cfg),
+		STS:         sts.NewFromConfig(cfg),
+		IAM:         iam.NewFromConfig(cfg),
+		EKS:         eks.NewFromConfig(cfg),
+		SSM:         ssm.NewFromConfig(cfg),
+		SageMaker:   sagemaker.NewFromConfig(cfg),
+		AutoScaling: autoscaling.NewFromConfig(cfg),
+		Profile:     profile,
 	}, nil
 }
 
