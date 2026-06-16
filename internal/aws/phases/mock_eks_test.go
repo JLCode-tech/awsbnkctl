@@ -35,6 +35,16 @@ type mockEKS struct {
 	// Configurable errors.
 	createClusterErr   error
 	describeClusterErr error
+
+	// ngCreatingTicks maps (clusterName+"/"+ngName) → remaining CREATING responses
+	// before switching to ACTIVE. When 0 (default), DescribeNodegroup returns ACTIVE
+	// immediately (backward-compatible). Set > 0 to simulate a real creation delay
+	// during which ASG capacity checks can fire.
+	ngCreatingTicks map[string]int
+
+	// ngASGName maps (clusterName+"/"+ngName) → ASG name to inject into
+	// NodegroupResources so the AZ-sweep can discover the backing ASG.
+	ngASGName map[string]string
 }
 
 func newMockEKS() *mockEKS {
@@ -120,18 +130,21 @@ func (m *mockEKS) CreateNodegroup(_ context.Context, in *eks.CreateNodegroupInpu
 	status := ekstypes.NodegroupStatusActive // mock immediately ACTIVE
 
 	ng := &ekstypes.Nodegroup{
-		ClusterName:   in.ClusterName,
-		NodegroupName: in.NodegroupName,
-		NodegroupArn:  &arn,
-		Status:        status,
-		NodeRole:      in.NodeRole,
-		Subnets:       in.Subnets,
-		AmiType:       in.AmiType,
-		InstanceTypes: in.InstanceTypes,
-		ScalingConfig: in.ScalingConfig,
-		DiskSize:      in.DiskSize,
-		Labels:        in.Labels,
-		Tags:          in.Tags,
+		ClusterName:    in.ClusterName,
+		NodegroupName:  in.NodegroupName,
+		NodegroupArn:   &arn,
+		Status:         status,
+		NodeRole:       in.NodeRole,
+		Subnets:        in.Subnets,
+		AmiType:        in.AmiType,
+		InstanceTypes:  in.InstanceTypes,
+		ScalingConfig:  in.ScalingConfig,
+		DiskSize:       in.DiskSize,
+		Labels:         in.Labels,
+		Tags:           in.Tags,
+		CapacityType:   in.CapacityType,
+		Taints:         in.Taints,
+		LaunchTemplate: in.LaunchTemplate,
 	}
 	if m.nodegroups[clusterName] == nil {
 		m.nodegroups[clusterName] = make(map[string]*ekstypes.Nodegroup)
@@ -148,6 +161,27 @@ func (m *mockEKS) DescribeNodegroup(_ context.Context, in *eks.DescribeNodegroup
 	ng, ok := clusterNGs[*in.NodegroupName]
 	if !ok {
 		return nil, mkEKSNotFound("nodegroup not found: " + *in.NodegroupName)
+	}
+
+	// If ngCreatingTicks has a remaining count for this ng, return CREATING and
+	// inject the ASG name into Resources so the AZ-sweep can discover it.
+	// Decrement the counter each call until it reaches zero, then return ACTIVE.
+	key := *in.ClusterName + "/" + *in.NodegroupName
+	if m.ngCreatingTicks != nil {
+		if ticks, ok2 := m.ngCreatingTicks[key]; ok2 && ticks > 0 {
+			m.ngCreatingTicks[key]--
+			// Build a copy of the nodegroup with CREATING status + ASG resources.
+			creating := *ng
+			creating.Status = ekstypes.NodegroupStatusCreating
+			if m.ngASGName != nil {
+				if asgName, ok3 := m.ngASGName[key]; ok3 {
+					creating.Resources = &ekstypes.NodegroupResources{
+						AutoScalingGroups: []ekstypes.AutoScalingGroup{{Name: &asgName}},
+					}
+				}
+			}
+			return &eks.DescribeNodegroupOutput{Nodegroup: &creating}, nil
+		}
 	}
 	return &eks.DescribeNodegroupOutput{Nodegroup: ng}, nil
 }

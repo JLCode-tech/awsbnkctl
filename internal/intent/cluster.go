@@ -149,6 +149,12 @@ type Cluster struct {
 	// Admin password: NEVER stored in cluster.yaml. Supply via the
 	// AWSBNKCTL_BIGIP_PASSWORD environment variable at provisioning time.
 	BigIPVE *BigIPVESpec `yaml:"bigipVE,omitempty"`
+	// AI declares the opt-in AI inference block (PRD-11 M4+). When present and
+	// ai.sagemaker.enabled is true, awsbnkctl creates a disposable SageMaker LMI
+	// (v15 / vLLM) endpoint on up and deletes it on down so no AI infra bills
+	// between sessions. Omitting the block (or setting enabled: false) is the
+	// default — all existing cluster.yaml files are unaffected.
+	AI *AISpec `yaml:"ai,omitempty"`
 }
 
 // EndpointAccessSpec controls who can reach the EKS control-plane API endpoint.
@@ -189,6 +195,43 @@ type NodeGroupSpec struct {
 	DiskSize int `yaml:"diskSize,omitempty"`
 	// Labels are additional Kubernetes node labels.
 	Labels map[string]string `yaml:"labels,omitempty"`
+	// GPU marks this node group as an NVIDIA GPU inference node group. When true,
+	// phase10 selects the AL2023 NVIDIA EKS AMI (AL2023_x86_64_NVIDIA), the node
+	// group is exempted from the BNK dSSM desiredSize>=3 rule + the BNK AZ pin, and
+	// the NVIDIA device-plugin phase targets it. A GPU node group is NEVER a BNK
+	// TMM node — it must not carry role=bnk. Default false (existing node groups
+	// are non-GPU; backward-compatible).
+	GPU bool `yaml:"gpu,omitempty"`
+	// CapacityType selects the EC2 purchasing option: "on-demand" (default) or
+	// "spot". Maps to EKS CapacityType. Applies to any node group; spot is the
+	// demo-appropriate default for GPU rigs.
+	CapacityType string `yaml:"capacityType,omitempty"`
+	// Taints are Kubernetes node taints applied at node-group creation, e.g.
+	// {key: "nvidia.com/gpu", value: "present", effect: "NoSchedule"}. Keeps
+	// non-GPU workloads off GPU nodes. Empty for normal node groups.
+	Taints []NodeTaintSpec `yaml:"taints,omitempty"`
+	// AZs optionally pins this node group's nodes to a subset of availability
+	// zones (e.g. ["ap-southeast-2a","ap-southeast-2c"] for g5). Empty = all
+	// public-subnet AZs. Independent of the BNK data-path AZ pin.
+	AZs []string `yaml:"azs,omitempty"`
+	// OnDemandFallback enables an automatic spot→on-demand retry sweep when
+	// capacityType is "spot" and ALL candidate AZs have exhausted spot capacity.
+	// Default false — no fallback means phase10 fails fast with a clear aggregated
+	// error listing every (AZ, spot) attempt, rather than silently switching
+	// purchasing options and incurring higher cost. Set true only when continuous
+	// availability is more important than cost predictability.
+	// Only meaningful for GPU node groups with capacityType: spot.
+	OnDemandFallback bool `yaml:"onDemandFallback,omitempty"`
+}
+
+// IsGPU reports whether this node group is an NVIDIA GPU inference node group.
+func (ng NodeGroupSpec) IsGPU() bool { return ng.GPU }
+
+// NodeTaintSpec is one Kubernetes node taint applied to a managed node group.
+type NodeTaintSpec struct {
+	Key    string `yaml:"key"`
+	Value  string `yaml:"value,omitempty"`
+	Effect string `yaml:"effect"` // NoSchedule | PreferNoSchedule | NoExecute
 }
 
 // Metadata carries the cluster identity fields.
@@ -310,6 +353,10 @@ type AddonsSpec struct {
 	// Flo configures the F5 Lifecycle Operator installation. When absent,
 	// FLO is installed with the pinned chart version.
 	Flo *FloSpec `yaml:"flo,omitempty"`
+	// LBController configures the AWS Load Balancer Controller installation.
+	// When absent (nil), the controller is NOT installed (opt-in; default OFF).
+	// Set enabled: true to install the AWS LB Controller for internal NLB support.
+	LBController *LBControllerSpec `yaml:"lbController,omitempty"`
 }
 
 // TestingSpec holds optional test-infrastructure configuration (slice 12+).
@@ -423,6 +470,47 @@ func (f *FloSpec) FLOVersion() string {
 		return DefaultFLOVersion
 	}
 	return f.Version
+}
+
+// LBControllerSpec configures the AWS Load Balancer Controller Helm install in Phase 14b.
+// Default: disabled (nil receiver or absent block means the controller is NOT installed).
+// This is the INVERSE of FloSpec/FloEnabled which defaults ON for backward-compat.
+type LBControllerSpec struct {
+	// EnabledFlag is the master switch. Default false (nil or absent block = disabled).
+	// Set true via "enabled: true" in cluster.yaml to install the AWS LB Controller.
+	// Note: the yaml tag is "enabled" for a clean cluster.yaml interface.
+	EnabledFlag *bool `yaml:"enabled,omitempty"`
+	// Version overrides the default pinned chart version.
+	// Omit to use DefaultLBControllerVersion.
+	Version string `yaml:"version,omitempty"`
+}
+
+// DefaultLBControllerVersion is the pinned AWS Load Balancer Controller Helm chart version.
+// Chart 1.8.1 installs controller app v2.8.1. IAM policy vendored from
+// https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.8.1/docs/install/iam_policy.json
+const DefaultLBControllerVersion = "1.8.1"
+
+// Enabled returns true when the AWS Load Balancer Controller should be installed.
+// A nil receiver (absent addons.lbController block) returns FALSE — this is the
+// INVERSE of FloEnabled which returns true for nil (backward-compat default-on).
+// Phase 14b is opt-in: existing clusters without an lbController block are unaffected.
+func (l *LBControllerSpec) Enabled() bool {
+	if l == nil {
+		return false
+	}
+	if l.EnabledFlag == nil {
+		return false
+	}
+	return *l.EnabledFlag
+}
+
+// LBControllerVersion returns the chart version to install. Falls back to the
+// pinned default when not overridden.
+func (l *LBControllerSpec) LBControllerVersion() string {
+	if l == nil || l.Version == "" {
+		return DefaultLBControllerVersion
+	}
+	return l.Version
 }
 
 // BNK interface patterns. A pattern fixes two orthogonal axes of the TMM data
@@ -597,35 +685,39 @@ func applyDefaults(c *Cluster) {
 		for i := range c.ClusterSpec.NodeGroups {
 			ng := &c.ClusterSpec.NodeGroups[i]
 			if ng.InstanceType == "" {
+				// GPU node groups default to g5.2xlarge; they are not BNK TMM nodes.
 				// BNK patterns need ≥16 vCPU / ≥64 GB for the full BNK 2.3 Small
 				// control plane + TMM packed onto one labeled node, plus enough ENIs
 				// for the TMM data-plane secondaries. m6i.4xlarge is the documented
 				// minimum per docs/audits/slice-09-aws-gpu-setup-audit.md row 27 and
 				// slice-12 audit. Non-BNK (network-only) clusters use smaller workers.
-				if c.IsBNKPattern() {
+				if ng.IsGPU() {
+					ng.InstanceType = "g5.2xlarge"
+				} else if c.IsBNKPattern() {
 					ng.InstanceType = "m6i.4xlarge"
 				} else {
 					ng.InstanceType = "t3.medium"
 				}
 			}
 			if ng.DesiredSize == 0 {
-				// BNK patterns need ≥3 nodes for dSSM quorum (slice-09 audit row 28,
-				// un-deferred 2026-05-24). Non-BNK clusters default to 1.
-				if c.IsBNKPattern() {
+				// GPU node groups default to 1 — they are not subject to the BNK
+				// dSSM quorum. BNK patterns need ≥3 nodes for dSSM quorum
+				// (slice-09 audit row 28, un-deferred 2026-05-24). Non-BNK default 1.
+				if !ng.IsGPU() && c.IsBNKPattern() {
 					ng.DesiredSize = 3
 				} else {
 					ng.DesiredSize = 1
 				}
 			}
 			if ng.MinSize == 0 {
-				if c.IsBNKPattern() {
+				if !ng.IsGPU() && c.IsBNKPattern() {
 					ng.MinSize = 3
 				} else {
 					ng.MinSize = 1
 				}
 			}
 			if ng.MaxSize == 0 {
-				if c.IsBNKPattern() {
+				if !ng.IsGPU() && c.IsBNKPattern() {
 					ng.MaxSize = 4
 				} else {
 					ng.MaxSize = 2
@@ -634,13 +726,20 @@ func applyDefaults(c *Cluster) {
 			if ng.DiskSize == 0 {
 				ng.DiskSize = 50
 			}
+			// CapacityType defaults to "on-demand" for all node groups.
+			if ng.CapacityType == "" {
+				ng.CapacityType = "on-demand"
+			}
 		}
 
 		// BNK patterns: auto-inject role=bnk into the first node group's
 		// labels if not already set. Phase 16 reads `kubectl get nodes -l role=bnk`
 		// to find the TMM-target node — missing this label causes a "no nodes found"
 		// failure at Phase 16 entry. Preserve an explicitly-set value.
-		if c.IsBNKPattern() && len(c.ClusterSpec.NodeGroups) > 0 {
+		// GUARD: skip if NodeGroups[0] is a GPU node group (GPU nodes are NEVER
+		// BNK TMM nodes — role=bnk must not be injected onto them).
+		if c.IsBNKPattern() && len(c.ClusterSpec.NodeGroups) > 0 &&
+			!c.ClusterSpec.NodeGroups[0].IsGPU() {
 			ng := &c.ClusterSpec.NodeGroups[0]
 			if ng.Labels == nil {
 				ng.Labels = make(map[string]string)
@@ -734,6 +833,11 @@ func applyDefaults(c *Cluster) {
 			c.BigIPVE.LicenseTier = "Good"
 		}
 		// Version intentionally left empty by default (newest AMI).
+	}
+
+	// ai.sagemaker defaults.
+	if c.AI != nil && c.AI.SageMaker != nil {
+		applySageMakerDefaults(c.AI.SageMaker)
 	}
 
 	// BNK patterns: auto-derive TMM SelfIPs as <subnet>.240 when not explicitly
@@ -838,7 +942,141 @@ func validate(c *Cluster) error {
 			return err
 		}
 	}
+	if c.AI != nil && c.AI.SageMaker != nil && c.AI.SageMaker.Enabled {
+		if err := validateSageMaker(c.AI.SageMaker); err != nil {
+			return err
+		}
+	}
+	if err := validateNodeGroups(c); err != nil {
+		return err
+	}
 	return nil
+}
+
+// gpuInstanceAZDeny maps a region to AZs where g5-family GPU instances are NOT
+// available, so validation can reject a GPU node group pinned to an AZ with no
+// g5 capacity. KNOWN-GAPS table, not an allow-list: regions/AZs absent are
+// treated as "available" (fail-open) so a new region needs no code change.
+// Override via AWSBNKCTL_GPU_AZ_DENY (format: "region:az1,az2;region2:az3")
+// for ad-hoc gaps.
+var gpuInstanceAZDeny = map[string][]string{
+	// g5 absent from ap-southeast-2b (Sydney) as of 2026-06. 2a + 2c only.
+	"ap-southeast-2": {"ap-southeast-2b"},
+}
+
+// validateNodeGroups validates GPU node group constraints (AZ gaps, AZ membership).
+// Runs for all clusters; non-GPU node groups pass through immediately.
+func validateNodeGroups(c *Cluster) error {
+	if c.ClusterSpec == nil {
+		return nil
+	}
+
+	// Build the deny table: env entries MERGE into the static table so a
+	// US-region override doesn't silently drop ap-southeast-2→2b and vice versa.
+	// Env entries add to / extend per-region lists; a region absent from env
+	// keeps its static deny entries (F2 fix).
+	denyTable := gpuInstanceAZDeny
+	if envVal := os.Getenv("AWSBNKCTL_GPU_AZ_DENY"); envVal != "" {
+		envTable := parseGPUAZDenyEnv(envVal)
+		merged := make(map[string][]string, len(gpuInstanceAZDeny)+len(envTable))
+		for r, azs := range gpuInstanceAZDeny {
+			merged[r] = append(merged[r], azs...)
+		}
+		for r, azs := range envTable {
+			merged[r] = append(merged[r], azs...)
+		}
+		denyTable = merged
+	}
+
+	// Build the cluster AZ set for membership checks.
+	azSet := make(map[string]bool, len(c.Network.AZs))
+	for _, az := range c.Network.AZs {
+		azSet[az] = true
+	}
+
+	region := c.Metadata.Region
+
+	for i, ng := range c.ClusterSpec.NodeGroups {
+		// Validate CapacityType if explicitly set.
+		if ng.CapacityType != "" && ng.CapacityType != "on-demand" && ng.CapacityType != "spot" {
+			return fmt.Errorf(
+				"cluster.nodeGroups[%d] (%s): capacityType %q is not valid (expected on-demand or spot)",
+				i, ng.Name, ng.CapacityType,
+			)
+		}
+
+		// Validate taint effects against the allowed EKS enum set.
+		for j, taint := range ng.Taints {
+			switch taint.Effect {
+			case "NoSchedule", "NoExecute", "PreferNoSchedule":
+				// valid
+			default:
+				return fmt.Errorf(
+					"cluster.nodeGroups[%d] (%s) taints[%d]: effect %q is not valid "+
+						"(expected NoSchedule, NoExecute, or PreferNoSchedule)",
+					i, ng.Name, j, taint.Effect,
+				)
+			}
+		}
+
+		if !ng.IsGPU() || len(ng.AZs) == 0 {
+			continue
+		}
+		deniedAZs := denyTable[region]
+		deniedSet := make(map[string]bool, len(deniedAZs))
+		for _, az := range deniedAZs {
+			deniedSet[az] = true
+		}
+
+		// Build available AZ list (region AZs minus denied) for error messages.
+		var available []string
+		for _, az := range c.Network.AZs {
+			if !deniedSet[az] {
+				available = append(available, az)
+			}
+		}
+
+		for _, az := range ng.AZs {
+			// Check AZ is in network.azs.
+			if !azSet[az] {
+				return fmt.Errorf(
+					"cluster.nodeGroups[%d] (%s): az %q is not in network.azs %v",
+					i, ng.Name, az, c.Network.AZs,
+				)
+			}
+			// Check AZ is not in the deny list.
+			if deniedSet[az] {
+				return fmt.Errorf(
+					"cluster.nodeGroups[%d] (%s) pins az %q which has no g5/GPU "+
+						"capacity in region %s (available: %v); "+
+						"remove it from nodeGroups[%d].azs or set AWSBNKCTL_GPU_AZ_DENY to override",
+					i, ng.Name, az, region, available, i,
+				)
+			}
+		}
+	}
+	return nil
+}
+
+// parseGPUAZDenyEnv parses AWSBNKCTL_GPU_AZ_DENY in the format
+// "region:az1,az2;region2:az3" into the same map shape as gpuInstanceAZDeny.
+// Malformed entries are silently skipped (fail-open).
+func parseGPUAZDenyEnv(val string) map[string][]string {
+	result := make(map[string][]string)
+	for _, entry := range strings.Split(val, ";") {
+		parts := strings.SplitN(strings.TrimSpace(entry), ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		region := strings.TrimSpace(parts[0])
+		for _, az := range strings.Split(parts[1], ",") {
+			az = strings.TrimSpace(az)
+			if az != "" {
+				result[region] = append(result[region], az)
+			}
+		}
+	}
+	return result
 }
 
 // validatePattern checks pattern-specific constraints.
@@ -906,9 +1144,13 @@ func validatePattern(c *Cluster) error {
 			"(the internal subnet is only used by pattern: dual-interface)", c.Pattern)
 	}
 
-	// dSSM quorum applies to every BNK pattern.
+	// dSSM quorum applies to every BNK pattern, but NOT GPU node groups.
+	// GPU node groups are inference workers, not BNK quorum members.
 	if c.ClusterSpec != nil {
 		for i, ng := range c.ClusterSpec.NodeGroups {
+			if ng.IsGPU() {
+				continue // GPU node groups are exempt from dSSM quorum rule
+			}
 			if ng.DesiredSize > 0 && ng.DesiredSize < 3 {
 				return fmt.Errorf(
 					"pattern %s requires cluster.nodeGroups[%d].desiredSize >= 3 (dSSM quorum), got %d. "+
@@ -1002,6 +1244,20 @@ func (c *Cluster) DemoEnabled() bool {
 // True when c.BigIPVE is non-nil and c.BigIPVE.Enabled is true.
 func (c *Cluster) BigIPVEEnabled() bool {
 	return c.BigIPVE != nil && c.BigIPVE.Enabled
+}
+
+// HasGPUNodeGroup reports whether any node group is a GPU node group.
+// Used to gate the NVIDIA device-plugin phase (clean skip when false).
+func (c *Cluster) HasGPUNodeGroup() bool {
+	if c.ClusterSpec == nil {
+		return false
+	}
+	for _, ng := range c.ClusterSpec.NodeGroups {
+		if ng.IsGPU() {
+			return true
+		}
+	}
+	return false
 }
 
 // bigipVEReservedOffsets lists the host-part offsets that are already allocated

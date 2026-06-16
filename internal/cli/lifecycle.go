@@ -15,7 +15,6 @@ import (
 	awspkg "github.com/JLCode-tech/awsbnkctl/internal/aws"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
-	"github.com/JLCode-tech/awsbnkctl/internal/config"
 	"github.com/JLCode-tech/awsbnkctl/internal/demo"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -175,31 +174,32 @@ func runUp(cmd *cobra.Command, _ []string) error {
 // register` — used by `awsbnkctl up --register-with-forge`. Pulled out
 // of runUp so the dry-run / live-apply branching stays readable, and
 // so it can be unit-tested independently of the lifecycle path.
-func registerWithForgePostApply(ctx context.Context) error {
-	cctx, err := requireWorkspace()
-	if err != nil {
-		return fmt.Errorf("forge register after apply: %w", err)
+//
+// cl is the already-loaded cluster intent (from runPhasedUp). Name and
+// region are taken directly from cl.Metadata so the correct cluster (the
+// one that was just provisioned) is registered — NOT the legacy workspace
+// config name which defaults to "bnk-demo" regardless of --config.
+func registerWithForgePostApply(ctx context.Context, cl *intent.Cluster) error {
+	clusterName := cl.Metadata.Name
+	if clusterName == "" {
+		return fmt.Errorf("forge register after apply: cluster metadata.name is empty")
 	}
-	wsDir, err := config.WorkspaceDir(cctx.WorkspaceName)
-	if err != nil {
-		return fmt.Errorf("forge register after apply: resolving workspace dir: %w", err)
+	region := cl.Metadata.Region
+	if region == "" {
+		return fmt.Errorf("forge register after apply: cluster metadata.region is empty")
 	}
 
-	clusterName := cctx.Workspace.Cluster.Name
-	if clusterName == "" {
-		return fmt.Errorf("forge register after apply: workspace cluster.name is empty")
-	}
-	region := cctx.Workspace.AWS.Region
-	if region == "" {
-		return fmt.Errorf("forge register after apply: workspace AWS.region is empty")
-	}
+	// linkDir: store forge_link.json alongside the rest of the cluster state
+	// (same directory resolveForgeTarget uses in intent mode).
+	linkDir := cl.StateDir()
 
 	// Generate the kubeconfig in-process via the EKS presigned-URL
 	// flow. Matches what `awsbnkctl forge register` does without a
-	// --kubeconfig override.
+	// --kubeconfig override. AWS_PROFILE from the environment is used
+	// (no workspace profile field to consult — the intent doesn't carry one).
 	clients, err := awspkg.NewClients(ctx, awspkg.Options{
 		Region:  region,
-		Profile: cctx.Workspace.AWS.Profile,
+		Profile: os.Getenv("AWS_PROFILE"),
 	})
 	if err != nil {
 		return fmt.Errorf("forge register after apply: aws clients: %w", err)
@@ -213,7 +213,13 @@ func registerWithForgePostApply(ctx context.Context) error {
 		return fmt.Errorf("forge register after apply: generate kubeconfig: %w", err)
 	}
 
-	fc := forge.NewClient("")
+	// Pick up the MCP URL from the intent if configured.
+	mcpURL := ""
+	if cl.Forge != nil && cl.Forge.MCPURL != "" {
+		mcpURL = cl.Forge.MCPURL
+	}
+
+	fc := forge.NewClient(mcpURL)
 	if !flagQuiet {
 		fmt.Fprintf(os.Stderr, "→ forge MCP: %s\n", fc.URL())
 	}
@@ -221,8 +227,8 @@ func registerWithForgePostApply(ctx context.Context) error {
 	regCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	res, err := forge.Register(regCtx, fc, forge.RegisterRequest{
-		WorkspaceName: cctx.WorkspaceName,
-		WorkspaceDir:  wsDir,
+		WorkspaceName: clusterName,
+		WorkspaceDir:  linkDir,
 		ClusterName:   clusterName,
 		Region:        region,
 		Kubeconfig:    []byte(yaml),
@@ -438,6 +444,26 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 	}); err != nil {
 		return err
 	}
+	// Phase 11c: NVIDIA device-plugin (GPU node groups only). Self-gates on
+	// HasGPUNodeGroup() — clean no-op for all existing non-GPU clusters.
+	// Runs here (after k8s clients attached + tmm-node-label) so GPU nodes
+	// are ACTIVE and the API server is reachable.
+	if err := stage(3, "nvidia-device-plugin", func() error {
+		return phases.Phase11cNvidiaDevicePlugin(ctx, cl, st, clients, dryRun)
+	}); err != nil {
+		return err
+	}
+	// SageMaker LMI endpoint (PRD-11 M4). Opt-in via ai.sagemaker.enabled. Runs
+	// after the GPU node group (which provides inference capacity) but is otherwise
+	// independent of the K8s control plane — SageMaker is a managed AWS service.
+	// Skipped entirely when not enabled (existing clusters byte-for-byte unchanged).
+	if cl.SageMakerEnabled() {
+		if err := stage(3, "sagemaker-lmi", func() error {
+			return phases.PhaseSageMakerUp(ctx, cl, st, clients, dryRun)
+		}); err != nil {
+			return err
+		}
+	}
 	if err := stage(3, "secondary-enis", func() error {
 		return phases.Phase17SecondaryENIs(ctx, cl, st, clients, dryRun)
 	}); err != nil {
@@ -494,6 +520,14 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 	}
 	if err := stage(4, "flo-helm", func() error {
 		return phases.Phase14FLOHelm(ctx, cl, st, clients, dryRun)
+	}); err != nil {
+		return err
+	}
+	// Phase 14b: AWS Load Balancer Controller (opt-in, default OFF).
+	// Installs the controller via HTTPS eks-charts Helm repo + IRSA + subnet tags.
+	// Required for internal NLB support in the data-path subnet (bake-off / forge proxies).
+	if err := stage(4, "lb-controller", func() error {
+		return phases.Phase14bLBController(ctx, cl, st, clients, dryRun)
 	}); err != nil {
 		return err
 	}
@@ -610,7 +644,7 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 	// Dry-run skips because forge.Register needs a real EKS cluster to
 	// describe + generate a kubeconfig for — and there isn't one yet.
 	if flagRegisterWithForge && !dryRun {
-		return registerWithForgePostApply(ctx)
+		return registerWithForgePostApply(ctx, cl)
 	}
 	return nil
 }
@@ -722,6 +756,9 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 	steps := []downStep{
 		// STAGE 4 — BNK supply chain · activation (reverse of up order).
 		{4, "otel-certs", func() error { return phases.Phase15OTELCertsDown(ctx, cl, st, clients) }},
+		// Phase 14b down: AWS Load Balancer Controller teardown (opt-in; no-op when never installed).
+		// Runs before flo-helm-down and before irsa-oidc-down so the role is gone before its OIDC provider.
+		{4, "lb-controller", func() error { return phases.Phase14bLBControllerDown(ctx, cl, st, clients) }},
 		{4, "activation-poll", func() error { return phases.Phase25ActivationPollDown(ctx, cl, st, clients) }},
 		{4, "pod-manager-heal", func() error { return phases.Phase24cPodManagerHealDown(ctx, cl, st, clients) }},
 		{4, "dssm-overlay", func() error { return phases.Phase24bDSSMInsecureOverlayDown(ctx, cl, st, clients) }},
@@ -736,6 +773,19 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 		{4, "k8s-foundation", func() error { return phases.Phase12K8sFoundationDown(ctx, cl, st, clients) }},
 		// STAGE 3 — Nodes · kubeconfig · ENIs · jumphost.
 		{3, "ebs-csi-hugepages", func() error { return phases.Phase11bEBSCSIHugepagesDown(ctx, cl, st, clients) }},
+		// Phase 11c down: NVIDIA device-plugin DaemonSet (GPU clusters only).
+		// Self-gates on HasGPUNodeGroup() — no-op for all existing non-GPU clusters.
+		// Runs before kubeconfig-down so the API server is still reachable.
+		{3, "nvidia-device-plugin", func() error { return phases.Phase11cNvidiaDevicePluginDown(ctx, cl, st, clients) }},
+		// SageMaker LMI endpoint down: delete Endpoint → EndpointConfig → Model.
+		// Gated on SageMakerEnabled() so it is a no-op for clusters that never had
+		// SageMaker enabled. Disposable-with-the-rig is the core invariant (PRD-11 M4).
+		{3, "sagemaker-lmi", func() error {
+			if !cl.SageMakerEnabled() {
+				return nil
+			}
+			return phases.PhaseSageMakerDown(ctx, cl, st, clients)
+		}},
 		{3, "kubeconfig", func() error { return phases.Phase11KubeconfigDown(ctx, cl, st, clients) }},
 		{3, "irsa-oidc", func() error { return phases.Phase18IrsaOidcDown(ctx, cl, st, clients, flagKeepIRSA) }},
 		{3, "iface-discovery", func() error { return phases.Phase17cIfaceDiscoveryDown(ctx, cl, st, clients) }},
@@ -751,6 +801,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 		{3, "tmm-node-label", func() error { return phases.Phase16TMMNodeLabelDown(ctx, cl, st, clients) }},
 		{3, "node-group", func() error { return phases.Phase10NodeGroupDown(ctx, cl, st, clients) }},
 		// STAGE 2 — EKS control plane.
+		{2, "forge-benchmark-cleanup", func() error { return phases.Phase09bBenchmarkDown(ctx, cl, st, clients) }},
 		{2, "forge-unregister", func() error { return phases.Phase09ForgeRegisterDown(ctx, cl, st, clients, flagKeepForgeLink) }},
 		{2, "vpc-cni-prefix", func() error { return phases.Phase08bVPCCNIPrefixDown(ctx, cl, st, clients) }},
 		{2, "eks-cluster", func() error { return phases.Phase08EKSClusterDown(ctx, cl, st, clients) }},
@@ -804,6 +855,12 @@ func printDownPlan(w io.Writer, cl *intent.Cluster, st *state.State, keepIRSA, k
 		{label: "IRSA ServiceAccount", key: "CNE_SA_NAME"},
 		{label: "internal NAD", key: "INTERNAL_NAD"},
 		{label: "external NAD", key: "EXTERNAL_NAD"},
+		// LBC resources — present only when addons.lbController.enabled=true.
+		// Phase14bLBControllerDown: NLB Services deprovisioned, helm uninstalled,
+		// BNK_EXT_SUBNET tags removed, IAM policy detached+deleted, IRSA role deleted.
+		{label: "LBC helm release + NLBs", key: "LB_CONTROLLER_RELEASE_NAME"},
+		{label: "LBC IAM policy", key: "LB_CONTROLLER_POLICY_ARN"},
+		{label: "LBC IRSA role", key: "LB_CONTROLLER_IAM_ROLE_ARN"},
 		{label: "FLO helm release", key: "FLO_RELEASE_NAME"},
 		{label: "EBS CSI addon", key: "EBS_CSI_ADDON_STATUS"},
 		{label: "kubeconfig (local file)", key: "KUBECONFIG_PATH"},
