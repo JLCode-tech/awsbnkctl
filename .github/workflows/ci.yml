@@ -436,10 +436,13 @@ jobs:
     #      detect --redact` run would catch.
     #
     # All three steps run with `continue-on-error: false` (the default):
-    # the gate posture is "gosec ./... clean; secrets scan clean". A
-    # finding fails the job, blocks the PR, and surfaces in the Actions tab
-    # as a red-x check. This is the static offline gate; live-AWS
-    # validation is exercised separately by the operator.
+    # the gate posture is "gosec ./... clean; secrets scan clean;
+    # no reachable vulns with an available fix". A finding fails the job,
+    # blocks the PR, and surfaces in the Actions tab as a red-x check.
+    # (govulncheck findings with no released fix anywhere warn instead of
+    # fail — see the gate policy note on that step.) This is the static
+    # offline gate; live-AWS validation is exercised separately by the
+    # operator.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -476,10 +479,46 @@ jobs:
         # step above. The wrapper action re-installs the newest manifest Go,
         # which can lag a patched release and re-flag stdlib CVEs that the
         # go.mod pin has already fixed.
+        #
+        # Gate policy: fail only on reachable vulns that have a released
+        # fix (fixed_version set in the vuln DB) — those are actionable
+        # via a dependency or toolchain bump. Reachable vulns with no fix
+        # released anywhere (e.g. containerd CRI-checkpoint CVEs pending
+        # an upstream release, the x/crypto/openpgp deprecation pulled in
+        # by helm) are surfaced as warnings instead of blocking every PR
+        # on findings nobody can act on. The moment upstream publishes a
+        # fix, the finding gains a fixed_version and the gate goes red
+        # until we bump.
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           go version
-          govulncheck ./...
+          code=0
+          govulncheck -format json ./... > vulns.json || code=$?
+          if [ "$code" != 0 ] && [ "$code" != 3 ]; then
+            echo "govulncheck failed to run (exit $code)"
+            cat vulns.json
+            exit "$code"
+          fi
+          # Symbol-level (reachable) findings have a function in the first
+          # trace frame; module-level require-graph findings do not.
+          fixable=$(jq -r 'select(.finding != null) | .finding
+            | select(.trace[0].function != null)
+            | select(.fixed_version != null and .fixed_version != "")
+            | .osv' vulns.json | sort -u)
+          unfixable=$(jq -r 'select(.finding != null) | .finding
+            | select(.trace[0].function != null)
+            | select(.fixed_version == null or .fixed_version == "")
+            | .osv' vulns.json | sort -u)
+          if [ -n "$unfixable" ]; then
+            echo "::warning title=govulncheck::reachable vulns with no released fix (not blocking): $(echo "$unfixable" | tr '\n' ' ')"
+            echo "$unfixable" | sed 's|^|  https://pkg.go.dev/vuln/|'
+          fi
+          if [ -n "$fixable" ]; then
+            echo "::error title=govulncheck::reachable vulns with a released fix — bump the module/toolchain:"
+            echo "$fixable" | sed 's|^|  https://pkg.go.dev/vuln/|'
+            exit 1
+          fi
+          echo "govulncheck: no reachable vulnerabilities with an available fix"
 
       - name: gitleaks (secret scan)
         # Scans the full git history for committed secrets. Uses

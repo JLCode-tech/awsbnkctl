@@ -6,7 +6,14 @@
 
 `f5-cne-controller` resolves HTTPRoute `backendRefs` → Service → EndpointSlice → TMM pool members **only at HTTPRoute spec reconcile time**. It does NOT subscribe to EndpointSlice change events for backend services. When a backend pod is rescheduled (new pod IP), the EndpointSlice updates correctly but TMM's `pool_member` table retains the stale (deleted) pod IP. Traffic landing on the VIP returns HTTP 500 ("no available pool member") indefinitely.
 
-The only documented workaround is to bounce the HTTPRoute (delete + re-apply, or patch the spec) so the controller re-reads the current EndpointSlice. This is a known issue verified live on multiple occasions.
+The only effective recovery we have found is to force a **spec** change on the HTTPRoute (patch a field, or delete + re-apply) so the controller re-reads the current EndpointSlice. We have reproduced this live on multiple occasions; every non-spec recovery we tried (controller restart, annotation/finalizer patches) was confirmed ineffective — see below.
+
+Verified with `HTTPRoute`. Other route types (e.g. `L4Route`, `TLSRoute`) were not tested, but likely share the reconcile-on-spec-change-only pattern.
+
+## Expected vs actual behaviour
+
+- **Expected:** when the EndpointSlice backing an HTTPRoute `backendRef` changes, the controller re-resolves pool members and pushes the new endpoint IPs to TMM — the same way it already reacts to EndpointSlice changes for its own internal services (see log evidence below).
+- **Actual:** the EndpointSlice change is never propagated for user-defined backends. TMM keeps the deleted pod IP and the VIP returns HTTP 500 until an operator forces an HTTPRoute spec change.
 
 ## Versions
 
@@ -80,6 +87,8 @@ We tried, with full logs captured each time:
 
 Add an EndpointSlice informer to `GatewayReconciler` (or the equivalent component responsible for translating `HTTPRoute.backendRefs` → pool members). On EndpointSlice add/update/delete events, enqueue reconciles for every HTTPRoute whose `backendRefs` reference the parent Service. The Kubernetes controller-runtime `Watches()` builder supports this pattern out-of-the-box via `handler.EnqueueRequestsFromMapFunc`.
 
+Note that the controller already runs an EndpointSlice watch for its internal services (the `"Endpointslice ... changed, syncing"` log lines above), so this extends existing machinery rather than adding new infrastructure — the watch just needs to cover Services referenced by HTTPRoute `backendRefs` as well.
+
 Reference implementation pattern (controller-runtime):
 
 ```go
@@ -95,45 +104,71 @@ func (r *HTTPRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *HTTPRouteReconciler) findRoutesForSlice(ctx context.Context, obj client.Object) []reconcile.Request {
     slice := obj.(*discoveryv1.EndpointSlice)
-    serviceName := slice.Labels["kubernetes.io/service-name"]
+    serviceName := slice.Labels[discoveryv1.LabelServiceName] // "kubernetes.io/service-name"
     if serviceName == "" {
         return nil
     }
     var routes gatewayv1.HTTPRouteList
-    _ = r.Client.List(ctx, &routes, client.InNamespace(slice.Namespace))
+    if err := r.Client.List(ctx, &routes, client.InNamespace(slice.Namespace)); err != nil {
+        return nil
+    }
     var requests []reconcile.Request
     for _, route := range routes.Items {
-        for _, rule := range route.Spec.Rules {
-            for _, ref := range rule.BackendRefs {
-                if ref.BackendRef.BackendObjectReference.Name == gatewayv1.ObjectName(serviceName) {
-                    requests = append(requests, reconcile.Request{
-                        NamespacedName: types.NamespacedName{
-                            Name:      route.Name,
-                            Namespace: route.Namespace,
-                        },
-                    })
-                }
-            }
+        if routeReferencesService(route, serviceName) {
+            requests = append(requests, reconcile.Request{
+                NamespacedName: types.NamespacedName{
+                    Name:      route.Name,
+                    Namespace: route.Namespace,
+                },
+            })
         }
     }
     return requests
 }
+
+func routeReferencesService(route gatewayv1.HTTPRoute, serviceName string) bool {
+    for _, rule := range route.Spec.Rules {
+        for _, ref := range rule.BackendRefs {
+            // Kind defaults to Service when unset.
+            if ref.Kind != nil && *ref.Kind != "Service" {
+                continue
+            }
+            if string(ref.Name) == serviceName {
+                return true
+            }
+        }
+    }
+    return false
+}
 ```
+
+Two refinements a production implementation would also want: (1) cross-namespace `backendRefs` (`ref.Namespace` set, authorised via ReferenceGrant) require matching routes outside the slice's namespace, not just `client.InNamespace(slice.Namespace)`; (2) a field index on backendRef service names (`mgr.GetFieldIndexer()`) avoids listing every HTTPRoute on each EndpointSlice event.
 
 ## Operator-side workaround (until the fix lands)
 
-`awsbnkctl bnk resync <httproute-name> -n <namespace>` does the spec-toggle for you:
+`awsbnkctl bnk resync <httproute-name> -n <namespace>` does the spec-toggle for you, on every backendRef in the route:
 
 ```
-weight 1 → 2  (forces spec generation bump → controller reconciles)
-weight 2 → 1  (restores original weight)
+weight N → N+1  (forces spec generation bump → controller reconciles)
+weight N+1 → N  (restores the original weight ~1s later)
+```
+
+(A backendRef with no explicit weight is restored to `weight: 1` — the Gateway API default, so semantically identical.)
+
+The same recovery with `kubectl` alone, for operators without `awsbnkctl`:
+
+```
+kubectl patch httproute <name> -n <ns> --type=json \
+  -p='[{"op":"add","path":"/spec/rules/0/backendRefs/0/weight","value":2}]'
+kubectl patch httproute <name> -n <ns> --type=json \
+  -p='[{"op":"replace","path":"/spec/rules/0/backendRefs/0/weight","value":1}]'
 ```
 
 The controller picks up the spec change, re-resolves the EndpointSlice, and pushes fresh pool members. Idempotent. Behaviour-preserving. No pod restarts. Verified live: curl response transitions from HTTP 500 to HTTP 200 within ~1 second of running `awsbnkctl bnk resync`.
 
 ## Impact
 
-This affects any production deployment where backend pods can be evicted, drained, or replaced (so: every production deployment). The current behaviour silently breaks the VIP and provides no signal to the operator that the pool is stale beyond observing HTTP 500 traffic. A naive operator who restarts the controller will see no improvement, escalating to "is BNK broken?" investigations that are expensive in operator time.
+This affects any production deployment where backend pods can be replaced — which includes routine rolling updates (`kubectl rollout restart`), node drains and upgrades, evictions, OOM kills, and spot reclaims. So: every production deployment. The current behaviour silently breaks the VIP and provides no signal to the operator that the pool is stale beyond observing HTTP 500 traffic. With multi-replica backends, a single replaced pod leaves one stale member in an otherwise-healthy pool, which would manifest as intermittent errors rather than a hard outage — harder still to diagnose. (Our reproduction used a single-replica backend, where the outage is total.) A naive operator who restarts the controller will see no improvement, escalating to "is BNK broken?" investigations that are expensive in operator time.
 
 ## Suggested labels
 
