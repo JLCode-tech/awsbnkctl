@@ -38,7 +38,7 @@ jobs:
       matrix:
         image: [aws, iperf3]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # QEMU is required for emulated cross-arch builds on a single
       # runner. `tonistiigi/binfmt:latest` registers handlers for every
