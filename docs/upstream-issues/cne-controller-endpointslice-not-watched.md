@@ -166,6 +166,8 @@ kubectl patch httproute <name> -n <ns> --type=json \
 
 The controller picks up the spec change, re-resolves the EndpointSlice, and pushes fresh pool members. Idempotent. Behaviour-preserving. No pod restarts. Verified live: curl response transitions from HTTP 500 to HTTP 200 within ~1 second of running `awsbnkctl bnk resync`.
 
+For unattended mitigation, `awsbnkctl bnk resync --watch` runs the same logic as a daemon: it watches EndpointSlices for the Services referenced by the targeted HTTPRoutes and auto-triggers the spec-toggle when one changes, so the VIP self-heals without operator intervention until the upstream fix lands.
+
 ## Impact
 
 This affects any production deployment where backend pods can be replaced — which includes routine rolling updates (`kubectl rollout restart`), node drains and upgrades, evictions, OOM kills, and spot reclaims. So: every production deployment. The current behaviour silently breaks the VIP and provides no signal to the operator that the pool is stale beyond observing HTTP 500 traffic. With multi-replica backends, a single replaced pod leaves one stale member in an otherwise-healthy pool, which would manifest as intermittent errors rather than a hard outage — harder still to diagnose. (Our reproduction used a single-replica backend, where the outage is total.) A naive operator who restarts the controller will see no improvement, escalating to "is BNK broken?" investigations that are expensive in operator time.
