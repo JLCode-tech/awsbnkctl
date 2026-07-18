@@ -257,9 +257,11 @@ func countBackendRefs(route *unstructured.Unstructured) int {
 }
 
 type patchOp struct {
-	Op    string `json:"op"`
-	Path  string `json:"path"`
-	Value int64  `json:"value"`
+	Op   string `json:"op"`
+	Path string `json:"path"`
+	// Value is a pointer so "remove" ops (which must not carry a value)
+	// serialize without the field.
+	Value *int64 `json:"value,omitempty"`
 }
 
 type weightEntry struct {
@@ -303,19 +305,48 @@ func collectWeights(route *unstructured.Unstructured) []weightEntry {
 	return entries
 }
 
-// buildPatches constructs a JSON-patch document to set every backendRef weight
-// to newWeight(entry.orig).
-func buildPatches(entries []weightEntry, newWeight func(orig int64) int64) []patchOp {
-	ops := make([]patchOp, len(entries))
-	for i, e := range entries {
-		op := "replace"
-		if !e.fieldExists {
-			op = "add"
+func weightPath(e weightEntry) string {
+	return fmt.Sprintf("/spec/rules/%d/backendRefs/%d/weight", e.ruleIdx, e.refIdx)
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+// buildForwardPatches sets every backendRef weight to orig+1. Refs that
+// already carry a weight are guarded by a "test" op asserting the value we
+// read is still current, so a spec edit that raced our Get fails the patch
+// loudly (RFC 6902 test failure) instead of being silently overwritten.
+// Absent weights use "add" — there is no value to test.
+func buildForwardPatches(entries []weightEntry) []patchOp {
+	var ops []patchOp
+	for _, e := range entries {
+		p := weightPath(e)
+		if e.fieldExists {
+			ops = append(ops,
+				patchOp{Op: "test", Path: p, Value: int64Ptr(e.orig)},
+				patchOp{Op: "replace", Path: p, Value: int64Ptr(e.orig + 1)},
+			)
+		} else {
+			ops = append(ops, patchOp{Op: "add", Path: p, Value: int64Ptr(e.orig + 1)})
 		}
-		ops[i] = patchOp{
-			Op:    op,
-			Path:  fmt.Sprintf("/spec/rules/%d/backendRefs/%d/weight", e.ruleIdx, e.refIdx),
-			Value: newWeight(e.orig),
+	}
+	return ops
+}
+
+// buildRestorePatches returns the route to its original state: refs that had
+// an explicit weight get it back via "replace"; refs that had none get the
+// field removed again (leaving `weight: 1` behind would be semantically
+// identical — the Gateway API default — but not spec-identical). Every entry
+// is guarded by a "test" op on the toggled value so a concurrent edit during
+// ReconcileWait aborts the restore instead of clobbering it.
+func buildRestorePatches(entries []weightEntry) []patchOp {
+	var ops []patchOp
+	for _, e := range entries {
+		p := weightPath(e)
+		ops = append(ops, patchOp{Op: "test", Path: p, Value: int64Ptr(e.orig + 1)})
+		if e.fieldExists {
+			ops = append(ops, patchOp{Op: "replace", Path: p, Value: int64Ptr(e.orig)})
+		} else {
+			ops = append(ops, patchOp{Op: "remove", Path: p})
 		}
 	}
 	return ops
@@ -339,13 +370,8 @@ func toggleWeights(ctx context.Context, dyn dynamic.Interface, ns, name string, 
 		return nil
 	}
 
-	forward := buildPatches(entries, func(orig int64) int64 { return orig + 1 })
-	restore := buildPatches(entries, func(orig int64) int64 { return orig })
-	// After the forward patch, the weight field exists in the API server object,
-	// so the restore patch always uses "replace" regardless of the original state.
-	for i := range restore {
-		restore[i].Op = "replace"
-	}
+	forward := buildForwardPatches(entries)
+	restore := buildRestorePatches(entries)
 
 	// Apply forward patch.
 	rv, err := applyJSONPatch(ctx, dyn, ns, name, forward)
