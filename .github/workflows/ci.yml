@@ -27,9 +27,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Track go.mod's `go` directive — testcontainers-go's
           # transitive otel deps require Go 1.25+, and pinning here
@@ -92,9 +92,9 @@ jobs:
       # `TestIntegration_Connect_Whoami`.
       TESTCONTAINERS_RYUK_DISABLED: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Track go.mod's `go` directive rather than hard-coding here —
           # the testcontainers-go dependency chain (docker → otel) pulls
@@ -120,9 +120,9 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -174,9 +174,9 @@ jobs:
       AWS_REGION: us-east-1
       AWS_EC2_METADATA_DISABLED: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -201,9 +201,9 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -256,9 +256,9 @@ jobs:
       AWS_REGION: us-east-1
       AWS_EC2_METADATA_DISABLED: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -358,7 +358,7 @@ jobs:
       - name: Upload dry-run logs
         # Always upload so a red run leaves debug context behind.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-dryrun-logs
           path: artifacts/
@@ -368,9 +368,9 @@ jobs:
     name: windows build
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -380,9 +380,9 @@ jobs:
     name: goreleaser config sanity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -401,7 +401,7 @@ jobs:
     # words land via a cspell.json edit on the same PR.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: cspell (docs/**/*.md + README + CONTRIBUTING)
         # Hard-fail on any unknown-word finding.
@@ -447,7 +447,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # gitleaks needs the full git history to scan past commits
           # (the default fetch-depth: 1 only gives the worktree, not
@@ -456,7 +456,7 @@ jobs:
           # fetch is bounded (~5 MB repo today).
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -490,7 +490,11 @@ jobs:
         # fix, the finding gains a fixed_version and the gate goes red
         # until we bump.
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          # Pinned (not @latest) so the gate is reproducible — same
+          # philosophy as the staticcheck pin via the go.mod `tool`
+          # directive. Dependabot does not track this string, so bump it
+          # deliberately when x/vuln releases.
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           go version
           code=0
           govulncheck -format json ./... > vulns.json || code=$?
