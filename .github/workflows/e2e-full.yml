@@ -44,7 +44,7 @@ jobs:
     # Gate to this repo so cross-repo PRs don't try to run it.
     if: github.repository == 'JLCode-tech/awsbnkctl'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Status banner
         run: |
