@@ -24,6 +24,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
+// ErrRegionEmpty is returned by NewClients when the credential chain
+// resolves no region at all. Callers that want "AWS simply isn't
+// configured here" to be a benign state (e.g. the doctor's
+// green-by-default contract on a stock dev box) match it with
+// errors.Is; every other construction failure means broken config.
+var ErrRegionEmpty = errors.New("AWS region is empty; set AWS_REGION, --region, or configure a profile")
+
 // Clients bundles the per-service SDK handles awsbnkctl needs.
 //
 // Each field is an interface (defined alongside its consumer file —
@@ -102,7 +109,7 @@ func NewClients(ctx context.Context, opts Options) (*Clients, error) {
 		return nil, fmt.Errorf("loading AWS config: %w", err)
 	}
 	if cfg.Region == "" {
-		return nil, errors.New("AWS region is empty; set AWS_REGION, --region, or configure a profile")
+		return nil, ErrRegionEmpty
 	}
 
 	return &Clients{

@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -86,14 +87,44 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 		}
 		return out
 	}
-	out = append(out, withWhy{
-		Check: Check{Name: "aws credentials", Status: StatusOK, Detail: credSource},
-		Why:   "every AWS-side operation needs valid credentials",
-	})
-
-	// Build a shared Clients for the remaining live checks.
+	// Build a shared Clients for the remaining live checks. Done before
+	// the credentials row is emitted so a resolved-creds-but-no-region
+	// box degrades on the `aws credentials` row itself: the doctor's
+	// green-by-default contract (see doctor_test.go) allows warnings
+	// only on `workspace` + `aws credentials`, with downstream `aws *`
+	// rows Skipped.
 	clients, err := awspkg.NewClients(ctx, awspkg.Options{Region: region, Profile: profile})
 	if err != nil {
+		if errors.Is(err, awspkg.ErrRegionEmpty) {
+			// No region anywhere in the chain = AWS simply isn't
+			// configured on this box. Benign, like the no-credentials
+			// path above — a stock dev box must still exit 0.
+			out = append(out, withWhy{
+				Check: Check{
+					Name:   "aws credentials",
+					Status: StatusWarning,
+					Detail: fmt.Sprintf("credentials resolve (%s) but no AWS region is configured — set AWS_REGION, --region, or a profile region before `awsbnkctl up`", credSource),
+				},
+				Why: "every AWS-side operation needs valid credentials",
+			})
+			for _, name := range []string{
+				"aws sts caller-identity",
+				"aws eks:DescribeCluster permission",
+				"aws ec2 vCPU quota",
+				"aws s3:PutObject feasibility",
+				"aws iam:GetRole (FLO IRSA)",
+			} {
+				out = append(out, withWhy{
+					Check: Check{Name: name, Status: StatusSkipped, Detail: "skipped (no region)"},
+					Why:   "skipped because no AWS region is configured",
+				})
+			}
+			return out
+		}
+		out = append(out, withWhy{
+			Check: Check{Name: "aws credentials", Status: StatusOK, Detail: credSource},
+			Why:   "every AWS-side operation needs valid credentials",
+		})
 		out = append(out, withWhy{
 			Check: Check{
 				Name:   "aws sts caller-identity",
@@ -104,6 +135,10 @@ func awsChecks(ctx context.Context, cctx *config.Context) []withWhy {
 		})
 		return out
 	}
+	out = append(out, withWhy{
+		Check: Check{Name: "aws credentials", Status: StatusOK, Detail: credSource},
+		Why:   "every AWS-side operation needs valid credentials",
+	})
 
 	// Check 2: STS GetCallerIdentity.
 	id, err := clients.CallerIdentity(ctx)
