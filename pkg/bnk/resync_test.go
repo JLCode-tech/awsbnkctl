@@ -34,6 +34,10 @@ func resyncScheme() *runtime.Scheme {
 			gvk:     schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "Gateway"},
 			listGVK: schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "GatewayList"},
 		},
+		{
+			gvk:     schema.GroupVersionKind{Group: "discovery.k8s.io", Version: "v1", Kind: "EndpointSlice"},
+			listGVK: schema.GroupVersionKind{Group: "discovery.k8s.io", Version: "v1", Kind: "EndpointSliceList"},
+		},
 	} {
 		s.AddKnownTypeWithName(pair.gvk, &unstructured.Unstructured{})
 		s.AddKnownTypeWithName(pair.listGVK, &unstructured.UnstructuredList{})
@@ -50,8 +54,9 @@ func newFakeDynamic(objs ...*unstructured.Unstructured) *dynamicfake.FakeDynamic
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		resyncScheme(),
 		map[schema.GroupVersionResource]string{
-			httpRouteGVR: "HTTPRouteList",
-			gatewayGVR:   "GatewayList",
+			httpRouteGVR:     "HTTPRouteList",
+			gatewayGVR:       "GatewayList",
+			endpointSliceGVR: "EndpointSliceList",
 		},
 	)
 	ctx := context.Background()
@@ -72,6 +77,8 @@ func gvrForKind(kind string) schema.GroupVersionResource {
 		return httpRouteGVR
 	case "Gateway":
 		return gatewayGVR
+	case "EndpointSlice":
+		return endpointSliceGVR
 	default:
 		panic("gvrForKind: unknown kind " + kind)
 	}
