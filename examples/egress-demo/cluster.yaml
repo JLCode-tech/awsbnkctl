@@ -1,0 +1,84 @@
+# cluster.yaml — BNK transparent-egress demo cluster (external-only).
+#
+# Companion to examples/egress-demo/README.md. Brings up the cheapest
+# egress-capable BNK pattern (external-only: TMM has ONE data-plane ENI and
+# reaches pods over the CNI), optionally auto-registering into a localhost
+# BNK Forge so the egress toggle can be driven from the UI.
+#
+# Quick start:
+#   awsbnkctl validate examples/egress-demo/cluster.yaml
+#   awsbnkctl up --config examples/egress-demo/cluster.yaml --dry-run
+#   awsbnkctl up --config examples/egress-demo/cluster.yaml
+# then follow examples/egress-demo/README.md to run the demo.
+
+apiVersion: awsbnkctl/v1
+kind: Cluster
+
+metadata:
+  name: bnk-egress
+  region: ap-southeast-2
+  labels:
+    purpose: bnk-egress-demo
+
+# external-only: single external (ingress) interface, CNI backend. This is the
+# egress-capable pattern — see README.md "Why external-only?".
+pattern: external-only
+
+network:
+  vpcCidr: 10.0.0.0/16
+
+  azs:
+    - ap-southeast-2a
+    - ap-southeast-2b
+
+  subnets:
+    public:
+      - cidr: 10.0.1.0/24
+        az: ap-southeast-2a
+      - cidr: 10.0.2.0/24
+        az: ap-southeast-2b
+    private:
+      - cidr: 10.0.11.0/24
+        az: ap-southeast-2a
+      - cidr: 10.0.12.0/24
+        az: ap-southeast-2b
+
+  dataPath:
+    external:
+      cidr: 10.0.10.0/24
+      az: ap-southeast-2a
+
+  natGateways: 1
+
+cluster:
+  kubernetesVersion: "1.30"
+  nodeGroups:
+    - name: default
+      instanceType: m6i.4xlarge
+      desiredSize: 3
+      minSize: 3
+      maxSize: 4
+      diskSize: 50
+
+bnk:
+  farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
+  jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
+
+testing:
+  jumphost:
+    enabled: true
+    instanceType: t3.small
+    mgmtSubnetIndex: 0
+
+# Register the new cluster into the running localhost bnk-forge after `up`,
+# and unregister on `down`. Password supplied via $AWSBNKCTL_FORGE_PASSWORD.
+forge:
+  enabled: true
+  url: http://localhost:8000
+  mcpUrl: http://localhost:8081/mcp/
+  credentialTemplateId: 1
+  username: admin
+
+tags:
+  env: lab
+  purpose: bnk-egress-demo
