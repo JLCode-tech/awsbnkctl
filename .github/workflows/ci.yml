@@ -479,7 +479,8 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           go version
-          govulncheck ./...
+          jq --version
+          scripts/govulncheck-gate.sh
 
       - name: gitleaks (secret scan)
         # Scans the full git history for committed secrets. Uses
