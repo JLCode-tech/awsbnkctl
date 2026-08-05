@@ -100,7 +100,6 @@ The `pattern:` field selects the TMM data-plane interface topology and binding. 
 
 Ready-to-edit topologies live under [`examples/`](examples/):
 
-- **[`examples/tracer/`](examples/tracer/)** - Minimal VPC-only tracer-bullet (fastest smoke test)
 - **[`examples/full-cluster/`](examples/full-cluster/)** - Complete BNK cluster reference config
 - **[`examples/external-only/`](examples/external-only/)** - Single-interface `external-only` pattern
 - **[`examples/demo/`](examples/demo/)** - Full demo cluster + curated walkthroughs
