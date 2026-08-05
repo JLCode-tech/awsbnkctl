@@ -30,7 +30,8 @@ const (
 //   - external-otelsvr
 //   - external-f5ingotelsvr
 //
-// Both are signed by the slice-5 <cluster>-ca-cluster-issuer and created in
+// Both are signed by the <cluster>-ca-cluster-issuer created by the cert-chain
+// foundation phase and created in
 // the f5-cne-core namespace. Phase 15 waits until both are Ready=True.
 //
 // D-005: CheckAuthOrDie is called at entry.

@@ -6,7 +6,7 @@
 // novelty vs http-routing-e2e / http-traffic-split is exactly that: the
 // HTTPRoute's backendRef points at a selectorless Service (no Pods, no
 // selector), and the hand-written EndpointSlice carries an *external* IP —
-// here, the slice-12 jumphost's BNK_EXT ENI IP (JUMPHOST_BNK_EXT_ENI_IP),
+// here, the jumphost's BNK_EXT ENI IP (JUMPHOST_BNK_EXT_ENI_IP),
 // which sits on the same L2 as the VIP and is therefore directly TMM-reachable.
 //
 // AWS-specific shape mirrors httptrafficsplit:
@@ -146,7 +146,7 @@ func (s *scenario) Description() string {
 External-resource scenario exercising a Kubernetes EndpointSlice as an HTTPRoute
 backend (how-to #10). BNK 2.3 has NO Pool CRD; the documented way to load-balance
 to an *external* resource is a selectorless Service plus a manually-managed
-EndpointSlice whose single endpoint is an *off-cluster* IP — the slice-12
+EndpointSlice whose single endpoint is an *off-cluster* IP — the
 jumphost's BNK_EXT ENI (JUMPHOST_BNK_EXT_ENI_IP), which is on the VIP's L2 and
 directly TMM-reachable.
 

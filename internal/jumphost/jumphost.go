@@ -1,5 +1,5 @@
 // Package jumphost provides SSH-via-EICE curl probe utilities for the
-// slice-12 multi-ENI jumphost. It is a pure leaf package — it must NOT
+// multi-ENI jumphost model used by scenarios. It is a pure leaf package — it must NOT
 // import internal/cli or internal/scenarios. The CLI layer translates
 // cobra flags into ProbeOptions at the boundary.
 package jumphost
@@ -121,7 +121,7 @@ func prepareEICEKey(ctx context.Context, region, instanceID string) (keyPath, pu
 // EICE tunnel. Returns per-iteration results.
 //
 // Shelling to `aws ec2-instance-connect open-tunnel` + `ssh` reproduces
-// the slice-12 pattern operators already use. Requires the `aws` CLI and
+// the operator workflow already used for jumphost probing. Requires the `aws` CLI and
 // `ssh` to be on PATH.
 func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error) {
 	if opts.Iterations <= 0 {

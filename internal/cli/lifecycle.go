@@ -503,10 +503,10 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 		return err
 	}
 
-	// Phase 11b (slice 8): EBS CSI managed addon + gp3 StorageClass + hugepages-ds.
+	// Phase 11b: EBS CSI managed addon + gp3 StorageClass + hugepages-ds.
 	// Runs after Phase 18 (IRSA) so it has node-role IAM in place AND k8s clients
 	// attached, but BEFORE Phase 12 (k8s foundation) since cert-manager etc. don't
-	// depend on CSI/hugepages. Naming "11b" preserves slice-7 numbering identity.
+	// depend on CSI/hugepages. Naming "11b" preserves existing phase numbering.
 	if err := stage(4, "ebs-csi-hugepages", func() error {
 		return phases.Phase11bEBSCSIHugepages(ctx, cl, st, clients, dryRun)
 	}); err != nil {
@@ -600,8 +600,7 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 		return err
 	}
 	// Phase 24c: f5-tmm-pod-manager cold-start race heal (best-effort).
-	// Targets Finding #4 from docs/audits/2026-05-24-live-e2e-round-2-findings.md:
-	// pod-manager v1.6.x times out hitting the EKS API ClusterIP before
+	// pod-manager v1.6.x can time out hitting the EKS API ClusterIP before
 	// kube-proxy converges on a cold node; restart-once breaks the loop.
 	if err := stage(4, "pod-manager-heal", func() error {
 		return phases.Phase24cPodManagerHeal(ctx, cl, st, clients, dryRun)
