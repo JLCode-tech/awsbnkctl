@@ -496,33 +496,8 @@ jobs:
           # deliberately when x/vuln releases.
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           go version
-          code=0
-          govulncheck -format json ./... > vulns.json || code=$?
-          if [ "$code" != 0 ] && [ "$code" != 3 ]; then
-            echo "govulncheck failed to run (exit $code)"
-            cat vulns.json
-            exit "$code"
-          fi
-          # Symbol-level (reachable) findings have a function in the first
-          # trace frame; module-level require-graph findings do not.
-          fixable=$(jq -r 'select(.finding != null) | .finding
-            | select(.trace[0].function != null)
-            | select(.fixed_version != null and .fixed_version != "")
-            | .osv' vulns.json | sort -u)
-          unfixable=$(jq -r 'select(.finding != null) | .finding
-            | select(.trace[0].function != null)
-            | select(.fixed_version == null or .fixed_version == "")
-            | .osv' vulns.json | sort -u)
-          if [ -n "$unfixable" ]; then
-            echo "::warning title=govulncheck::reachable vulns with no released fix (not blocking): $(echo "$unfixable" | tr '\n' ' ')"
-            echo "$unfixable" | sed 's|^|  https://pkg.go.dev/vuln/|'
-          fi
-          if [ -n "$fixable" ]; then
-            echo "::error title=govulncheck::reachable vulns with a released fix — bump the module/toolchain:"
-            echo "$fixable" | sed 's|^|  https://pkg.go.dev/vuln/|'
-            exit 1
-          fi
-          echo "govulncheck: no reachable vulnerabilities with an available fix"
+          jq --version
+          scripts/govulncheck-gate.sh
 
       - name: gitleaks (secret scan)
         # Scans the full git history for committed secrets. Uses
