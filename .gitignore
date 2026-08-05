@@ -34,6 +34,10 @@ cne_pull_64.json
 # --- Release / build outputs ---
 dist/
 
+# --- Generated HTML mirrors of Markdown docs (do not track) ---
+docs/DEMOS.html
+examples/demo/README.html
+
 # --- Local environment overrides ---
 .env
 .env.local

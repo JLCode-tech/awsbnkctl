@@ -98,8 +98,6 @@ func Phase00Preflight(ctx context.Context, cl *intent.Cluster, st *state.State, 
 // desiredSize are shared across every BNK pattern. All failures are aggregated
 // so the operator sees the full picture in one shot rather than discovering
 // them sequentially.
-//
-// See docs/audits/slice-12-cold-start-audit.md §5 for rationale.
 func checkHostDeviceCapacity(ctx context.Context, cl *intent.Cluster, ec2c EC2API) error {
 	if cl.ClusterSpec == nil || len(cl.ClusterSpec.NodeGroups) == 0 {
 		return nil

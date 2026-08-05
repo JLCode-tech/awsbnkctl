@@ -149,7 +149,7 @@ Amber. When it passes, the Verify result carries a data-plane pass even though
 Rating() stays Amber (Rating is a static hint; live evidence is in Result).
 
 Rating Amber: the awsbnkctl EKS / host-device cluster has no ModelCache backend
-by default. Deploy docs/demo/encore/modelcache-deploy.yaml and set
+by default. Deploy the ModelCache manifests from the public demo docs and set
 modelcache_addr before a live data-path run.
 
 Cleanup: delete the scenario namespace (idempotent).
@@ -389,7 +389,7 @@ func runTimedSSHCmd(ctx context.Context, region, instanceID, cmd string) (int64,
 	// This stub returns the wall-clock time of the stub call itself — tests that
 	// inject the fn-pointer directly never reach this code.
 	elapsed := time.Since(start).Milliseconds()
-	return elapsed, fmt.Errorf("runTimedSSHCmd: live jumphost wiring not injected — set VerifyDeps.RunCacheHitProbeFn to a jumphost-backed implementation (see docs/demo/encore/RUNBOOK.md §4)")
+	return elapsed, fmt.Errorf("runTimedSSHCmd: live jumphost wiring not injected — set VerifyDeps.RunCacheHitProbeFn to a jumphost-backed implementation")
 }
 
 func (s *scenario) Cleanup(ctx *scenarios.Context) error {
