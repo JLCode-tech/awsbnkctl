@@ -106,7 +106,7 @@ func Phase19CloudNetworkMappingDown(ctx context.Context, _ *intent.Cluster, st *
 }
 
 // persistHostDeviceConstants writes the host-device architecture constants to
-// state.env for observability by Pass 3 and future slice-8 doctor/inspect.
+// state.env for observability by later diagnostic and inspection commands.
 //
 // NOTE: EXTERNAL_IFNAME, INTERNAL_IFNAME, EXTERNAL_PCI, INTERNAL_PCI, and
 // CLOUD_HOST_DEVICE_NAME are NOT written here. Phase 17c (iface-discovery) is

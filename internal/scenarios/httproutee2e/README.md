@@ -6,7 +6,7 @@
 
 ## What it tests
 
-End-to-end HTTP traffic through the BNK data plane via the slice-12 jumphost.
+End-to-end HTTP traffic through the BNK data plane via the jumphost.
 
 ```
 Operator laptop

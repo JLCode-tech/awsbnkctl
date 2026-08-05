@@ -2,8 +2,8 @@
 //
 // Phase 24c: f5-tmm-pod-manager cold-start race heal.
 //
-// Targets Finding #4 from docs/audits/2026-05-24-live-e2e-round-2-findings.md.
-// Memory anchor: project_pod_manager_image_regression.
+// Targets the observed cold-start race where pod-manager can crash-loop before
+// kube-proxy finishes programming node-local service rules.
 //
 // BNK 2.3 ships pod-manager v1.6.x as a sidecar inside f5-cne-controller.
 // On a cold node, pod-manager calls the EKS API server via the ClusterIP
@@ -88,8 +88,8 @@ const (
 // issued in case the first bounced pod also lands in the broken state.
 //
 // No new state keys are written (this is a recovery action, not a checkpoint).
-// D-005: CheckAuthOrDie called at entry.
-// Finding #4 mitigation: pod-manager v1.6.x cold-start race vs kube-proxy.
+// CheckAuthOrDie is called at entry.
+// Mitigates a pod-manager v1.6.x cold-start race versus kube-proxy.
 func Phase24cPodManagerHeal(ctx context.Context, _ *intent.Cluster, _ *state.State, clients *Clients, dryRun bool) error {
 	awsmw.CheckAuthOrDie(clients.Profile)
 	fmt.Fprintln(os.Stderr, "[phase 24c] f5-tmm-pod-manager cold-start race heal")

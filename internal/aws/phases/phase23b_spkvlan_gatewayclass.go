@@ -20,7 +20,8 @@ import (
 
 const (
 	f5spkvlanCRDName = "f5-spk-vlans.k8s.f5net.com"
-	// Why: CRD applies are sub-second; 3 min is generous. See docs/audits/slice-12-cold-start-audit.md §4.
+	// Why: CRD applies are typically sub-second once available; 3 minutes is a
+	// generous readiness budget on cold clusters.
 	f5spkvlanCRDWait     = 3 * time.Minute
 	f5spkvlanYAMLPath    = "host-device/f5spkvlan.yaml.tmpl"
 	gatewayClassYAMLPath = "host-device/gatewayclass.yaml.tmpl"
@@ -109,9 +110,9 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	// Wait for the GatewayClass CRD too (installed by the same FLO crd-installer
 	// Job). We wait for BOTH CRDs before applying EITHER CR: the GatewayClass
 	// apply otherwise races the RESTMapper cache when the CRD landed <2s earlier
-	// (Cycle-2 Finding #1, docs/audits/2026-05-24-h4-rev-live-cycle). The apply
-	// path's reset-and-retry (applyUnstructured, C-6) re-queries discovery on the
-	// next call once the CRD is present.
+	// on the previous discovery snapshot. The apply path's reset-and-retry in
+	// applyUnstructured re-queries discovery on the next call once the CRD is
+	// present.
 	fmt.Fprintf(os.Stderr, "[phase 23b] waiting for CRD %s (up to %s)\n", gatewayClassCRDName, gatewayClassCRDWait)
 	if err := k8swait.WaitForCRDExists(ctx, clients.Dynamic, gatewayClassCRDName, gatewayClassCRDWait); err != nil {
 		return fmt.Errorf("phase23b: waiting for GatewayClass CRD: %w", err)

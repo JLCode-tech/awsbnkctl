@@ -239,7 +239,8 @@ type Clients struct {
 
 	// RESTMapper resolves apiVersion+kind → GroupVersionResource using a live
 	// discovery client. Replaces the per-phase static GVR map that silently
-	// no-op'd unknown kinds (see docs/audits/2026-05-24-latent-bugs-sweep.md C-6).
+	// no-op'd unknown kinds; unknown CRDs now fail fast with an explicit
+	// mapping error from discovery.
 	// Constructed alongside K8s by AttachK8s.
 	RESTMapper meta.RESTMapper
 }

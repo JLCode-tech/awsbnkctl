@@ -350,7 +350,7 @@ func TestPhase13_WritesNoState(t *testing.T) {
 // ─── Test 8: Phase13 with FLO checks enabled — happy path ──────────────────
 
 // p13FloFullHappyClients returns a Clients struct seeded for Phase13 with FLO
-// checks enabled: all slice-5 objects plus FLO Deployment, CNE CRD, and OTEL
+// checks enabled: baseline postflight objects plus FLO Deployment, CNE CRD, and OTEL
 // certs.
 func p13FloFullHappyClients(t *testing.T) *Clients {
 	t.Helper()
@@ -582,7 +582,7 @@ func TestPhase13_FLODisabled_SkipsFLOChecks(t *testing.T) {
 		Flo: &intent.FloSpec{Enabled: &disabled},
 	}
 	st, _ := state.Load(dir)
-	// Use a clients with only slice-5 objects (no FLO/CRD/OTEL) — should pass
+	// Use clients with only baseline postflight objects (no FLO/CRD/OTEL) — should pass
 	// since FLO checks are skipped.
 	clients := p13FullHappyClients(t)
 
@@ -595,7 +595,7 @@ func TestPhase13_FLODisabled_SkipsFLOChecks(t *testing.T) {
 
 // p13FullHappyClientsWithActivation returns a Clients struct seeded with
 // CNEInstance (Ready) + License (Active) in addition to the full base set.
-// Used by the slice-7c postflight tests.
+// Used by the post-activation postflight tests.
 func p13FullHappyClientsWithActivation(t *testing.T) *Clients {
 	t.Helper()
 	base := p13FullHappyClients(t)

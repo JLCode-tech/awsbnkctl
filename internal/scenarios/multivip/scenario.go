@@ -11,7 +11,7 @@
 //   - F5BnkGateway IP pool is owned by the scenario (02-f5bnkgateway.yaml).
 //     Unlike single-VIP scenarios the pool is a RANGE (.106–.110) so it can
 //     hand out both pinned VIPs (.106 + .107).
-//   - Verification curls through SSH+EICE from the slice-12 jumphost's BNK_EXT
+//   - Verification curls through SSH+EICE from the jumphost's BNK_EXT
 //     ENI, reading the response body to detect which backend answered.
 //
 // Verify order (load-bearing):
