@@ -577,7 +577,7 @@ func buildCertObj(readyStatus string) map[string]interface{} {
 // (rather than silently skipping) when a YAML doc references a kind not in
 // the RESTMapper. This is the C-6 regression test — before the live-mapper
 // migration, unknown kinds logged a warning and returned nil, silently
-// dropping resources like F5SPKVlan/GatewayClass during slice-10.
+// dropping resources like F5SPKVlan/GatewayClass.
 func TestApplyRawYAML_UnknownKindHardFails(t *testing.T) {
 	clients := p12ClientsFake()
 	raw := []byte(`apiVersion: made-up.example/v1

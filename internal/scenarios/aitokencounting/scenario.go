@@ -147,7 +147,7 @@ Verify — two modes:
 Rating() returns Amber for the registered singleton (safe static default
 for "scenarios list"). The result status reflects the actual runtime
 outcome: if all data-path assertions pass, the run result is "ok" (Green
-equivalent). See docs/demo/economics/ for fill-first/spill config and the
+equivalent). See the public economics demo docs for fill-first/spill config and the
 503-overload demo scripts.
 
 Cleanup: delete the scenario namespace (idempotent).

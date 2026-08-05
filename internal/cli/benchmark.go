@@ -306,8 +306,8 @@ func hasNonBNKProxy(csv string) bool {
 	return false
 }
 
-// nlbOptInTags returns the opt-in internal-NLB tags required by forge
-// PR #325 when the run is a non-BNK proxy shootout; nil otherwise.
+// nlbOptInTags returns the opt-in internal-NLB tags required by forge's
+// BenchmarkTarget contract when the run is a non-BNK proxy shootout; nil otherwise.
 // Tags are forwarded to the forge BenchmarkTarget so forge exposes the proxy
 // front-end via an internal AWS NLB (Slice-3 contract). upstream_namespace is
 // included only when upstreamNamespace is non-empty.

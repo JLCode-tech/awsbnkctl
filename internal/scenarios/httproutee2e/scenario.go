@@ -7,7 +7,7 @@
 //   - F5BnkGateway IP pool is owned by the scenario (02-f5bnkgateway.yaml)
 //     because no lifecycle phase provisions it cluster-wide; the scenario
 //     provisions a namespaced pool so it can be self-contained and cleaned up.
-//   - Verification curls through SSH+EICE from the slice-12 jumphost's
+//   - Verification curls through SSH+EICE from the jumphost's
 //     BNK_EXT ENI (JUMPHOST_BNK_EXT_ENI_IP in state.env), not from an
 //     in-cluster pod, so traffic exercises the real data path.
 //

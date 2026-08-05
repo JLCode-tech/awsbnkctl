@@ -265,7 +265,8 @@ func (m *mockEC2) DescribeAvailabilityZones(_ context.Context, _ *ec2.DescribeAv
 	return &ec2.DescribeAvailabilityZonesOutput{}, nil
 }
 
-// mockEC2 slice-7 additions: security groups, network interfaces, instances, LTs.
+// Additional mockEC2 surface for security groups, network interfaces,
+// instances, and launch templates.
 
 func (m *mockEC2) DescribeSecurityGroups(_ context.Context, _ *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 	if m.describeSGsOut == nil {
@@ -407,7 +408,7 @@ func (m *mockEC2) DeleteLaunchTemplate(_ context.Context, _ *ec2.DeleteLaunchTem
 	return &ec2.DeleteLaunchTemplateOutput{}, m.deleteLTErr
 }
 
-// mockEC2 slice-12 additions: EICE, RunInstances, DescribeImages.
+// Additional mockEC2 surface for EICE, RunInstances, and DescribeImages.
 
 func (m *mockEC2) CreateInstanceConnectEndpoint(_ context.Context, _ *ec2.CreateInstanceConnectEndpointInput, _ ...func(*ec2.Options)) (*ec2.CreateInstanceConnectEndpointOutput, error) {
 	m.createEICECalls++

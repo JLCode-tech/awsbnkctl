@@ -87,8 +87,8 @@ func Phase25ActivationPoll(ctx context.Context, cl *intent.Cluster, st *state.St
 		// f5-dssm-db-1 is Pending — the rollup aggregates DSSM HA replicas which
 		// are NOT on the BNK data path. The right gate for "can traffic flow" is
 		// the sub-conditions F5TmmAvailable + CNEControllerAvailable. See:
-		//   docs/audits/2026-05-24-live-e2e-round-2-findings.md (H1)
-		//   memory: project_sydney_reference_baseline
+		// healthy long-running clusters can hold Available=False when non-data-path
+		// replicas (for example a DSSM DB follower) are pending.
 		// We still treat status.state ∈ {Ready,Running} as ready for
 		// backward-compatibility with FLO versions that set the field.
 		cneState := ""
@@ -160,8 +160,6 @@ func isCNEReady(state string) bool {
 // aws-syd-test reference cluster runs in healthy production for 33+ days
 // with Available=False because f5-dssm-db-1 is Pending (Insufficient cpu)
 // — the rollup aggregates DSSM HA replicas which are not on the data path.
-// See docs/audits/2026-05-24-live-e2e-round-2-findings.md (H1) and
-// memory: project_sydney_reference_baseline.
 func cneFunctionallyReady(obj map[string]interface{}) bool {
 	conds, found, err := unstructured.NestedSlice(obj, "status", "conditions")
 	if err != nil || !found {

@@ -31,7 +31,7 @@ import (
 // These match aws-gpu-setup's vars.env: OPERATOR_NS, INSTANCE_NS, UTILS_NS.
 // cert-manager must come first (cert-manager YAML depends on it pre-existing or
 // lets the static YAML create it — we create it explicitly for idempotency).
-// f5-cne-system is the slice-7 INSTANCE_NS target for the CNEInstance CR and
+// f5-cne-system is the INSTANCE_NS target for the CNEInstance CR and
 // related resources (cloud-network-mapping CM, NADs, IRSA SA).
 var bnkNamespaces = []string{
 	"cert-manager",
@@ -114,7 +114,7 @@ func Phase12K8sFoundation(ctx context.Context, cl *intent.Cluster, st *state.Sta
 
 	// Live path: validate bnk: block is present.
 	if cl.Bnk == nil {
-		return fmt.Errorf("phase12: cluster.yaml must include a 'bnk:' block (see slice-05 docs)")
+		return fmt.Errorf("phase12: cluster.yaml must include a 'bnk:' block")
 	}
 
 	farPath, jwtPath, err := resolveBnkFilePaths(cl)
@@ -481,7 +481,8 @@ func applySecretTyped(ctx context.Context, cs kubernetes.Interface, sec *corev1.
 // applyRawYAML parses a multi-document YAML byte slice and server-side-applies
 // each object via the dynamic client. Uses field-manager "awsbnkctl-phase12".
 // Hard-fails on unknown kinds — use clients.RESTMapper (live discovery) rather
-// than the former static GVR map (see C-6 in docs/audits/2026-05-24-latent-bugs-sweep.md).
+// than the former static GVR map so unknown CRDs fail fast instead of being
+// silently ignored.
 func applyRawYAML(ctx context.Context, clients *Clients, rawYAML []byte) error {
 	if clients == nil || clients.Dynamic == nil {
 		return fmt.Errorf("applyRawYAML: clients.Dynamic is nil — call AttachK8s first")

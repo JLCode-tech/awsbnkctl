@@ -28,7 +28,7 @@ func Phase08EKSCluster(ctx context.Context, cl *intent.Cluster, st *state.State,
 	name := cl.Metadata.Name
 
 	if cl.ClusterSpec == nil {
-		return fmt.Errorf("phase08: cluster.yaml must include a 'cluster:' block (see slice-03 docs)")
+		return fmt.Errorf("phase08: cluster.yaml must include a 'cluster:' block")
 	}
 
 	k8sVersion := cl.ClusterSpec.KubernetesVersion
@@ -48,7 +48,7 @@ func Phase08EKSCluster(ctx context.Context, cl *intent.Cluster, st *state.State,
 
 	clusterRoleARN := st.Get("EKS_CLUSTER_ROLE_ARN")
 	if clusterRoleARN == "" {
-		return fmt.Errorf("phase08: EKS_CLUSTER_ROLE_ARN not in state (run phase07 / slice-02 first)")
+		return fmt.Errorf("phase08: EKS_CLUSTER_ROLE_ARN not in state (run phase07 first)")
 	}
 
 	allSubnets := splitCSV(st.Get("PUBLIC_SUBNETS"))
