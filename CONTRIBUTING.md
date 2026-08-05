@@ -1,137 +1,125 @@
 # Contributing to awsbnkctl
 
-Thanks for your interest in awsbnkctl! This document covers the basics for getting set up locally, running tests, and shipping changes.
+Thank you for your interest in contributing to **awsbnkctl**! This document provides everything you need to get set up locally, run tests, and successfully ship your changes.
 
-## Prerequisites
+---
 
-Tested on Linux and macOS hosts with:
+## 🛠 Prerequisites
 
-- **Go 1.25+** — `go.mod` is the source of truth.
-- **git**, **make**, **docker**.
-- Standard dev utilities used by the test scripts: `jq`, `unzip`, `gnupg`, `openssh-client`, `python3`, and `helm` 3 for chart operations.
+This project is tested on Linux and macOS hosts. 
 
-What is **not** required on the host:
+**Required:**
+- **Go 1.25+** (Check `go.mod` for the exact source of truth)
+- **git**, **make**, **docker**
+- Standard dev utilities: `jq`, `unzip`, `gnupg`, `openssh-client`, `python3`, and `helm 3` (for chart operations)
 
-- `terraform` — removed; awsbnkctl uses the AWS SDK directly.
-- `kubectl` — internalised via `client-go`. Install only if you want a host-level kubectl alongside.
-- `aws` CLI — internalised via the AWS SDK. Install only if you want SSO login flows (`aws sso login`).
-- `goreleaser` — pulled at release time from `goreleaser/goreleaser:latest`.
+**NOT Required:**
+- `terraform` (awsbnkctl uses the AWS SDK directly)
+- `kubectl` (Internalized via `client-go`)
+- `aws` CLI (Internalized via the AWS SDK, unless you need `aws sso login`)
+- `goreleaser` (Pulled at release time automatically)
 
-## Building
+---
+
+## 🏗 Building Locally
+
+You can easily build the binary from the root directory:
 
 ```bash
 go build -o awsbnkctl ./cmd/awsbnkctl
 ./awsbnkctl --help
 ```
 
-`make` targets are available for common workflows — see `Makefile` for the full list.
+*Tip: Check the `Makefile` for common workflow targets.*
 
-## Running tests
+---
 
-The unit suite lives under `internal/...` and runs without any external dependencies:
+## 🧪 Testing
 
-```bash
-go test ./...
-```
-
-CI runs the standard Go gates on every PR:
+### Running Tests
+The unit suite runs entirely without external dependencies. Always run these locally before pushing your code.
 
 ```bash
-gofmt -l .         # must be empty
-go vet ./...      # must be clean
-staticcheck ./... # must be clean
-go test ./...     # must pass
+gofmt -l .         # Must be empty
+go vet ./...      # Must be clean
+staticcheck ./... # Must be clean
+go test ./...     # Must pass
 ```
 
-Run these locally before pushing — CI enforces them.
-
-### Integration tiers
+### Integration Tiers
 
 | Tier | What it exercises | When it runs |
 |---|---|---|
-| Unit | Pure Go packages, fakes for external IO | Every PR (CI) |
-| `kind`-based integration | Apply manifests against a local kind cluster, exercise the K8s code paths | PR (CI) |
-| AWS-SDK mocked | aws-sdk-go-v2 middleware fakes — exercise phase orchestration without real AWS calls | PR (CI) |
-| `testcontainers` (sshd) | SSH backend integration via a containerised sshd | PR (CI) |
-| Live e2e | Real AWS account + real EKS cluster | On demand only |
+| **Unit** | Pure Go packages, fakes for external IO | Every PR (CI) |
+| **`kind`-based** | Apply manifests against a local kind cluster | PR (CI) |
+| **AWS-SDK mocked** | AWS SDK middleware fakes (tests phase orchestration) | PR (CI) |
+| **`testcontainers`** | SSH backend integration via containerised sshd | PR (CI) |
+| **Live e2e** | Real AWS account + real EKS cluster | On demand only |
 
-Integration tests are gated by build tags so they don't run by default:
-
+*Note: Integration tests are gated by build tags so they don't run by default. To run them:*
 ```bash
 go test -tags integration ./...
 ```
 
-### Live e2e
-
-The full e2e tier spins up a real EKS cluster, runs the full lifecycle (`up` → `scenarios run` → `down`), and tears down. It costs real money and takes ~25 minutes per cycle.
+### Live End-to-End (e2e) Tests
+The full e2e tier spins up a real EKS cluster and tears it down. **It costs real money** and takes ~25 minutes per cycle. Use it sparingly against a sandbox account.
 
 ```bash
 export AWS_PROFILE=my-profile
 aws sso login --profile $AWS_PROFILE
-./scripts/e2e-test-full.sh    # set AWSBNKCTL_E2E_* env vars first; see the script
+./scripts/e2e-test-full.sh
 ```
 
-Use it sparingly and only against a sandbox account.
+---
 
-## Code style
+## 📝 Code Style & Guidelines
 
-- **Surgical changes** — touch only what the change requires; match surrounding style.
-- **Clarity over cleverness** — prefer maintainable code over impressive one-liners.
-- **No comments explaining WHAT** the code does, only WHY when non-obvious.
-- **No half-finished implementations** — if you can't finish a code path in this PR, document the limitation and gate the surface.
+- **Surgical changes:** Touch only what the change requires; match the surrounding style.
+- **Clarity over cleverness:** Prefer maintainable code over impressive one-liners.
+- **Comment WHY, not WHAT:** Avoid comments explaining what the code does, document *why* when non-obvious.
+- **Complete implementations:** If you can't finish a code path in a PR, document the limitation and gate the surface.
 
-The codebase uses standard `gofmt` formatting + `staticcheck` linting. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the architectural overview.
+For deeper architectural context, read the [Architecture Guide](docs/ARCHITECTURE.md).
 
-## Adding a new phase
+---
 
-If you're extending the provisioning graph, please:
+## 🧩 Adding a New Phase
 
-1. Read the existing phase you're closest to in shape (e.g. `internal/aws/phases/phase17_secondary_enis.go` for an AWS resource phase).
-2. Add a new file `phaseNN_<name>.go` and corresponding `phaseNN_<name>_test.go`.
-3. Wire it into `internal/cli/lifecycle.go:runPhasedUp` (and the inverse in `runPhasedDown`) at the correct ordering.
-4. Make sure the phase is **idempotent** on healthy re-runs — tag-discovery should be the source of truth.
-5. Update [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) if the phase changes the provisioning model.
+If you're extending the provisioning graph:
+1. Read the existing phase you're closest to in shape (e.g. `phase17_secondary_enis.go`).
+2. Add a new file `phaseNN_<name>.go` and its corresponding test.
+3. Wire it into `internal/cli/lifecycle.go:runPhasedUp` and the inverse in `runPhasedDown` at the correct ordering.
+4. Make sure the phase is **idempotent** on healthy re-runs.
+5. Update `docs/ARCHITECTURE.md` if the phase changes the model.
 
-## Adding a new scenario or demo use-case
+---
 
-- **Scenario** (validation suite): create `internal/scenarios/<name>/` implementing the `scenarios.Scenario` interface. Self-register via `init()` calling `scenarios.Register(&scenario{})`. Side-effect import from `internal/cli/scenarios.go`. Use the existing `httproutee2e` or `proxyprotocoll4` packages as references.
-- **Demo use-case** (audience walkthrough): create `internal/demo/<name>/` implementing the same `scenarios.Scenario` interface. Self-register via `init()` calling `demo.Register(&scenario{})`. Side-effect import from `internal/cli/demo.go`. Each demo owns a **dedicated VIP** via a `const scnVIP = "10.0.10.<N>"` (see existing demos for the canonical map).
+## 🚀 Adding a Scenario or Demo
 
-For both, include:
-- A `VerifyDeps` struct with seam fields for the load-bearing steps + a `TestVerifyCallOrder` test that regresses if the order changes.
-- An idempotent `Cleanup` that tolerates an already-absent namespace.
-- Templated embedded manifests via `//go:embed`.
+- **Scenario:** Create `internal/scenarios/<name>/` implementing the `scenarios.Scenario` interface. Self-register via `init()`.
+- **Demo:** Create `internal/demo/<name>/` implementing the same interface. Self-register via `init()`. Each demo owns a dedicated VIP.
 
-## Pre-commit
+Ensure you include a `VerifyDeps` struct with a `TestVerifyCallOrder` test, an idempotent `Cleanup`, and templated embedded manifests via `//go:embed`.
 
-A simple pre-commit hook lives at `scripts/pre-commit.sh`:
+---
 
-```bash
-ln -sf ../../scripts/pre-commit.sh .git/hooks/pre-commit
-```
+## 📦 Releasing
 
-It runs `gofmt`, `go vet`, and a quick test pass on the changed files.
-
-## Releasing
-
-Releases are built and published by [`.github/workflows/release.yml`](.github/workflows/release.yml) via `goreleaser` when a `vX.Y.Z` tag is pushed:
+Releases are published automatically via `.github/workflows/release.yml` using `goreleaser` when a `vX.Y.Z` tag is pushed:
 
 ```bash
 git tag -a vX.Y.Z -m "release vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The workflow builds darwin/linux/windows × amd64/arm64 binaries, attaches them to the GitHub release with `README.md` + `LICENSE` + `CHANGELOG.md`, and publishes checksums.
+---
 
-## Reporting issues
+## 🐛 Reporting Issues
 
 Open an issue using the templates in `.github/ISSUE_TEMPLATE/`. For bugs, please include:
-
 - `awsbnkctl --version`
-- The minimal `cluster.yaml` that reproduces the issue (redact credentials).
-- The full stderr output of the failing command.
-- Whether the issue reproduces against a fresh `up` or only on re-run / specific state.
+- The minimal `cluster.yaml` (redacted)
+- The full stderr output
+- Whether the issue reproduces on a fresh `up` or specific state
 
-## Questions
-
-For design questions, [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is usually the right starting point — it traces the AWS-SDK phased model and the `cluster.yaml` intent.
+Thank you for helping us improve **awsbnkctl**!
