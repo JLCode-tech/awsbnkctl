@@ -49,7 +49,6 @@ func TestPhase10NodeGroup_CreatesWithPublicSubnetsOnly(t *testing.T) {
 
 	// AMI type must be AL2023_x86_64_STANDARD: predictable interface naming
 	// (device-index 0..3 → ens5..ens8) is required by Phase 17/19/20.
-	// See docs/audits/slice-09-aws-gpu-setup-audit.md §2.3.
 	if ng.AmiType != ekstypes.AMITypesAl2023X8664Standard {
 		t.Errorf("AMI type = %v, want AL2023_x86_64_STANDARD", ng.AmiType)
 	}

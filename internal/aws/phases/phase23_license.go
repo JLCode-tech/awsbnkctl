@@ -26,7 +26,8 @@ const (
 )
 
 const (
-	// Why: CRD applies are sub-second; 3 min is generous. See docs/audits/slice-12-cold-start-audit.md §4.
+	// Why: CRD applies are typically sub-second once available; 3 minutes is a
+	// generous readiness budget on cold clusters.
 	phase23CRDWait = 3 * time.Minute
 )
 

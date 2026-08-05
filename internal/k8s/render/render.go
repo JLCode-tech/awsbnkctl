@@ -57,7 +57,8 @@ func RenderCertChain(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
 }
 
 // FLOValuesVars holds the substitution variables for shared/flo-values.yaml.tmpl.
-// All fields are derived from the cluster intent + slice-5 state at Phase 14 entry.
+// All fields are derived from the cluster intent plus state set by earlier phases
+// at Phase 14 entry.
 type FLOValuesVars struct {
 	CAIssuer      string // <cluster>-ca-cluster-issuer
 	FARSecretName string // far-secret
@@ -122,7 +123,7 @@ func RenderOTELCerts(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
 
 // CloudNetworkMappingVars holds the substitution variables for
 // shared/cloud-network-mapping.yaml.tmpl. All fields are derived from the
-// cluster intent + slice-03/18 state at Phase 19 entry.
+// cluster intent plus state set by earlier phases at Phase 19 entry.
 type CloudNetworkMappingVars struct {
 	AZ           string // first AZ from cl.Network.AZs
 	MGMTSubnet   string // MGMT_SUBNET (= first public subnet ID)
@@ -286,8 +287,7 @@ func RenderNvidiaDevicePlugin(tmpl []byte, version string) ([]byte, error) {
 const cneInstanceNamespace = bnkconst.InstanceNamespace
 
 // CNEInstanceVars holds the substitution variables for
-// shared/cneinstance.yaml.tmpl. Fields are split into three categories per
-// the Architect review (slice-07 reviews/architect.md):
+// shared/cneinstance.yaml.tmpl. Fields are split into three categories:
 //   - Operator-knobs: sourced from cl.Bnk.* (set by cluster.yaml, defaults applied).
 //   - State-derived: sourced from st.Get() (written by earlier phases).
 //   - Hardcoded constants: baked into the template, NOT templated.
@@ -418,7 +418,7 @@ func RenderIfaceDiscoveryPod(tmpl []byte, namespace, nodeName string) ([]byte, e
 	return Render(tmpl, vars)
 }
 
-// ─── F5SPKVlan + GatewayClass (slice-10) ───────────────────────────────────
+// ─── F5SPKVlan + GatewayClass ───────────────────────────────────────────────
 
 // F5SPKVlanVars holds the substitution variables for host-device/f5spkvlan.yaml.tmpl.
 type F5SPKVlanVars struct {

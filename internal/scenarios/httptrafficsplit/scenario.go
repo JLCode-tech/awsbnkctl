@@ -7,7 +7,7 @@
 //   - F5BnkGateway IP pool is owned by the scenario (02-f5bnkgateway.yaml);
 //     pool is a single address (VIP only) so it does not collide with other
 //     scenarios' pools.
-//   - Verification curls through SSH+EICE from the slice-12 jumphost's
+//   - Verification curls through SSH+EICE from the jumphost's
 //     BNK_EXT ENI, reading the response body to detect which backend answered.
 //
 // Verify order (load-bearing):

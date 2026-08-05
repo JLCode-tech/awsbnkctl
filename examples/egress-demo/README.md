@@ -14,9 +14,9 @@ EIP (controlled) as the egress CR is toggled.
 > **Why `external-only`?** Transparent egress via the pseudo-CNI VXLAN overlay
 > works on the **external-only** and **sriov-external** patterns, where TMM does
 > NOT consume the node's internal NIC (it reaches pods over the CNI). It does
-> **NOT** work on `dual-interface`/host-device on AWS VPC CNI — there the
-> node-side VXLAN VTEP never comes up and the capture route is un-scopable and
-> hijacks ingress (see `docs/audits/2026-05-27-egress-reinvestigation.md`). Use
+> **NOT** work on `dual-interface`/host-device on AWS VPC CNI: in that layout
+> the node-side VXLAN VTEP does not converge to a usable capture path and
+> traffic redirection can interfere with ingress handling. Use
 > `examples/external-only/cluster.yaml` (or `cluster.yaml` here) for this demo.
 
 ---
@@ -106,7 +106,7 @@ With this cluster registered in a localhost Forge:
   `egress-toggle.yaml`). The pod's `watch.sh` flips ~10–15s later.
 - Show **Insights** while ON: the **Traffic Flow** egress lane, the **Gateway
   Topology** egress node, and the **Policy Gateway Map** (`block-test-target →
-  1.1.1.1/32`). (Egress-display support shipped in bnk-forge PR #473.)
+  1.1.1.1/32`).
 
 ---
 
@@ -150,4 +150,4 @@ BNK NAT EIP the internet sees) and applies the `firewallEnforcedPolicy` ACL. Wit
 `external-only`, TMM's only data-plane interface is the external ENI and it
 reaches pods over the CNI — so nothing consumes the node's internal NIC and the
 overlay works. See `docs/ARCHITECTURE.md` and, for the data-plane rationale,
-`docs/audits/2026-05-27-egress-reinvestigation.md`.
+the pattern notes above in this README.

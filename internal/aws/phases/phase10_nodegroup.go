@@ -66,7 +66,7 @@ func Phase10NodeGroup(ctx context.Context, cl *intent.Cluster, st *state.State, 
 	name := cl.Metadata.Name
 
 	if cl.ClusterSpec == nil {
-		return fmt.Errorf("phase10: cluster.yaml must include a 'cluster:' block (see slice-03 docs)")
+		return fmt.Errorf("phase10: cluster.yaml must include a 'cluster:' block")
 	}
 
 	ltName := name + "-bnk-lt"
@@ -333,8 +333,8 @@ func ensureNodeGroup(
 	//   device-index 3 (→ ens8); Phase 19 hard-codes those names in the
 	//   cloud-network-mapping ConfigMap; Phase 20 NADs reference them too.
 	//   AL2 names secondary ENIs eth1..ethN, which breaks Multus link-lookup.
-	//   See docs/audits/slice-09-aws-gpu-setup-audit.md.3 and
-	//   aws-gpu-setup/vars.env:92-95 for the source of the naming contract.
+	//   This contract keeps node-side interface naming deterministic across
+	//   the data-plane setup phases.
 	amiType := ekstypes.AMITypesAl2023X8664Standard
 	if ng.IsGPU() {
 		amiType = ekstypes.AMITypesAl2023X8664Nvidia

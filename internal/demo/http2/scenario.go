@@ -42,7 +42,7 @@ const (
 	// scnBackendMarker is the literal substring the nginx backend echoes for $server_protocol
 	// when TMM→backend is HTTP/2. D3: the ".0" is load-bearing (nginx $server_protocol = "HTTP/2.0").
 	scnBackendMarker = "HTTP/2.0"
-	// scnVIP is the http2 demo's dedicated VIP (avoids colliding with scenario-suite VIPs — see docs/demo/http2/README.md).
+	// scnVIP is the http2 demo's dedicated VIP (avoids colliding with scenario-suite VIPs).
 	scnVIP = "10.0.10.111"
 )
 
