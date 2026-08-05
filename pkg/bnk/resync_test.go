@@ -34,6 +34,10 @@ func resyncScheme() *runtime.Scheme {
 			gvk:     schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "Gateway"},
 			listGVK: schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "GatewayList"},
 		},
+		{
+			gvk:     schema.GroupVersionKind{Group: "discovery.k8s.io", Version: "v1", Kind: "EndpointSlice"},
+			listGVK: schema.GroupVersionKind{Group: "discovery.k8s.io", Version: "v1", Kind: "EndpointSliceList"},
+		},
 	} {
 		s.AddKnownTypeWithName(pair.gvk, &unstructured.Unstructured{})
 		s.AddKnownTypeWithName(pair.listGVK, &unstructured.UnstructuredList{})
@@ -50,8 +54,9 @@ func newFakeDynamic(objs ...*unstructured.Unstructured) *dynamicfake.FakeDynamic
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		resyncScheme(),
 		map[schema.GroupVersionResource]string{
-			httpRouteGVR: "HTTPRouteList",
-			gatewayGVR:   "GatewayList",
+			httpRouteGVR:     "HTTPRouteList",
+			gatewayGVR:       "GatewayList",
+			endpointSliceGVR: "EndpointSliceList",
 		},
 	)
 	ctx := context.Background()
@@ -72,6 +77,8 @@ func gvrForKind(kind string) schema.GroupVersionResource {
 		return httpRouteGVR
 	case "Gateway":
 		return gatewayGVR
+	case "EndpointSlice":
+		return endpointSliceGVR
 	default:
 		panic("gvrForKind: unknown kind " + kind)
 	}
@@ -401,6 +408,121 @@ func TestCollectWeights_ExplicitWeight(t *testing.T) {
 	}
 	if !entries[0].fieldExists {
 		t.Error("fieldExists should be true when weight is present")
+	}
+}
+
+// TestResync_RestoreRemovesAddedWeight verifies that a backendRef that had
+// no weight field before the resync has no weight field after it either —
+// the restore must use a "remove" op, not leave `weight: 1` behind.
+func TestResync_RestoreRemovesAddedWeight(t *testing.T) {
+	route := makeHTTPRoute("f5-cne-system", "no-weight-route", 0) // 0 → omit field
+	dyn := newFakeDynamic(route)
+
+	_, err := ResyncHTTPRoutes(context.Background(), dyn, ResyncOptions{
+		Namespace: "f5-cne-system",
+		Name:      "no-weight-route",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := dyn.Resource(httpRouteGVR).Namespace("f5-cne-system").Get(
+		context.Background(), "no-weight-route", metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatalf("re-fetch: %v", err)
+	}
+	rules, _, _ := unstructured.NestedSlice(got.Object, "spec", "rules")
+	ref := rules[0].(map[string]interface{})["backendRefs"].([]interface{})[0].(map[string]interface{})
+	if w, exists := ref["weight"]; exists {
+		t.Errorf("weight field should be absent after restore, found %v", w)
+	}
+}
+
+// TestResync_RestorePreservesExplicitWeight verifies that an explicit weight
+// round-trips exactly through the toggle.
+func TestResync_RestorePreservesExplicitWeight(t *testing.T) {
+	route := makeHTTPRoute("f5-cne-system", "weighted-route", 5)
+	dyn := newFakeDynamic(route)
+
+	_, err := ResyncHTTPRoutes(context.Background(), dyn, ResyncOptions{
+		Namespace: "f5-cne-system",
+		Name:      "weighted-route",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := dyn.Resource(httpRouteGVR).Namespace("f5-cne-system").Get(
+		context.Background(), "weighted-route", metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatalf("re-fetch: %v", err)
+	}
+	rules, _, _ := unstructured.NestedSlice(got.Object, "spec", "rules")
+	ref := rules[0].(map[string]interface{})["backendRefs"].([]interface{})[0].(map[string]interface{})
+	w, exists := ref["weight"]
+	if !exists {
+		t.Fatal("weight field missing after restore")
+	}
+	if wi, _ := w.(int64); wi != 5 {
+		t.Errorf("expected weight restored to 5, got %v", w)
+	}
+}
+
+// TestBuildForwardPatches_TestGuard verifies the forward patch asserts the
+// currently-read value before replacing it (concurrent-edit safety) and
+// uses a bare "add" when the weight was absent.
+func TestBuildForwardPatches_TestGuard(t *testing.T) {
+	entries := []weightEntry{
+		{ruleIdx: 0, refIdx: 0, orig: 5, fieldExists: true},
+		{ruleIdx: 0, refIdx: 1, orig: 1, fieldExists: false},
+	}
+	ops := buildForwardPatches(entries)
+	if len(ops) != 3 {
+		t.Fatalf("expected 3 ops (test+replace, add), got %d: %+v", len(ops), ops)
+	}
+	if ops[0].Op != "test" || *ops[0].Value != 5 {
+		t.Errorf("op0: expected test(5), got %s(%v)", ops[0].Op, ops[0].Value)
+	}
+	if ops[1].Op != "replace" || *ops[1].Value != 6 {
+		t.Errorf("op1: expected replace(6), got %s(%v)", ops[1].Op, ops[1].Value)
+	}
+	if ops[2].Op != "add" || *ops[2].Value != 2 {
+		t.Errorf("op2: expected add(2), got %s(%v)", ops[2].Op, ops[2].Value)
+	}
+}
+
+// TestBuildRestorePatches_RemoveAndGuard verifies the restore patch tests the
+// toggled value first, replaces explicit weights, and removes added ones —
+// and that the "remove" op serializes without a value field.
+func TestBuildRestorePatches_RemoveAndGuard(t *testing.T) {
+	entries := []weightEntry{
+		{ruleIdx: 0, refIdx: 0, orig: 5, fieldExists: true},
+		{ruleIdx: 0, refIdx: 1, orig: 1, fieldExists: false},
+	}
+	ops := buildRestorePatches(entries)
+	if len(ops) != 4 {
+		t.Fatalf("expected 4 ops, got %d: %+v", len(ops), ops)
+	}
+	if ops[0].Op != "test" || *ops[0].Value != 6 {
+		t.Errorf("op0: expected test(6), got %s(%v)", ops[0].Op, ops[0].Value)
+	}
+	if ops[1].Op != "replace" || *ops[1].Value != 5 {
+		t.Errorf("op1: expected replace(5), got %s(%v)", ops[1].Op, ops[1].Value)
+	}
+	if ops[2].Op != "test" || *ops[2].Value != 2 {
+		t.Errorf("op2: expected test(2), got %s(%v)", ops[2].Op, ops[2].Value)
+	}
+	if ops[3].Op != "remove" || ops[3].Value != nil {
+		t.Errorf("op3: expected remove with no value, got %s(%v)", ops[3].Op, ops[3].Value)
+	}
+	data, err := json.Marshal(ops[3])
+	if err != nil {
+		t.Fatalf("marshal remove op: %v", err)
+	}
+	if strings.Contains(string(data), "value") {
+		t.Errorf("remove op must not serialize a value field: %s", data)
 	}
 }
 
