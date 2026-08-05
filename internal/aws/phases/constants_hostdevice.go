@@ -6,7 +6,7 @@ import "github.com/JLCode-tech/awsbnkctl/internal/bnkconst"
 // operator knobs. These are baked into the manifests and persisted to state.env
 // for observability by downstream phases (doctor, inspect) and Pass 3.
 //
-// Architect categorisation (slice-07 reviews/architect.md):
+// Constants are grouped by source of truth:
 //   - ExternalIFName / InternalIFName: hardcoded into template (not cluster.yaml).
 //   - ExternalNAD / InternalNAD: hardcoded NAD names.
 //   - CloudHostDeviceName / CloudHostDeviceTag: cne-controller matches ENIs by these.

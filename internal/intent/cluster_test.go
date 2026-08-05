@@ -801,7 +801,7 @@ func TestLoad_HostDevicePattern_DataPathParsed(t *testing.T) {
 	}
 }
 
-// TestLoad_BnkSpec_Defaults verifies that BnkSpec slice-7 fields get defaults
+// TestLoad_BnkSpec_Defaults verifies that BnkSpec fields get defaults
 // applied when omitted.
 func TestLoad_BnkSpec_Defaults(t *testing.T) {
 	dir := t.TempDir()
@@ -846,7 +846,7 @@ bnk:
 }
 
 // TestLoad_BnkSpec_ExplicitValuesPreserved verifies that explicitly-set
-// slice-7 BnkSpec values are not overwritten by defaults.
+// BnkSpec values are not overwritten by defaults.
 func TestLoad_BnkSpec_ExplicitValuesPreserved(t *testing.T) {
 	dir := t.TempDir()
 	farPath := writeFile(t, dir, "far.json", `{"auths":{}}`)
@@ -891,7 +891,7 @@ bnk:
 	}
 }
 
-// ─── slice-10: SelfIP derivation + host-device default desiredSize=3 ─────
+// ─── SelfIP derivation + host-device default desiredSize=3 ─────
 
 func TestDeriveSelfIP(t *testing.T) {
 	cases := []struct {

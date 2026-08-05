@@ -689,8 +689,8 @@ func applyDefaults(c *Cluster) {
 				// BNK patterns need ≥16 vCPU / ≥64 GB for the full BNK 2.3 Small
 				// control plane + TMM packed onto one labeled node, plus enough ENIs
 				// for the TMM data-plane secondaries. m6i.4xlarge is the documented
-				// minimum per docs/audits/slice-09-aws-gpu-setup-audit.md row 27 and
-				// slice-12 audit. Non-BNK (network-only) clusters use smaller workers.
+				// minimum for this footprint. Non-BNK (network-only) clusters use
+				// smaller workers.
 				if ng.IsGPU() {
 					ng.InstanceType = "g5.2xlarge"
 				} else if c.IsBNKPattern() {
@@ -701,8 +701,8 @@ func applyDefaults(c *Cluster) {
 			}
 			if ng.DesiredSize == 0 {
 				// GPU node groups default to 1 — they are not subject to the BNK
-				// dSSM quorum. BNK patterns need ≥3 nodes for dSSM quorum
-				// (slice-09 audit row 28, un-deferred 2026-05-24). Non-BNK default 1.
+				// dSSM quorum. BNK patterns need ≥3 nodes so dSSM can reach quorum.
+				// Non-BNK clusters default to 1.
 				if !ng.IsGPU() && c.IsBNKPattern() {
 					ng.DesiredSize = 3
 				} else {
@@ -754,7 +754,7 @@ func applyDefaults(c *Cluster) {
 			// onto one node which leaves no room for f5-tmm (7-container pod,
 			// ~7.6 vCPU requested) and dSSM only reaches 2/3 ready (no quorum).
 			// Only bump if the operator left the default (1) — preserve explicit
-			// overrides for cost-sensitive lab use. See docs/audits/slice-10.
+			// overrides for cost-sensitive lab use.
 			if ng.DesiredSize == 1 {
 				ng.DesiredSize = 3
 			}
@@ -1154,7 +1154,7 @@ func validatePattern(c *Cluster) error {
 			if ng.DesiredSize > 0 && ng.DesiredSize < 3 {
 				return fmt.Errorf(
 					"pattern %s requires cluster.nodeGroups[%d].desiredSize >= 3 (dSSM quorum), got %d. "+
-						"See docs/audits/slice-12-cold-start-audit.md",
+						"Increase desiredSize to at least 3 for BNK quorum",
 					c.Pattern, i, ng.DesiredSize,
 				)
 			}

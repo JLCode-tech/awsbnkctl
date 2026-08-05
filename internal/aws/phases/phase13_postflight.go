@@ -174,8 +174,8 @@ func checkCNEInstanceActive(ctx context.Context, cl *intent.Cluster, clients *Cl
 	// H1: mirror Phase 25's gate. status.state is empty on BNK 2.3.x / the
 	// aws-syd-test gold reference even when traffic flows; the real readiness
 	// signal is the F5TmmAvailable + CNEControllerAvailable sub-conditions.
-	// See phase25_activation_poll.go cneFunctionallyReady() and
-	// memory: project_sydney_reference_baseline.
+	// See phase25_activation_poll.go cneFunctionallyReady() for the same
+	// functional-readiness fallback used by the activation gate.
 	if !isCNEReady(state) && !cneFunctionallyReady(obj.Object) {
 		return fmt.Errorf("CNEInstance %s/%s status.state=%q and F5TmmAvailable+CNEControllerAvailable not both True (want Ready/Running state or functional readiness)",
 			InstanceNamespace, crName, state)

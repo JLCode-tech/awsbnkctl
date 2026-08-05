@@ -551,7 +551,7 @@ func firstN(s string, n int) string {
 	return s[:n]
 }
 
-// TestRegisterREST_SendsAWSProfile guards the slice-12 enhancement: the
+// TestRegisterREST_SendsAWSProfile guards the AWS-profile forwarding behavior: the
 // awsbnkctl-side forge registration must transmit `aws_profile` in the
 // POST /api/projects body so forge's EKS-token-mint code has per-project
 // AWS identity instead of falling back to the backend's process env.
@@ -586,7 +586,7 @@ func TestRegisterREST_SendsAWSProfile(t *testing.T) {
 
 // TestRegisterREST_OmitsAWSProfileWhenDash verifies the "-" sentinel
 // opts a caller out of sending aws_profile (forge then falls back to
-// its global env, matching pre-slice-12 behaviour). Useful for tests
+// its global env, matching legacy behaviour). Useful for tests
 // or operators who explicitly do not want a per-project profile.
 func TestRegisterREST_OmitsAWSProfileWhenDash(t *testing.T) {
 	srv := &forgeRESTServer{}
