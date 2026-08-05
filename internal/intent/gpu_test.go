@@ -649,7 +649,7 @@ func TestAllExamplesContinueToLoad(t *testing.T) {
 	examples := []string{
 		"../../examples/external-only/cluster.yaml",
 		"../../examples/sriov-external/cluster.yaml",
-		"../../examples/tracer/cluster.yaml",
+		"testdata/tracer/cluster.yaml",
 		"../../examples/demo/cluster.yaml",
 		"../../examples/full-cluster/cluster.yaml",
 	}
