@@ -4,9 +4,9 @@ Thank you for your interest in contributing to **awsbnkctl**! This document prov
 
 ---
 
-## 🛠 Prerequisites
+## Prerequisites
 
-This project is tested on Linux and macOS hosts. 
+This project is tested on Linux and macOS hosts.
 
 **Required:**
 - **Go 1.25+** (Check `go.mod` for the exact source of truth)
@@ -21,7 +21,7 @@ This project is tested on Linux and macOS hosts.
 
 ---
 
-## 🏗 Building Locally
+## Building Locally
 
 You can easily build the binary from the root directory:
 
@@ -34,16 +34,16 @@ go build -o awsbnkctl ./cmd/awsbnkctl
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ### Running Tests
 The unit suite runs entirely without external dependencies. Always run these locally before pushing your code.
 
 ```bash
-gofmt -l .         # Must be empty
-go vet ./...      # Must be clean
+gofmt -l .     # Must be empty
+go vet ./...   # Must be clean
 staticcheck ./... # Must be clean
-go test ./...     # Must pass
+go test ./...   # Must pass
 ```
 
 ### Integration Tiers
@@ -72,7 +72,7 @@ aws sso login --profile $AWS_PROFILE
 
 ---
 
-## 📝 Code Style & Guidelines
+## Code Style & Guidelines
 
 - **Surgical changes:** Touch only what the change requires; match the surrounding style.
 - **Clarity over cleverness:** Prefer maintainable code over impressive one-liners.
@@ -83,7 +83,7 @@ For deeper architectural context, read the [Architecture Guide](docs/ARCHITECTUR
 
 ---
 
-## 🧩 Adding a New Phase
+## Adding a New Phase
 
 If you're extending the provisioning graph:
 1. Read the existing phase you're closest to in shape (e.g. `phase17_secondary_enis.go`).
@@ -94,7 +94,7 @@ If you're extending the provisioning graph:
 
 ---
 
-## 🚀 Adding a Scenario or Demo
+## Adding a Scenario or Demo
 
 - **Scenario:** Create `internal/scenarios/<name>/` implementing the `scenarios.Scenario` interface. Self-register via `init()`.
 - **Demo:** Create `internal/demo/<name>/` implementing the same interface. Self-register via `init()`. Each demo owns a dedicated VIP.
@@ -103,7 +103,7 @@ Ensure you include a `VerifyDeps` struct with a `TestVerifyCallOrder` test, an i
 
 ---
 
-## 📦 Releasing
+## Releasing
 
 Releases are published automatically via `.github/workflows/release.yml` using `goreleaser` when a `vX.Y.Z` tag is pushed:
 
@@ -114,7 +114,7 @@ git push origin vX.Y.Z
 
 ---
 
-## 🐛 Reporting Issues
+## Reporting Issues
 
 Open an issue using the templates in `.github/ISSUE_TEMPLATE/`. For bugs, please include:
 - `awsbnkctl --version`
