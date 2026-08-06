@@ -2,13 +2,13 @@ name: Build tools images
 
 # Builds and publishes the per-tool docker images that the docker
 # backend pulls at runtime. Publishes the AWS-flavoured image
-# (`ghcr.io/JLCode-tech/awsbnkctl-tools-aws`) carrying awscli v2 +
+# (`ghcr.io/jlcode-tech/awsbnkctl-tools-aws`) carrying awscli v2 +
 # kubectl + helm + iperf3 + dig + jq + curl for the docker exec-backend's
 # AWS code paths.
 #
 # Current matrix:
-#   - ghcr.io/JLCode-tech/awsbnkctl-tools-aws
-#   - ghcr.io/JLCode-tech/awsbnkctl-tools-iperf3
+#   - ghcr.io/jlcode-tech/awsbnkctl-tools-aws
+#   - ghcr.io/jlcode-tech/awsbnkctl-tools-iperf3
 #
 # Triggered on tag pushes, on push to `main` (publishes a `:dev` tag so
 # `go install ./cmd/awsbnkctl@main` works on a fresh host without a local
@@ -82,8 +82,8 @@ jobs:
             AWSBNKCTL_COMMIT=${{ github.sha }}
           push: true
           tags: |
-            ghcr.io/JLCode-tech/awsbnkctl-tools-${{ matrix.image }}:${{ github.ref_name }}
-            ghcr.io/JLCode-tech/awsbnkctl-tools-${{ matrix.image }}:latest
+            ghcr.io/jlcode-tech/awsbnkctl-tools-${{ matrix.image }}:${{ github.ref_name }}
+            ghcr.io/jlcode-tech/awsbnkctl-tools-${{ matrix.image }}:latest
 
       # Main-push: publish :dev. internal/exec/docker.go's toolImageTag()
       # falls back to ":dev" for binaries that report Version=="dev"
@@ -103,7 +103,7 @@ jobs:
             AWSBNKCTL_COMMIT=${{ github.sha }}
           push: true
           tags: |
-            ghcr.io/JLCode-tech/awsbnkctl-tools-${{ matrix.image }}:dev
+            ghcr.io/jlcode-tech/awsbnkctl-tools-${{ matrix.image }}:dev
 
       # workflow_dispatch: build + push both forms so a manual run from
       # any branch can publish a :dev tag for testing.
@@ -120,4 +120,4 @@ jobs:
             AWSBNKCTL_COMMIT=${{ github.sha }}
           push: true
           tags: |
-            ghcr.io/JLCode-tech/awsbnkctl-tools-${{ matrix.image }}:dev
+            ghcr.io/jlcode-tech/awsbnkctl-tools-${{ matrix.image }}:dev
