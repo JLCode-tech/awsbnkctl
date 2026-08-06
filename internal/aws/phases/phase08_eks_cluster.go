@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/eks"
@@ -51,10 +52,21 @@ func Phase08EKSCluster(ctx context.Context, cl *intent.Cluster, st *state.State,
 		return fmt.Errorf("phase08: EKS_CLUSTER_ROLE_ARN not in state (run phase07 first)")
 	}
 
-	allSubnets := splitCSV(st.Get("PUBLIC_SUBNETS"))
-	allSubnets = append(allSubnets, splitCSV(st.Get("PRIVATE_SUBNETS"))...)
-	if len(allSubnets) == 0 {
+	allSubnetsRaw := splitCSV(st.Get("PUBLIC_SUBNETS"))
+	allSubnetsRaw = append(allSubnetsRaw, splitCSV(st.Get("PRIVATE_SUBNETS"))...)
+	if len(allSubnetsRaw) == 0 {
 		return fmt.Errorf("phase08: no subnets in state (run phases 02-03 first)")
+	}
+	var allSubnets []string
+	allSpecs := append(cl.Network.Subnets.Public, cl.Network.Subnets.Private...)
+	for i, sid := range allSubnetsRaw {
+		if i < len(allSpecs) {
+			if strings.Count(allSpecs[i].AZ, "-") > 2 {
+				fmt.Fprintf(os.Stderr, "[phase 08] filtering out local zone subnet %s in %s for control plane\n", sid, allSpecs[i].AZ)
+				continue
+			}
+		}
+		allSubnets = append(allSubnets, sid)
 	}
 
 	eksTags := tags.EKSTags(
