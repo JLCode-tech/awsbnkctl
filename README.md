@@ -11,7 +11,7 @@ No Terraform. No host `kubectl`. No `aws` CLI. **One binary, one intent file.**
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Installation
 
@@ -65,7 +65,7 @@ Run the built-in data-plane traffic validation, and once finished, tear down the
 
 ---
 
-## ✨ Features & Capabilities
+## Features & Capabilities
 
 - **Imperative phased provisioner:** ~30 ordered phases run via the AWS Go SDK. AWS resource tags act as the single source of truth; a local `state.env` cache speeds up re-runs and is rebuildable from tags.
 - **`cluster.yaml` intent file:** Declarative inputs (VPC, network, node group, BNK credentials) seamlessly map to imperative AWS calls. Validated up-front before any mutation.
@@ -74,7 +74,7 @@ Run the built-in data-plane traffic validation, and once finished, tear down the
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
 The Go-SDK phased path runs end-to-end without Terraform: VPC, subnets, IGW, NAT, EKS control plane, node group, kubeconfig, S3 supply chain, IRSA, Multus, host-device secondary ENIs, BNK activation, jumphost, forge registration. Terraform has been removed entirely from the production path.
 
@@ -82,7 +82,7 @@ For more deep-dive context, check out our [Architecture Guide](docs/ARCHITECTURE
 
 ---
 
-## 🗂 Patterns
+## Patterns
 
 The `pattern:` field selects the TMM data-plane interface topology and binding. Backend pods are always reached over the CNI.
 
@@ -96,7 +96,7 @@ The `pattern:` field selects the TMM data-plane interface topology and binding. 
 
 ---
 
-## 📚 Examples & Demos
+## Examples & Demos
 
 Ready-to-edit topologies live under [`examples/`](examples/):
 
@@ -109,7 +109,7 @@ Check out the [Demo Guide](examples/demo/README.md) for full walkthroughs.
 
 ---
 
-## 💻 Commands
+## Commands
 
 Run `awsbnkctl --help` for the complete command tree. Some highlights:
 
@@ -122,10 +122,10 @@ Run `awsbnkctl --help` for the complete command tree. Some highlights:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to get started locally, run tests, and ship changes.
 
-## 📄 License
+## License
 
 [MIT](LICENSE) © 2026 JLCode-tech
