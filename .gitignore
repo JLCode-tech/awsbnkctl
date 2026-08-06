@@ -44,11 +44,19 @@ examples/demo/README.html
 .env.*.local
 
 # --- Internal dev tooling (not for public repo) ---
-# AI-assisted dev frameworks; live on local disk only.
+# AI-assisted dev framework (MAF, claude-only target); lives on local disk only.
 .agent/
-.opencode/
 .claude/
 CLAUDE.md
+CLAUDE.local.md
+
+# --- MAF framework operational artifacts (installer-managed) ---
+# Only relevant if .agent/ is ever versioned; kept so a future opt-in to
+# tracking framework tooling doesn't also pick up runtime/session junk.
+.agent/tmp/
+.agent/cache/
+.agent/**/*.maf.new
+.agent/install-state.yaml
 
 # --- Internal debugging / audit notes ---
 # Live-cluster captures contain AWS resource IDs + private IPs.
@@ -66,7 +74,6 @@ docs/demo/
 # --- Compiled tool binaries (build locally; don't commit) ---
 /tools/ciwatch/ciwatch
 /tools/sprintwatch/sprintwatch
-/opencode.json
 
 # --- HuggingFace token (gated model auth; never commit) ---
 .hf_token

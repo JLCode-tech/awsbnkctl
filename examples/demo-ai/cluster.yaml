@@ -1,0 +1,159 @@
+# cluster.yaml — combined BNK demo + SageMaker AI rig.
+#
+# Composes two reviewed configs into one cluster:
+#   - examples/demo/cluster.yaml   — host-device demo (the 7 protocol use-cases
+#                                    via `awsbnkctl demo run --all`) + jumphost.
+#   - examples/ai-rig/cluster.yaml — managed SageMaker LMI (vLLM) inference leg,
+#                                    a GPU nodegroup for the in-cluster
+#                                    ai-inference-e2e vLLM leg, and the AWS LB
+#                                    Controller addon.
+#
+# Result: one VPC, one `up`, that runs ALL the protocol demos AND stands up a
+# disposable SageMaker endpoint for the AI inference demo.
+#
+# Quick start:
+#   awsbnkctl validate examples/demo-ai/cluster.yaml
+#   awsbnkctl up --config examples/demo-ai/cluster.yaml --dry-run
+#   HF_TOKEN=$(cat .hf_token) AWSBNKCTL_FORGE_PASSWORD=admin123 \
+#     awsbnkctl up --config examples/demo-ai/cluster.yaml
+#   awsbnkctl demo run --all --config examples/demo-ai/cluster.yaml
+#   awsbnkctl down --config examples/demo-ai/cluster.yaml --yes
+
+apiVersion: awsbnkctl/v1
+kind: Cluster
+
+metadata:
+  name: bnk-demo-ai
+  region: ap-southeast-2
+  labels:
+    purpose: bnk-demo-ai
+
+# host-device (dual-interface): the demo's interface topology. TMM on EC2 host
+# NIC interfaces; needs network.dataPath (external + internal) and a >=3 node
+# BNK nodegroup.
+pattern: host-device
+
+# demo marks this as a demo deployment (== --demo). Pre-stages the demo test
+# clients on the jumphost; `down` cleans the demo use-cases first. Requires
+# testing.jumphost.enabled: true.
+demo:
+  enabled: true
+  ttl: 24h
+
+network:
+  vpcCidr: 10.0.0.0/16
+
+  # 2a + 2b: control plane needs >=2 AZs; dataPath + GPU node live in 2a (g5 is
+  # available in 2a; 2b has no g5 capacity — the GPU nodegroup is pinned to 2a).
+  azs:
+    - ap-southeast-2a
+    - ap-southeast-2b
+
+  subnets:
+    public:
+      - cidr: 10.0.1.0/24
+        az: ap-southeast-2a
+      - cidr: 10.0.2.0/24
+        az: ap-southeast-2b
+    private:
+      - cidr: 10.0.11.0/24
+        az: ap-southeast-2a
+      - cidr: 10.0.12.0/24
+        az: ap-southeast-2b
+
+  dataPath:
+    external:
+      cidr: 10.0.10.0/24      # BNK_EXT — TMM client-side VLAN (VIP 10.0.10.100)
+      az: ap-southeast-2a
+    internal:
+      cidr: 10.0.20.0/24      # BNK_INT — TMM backend-side VLAN
+      az: ap-southeast-2a
+
+  natGateways: 1
+
+cluster:
+  # 1.31 from the start: the optional Envoy AI Gateway shootout leg needs k8s
+  # >=1.31 (its CRDs use the isIP CEL function). Starting at 1.31 avoids an
+  # in-place control-plane upgrade later.
+  kubernetesVersion: "1.31"
+  nodeGroups:
+    # Index 0: BNK TMM control nodegroup (role=bnk injected by defaults). Three
+    # nodes for the dSSM quorum + headroom for the full BNK control plane + TMM.
+    - name: default
+      instanceType: m6i.4xlarge
+      desiredSize: 3
+      minSize: 3
+      maxSize: 4
+      diskSize: 50
+
+    # Index 1: GPU inference nodegroup for the in-cluster ai-inference-e2e vLLM
+    # leg. g5.xlarge = 1×NVIDIA A10G (24 GB) — same GPU as the SageMaker
+    # ml.g5.xlarge leg (apples-to-apples). Pinned to 2a (the only AZ here with
+    # both a private subnet and g5 capacity). on-demand for capacity guarantee.
+    - name: gpu
+      gpu: true
+      instanceType: g5.xlarge
+      capacityType: on-demand
+      desiredSize: 1
+      minSize: 1
+      maxSize: 2
+      diskSize: 100
+      azs:
+        - ap-southeast-2a
+      taints:
+        - key: nvidia.com/gpu
+          value: "present"
+          effect: NoSchedule
+
+# AWS Load Balancer Controller (Phase 14b): required for the Envoy-vs-BNK proxy
+# shootout (forge exposes the Envoy proxy on an internal data-path NLB the
+# benchmark reads). Harmless for the protocol demos.
+addons:
+  lbController:
+    enabled: true
+
+# ai: disposable SageMaker LMI (vLLM) endpoint for the managed inference leg.
+# `up` creates Model → EndpointConfig → Endpoint; `down` deletes them in
+# reverse so nothing bills between sessions. Requires HF_TOKEN at up time.
+ai:
+  sagemaker:
+    enabled: true
+    # Larger model on a bigger instance. ml.g5.xlarge SageMaker capacity was
+    # exhausted in ap-southeast-2 (InsufficientInstanceCapacity, twice) on
+    # 2026-06-25, so this uses the g6 (L4) pool which has better availability.
+    model: Qwen/Qwen2.5-32B-Instruct
+    instanceType: ml.g6.12xlarge    # 4× NVIDIA L4 (96 GiB total) — 4-GPU SKU
+    tensorParallelSize: 4           # split 32B across all 4 GPUs (matches GPU count → passes GPU-fit preflight)
+    maxModelLen: 8192               # cap the KV cache to fit the 32B weights in 96 GiB
+    scaleToZero: false              # OPTION_SERVED_MODEL_NAME stays "llama3" (served name unchanged)
+
+# bnk: F5 supply-chain credentials (Phase 12). Gitignored symlinks in repo root.
+bnk:
+  farArchive: ./cne_pull_64.json
+  jwt: ./license.jwt
+
+# testing.jumphost: required for demo mode AND the AI benchmark client.
+# c6i.2xlarge (non-burstable) so the aiperf load generator never becomes the
+# bottleneck during the SageMaker/vLLM benchmark sweep.
+testing:
+  jumphost:
+    enabled: true
+    # c6i.4xlarge (16 vCPU): headroom for the aiperf load generator. Size it
+    # right at launch — resizing later (stop/start) drops the auto-assigned
+    # public IP and breaks egress until an EIP is attached.
+    instanceType: c6i.4xlarge
+    mgmtSubnetIndex: 0
+
+# forge: register with the running bnk-forge instance after `up` (unregister on
+# `down`). Password via AWSBNKCTL_FORGE_PASSWORD env var (never in this file).
+forge:
+  enabled: true
+  url: http://localhost:8000
+  mcpUrl: http://localhost:8081/mcp/
+  credentialTemplateId: 1
+  username: admin
+
+tags:
+  cost-center: RnD-AI
+  env: demo
+  purpose: bnk-demo-ai
