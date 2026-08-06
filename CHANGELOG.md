@@ -4,6 +4,12 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## v1.0.0 — 2026-08-06
+
+### Changed
+- **Documentation rewrite** — modernized and rewrote all READMEs across the project.
+- **Repository cleanup** — removed unused/internal references from public tracked state.
+
 ## v0.9.0 — 2026-07-19
 
 Finalizes `v0.9.0-rc1`. Everything in the rc plus the pool-member auto-heal daemon, resync safety hardening, doctor green-by-default fixes, and a reproducible security gate.
