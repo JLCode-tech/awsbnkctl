@@ -10,6 +10,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 - **Documentation rewrite** — modernized and rewrote all READMEs across the project.
 - **Repository cleanup** — removed unused/internal references from public tracked state.
 
+### Fixed
+- **Local Zone Cluster Creation** — Fixed an issue where EKS `CreateCluster` failed when AWS Local Zone subnets were provided for the control plane. Local Zone subnets are now correctly filtered out from the `CreateCluster` API request while remaining available for worker nodes in the data plane.
+
 ## v0.9.0 — 2026-07-19
 
 Finalizes `v0.9.0-rc1`. Everything in the rc plus the pool-member auto-heal daemon, resync safety hardening, doctor green-by-default fixes, and a reproducible security gate.
