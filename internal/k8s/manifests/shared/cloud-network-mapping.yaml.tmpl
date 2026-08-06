@@ -9,13 +9,11 @@ metadata:
 data:
   config.yaml: |
     availability_zones:
-      - name: "{{ .AZ }}"
+{{- range .AZs }}
+      - name: "{{ .Name }}"
         subnets:
-          - cidr: "{{ .MGMTCidr }}"
-            subnet_id: "{{ .MGMTSubnet }}"
-          - cidr: "{{ .BNKExtCidr }}"
-            subnet_id: "{{ .BNKExtSubnet }}"
-{{- if .HasInternal }}
-          - cidr: "{{ .BNKIntCidr }}"
-            subnet_id: "{{ .BNKIntSubnet }}"
+{{- range .Subnets }}
+          - cidr: "{{ .CIDR }}"
+            subnet_id: "{{ .SubnetID }}"
+{{- end }}
 {{- end }}

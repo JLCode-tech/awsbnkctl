@@ -206,13 +206,12 @@ func TestRender_DefaultValues(t *testing.T) {
 
 // cloudNetworkMappingTmpl is a minimal template that exercises all substitution
 // variables of cloud-network-mapping.yaml.tmpl.
-var cloudNetworkMappingTmpl = []byte(`az: {{ .AZ }}
-mgmtSubnet: {{ .MGMTSubnet }}
-bnkExtSubnet: {{ .BNKExtSubnet }}
-bnkIntSubnet: {{ .BNKIntSubnet }}
-mgmtCidr: {{ .MGMTCidr }}
-bnkExtCidr: {{ .BNKExtCidr }}
-bnkIntCidr: {{ .BNKIntCidr }}
+var cloudNetworkMappingTmpl = []byte(`{{- range .AZs }}
+az: {{ .Name }}
+{{- range .Subnets }}
+subnet: {{ .SubnetID }} cidr: {{ .CIDR }}
+{{- end }}
+{{- end }}
 `)
 
 // hostDeviceClusterForRender returns a cluster fixture with the host-device
@@ -255,18 +254,15 @@ func TestRenderCloudNetworkMapping_Substitution(t *testing.T) {
 	}
 	rendered := string(out)
 
-	checks := map[string]string{
-		"az":           "ap-southeast-2a", // first AZ
-		"mgmtSubnet":   "subnet-pub-001",
-		"bnkExtSubnet": "subnet-ext-001",
-		"bnkIntSubnet": "subnet-int-001",
-		"mgmtCidr":     "10.0.1.0/24",
-		"bnkExtCidr":   "10.0.20.0/24",
-		"bnkIntCidr":   "10.0.21.0/24",
+	checks := []string{
+		"az: ap-southeast-2a", // first AZ
+		"subnet: subnet-pub-001 cidr: 10.0.1.0/24",
+		"subnet: subnet-ext-001 cidr: 10.0.20.0/24",
+		"subnet: subnet-int-001 cidr: 10.0.21.0/24",
 	}
-	for field, want := range checks {
+	for _, want := range checks {
 		if !strings.Contains(rendered, want) {
-			t.Errorf("rendered cloud-network-mapping missing %s=%q:\n%s", field, want, rendered)
+			t.Errorf("rendered cloud-network-mapping missing %q:\n%s", want, rendered)
 		}
 	}
 }

@@ -121,18 +121,21 @@ func RenderOTELCerts(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
 
 // ─── cloud-network-mapping ConfigMap ─────────────────────────────────────────
 
+type CloudNetworkMappingAZ struct {
+	Name    string
+	Subnets []CloudNetworkMappingSubnet
+}
+
+type CloudNetworkMappingSubnet struct {
+	CIDR     string
+	SubnetID string
+}
+
 // CloudNetworkMappingVars holds the substitution variables for
 // shared/cloud-network-mapping.yaml.tmpl. All fields are derived from the
 // cluster intent plus state set by earlier phases at Phase 19 entry.
 type CloudNetworkMappingVars struct {
-	AZ           string // first AZ from cl.Network.AZs
-	MGMTSubnet   string // MGMT_SUBNET (= first public subnet ID)
-	BNKExtSubnet string // BNK_EXT_SUBNET from state
-	BNKIntSubnet string // BNK_INT_SUBNET from state (dual-interface only)
-	MGMTCidr     string // first public subnet CIDR
-	BNKExtCidr   string // cl.Network.DataPath.External.Cidr
-	BNKIntCidr   string // cl.Network.DataPath.Internal.Cidr (dual-interface only)
-	HasInternal  bool   // render the internal subnet entry (dual-interface only)
+	AZs []CloudNetworkMappingAZ
 }
 
 // RenderCloudNetworkMapping renders the cloud-network-mapping ConfigMap
@@ -157,25 +160,44 @@ func RenderCloudNetworkMapping(tmpl []byte, cl *intent.Cluster, getter func(stri
 	if bnkExtSubnet == "" {
 		return nil, fmt.Errorf("render: BNK_EXT_SUBNET not in state (Phase 03 must run first)")
 	}
-	hasInternal := cl.HasInternalInterface()
-	vars := CloudNetworkMappingVars{
-		AZ:           cl.Network.AZs[0],
-		MGMTSubnet:   mgmtSubnet,
-		BNKExtSubnet: bnkExtSubnet,
-		MGMTCidr:     cl.Network.Subnets.Public[0].CIDR,
-		BNKExtCidr:   cl.Network.DataPath.External.CIDR,
-		HasInternal:  hasInternal,
-	}
-	// Internal subnet entry only for dual-interface; single-interface patterns
-	// reach in-cluster backends over CNI and have no BNK_INT subnet.
-	if hasInternal {
+
+	azSubnets := make(map[string][]CloudNetworkMappingSubnet)
+
+	mgmtAZ := cl.Network.Subnets.Public[0].AZ
+	azSubnets[mgmtAZ] = append(azSubnets[mgmtAZ], CloudNetworkMappingSubnet{
+		CIDR:     cl.Network.Subnets.Public[0].CIDR,
+		SubnetID: mgmtSubnet,
+	})
+
+	extAZ := cl.Network.DataPath.External.AZ
+	azSubnets[extAZ] = append(azSubnets[extAZ], CloudNetworkMappingSubnet{
+		CIDR:     cl.Network.DataPath.External.CIDR,
+		SubnetID: bnkExtSubnet,
+	})
+
+	if cl.HasInternalInterface() {
 		bnkIntSubnet := getter("BNK_INT_SUBNET")
 		if bnkIntSubnet == "" {
 			return nil, fmt.Errorf("render: BNK_INT_SUBNET not in state (Phase 03 must run first)")
 		}
-		vars.BNKIntSubnet = bnkIntSubnet
-		vars.BNKIntCidr = cl.Network.DataPath.Internal.CIDR
+		intAZ := cl.Network.DataPath.Internal.AZ
+		azSubnets[intAZ] = append(azSubnets[intAZ], CloudNetworkMappingSubnet{
+			CIDR:     cl.Network.DataPath.Internal.CIDR,
+			SubnetID: bnkIntSubnet,
+		})
 	}
+
+	var vars CloudNetworkMappingVars
+	// Preserve deterministic order by iterating over all defined AZs
+	for _, az := range cl.Network.AZs {
+		if subnets, ok := azSubnets[az]; ok {
+			vars.AZs = append(vars.AZs, CloudNetworkMappingAZ{
+				Name:    az,
+				Subnets: subnets,
+			})
+		}
+	}
+
 	return Render(tmpl, vars)
 }
 
