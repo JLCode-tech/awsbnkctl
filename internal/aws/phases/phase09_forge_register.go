@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -26,7 +25,7 @@ import (
 // D-005: CheckAuthOrDie is called at entry even though forge calls do not
 // touch AWS — the sentinel may have tripped during phase 08 EKS waits.
 func Phase09ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 
 	if cl.Forge == nil || !cl.Forge.Enabled {
 		fmt.Fprintln(os.Stderr, "[phase 09] forge: not enabled, skipping")
@@ -163,7 +162,7 @@ func Phase09ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 // D-005: CheckAuthOrDie is called at entry even though forge calls do not
 // touch AWS.
 func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, keepLink bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 
 	if keepLink {
 		fmt.Fprintln(os.Stderr, "[phase 09 down] forge: --keep-forge-link, preserving link")
@@ -297,7 +296,7 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 // AWS infra always proceeds. Run/result rows are never deleted (forge nulls
 // their FKs via SET NULL).
 func Phase09bBenchmarkDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 
 	// Resolve the forge cluster ID from state (written by Phase09ForgeRegister).
 	clusterIDStr := st.Get("FORGE_CLUSTER_ID")

@@ -12,7 +12,6 @@ import (
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
@@ -42,7 +41,7 @@ const (
 //
 // D-005: CheckAuthOrDie at entry.
 func Phase08bVPCCNIPrefix(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	fmt.Fprintf(os.Stderr, "[phase 08b] vpc-cni prefix delegation: cluster=%s\n", cl.Metadata.Name)
 
 	if dryRun {
@@ -62,7 +61,7 @@ func Phase08bVPCCNIPrefix(ctx context.Context, cl *intent.Cluster, st *state.Sta
 // EKS-owned core networking and will be removed with the cluster by Phase08
 // down. This function only clears state.
 func Phase08bVPCCNIPrefixDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	fmt.Fprintf(os.Stderr, "[phase 08b down] vpc-cni addon left in place (EKS-owned core networking; removed with the cluster by phase08 down): cluster=%s\n", cl.Metadata.Name)
 	clearPhase08bState(st)
 	return st.Save()

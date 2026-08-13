@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
@@ -179,7 +178,7 @@ const bigipAS3RPMMinBytes = 1 << 20 // 1 MiB
 //
 // D-005: CheckAuthOrDie at entry.
 func Phase17fBigIPOnboard(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 17f] bigip-onboard: cluster=%s\n", name)
 

@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
@@ -38,7 +37,7 @@ func cneSAName(clusterName string) string {
 // Idempotent: server-side-apply upserts the annotation on re-run.
 // D-005: CheckAuthOrDie called at entry.
 func Phase21IRSASA(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 21] IRSA SA: cluster=%s\n", name)
 
@@ -87,7 +86,7 @@ func Phase21IRSASA(ctx context.Context, cl *intent.Cluster, st *state.State, cli
 // Phase21IRSASADown deletes the IRSA ServiceAccount from f5-cne-system.
 // Tolerates NotFound.
 func Phase21IRSASADown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	saName := cneSAName(name)
 	fmt.Fprintf(os.Stderr, "[phase 21 down] IRSA SA: deleting %s from %s\n", saName, InstanceNamespace)

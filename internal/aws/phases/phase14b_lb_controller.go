@@ -17,7 +17,6 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -138,7 +137,7 @@ func (r *realLBCHelmInstaller) PullAndLoadHTTPS(repoURL, chartName, version stri
 //
 // D-005: CheckAuthOrDie is called at entry.
 func Phase14bLBController(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 14b] AWS LB Controller: cluster=%s\n", name)
 
@@ -267,7 +266,7 @@ func Phase14bLBController(ctx context.Context, cl *intent.Cluster, st *state.Sta
 // Phase14b is out of scope for Slice 1 and is intentionally deferred; the divergence
 // from Phase18IrsaOidcDown's --keep-irsa behaviour is a documented decision, not a gap.
 func Phase14bLBControllerDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 14b down] AWS LB Controller: cluster=%s\n", name)
 

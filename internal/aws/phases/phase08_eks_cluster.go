@@ -11,7 +11,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -25,7 +24,7 @@ import (
 // waits until ACTIVE; if already ACTIVE populates state and skips create.
 // Dry-run: writes placeholder state, no AWS mutations.
 func Phase08EKSCluster(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 
 	if cl.ClusterSpec == nil {
@@ -128,7 +127,7 @@ func Phase08EKSCluster(ctx context.Context, cl *intent.Cluster, st *state.State,
 // Phase08EKSClusterDown deletes the EKS cluster and waits until gone.
 // Tolerates ResourceNotFoundException (already deleted).
 func Phase08EKSClusterDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 08 down] eks cluster: cluster=%s\n", name)
 

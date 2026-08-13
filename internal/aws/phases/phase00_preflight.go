@@ -11,7 +11,6 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
@@ -55,27 +54,34 @@ const HostDeviceMinDesiredSize = 3
 //   - Ensures .awsbnkctl/<cluster>/ exists and persists CLUSTER_NAME + AWS_REGION
 //
 // In dry-run mode the instance-type API call is skipped (no AWS mutations)
-// and state values are set in memory only.
+// and state values are set in memory only. When AWSBNKCTL_SKIP_AUTH=1 is set,
+// clients is a sentinel with no service clients; STS and EC2 calls are skipped.
 func Phase00Preflight(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
 	fmt.Fprintf(os.Stderr, "[phase 00] preflight: cluster=%s region=%s\n",
 		cl.Metadata.Name, cl.Metadata.Region)
 
-	// Verify credentials are live.
-	out, err := clients.STS.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
-	if err != nil {
-		return fmt.Errorf("phase00: sts:GetCallerIdentity: %w", err)
-	}
-	account := ""
-	if out.Account != nil {
-		account = *out.Account
-	}
-	fmt.Fprintf(os.Stderr, "[phase 00] authenticated: account=%s\n", account)
+	if clients == nil {
+		// Credential-free dry-run sentinel: no AWS service clients available.
+		fmt.Fprintln(os.Stderr, "[phase 00] AWSBNKCTL_SKIP_AUTH=1: skipping STS + quota checks")
+	} else {
+		checkAuthOrDie(clients)
 
-	// Validate instance type + node group capacity for BNK interface patterns.
-	if !dryRun && cl.IsBNKPattern() {
-		if err := checkHostDeviceCapacity(ctx, cl, clients.EC2); err != nil {
-			return fmt.Errorf("phase00: %w", err)
+		// Verify credentials are live.
+		out, err := clients.STS.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+		if err != nil {
+			return fmt.Errorf("phase00: sts:GetCallerIdentity: %w", err)
+		}
+		account := ""
+		if out.Account != nil {
+			account = *out.Account
+		}
+		fmt.Fprintf(os.Stderr, "[phase 00] authenticated: account=%s\n", account)
+
+		// Validate instance type + node group capacity for BNK interface patterns.
+		if !dryRun && cl.IsBNKPattern() {
+			if err := checkHostDeviceCapacity(ctx, cl, clients.EC2); err != nil {
+				return fmt.Errorf("phase00: %w", err)
+			}
 		}
 	}
 

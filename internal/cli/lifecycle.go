@@ -279,13 +279,26 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 		}
 	}
 
-	clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
-	if err != nil {
-		return fmt.Errorf("up: aws clients: %w", err)
+	skipAuth := os.Getenv("AWSBNKCTL_SKIP_AUTH") == "1"
+	if skipAuth && !dryRun {
+		return errors.New("up: AWSBNKCTL_SKIP_AUTH=1 is only valid with --dry-run")
 	}
-	// Attach forge client when forge is enabled in cluster.yaml.
-	if cl.Forge != nil {
-		clients.AttachForgeClient(cl.Forge.Enabled, cl.Forge.MCPURL)
+
+	var clients *phases.Clients
+	if dryRun && skipAuth {
+		// Credential-free dry-run: pass a nil *Clients so every phase's dry-run
+		// branch sets placeholder state without calling AWS.
+		clients = nil
+		fmt.Fprintln(os.Stderr, "→ AWSBNKCTL_SKIP_AUTH=1: skipping AWS authentication and SDK client construction")
+	} else {
+		clients, err = phases.NewClients(ctx, cl.Metadata.Region, "")
+		if err != nil {
+			return fmt.Errorf("up: aws clients: %w", err)
+		}
+		// Attach forge client when forge is enabled in cluster.yaml.
+		if cl.Forge != nil {
+			clients.AttachForgeClient(cl.Forge.Enabled, cl.Forge.MCPURL)
+		}
 	}
 
 	stateDir := cl.StateDir()
@@ -684,13 +697,26 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 		return fmt.Errorf("down: %w", err)
 	}
 
-	clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
-	if err != nil {
-		return fmt.Errorf("down: aws clients: %w", err)
+	skipAuth := os.Getenv("AWSBNKCTL_SKIP_AUTH") == "1"
+	if skipAuth && !dryRun {
+		return errors.New("down: AWSBNKCTL_SKIP_AUTH=1 is only valid with --dry-run")
 	}
-	// Attach forge client when forge is enabled in cluster.yaml.
-	if cl.Forge != nil {
-		clients.AttachForgeClient(cl.Forge.Enabled, cl.Forge.MCPURL)
+
+	var clients *phases.Clients
+	if dryRun && skipAuth {
+		// Credential-free destroy plan: no AWS calls are made (printDownPlan only
+		// reads state), so pass a nil *Clients bundle.
+		clients = nil
+		fmt.Fprintln(os.Stderr, "→ AWSBNKCTL_SKIP_AUTH=1: skipping AWS authentication and SDK client construction")
+	} else {
+		clients, err = phases.NewClients(ctx, cl.Metadata.Region, "")
+		if err != nil {
+			return fmt.Errorf("down: aws clients: %w", err)
+		}
+		// Attach forge client when forge is enabled in cluster.yaml.
+		if cl.Forge != nil {
+			clients.AttachForgeClient(cl.Forge.Enabled, cl.Forge.MCPURL)
+		}
 	}
 
 	stateDir := cl.StateDir()

@@ -11,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
@@ -51,7 +50,7 @@ var licenseGVR = schema.GroupVersionResource{
 //
 // D-005: CheckAuthOrDie called at entry.
 func Phase23License(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 23] License: cluster=%s\n", name)
 
@@ -108,7 +107,7 @@ func Phase23License(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 // Phase23LicenseDown deletes the License CR from f5-cne-core.
 // Tolerates NotFound. CRD cleanup happens at FLO/CNEInstance down time.
 func Phase23LicenseDown(ctx context.Context, _ *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	fmt.Fprintf(os.Stderr, "[phase 23 down] License: deleting %s from %s\n", licenseCRName, OperatorNamespace)
 
 	if clients.Dynamic == nil {

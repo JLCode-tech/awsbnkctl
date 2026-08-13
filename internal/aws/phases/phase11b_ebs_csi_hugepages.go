@@ -12,7 +12,6 @@ import (
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
@@ -57,7 +56,7 @@ const (
 // D-005: CheckAuthOrDie at entry.
 // Lifecycle order: ... Phase11 → Phase11bEBSCSIHugepages → Phase12 ...
 func Phase11bEBSCSIHugepages(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 
 	// On dry-run, cl.Bnk is optional. Use defaults (matching applyDefaults) for logging/state.
@@ -130,7 +129,7 @@ func Phase11bEBSCSIHugepages(ctx context.Context, cl *intent.Cluster, st *state.
 // deleted — it is EKS-owned and lifecycle-tied to the cluster (matches
 // aws-gpu-setup which never deletes the default SC).
 func Phase11bEBSCSIHugepagesDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 11b down] EBS CSI addon + hugepages-ds: cluster=%s\n", name)
 

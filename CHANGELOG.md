@@ -4,6 +4,11 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [Unreleased]
+
+### Added
+- **`AWSBNKCTL_SKIP_AUTH=1`** — credential-free dry-run hook. `up --dry-run` and `down --dry-run` can now render the full plan without live AWS credentials. The hook is rejected for live runs; it is only valid together with `--dry-run`.
+
 ## v1.0.0 — 2026-08-06
 
 ### Changed

@@ -15,7 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -62,7 +61,7 @@ done
 // Idempotent: DescribeNodegroup + DescribeLaunchTemplates before creating.
 // Dry-run: writes placeholder state, no AWS mutations.
 func Phase10NodeGroup(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 
 	if cl.ClusterSpec == nil {
@@ -180,7 +179,7 @@ func Phase10NodeGroup(ctx context.Context, cl *intent.Cluster, st *state.State, 
 // Phase10NodeGroupDown deletes all managed node groups for the cluster, then
 // deletes the Launch Template. Tolerates ResourceNotFoundException (already deleted).
 func Phase10NodeGroupDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 10 down] node group: cluster=%s\n", name)
 

@@ -8,7 +8,6 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
@@ -37,7 +36,7 @@ const (
 // phase12 (BNK k8s foundation). Phase11c naming follows the Phase11b precedent.
 // D-005: CheckAuthOrDie at entry.
 func Phase11cNvidiaDevicePlugin(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	// Self-gate: skip cleanly when no GPU node group is declared (R3).
 	if !cl.HasGPUNodeGroup() {
 		return nil
@@ -82,7 +81,7 @@ func Phase11cNvidiaDevicePlugin(ctx context.Context, cl *intent.Cluster, st *sta
 // Called in the down sequence while kubeconfig is still valid (stage 3,
 // before kubeconfig-down), so k8s clients are available.
 func Phase11cNvidiaDevicePluginDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	// Self-gate: skip when no GPU node group (R3).
 	if !cl.HasGPUNodeGroup() {
 		return nil

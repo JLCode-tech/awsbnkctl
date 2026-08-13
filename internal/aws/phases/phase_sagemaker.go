@@ -12,7 +12,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sagemaker"
 	sagemaker_types "github.com/aws/aws-sdk-go-v2/service/sagemaker/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -92,7 +91,7 @@ const optMaxModelLen = "OPTION_MAX_MODEL_LEN"
 // Gated by cl.SageMakerEnabled() — the caller (lifecycle.go) must also gate.
 // Dry-run: logs what would be created, writes placeholder state, no SDK mutations.
 func PhaseSageMakerUp(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	sm := cl.AI.SageMaker
 	name := cl.Metadata.Name
 	region := cl.Metadata.Region
@@ -201,7 +200,7 @@ func PhaseSageMakerUp(ctx context.Context, cl *intent.Cluster, st *state.State, 
 // ResourceNotFound / NoSuchEntity for each resource (already deleted). On
 // state-loss, falls back to the name-derived defaults.
 func PhaseSageMakerDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[sagemaker down] cluster=%s\n", name)
 

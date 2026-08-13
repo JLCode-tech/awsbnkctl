@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
@@ -33,7 +32,7 @@ const (
 //
 // D-005: CheckAuthOrDie called at entry.
 func Phase19CloudNetworkMapping(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 19] cloud-network-mapping: cluster=%s\n", name)
 
@@ -79,7 +78,7 @@ func Phase19CloudNetworkMapping(ctx context.Context, cl *intent.Cluster, st *sta
 // Phase19CloudNetworkMappingDown deletes the cloud-network-mapping ConfigMap.
 // Tolerates NotFound.
 func Phase19CloudNetworkMappingDown(ctx context.Context, _ *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	fmt.Fprintf(os.Stderr, "[phase 19 down] cloud-network-mapping: deleting CM in %s\n", InstanceNamespace)
 
 	if clients.Dynamic == nil {

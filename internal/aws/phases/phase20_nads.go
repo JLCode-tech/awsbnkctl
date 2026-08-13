@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
@@ -33,7 +32,7 @@ var nadNamespaces = []string{InstanceNamespace, "default"}
 // Idempotent: server-side-apply via applyUnstructured.
 // D-005: CheckAuthOrDie called at entry.
 func Phase20NADs(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 20] NADs: cluster=%s\n", name)
 
@@ -87,7 +86,7 @@ func Phase20NADs(ctx context.Context, cl *intent.Cluster, st *state.State, clien
 
 // Phase20NADsDown deletes both NADs from both namespaces. Tolerates NotFound.
 func Phase20NADsDown(ctx context.Context, _ *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	fmt.Fprintf(os.Stderr, "[phase 20 down] NADs: deleting from %v\n", nadNamespaces)
 
 	if clients.Dynamic == nil {

@@ -38,7 +38,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
@@ -91,7 +90,7 @@ const (
 // CheckAuthOrDie is called at entry.
 // Mitigates a pod-manager v1.6.x cold-start race versus kube-proxy.
 func Phase24cPodManagerHeal(ctx context.Context, _ *intent.Cluster, _ *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	fmt.Fprintln(os.Stderr, "[phase 24c] f5-tmm-pod-manager cold-start race heal")
 
 	if dryRun {

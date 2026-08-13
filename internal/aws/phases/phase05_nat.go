@@ -9,7 +9,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -21,7 +20,7 @@ import (
 //
 // Idempotent: lists by tag before creating.
 func Phase05NAT(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 
 	// The NAT GW lives in the first public subnet.
@@ -33,18 +32,19 @@ func Phase05NAT(ctx context.Context, cl *intent.Cluster, st *state.State, client
 
 	fmt.Fprintf(os.Stderr, "[phase 05] nat: cluster=%s subnet=%s\n", name, firstPublicSubnet)
 
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "[phase 05] dry-run: would allocate EIP and create NAT GW in %s\n", firstPublicSubnet)
+		st.Set("NAT_EIP_ALLOC", "dry-run-eip")
+		st.Set("NAT_GW_ID", "dry-run-nat")
+		return nil
+	}
+
 	// --- EIP ---
 	eipAllocID, err := findEIPByTag(ctx, clients.EC2, name)
 	if err != nil {
 		return fmt.Errorf("phase05: listing EIPs by tag: %w", err)
 	}
 	if eipAllocID == "" {
-		if dryRun {
-			fmt.Fprintf(os.Stderr, "[phase 05] dry-run: would allocate EIP and create NAT GW in %s\n", firstPublicSubnet)
-			st.Set("NAT_EIP_ALLOC", "dry-run-eip")
-			st.Set("NAT_GW_ID", "dry-run-nat")
-			return nil
-		}
 		eipTags := tags.Merge(
 			tags.Required(name, tags.CompEIP),
 			cl.Tags,
@@ -109,7 +109,7 @@ func Phase05NAT(ctx context.Context, cl *intent.Cluster, st *state.State, client
 // still associated fails with InvalidIPAddress.InUse. We poll until
 // AssociationId is nil before calling ReleaseAddress.
 func Phase05NATDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 05 down] nat: cluster=%s\n", name)
 

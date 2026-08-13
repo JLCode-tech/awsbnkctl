@@ -46,6 +46,19 @@ staticcheck ./... # Must be clean
 go test ./...   # Must pass
 ```
 
+### Credential-Free Dry-Run
+The `AWSBNKCTL_SKIP_AUTH=1` environment variable lets `up --dry-run` and
+`down --dry-run` execute the full phase graph without authenticating to AWS.
+This is the primary local regression guard for the dry-run path:
+
+```bash
+AWSBNKCTL_SKIP_AUTH=1 ./awsbnkctl up -f examples/full-cluster/cluster.yaml --dry-run
+AWSBNKCTL_SKIP_AUTH=1 ./awsbnkctl down -f examples/full-cluster/cluster.yaml --dry-run
+```
+
+It is intentionally rejected for live runs; `AWSBNKCTL_SKIP_AUTH=1` is only
+valid together with `--dry-run`.
+
 ### Integration Tiers
 
 | Tier | What it exercises | When it runs |

@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
@@ -65,7 +64,7 @@ var phase24bConfigMapWait = 3 * time.Minute
 //
 // D-005: CheckAuthOrDie called at entry.
 func Phase24bDSSMInsecureOverlay(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	fmt.Fprintln(os.Stderr, "[phase 24b] DSSM --insecure readiness probe overlay")
 
 	if cl != nil && !cl.IsBNKPattern() {
