@@ -499,13 +499,17 @@ jobs:
           jq --version
           scripts/govulncheck-gate.sh
 
-      - name: gitleaks (secret scan)
-        # Scans the full git history for committed secrets. Uses
-        # the upstream-maintained gitleaks-action; runs in default
-        # mode (no license required for public repos). A finding
-        # fails the job; the integrator triages from the Actions
-        # log + redacted secret patterns. Suppression rationale,
-        # if any, lives in `.gitleaks.toml` at repo root.
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: gitleaks (secret scan — full history)
+        # The gitleaks/gitleaks-action@v2 default mode scans the PR/push
+        # commit range, not the full history, and crashes with a 403 API
+        # error in this private repo. Use the MIT-licensed CLI directly
+        # (pinned + checksum-verified) and scan the entire git history
+        # that `fetch-depth: 0` already checked out. This is the same
+        # approach as gkebnkctl.
+        run: |
+          wget -q -O /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
+          echo "6298c9235dfc9278c14b28afd9b7fa4e6f4a289cb1974bd27949fc1e9122bdee  /tmp/gitleaks.tar.gz" \
+            | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner --redact -v
