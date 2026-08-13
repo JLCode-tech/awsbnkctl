@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sctp-scenario
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5BnkGateway
+metadata:
+  name: sctp-vip-pool
+  namespace: sctp-scenario
+spec:
+  ingressConfig:
+    defaultListenerNetworks:
+    - name: ext
+      ipv4BaseCidr: "10.0.10.200/32"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sctp-echo-backend
+  namespace: sctp-scenario
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sctp-echo
+  template:
+    metadata:
+      labels:
+        app: sctp-echo
+    spec:
+      containers:
+      - name: sctp-echo
+        image: nicolaka/netshoot
+        command: ["socat", "SCTP-LISTEN:9000,fork", "EXEC:'cat'"]
+        ports:
+        - containerPort: 9000
+          protocol: SCTP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sctp-echo-backend
+  namespace: sctp-scenario
+spec:
+  selector:
+    app: sctp-echo
+  ports:
+  - port: 9000
+    targetPort: 9000
+    protocol: SCTP
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: sctp-gateway
+  namespace: sctp-scenario
+spec:
+  gatewayClassName: bnk-perth-lz-gatewayclass
+  addresses:
+  - type: IPAddress
+    value: 10.0.10.200
+  listeners:
+  - name: sctp-listen
+    protocol: SCTP
+    port: 9000
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.k8s.f5net.com/v1
+kind: L4Route
+metadata:
+  name: sctp-route
+  namespace: sctp-scenario
+spec:
+  protocol: SCTP
+  parentRefs:
+  - name: sctp-gateway
+    sectionName: sctp-listen
+  rules:
+  - backendRefs:
+    - name: sctp-echo-backend
+      port: 9000

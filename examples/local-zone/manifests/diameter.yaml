@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: diameter-scenario
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5BnkGateway
+metadata:
+  name: diameter-vip-pool
+  namespace: diameter-scenario
+spec:
+  ingressConfig:
+    defaultListenerNetworks:
+    - name: ext
+      ipv4BaseCidr: "10.0.10.201/32"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diameter-backend
+  namespace: diameter-scenario
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: diameter
+  template:
+    metadata:
+      labels:
+        app: diameter
+    spec:
+      containers:
+      - name: diameter
+        image: nicolaka/netshoot
+        command: ["socat", "TCP-LISTEN:3868,fork", "EXEC:'echo Diameter OK'"]
+        ports:
+        - containerPort: 3868
+          protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: diameter-backend
+  namespace: diameter-scenario
+spec:
+  selector:
+    app: diameter
+  ports:
+  - port: 3868
+    targetPort: 3868
+    protocol: TCP
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: diameter-gateway
+  namespace: diameter-scenario
+spec:
+  gatewayClassName: bnk-perth-lz-gatewayclass
+  addresses:
+  - type: IPAddress
+    value: 10.0.10.201
+  listeners:
+  - name: diameter-listen
+    protocol: TCP
+    port: 3868
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.k8s.f5net.com/v1
+kind: L4Route
+metadata:
+  name: diameter-route
+  namespace: diameter-scenario
+spec:
+  protocol: TCP
+  parentRefs:
+  - name: diameter-gateway
+    sectionName: diameter-listen
+  rules:
+  - backendRefs:
+    - name: diameter-backend
+      port: 3868

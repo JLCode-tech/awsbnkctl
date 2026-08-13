@@ -1,0 +1,21 @@
+apiVersion: k8s.f5net.com/v3
+kind: F5SPKEgress
+metadata:
+  name: perth-test-egress
+  namespace: f5-cne-system
+spec:
+  snatType: SRC_TRANS_AUTOMAP
+  pseudoCNIConfig:
+    namespaces:
+    - http2-scenario
+    - diameter-scenario
+    - sctp-scenario
+    appPodInterface: eth0
+    vxlan:
+      create: true
+      tmmInterfaceName: int-vlan
+      nodeInterfaceName: ens5
+      ipv4Subnet: "192.168.0.0"
+      ipv4PrefixLen: 16
+      ipv6Subnet: "fd50::"
+      ipv6PrefixLen: 112
