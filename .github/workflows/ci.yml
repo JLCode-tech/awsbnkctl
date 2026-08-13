@@ -364,6 +364,111 @@ jobs:
           path: artifacts/
           if-no-files-found: warn
 
+  up-dryrun:
+    name: up-dryrun (awsbnkctl validate + up/down --dry-run)
+    needs: test
+    # The offline lifecycle gate: proves `awsbnkctl validate` and `up`/`down
+    # --dry-run` resolve cluster.yaml and print a full phased plan without
+    # touching AWS, using the AWSBNKCTL_SKIP_AUTH=1 test hook. No live AWS
+    # credentials, no network egress to Amazon APIs.
+    runs-on: ubuntu-latest
+    env:
+      # Belt-and-braces: if a code path leaks past the skip-auth gate, these
+      # fake creds let the SDK construct a Signer without panicking, while
+      # still failing closed at the network layer.
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_SESSION_TOKEN: testing
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build awsbnkctl
+        run: |
+          mkdir -p bin
+          go build -o bin/awsbnkctl ./cmd/awsbnkctl
+
+      - name: Validate example configs
+        run: |
+          set -eo pipefail
+          ./bin/awsbnkctl validate examples/full-cluster/cluster.yaml
+          ./bin/awsbnkctl validate examples/external-only/cluster.yaml
+          ./bin/awsbnkctl validate examples/sriov-external/cluster.yaml
+
+      - name: awsbnkctl up --dry-run (full-cluster)
+        env:
+          AWSBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          mkdir -p artifacts
+          ./bin/awsbnkctl up -f examples/full-cluster/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/up-dryrun-full-cluster.log
+          grep -q 'postflight' artifacts/up-dryrun-full-cluster.log
+          grep -q 'dry-run complete' artifacts/up-dryrun-full-cluster.log
+
+      - name: awsbnkctl down --dry-run (full-cluster)
+        env:
+          AWSBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          ./bin/awsbnkctl down -f examples/full-cluster/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/down-dryrun-full-cluster.log
+          grep -q 'dry-run complete' artifacts/down-dryrun-full-cluster.log
+
+      - name: awsbnkctl up --dry-run (external-only)
+        env:
+          AWSBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          ./bin/awsbnkctl up -f examples/external-only/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/up-dryrun-external-only.log
+          grep -q 'postflight' artifacts/up-dryrun-external-only.log
+          grep -q 'dry-run complete' artifacts/up-dryrun-external-only.log
+
+      - name: awsbnkctl down --dry-run (external-only)
+        env:
+          AWSBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          ./bin/awsbnkctl down -f examples/external-only/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/down-dryrun-external-only.log
+          grep -q 'dry-run complete' artifacts/down-dryrun-external-only.log
+
+      - name: awsbnkctl up --dry-run (sriov-external)
+        env:
+          AWSBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          ./bin/awsbnkctl up -f examples/sriov-external/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/up-dryrun-sriov-external.log
+          grep -q 'postflight' artifacts/up-dryrun-sriov-external.log
+          grep -q 'dry-run complete' artifacts/up-dryrun-sriov-external.log
+
+      - name: awsbnkctl down --dry-run (sriov-external)
+        env:
+          AWSBNKCTL_SKIP_AUTH: "1"
+        run: |
+          set -eo pipefail
+          ./bin/awsbnkctl down -f examples/sriov-external/cluster.yaml --dry-run \
+            2>&1 | tee artifacts/down-dryrun-sriov-external.log
+          grep -q 'dry-run complete' artifacts/down-dryrun-sriov-external.log
+
+      - name: Upload up/down dry-run logs
+        # Always upload so a red run leaves debug context behind.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: up-dryrun-logs
+          path: artifacts/
+          if-no-files-found: warn
+
   windows-build:
     name: windows build
     runs-on: windows-latest
