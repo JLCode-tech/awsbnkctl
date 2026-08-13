@@ -334,6 +334,16 @@ func NewClients(ctx context.Context, region, profile string) (*Clients, error) {
 	}, nil
 }
 
+// checkAuthOrDie is a nil-safe wrapper for awsmw.CheckAuthOrDie. When clients
+// is nil (AWSBNKCTL_SKIP_AUTH=1 credential-free dry-run) it returns
+// immediately; otherwise it delegates to the SSO sentinel.
+func checkAuthOrDie(clients *Clients) {
+	if clients == nil || clients.Profile == "" {
+		return
+	}
+	awsmw.CheckAuthOrDie(clients.Profile)
+}
+
 // ptr returns a pointer to a string — avoids aws.String import at every call
 // site within the phases package.
 func ptr(s string) *string { return &s }

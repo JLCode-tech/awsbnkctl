@@ -13,7 +13,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -76,7 +75,7 @@ func bigipVEKeyName(clusterName string) string {
 // Dry-run: placeholder state keys, zero AWS calls.
 // SSO sentinel: CheckAuthOrDie at entry.
 func Phase17eBigIPVE(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 17e] bigip-ve: cluster=%s\n", name)
 
@@ -265,7 +264,7 @@ func Phase17eBigIPVE(ctx context.Context, cl *intent.Cluster, st *state.State, c
 // Tolerates NotFound / missing resources (idempotent down). Falls back to
 // tag-discovery when state keys are absent.
 func Phase17eBigIPVEDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 17e down] bigip-ve: cluster=%s\n", name)
 

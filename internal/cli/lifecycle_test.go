@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -379,6 +381,90 @@ func TestRegisterWithForgePostApply_RejectsEmptyRegion(t *testing.T) {
 	if !strings.Contains(err.Error(), "metadata.region") {
 		t.Errorf("error should mention metadata.region; got %q", err.Error())
 	}
+}
+
+// TestSkipAuth_RequiresDryRun verifies that AWSBNKCTL_SKIP_AUTH=1 is rejected
+// unless --dry-run is also set, for both up and down.
+func TestSkipAuth_RequiresDryRun(t *testing.T) {
+	cfgPath := writeTempClusterYAML(t, "skip-auth-test", "ap-southeast-2")
+
+	t.Run("up rejects skip-auth without dry-run", func(t *testing.T) {
+		t.Setenv("AWSBNKCTL_SKIP_AUTH", "1")
+		err := runPhasedUp(context.Background(), cfgPath, false /*dryRun*/, false, false)
+		if err == nil {
+			t.Fatal("runPhasedUp with SKIP_AUTH=1 and dryRun=false should error, got nil")
+		}
+		want := "AWSBNKCTL_SKIP_AUTH=1 is only valid with --dry-run"
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want substring %q", err.Error(), want)
+		}
+	})
+
+	t.Run("down rejects skip-auth without dry-run", func(t *testing.T) {
+		t.Setenv("AWSBNKCTL_SKIP_AUTH", "1")
+		err := runPhasedDown(context.Background(), cfgPath, true /*yes*/, false /*dryRun*/)
+		if err == nil {
+			t.Fatal("runPhasedDown with SKIP_AUTH=1 and dryRun=false should error, got nil")
+		}
+		want := "AWSBNKCTL_SKIP_AUTH=1 is only valid with --dry-run"
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want substring %q", err.Error(), want)
+		}
+	})
+}
+
+// TestSkipAuth_DryRunUp_ReachesPostflight verifies that runPhasedUp with
+// AWSBNKCTL_SKIP_AUTH=1 and --dry-run runs the full plan to completion using a
+// nil *Clients bundle. This is the local regression guard for AWS-05.
+func TestSkipAuth_DryRunUp_ReachesPostflight(t *testing.T) {
+	cfgPath := writeTempClusterYAML(t, "skip-auth-dryrun", "ap-southeast-2")
+	t.Setenv("AWSBNKCTL_SKIP_AUTH", "1")
+
+	if err := runPhasedUp(context.Background(), cfgPath, true /*dryRun*/, false, false); err != nil {
+		t.Fatalf("runPhasedUp dry-run with SKIP_AUTH=1: %v", err)
+	}
+}
+
+// writeTempClusterYAML writes a minimal valid cluster.yaml to a temp file and
+// returns its path. Used for lifecycle-level skip-auth tests.
+func writeTempClusterYAML(t *testing.T, name, region string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cluster.yaml")
+	content := fmt.Sprintf(`metadata:
+  name: %s
+  region: %s
+network:
+  vpcCidr: 10.0.0.0/16
+  azs:
+    - %sa
+    - %sb
+  subnets:
+    public:
+      - cidr: 10.0.1.0/24
+        az: %sa
+      - cidr: 10.0.2.0/24
+        az: %sb
+    private:
+      - cidr: 10.0.11.0/24
+        az: %sa
+      - cidr: 10.0.12.0/24
+        az: %sb
+  natGateways: 1
+cluster:
+  kubernetesVersion: "1.30"
+  nodeGroups:
+    - name: default
+      instanceType: t3.medium
+      desiredSize: 1
+      minSize: 1
+      maxSize: 2
+      diskSize: 50
+`, name, region, region, region, region, region, region, region)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write temp cluster.yaml: %v", err)
+	}
+	return path
 }
 
 // TestConfirmDestroy guards the destroy confirmation gate: only an explicit

@@ -9,7 +9,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -22,7 +21,7 @@ import (
 // When pattern is host-device, also creates BNK_EXT_SUBNET and BNK_INT_SUBNET
 // from network.dataPath.
 func Phase03Subnets(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	vpcID := st.Get("VPC_ID")
 	if vpcID == "" {
@@ -31,28 +30,11 @@ func Phase03Subnets(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 
 	fmt.Fprintf(os.Stderr, "[phase 03] subnets: cluster=%s vpc=%s\n", name, vpcID)
 
-	publicIDs, err := provisionSubnets(ctx, clients.EC2, name, vpcID,
-		cl.Network.Subnets.Public, tags.CompSubnetPublic, true, cl.Tags, cl.Metadata.Labels, dryRun)
-	if err != nil {
-		return fmt.Errorf("phase03: public subnets: %w", err)
-	}
-
-	privateIDs, err := provisionSubnets(ctx, clients.EC2, name, vpcID,
-		cl.Network.Subnets.Private, tags.CompSubnetPrivate, false, cl.Tags, cl.Metadata.Labels, dryRun)
-	if err != nil {
-		return fmt.Errorf("phase03: private subnets: %w", err)
-	}
-
 	if dryRun {
-		// In dry-run, provisionSubnets skips creation and returns empty slices for
-		// subnets that don't already exist. Populate placeholder IDs so downstream
-		// phases can render their plan.
-		if len(publicIDs) == 0 {
-			publicIDs = makeDryRunSubnetIDs("pub", len(cl.Network.Subnets.Public))
-		}
-		if len(privateIDs) == 0 {
-			privateIDs = makeDryRunSubnetIDs("priv", len(cl.Network.Subnets.Private))
-		}
+		// Credential-free dry-run: do not call EC2 DescribeSubnets/CreateSubnet.
+		// Populate placeholder IDs so downstream phases can render their plan.
+		publicIDs := makeDryRunSubnetIDs("pub", len(cl.Network.Subnets.Public))
+		privateIDs := makeDryRunSubnetIDs("priv", len(cl.Network.Subnets.Private))
 		st.Set("PUBLIC_SUBNETS", strings.Join(publicIDs, ","))
 		st.Set("PRIVATE_SUBNETS", strings.Join(privateIDs, ","))
 		// data-path placeholders (BNK patterns). External always; internal only
@@ -68,6 +50,18 @@ func Phase03Subnets(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 			}
 		}
 		return nil
+	}
+
+	publicIDs, err := provisionSubnets(ctx, clients.EC2, name, vpcID,
+		cl.Network.Subnets.Public, tags.CompSubnetPublic, true, cl.Tags, cl.Metadata.Labels, dryRun)
+	if err != nil {
+		return fmt.Errorf("phase03: public subnets: %w", err)
+	}
+
+	privateIDs, err := provisionSubnets(ctx, clients.EC2, name, vpcID,
+		cl.Network.Subnets.Private, tags.CompSubnetPrivate, false, cl.Tags, cl.Metadata.Labels, dryRun)
+	if err != nil {
+		return fmt.Errorf("phase03: private subnets: %w", err)
 	}
 
 	st.Set("PUBLIC_SUBNETS", strings.Join(publicIDs, ","))
@@ -100,7 +94,7 @@ func Phase03Subnets(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 // of Phase03Subnets). Tolerates "already gone". When pattern is host-device,
 // also deletes BNK_EXT_SUBNET and BNK_INT_SUBNET.
 func Phase03SubnetsDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 03 down] subnets: cluster=%s\n", name)
 

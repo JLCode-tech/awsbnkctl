@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
@@ -47,7 +46,7 @@ type ifaceInfo struct {
 //
 // Lifecycle order: Phase17 → Phase17b → Phase17c → Phase18 → ...
 func Phase17cIfaceDiscovery(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	hasInternal := cl.HasInternalInterface()
 	fmt.Fprintf(os.Stderr, "[phase 17c] iface-discovery: cluster=%s\n", cl.Metadata.Name)
 

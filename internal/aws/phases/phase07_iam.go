@@ -13,7 +13,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -40,7 +39,7 @@ const tmmVpcRoutePolicy = `{"Version":"2012-10-17","Statement":[{"Effect":"Allow
 // Idempotent: GetRole / GetInstanceProfile by name before creating.
 // Dry-run: writes placeholder state values, makes zero IAM API mutations.
 func Phase07IAM(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 07] iam: cluster=%s\n", name)
 
@@ -137,7 +136,7 @@ func Phase07IAM(ctx context.Context, cl *intent.Cluster, st *state.State, client
 // Destroy order: remove role from profile → delete profile → detach + delete
 // inline policies on node role → delete node role → same for cluster role.
 func Phase07IAMDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 07 down] iam: cluster=%s\n", name)
 

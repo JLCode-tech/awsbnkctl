@@ -8,7 +8,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -17,7 +16,7 @@ import (
 // Phase04IGW creates the Internet Gateway and attaches it to the VPC.
 // Idempotent: skips creation and re-attaches if already present.
 func Phase04IGW(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	vpcID := st.Get("VPC_ID")
 	if vpcID == "" {
@@ -25,6 +24,12 @@ func Phase04IGW(ctx context.Context, cl *intent.Cluster, st *state.State, client
 	}
 
 	fmt.Fprintf(os.Stderr, "[phase 04] igw: cluster=%s vpc=%s\n", name, vpcID)
+
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "[phase 04] dry-run: would create IGW and attach to %s\n", vpcID)
+		st.Set("IGW_ID", "dry-run-igw")
+		return nil
+	}
 
 	existing, err := findIGWByTag(ctx, clients.EC2, name)
 	if err != nil {
@@ -35,10 +40,6 @@ func Phase04IGW(ctx context.Context, cl *intent.Cluster, st *state.State, client
 	if existing != "" {
 		fmt.Fprintf(os.Stderr, "[phase 04] igw %s already exists, skipping create\n", existing)
 		igwID = existing
-	} else if dryRun {
-		fmt.Fprintf(os.Stderr, "[phase 04] dry-run: would create IGW and attach to %s\n", vpcID)
-		st.Set("IGW_ID", "dry-run-igw")
-		return nil
 	} else {
 		resourceTags := tags.Merge(
 			tags.Required(name, tags.CompIGW),
@@ -68,7 +69,7 @@ func Phase04IGW(ctx context.Context, cl *intent.Cluster, st *state.State, client
 
 // Phase04IGWDown detaches and deletes the IGW. Tolerates "already gone".
 func Phase04IGWDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 
 	igwID := st.Get("IGW_ID")

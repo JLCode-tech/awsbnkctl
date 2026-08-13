@@ -85,8 +85,14 @@ func isAuthError(err error) bool {
 // up/down so a mid-run SSO expiry produces a clear message rather than a
 // cascade of confusing SDK errors.
 //
-// profile is the AWS profile name shown in the sso-login hint.
+// profile is the AWS profile name shown in the sso-login hint. When profile
+// is empty, the caller is running in AWSBNKCTL_SKIP_AUTH=1 credential-free
+// dry-run mode: no AWS SDK calls are made, so the auth sentinel is not
+// consulted and the function returns immediately.
 func CheckAuthOrDie(profile string) {
+	if profile == "" {
+		return
+	}
 	if !authFail.Load() {
 		return
 	}

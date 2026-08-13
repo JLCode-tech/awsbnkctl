@@ -17,7 +17,6 @@ import (
 	"helm.sh/helm/v3/pkg/release"
 	"sigs.k8s.io/yaml"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
@@ -144,7 +143,7 @@ func (r *realHelmInstaller) PullAndLoad(chartRef, version string) (*chart.Chart,
 //
 // D-005: CheckAuthOrDie is called at entry.
 func Phase14FLOHelm(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 14] FLO Helm install: cluster=%s\n", name)
 
@@ -367,7 +366,7 @@ func buildHelmInstaller(st *state.State, farKeyB64 string) (helmInstaller, error
 // Phase14FLOHelmDown uninstalls the FLO Helm release.
 // Tolerates "release not found". CRDs may linger (slice 7+ tightens).
 func Phase14FLOHelmDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 14 down] FLO helm uninstall: cluster=%s\n", name)
 

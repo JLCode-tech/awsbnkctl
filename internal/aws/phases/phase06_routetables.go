@@ -9,7 +9,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -22,7 +21,7 @@ import (
 // Idempotent: creates each route table only if absent (tag-based check),
 // and skips route/association creation if already present.
 func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	vpcID := st.Get("VPC_ID")
 	igwID := st.Get("IGW_ID")
@@ -37,29 +36,34 @@ func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State
 
 	fmt.Fprintf(os.Stderr, "[phase 06] route tables: cluster=%s vpc=%s\n", name, vpcID)
 
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "[phase 06] dry-run: would create public route table → IGW\n")
+		st.Set("PUBLIC_RTB", "dry-run-rtb-pub")
+		if natID != "" {
+			fmt.Fprintf(os.Stderr, "[phase 06] dry-run: would create private route table → NAT\n")
+			st.Set("PRIVATE_RTB", "dry-run-rtb-priv")
+		} else {
+			fmt.Fprintf(os.Stderr, "[phase 06] no NAT GW in state, skipping private route table\n")
+		}
+		return nil
+	}
+
 	// --- Public route table ---
 	pubRTBID, err := findRTBByTagAndVPC(ctx, clients.EC2, name, vpcID, "public")
 	if err != nil {
 		return fmt.Errorf("phase06: listing public RTBs: %w", err)
 	}
 	if pubRTBID == "" {
-		if dryRun {
-			fmt.Fprintf(os.Stderr, "[phase 06] dry-run: would create public route table → IGW\n")
-			pubRTBID = "dry-run-rtb-pub"
-		} else {
-			pubRTBID, err = createRTB(ctx, clients.EC2, name, vpcID, "public", cl.Tags, cl.Metadata.Labels)
-			if err != nil {
-				return fmt.Errorf("phase06: create public RTB: %w", err)
-			}
-			fmt.Fprintf(os.Stderr, "[phase 06] created public RTB %s\n", pubRTBID)
+		pubRTBID, err = createRTB(ctx, clients.EC2, name, vpcID, "public", cl.Tags, cl.Metadata.Labels)
+		if err != nil {
+			return fmt.Errorf("phase06: create public RTB: %w", err)
 		}
+		fmt.Fprintf(os.Stderr, "[phase 06] created public RTB %s\n", pubRTBID)
 	} else {
 		fmt.Fprintf(os.Stderr, "[phase 06] public RTB %s already exists, skipping\n", pubRTBID)
 	}
 
-	if dryRun {
-		st.Set("PUBLIC_RTB", pubRTBID)
-	} else if pubRTBID != "" {
+	if pubRTBID != "" {
 		// Default route → IGW.
 		if err := ensureRoute(ctx, clients.EC2, pubRTBID, "0.0.0.0/0", igwID, ""); err != nil {
 			return fmt.Errorf("phase06: public route → IGW: %w", err)
@@ -80,23 +84,16 @@ func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State
 			return fmt.Errorf("phase06: listing private RTBs: %w", err)
 		}
 		if privRTBID == "" {
-			if dryRun {
-				fmt.Fprintf(os.Stderr, "[phase 06] dry-run: would create private route table → NAT\n")
-				privRTBID = "dry-run-rtb-priv"
-			} else {
-				privRTBID, err = createRTB(ctx, clients.EC2, name, vpcID, "private", cl.Tags, cl.Metadata.Labels)
-				if err != nil {
-					return fmt.Errorf("phase06: create private RTB: %w", err)
-				}
-				fmt.Fprintf(os.Stderr, "[phase 06] created private RTB %s\n", privRTBID)
+			privRTBID, err = createRTB(ctx, clients.EC2, name, vpcID, "private", cl.Tags, cl.Metadata.Labels)
+			if err != nil {
+				return fmt.Errorf("phase06: create private RTB: %w", err)
 			}
+			fmt.Fprintf(os.Stderr, "[phase 06] created private RTB %s\n", privRTBID)
 		} else {
 			fmt.Fprintf(os.Stderr, "[phase 06] private RTB %s already exists, skipping\n", privRTBID)
 		}
 
-		if dryRun {
-			st.Set("PRIVATE_RTB", privRTBID)
-		} else if privRTBID != "" {
+		if privRTBID != "" {
 			// Default route → NAT GW.
 			if err := ensureRoute(ctx, clients.EC2, privRTBID, "0.0.0.0/0", "", natID); err != nil {
 				return fmt.Errorf("phase06: private route → NAT: %w", err)
@@ -113,15 +110,12 @@ func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State
 		fmt.Fprintf(os.Stderr, "[phase 06] no NAT GW in state, skipping private route table\n")
 	}
 
-	if dryRun {
-		return nil
-	}
 	return st.Save()
 }
 
 // Phase06RouteTablesDown deletes both route tables. Tolerates "already gone".
 func Phase06RouteTablesDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	vpcID := st.Get("VPC_ID")
 	fmt.Fprintf(os.Stderr, "[phase 06 down] route tables: cluster=%s\n", name)

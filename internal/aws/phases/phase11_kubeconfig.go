@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
@@ -53,7 +52,7 @@ type kubeconfigData struct {
 // State key written: KUBECONFIG_PATH.
 // Dry-run: logs would-write, no file written.
 func Phase11Kubeconfig(_ context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	kubeconfigPath := filepath.Join(cl.StateDir(), "kubeconfig")
 
@@ -100,7 +99,7 @@ func Phase11Kubeconfig(_ context.Context, cl *intent.Cluster, st *state.State, c
 // happen inside this function and SSO expiry must be caught before any
 // state mutation, even when no direct AWS SDK calls are made.
 func Phase11KubeconfigDown(_ context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 11 down] kubeconfig: cluster=%s\n", name)
 

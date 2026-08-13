@@ -8,7 +8,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
@@ -41,7 +40,7 @@ const (
 // Skipped unless DataplaneBinding()=="sriov". The host-device NAD (phase 20) is
 // skipped for sriov; this phase applies the sriov NAD instead.
 func Phase20bSriovDataplane(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	if cl.DataplaneBinding() != "sriov" {
 		return nil
 	}

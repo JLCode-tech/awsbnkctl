@@ -9,7 +9,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
@@ -46,7 +45,7 @@ const (
 // D-005: CheckAuthOrDie called at entry.
 // ADR D-011: restart threshold hardcoded at 3.
 func Phase24CWCHeal(ctx context.Context, _ *intent.Cluster, _ *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	fmt.Fprintln(os.Stderr, "[phase 24] CWC DNS-warmup heal")
 
 	if dryRun {

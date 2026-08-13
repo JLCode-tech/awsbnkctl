@@ -13,7 +13,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -54,7 +53,7 @@ const (
 // Dry-run: sets placeholder state values, makes zero AWS mutations.
 // SSO sentinel: CheckAuthOrDie at entry.
 func Phase17bJumphost(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 17b] jumphost: cluster=%s\n", name)
 
@@ -208,7 +207,7 @@ func Phase17bJumphost(ctx context.Context, cl *intent.Cluster, st *state.State, 
 // Tolerates NotFound on every resource (idempotent down).
 // Falls back to tag-discovery when state keys are absent.
 func Phase17bJumphostDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 17b down] jumphost: cluster=%s\n", name)
 

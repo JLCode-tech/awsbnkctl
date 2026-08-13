@@ -8,7 +8,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -19,9 +18,15 @@ import (
 //
 // Phase 01 is reserved for IAM (slice 2).
 func Phase02VPC(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 02] vpc: cluster=%s cidr=%s\n", name, cl.Network.VPCCidr)
+
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "[phase 02] dry-run: would create VPC cidr=%s\n", cl.Network.VPCCidr)
+		st.Set("VPC_ID", "dry-run-vpc")
+		return nil
+	}
 
 	// List-by-tag idempotency check.
 	existing, err := findVPCByTag(ctx, clients.EC2, name)
@@ -32,12 +37,6 @@ func Phase02VPC(ctx context.Context, cl *intent.Cluster, st *state.State, client
 		fmt.Fprintf(os.Stderr, "[phase 02] vpc %s already exists, skipping\n", existing)
 		st.Set("VPC_ID", existing)
 		return st.Save()
-	}
-
-	if dryRun {
-		fmt.Fprintf(os.Stderr, "[phase 02] dry-run: would create VPC cidr=%s\n", cl.Network.VPCCidr)
-		st.Set("VPC_ID", "dry-run-vpc")
-		return nil
 	}
 
 	resourceTags := tags.Merge(
@@ -78,7 +77,7 @@ func Phase02VPC(ctx context.Context, cl *intent.Cluster, st *state.State, client
 
 // Phase02VPCDown destroys the VPC. Tolerates "already gone".
 func Phase02VPCDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 
 	vpcID := st.Get("VPC_ID")

@@ -54,6 +54,16 @@ Validate your intent file (no AWS API calls made), and then provision everything
 ./awsbnkctl up -f my-cluster.yaml
 ```
 
+You can also preview the plan without any AWS credentials at all by setting
+`AWSBNKCTL_SKIP_AUTH=1` together with `--dry-run`:
+
+```bash
+AWSBNKCTL_SKIP_AUTH=1 ./awsbnkctl up -f my-cluster.yaml --dry-run
+```
+
+`AWSBNKCTL_SKIP_AUTH=1` is only valid with `--dry-run`; a live `up` or `down`
+run must have real AWS credentials.
+
 ### 5. Validate & Teardown
 
 Run the built-in data-plane traffic validation, and once finished, tear down the environment safely.

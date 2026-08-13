@@ -19,7 +19,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
@@ -86,7 +85,7 @@ const (
 // D-005: CheckAuthOrDie is called at entry even though phase 12 doesn't touch AWS
 // (the sentinel may have tripped during earlier EKS waits in the same run).
 func Phase12K8sFoundation(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 12] k8s foundation: cluster=%s\n", name)
 
@@ -273,7 +272,7 @@ func Phase12K8sFoundation(ctx context.Context, cl *intent.Cluster, st *state.Sta
 // Order: cert chain CRs → cert-manager YAML objects → FAR secrets from default ns →
 // F5 namespaces (cert-manager ns deleted with cert-manager YAML).
 func Phase12K8sFoundationDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 12 down] k8s foundation: cluster=%s\n", name)
 

@@ -15,7 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -49,7 +48,7 @@ const cneControllerVpcReadPolicy = `{"Version":"2012-10-17","Statement":[{"Effec
 // Dry-run: sets placeholder values, skips all mutations.
 // SSO sentinel: CheckAuthOrDie at entry.
 func Phase18IRSAOIDC(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 18] irsa+oidc: cluster=%s\n", name)
 
@@ -178,7 +177,7 @@ func Phase18IRSAOIDC(ctx context.Context, cl *intent.Cluster, st *state.State, c
 //
 // keepIRSA mirrors --keep-irsa on the CLI down command.
 func Phase18IrsaOidcDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, keepIRSA bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 18 down] irsa+oidc: cluster=%s keep-irsa=%v\n", name, keepIRSA)
 

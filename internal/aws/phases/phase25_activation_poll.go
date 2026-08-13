@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/pkg/bnk"
@@ -39,7 +38,7 @@ const (
 //
 // D-005: CheckAuthOrDie called at entry.
 func Phase25ActivationPoll(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool, skipPoll bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	crName := cl.Metadata.Name + "-bnk"
 	fmt.Fprintf(os.Stderr, "[phase 25] activation poll: cluster=%s cr=%s\n", cl.Metadata.Name, crName)
 

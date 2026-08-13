@@ -722,3 +722,177 @@ func TestDryRun_Phase22CNEInstance_NoBnk(t *testing.T) {
 		t.Errorf("CNEINSTANCE_APPLIED_AT = %q, want dry-run", st.Get("CNEINSTANCE_APPLIED_AT"))
 	}
 }
+
+// TestDryRun_NilClients_AllPhasesEndToEnd is the AWSBNKCTL_SKIP_AUTH=1
+// credential-free dry-run regression guard: every phase must tolerate a nil
+// *Clients and set placeholder state without touching any AWS/k8s API.
+// The plan must reach postflight.
+func TestDryRun_NilClients_AllPhasesEndToEnd(t *testing.T) {
+	awsmw.ResetForTest()
+	dir := t.TempDir()
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	st, err := state.Load(dir)
+	if err != nil {
+		t.Fatalf("state.Load: %v", err)
+	}
+
+	// nil *Clients is the shape passed by runPhasedUp when
+	// AWSBNKCTL_SKIP_AUTH=1 is set together with --dry-run.
+	var clients *Clients
+
+	cl := sydTracerCluster()
+	cl.Pattern = intent.PatternDualInterface
+	cl.Network.DataPath = &intent.DataPathSpec{
+		External: intent.SubnetSpec{CIDR: "10.0.10.0/24", AZ: "ap-southeast-2a"},
+		Internal: intent.SubnetSpec{CIDR: "10.0.20.0/24", AZ: "ap-southeast-2a"},
+	}
+	cl.ClusterSpec = &intent.ClusterSpec{
+		KubernetesVersion: "1.30",
+		NodeGroups: []intent.NodeGroupSpec{
+			{Name: "default", InstanceType: "t3.medium", DesiredSize: 1, MinSize: 1, MaxSize: 2, DiskSize: 50},
+		},
+	}
+	ctx := context.Background()
+
+	if err := Phase00Preflight(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase00Preflight: %v", err)
+	}
+	if err := Phase02VPC(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase02VPC: %v", err)
+	}
+	if err := Phase03Subnets(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase03Subnets: %v", err)
+	}
+	if err := Phase04IGW(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase04IGW: %v", err)
+	}
+	if err := Phase05NAT(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase05NAT: %v", err)
+	}
+	if err := Phase06RouteTables(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase06RouteTables: %v", err)
+	}
+	if err := Phase07IAM(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase07IAM: %v", err)
+	}
+	if err := Phase08EKSCluster(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase08EKSCluster: %v", err)
+	}
+	if err := Phase09ForgeRegister(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase09ForgeRegister (disabled): %v", err)
+	}
+	if err := Phase08bVPCCNIPrefix(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase08bVPCCNIPrefix: %v", err)
+	}
+	if err := Phase10NodeGroup(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase10NodeGroup: %v", err)
+	}
+	if err := Phase11Kubeconfig(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase11Kubeconfig: %v", err)
+	}
+	if err := Phase16TMMNodeLabel(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase16TMMNodeLabel: %v", err)
+	}
+	if err := Phase11cNvidiaDevicePlugin(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase11cNvidiaDevicePlugin: %v", err)
+	}
+	if err := Phase17SecondaryENIs(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase17SecondaryENIs: %v", err)
+	}
+	if err := Phase17bJumphost(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase17bJumphost: %v", err)
+	}
+	if err := Phase17eBigIPVE(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase17eBigIPVE: %v", err)
+	}
+	if err := Phase17cIfaceDiscovery(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase17cIfaceDiscovery: %v", err)
+	}
+	// Demo staging is gated on DemoEnabled(); cl has no demo block.
+	if err := Phase18IRSAOIDC(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase18IRSAOIDC: %v", err)
+	}
+	if err := Phase11bEBSCSIHugepages(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase11bEBSCSIHugepages: %v", err)
+	}
+
+	// Phase 12 requires bnk: block with temp FAR/JWT files.
+	farPath := writeDryRunFile(t, dir, "far.json", `{"auths":{}}`)
+	jwtPath := writeDryRunFile(t, dir, "license.jwt", "jwt-token")
+	cl.Bnk = &intent.BnkSpec{
+		FARArchive:         farPath,
+		JWT:                jwtPath,
+		CertManagerVersion: "1.16.1",
+	}
+	if err := Phase12K8sFoundation(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase12K8sFoundation dry-run: %v", err)
+	}
+	if err := Phase14FLOHelm(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase14FLOHelm dry-run: %v", err)
+	}
+	if err := Phase14bLBController(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase14bLBController dry-run: %v", err)
+	}
+	if err := Phase15OTELCerts(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase15OTELCerts dry-run: %v", err)
+	}
+	if err := Phase19CloudNetworkMapping(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase19CloudNetworkMapping dry-run: %v", err)
+	}
+	if err := Phase20NADs(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase20NADs dry-run: %v", err)
+	}
+	if err := Phase20bSriovDataplane(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase20bSriovDataplane dry-run: %v", err)
+	}
+	if err := Phase21IRSASA(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase21IRSASA dry-run: %v", err)
+	}
+	if err := Phase22CNEInstance(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase22CNEInstance dry-run: %v", err)
+	}
+	if err := Phase23License(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase23License dry-run: %v", err)
+	}
+	if err := Phase23bSPKVlanGatewayClass(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase23bSPKVlanGatewayClass dry-run: %v", err)
+	}
+	if err := Phase24CWCHeal(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase24CWCHeal dry-run: %v", err)
+	}
+	if err := Phase24bDSSMInsecureOverlay(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase24bDSSMInsecureOverlay dry-run: %v", err)
+	}
+	if err := Phase24cPodManagerHeal(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase24cPodManagerHeal dry-run: %v", err)
+	}
+	if err := Phase25ActivationPoll(ctx, cl, st, clients, true, false); err != nil {
+		t.Fatalf("Phase25ActivationPoll dry-run: %v", err)
+	}
+	if err := Phase17fBigIPOnboard(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase17fBigIPOnboard dry-run: %v", err)
+	}
+	if err := Phase13Postflight(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase13Postflight dry-run: %v", err)
+	}
+
+	// Spot-check a few placeholder values.
+	if st.Get("VPC_ID") != "dry-run-vpc" {
+		t.Errorf("VPC_ID = %q, want dry-run-vpc", st.Get("VPC_ID"))
+	}
+	if st.Get("EKS_CLUSTER_NAME") != cl.Metadata.Name {
+		t.Errorf("EKS_CLUSTER_NAME = %q, want %q", st.Get("EKS_CLUSTER_NAME"), cl.Metadata.Name)
+	}
+	if st.Get("CNEINSTANCE_NAME") != cl.Metadata.Name+"-bnk" {
+		t.Errorf("CNEINSTANCE_NAME = %q, want %q", st.Get("CNEINSTANCE_NAME"), cl.Metadata.Name+"-bnk")
+	}
+}

@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
@@ -36,7 +35,7 @@ const (
 //
 // D-005: CheckAuthOrDie is called at entry.
 func Phase15OTELCerts(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 15] OTEL certs: cluster=%s\n", name)
 
@@ -102,7 +101,7 @@ func waitForOTELCerts(ctx context.Context, _ *intent.Cluster, clients *Clients, 
 
 // Phase15OTELCertsDown deletes both OTEL Certificate CRs. Tolerates NotFound.
 func Phase15OTELCertsDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 15 down] OTEL certs: cluster=%s\n", name)
 

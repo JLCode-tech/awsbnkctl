@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
@@ -66,7 +65,7 @@ var gatewayClassGVR = schema.GroupVersionResource{
 // Skipped when the cluster is not a BNK pattern.
 // SSO sentinel: CheckAuthOrDie at entry.
 func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	if !cl.IsBNKPattern() {
 		fmt.Fprintf(os.Stderr, "[phase 23b] skipped: pattern=%q (BNK patterns only)\n", cl.Pattern)
@@ -163,7 +162,7 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 // Skipped silently when the cluster is not a BNK pattern. Deleting a
 // non-existent int-vlan (single-interface clusters) is tolerated via NotFound.
 func Phase23bSPKVlanGatewayClassDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
-	awsmw.CheckAuthOrDie(clients.Profile)
+	checkAuthOrDie(clients)
 	if !cl.IsBNKPattern() {
 		return nil
 	}
