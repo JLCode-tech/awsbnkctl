@@ -119,9 +119,30 @@ func Phase10NodeGroup(ctx context.Context, cl *intent.Cluster, st *state.State, 
 		bnkSubnets = filtered
 	}
 
+	// Detect Local Zone deployment from subnet AZ names (Local Zone AZs have an
+	// extra segment, e.g. ap-southeast-2-per-1a). Local Zones do not support gp3.
+	var isLocalZone bool
+	for _, spec := range cl.Network.Subnets.Public {
+		if strings.Count(spec.AZ, "-") > 2 {
+			isLocalZone = true
+			break
+		}
+	}
+
+	// Largest non-GPU nodegroup disk size for the BNK launch template root volume.
+	var maxDiskSize int32
+	for _, ng := range cl.ClusterSpec.NodeGroups {
+		if !ng.IsGPU() && int32(ng.DiskSize) > maxDiskSize { // #nosec G115 -- DiskSize is a small validated GB count, cannot overflow int32
+			maxDiskSize = int32(ng.DiskSize) // #nosec G115
+		}
+	}
+	if maxDiskSize == 0 {
+		maxDiskSize = 50
+	}
+
 	// Ensure the BNK Launch Template exists. GPU node groups do NOT use this
 	// LT — it carries TMM host-device ENA udev rules incompatible with NVIDIA AMI.
-	ltID, err := ensureLaunchTemplate(ctx, clients.EC2, name, ltName, cl.Tags, cl.Metadata.Labels)
+	ltID, err := ensureLaunchTemplate(ctx, clients.EC2, name, ltName, maxDiskSize, isLocalZone, cl.Tags, cl.Metadata.Labels)
 	if err != nil {
 		return fmt.Errorf("phase10: launch template: %w", err)
 	}
@@ -425,8 +446,10 @@ func ensureNodeGroup(
 // UserData if not already present. Idempotent: lookup-by-name first.
 // The LT sets MetadataOptions for IMDSv2 with hop=2 so pods can reach
 // 169.254.169.254 (EKS-optimized AMIs default hop=1 which blocks pod IMDS).
+// diskSize sets the root /dev/xvda volume size; isLocalZone forces gp2 because
+// AWS Local Zones do not support gp3 volumes.
 func ensureLaunchTemplate(ctx context.Context, ec2c EC2API, clusterName, ltName string,
-	extraTags, labels map[string]string) (string, error) {
+	diskSize int32, isLocalZone bool, extraTags, labels map[string]string) (string, error) {
 
 	// Idempotency: look up by name.
 	existing, err := ec2c.DescribeLaunchTemplates(ctx, &ec2.DescribeLaunchTemplatesInput{
@@ -453,6 +476,11 @@ func ensureLaunchTemplate(ctx context.Context, ec2c EC2API, clusterName, ltName 
 		Tags:         ltTags,
 	}
 
+	volType := ec2types.VolumeTypeGp3
+	if isLocalZone {
+		volType = ec2types.VolumeTypeGp2
+	}
+
 	out, err := ec2c.CreateLaunchTemplate(ctx, &ec2.CreateLaunchTemplateInput{
 		LaunchTemplateName: ptr(ltName),
 		TagSpecifications:  []ec2types.TagSpecification{ltTagSpec},
@@ -462,6 +490,20 @@ func ensureLaunchTemplate(ctx context.Context, ec2c EC2API, clusterName, ltName 
 				HttpTokens:              ec2types.LaunchTemplateHttpTokensStateRequired,
 				HttpPutResponseHopLimit: int32Ptr(2),
 				HttpEndpoint:            ec2types.LaunchTemplateInstanceMetadataEndpointStateEnabled,
+			},
+			// BlockDeviceMappings carries the root-volume size because EKS rejects
+			// LaunchTemplate + DiskSize together on CreateNodegroup (SDK v1.83.0).
+			// /dev/xvda is the AL2023 EKS AMI root device name. Local Zones require
+			// gp2; everywhere else uses gp3.
+			BlockDeviceMappings: []ec2types.LaunchTemplateBlockDeviceMappingRequest{
+				{
+					DeviceName: ptr("/dev/xvda"),
+					Ebs: &ec2types.LaunchTemplateEbsBlockDeviceRequest{
+						VolumeType:          volType,
+						VolumeSize:          int32Ptr(diskSize),
+						DeleteOnTermination: boolPtr(true),
+					},
+				},
 			},
 		},
 	})
