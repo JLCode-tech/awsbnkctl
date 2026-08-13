@@ -1,10 +1,17 @@
 # gitleaks ignore list — reviewed false positives (fingerprint = commit:file:rule:line).
-# CI's security-audit scans the PR commit range, so a finding persists in the commit
+# CI's security-audit scans full git history, so a finding persists in the commit
 # that introduced it even after the working tree is fixed; ignore by fingerprint.
 #
 # A scenario.go doc comment tripped the generic-api-key rule on a public model name
 # (reworded in a later commit; not a credential).
-f76d8f0ba3553785cc730e84af96322dd449c5cb:internal/scenarios/aiinferencee2e/scenario.go:generic-api-key:9
-# Second fingerprint: an earlier revision of THIS file quoted that phrase in a comment,
-# so the same pattern is flagged in that commit's diff. Pure-fingerprint line, no trigger.
-d46c6e922bbd91401cc7ba70d932990c64ebb5ae:.gitleaksignore:generic-api-key:5
+fa5ecf3ad6c98840ef3ac72645fdda65b08e1c86:internal/scenarios/aiinferencee2e/scenario.go:generic-api-key:9
+# Historical .gitleaksignore file quoted the same public model name in its own
+# comment; the quoted phrase is not a credential.
+2271ea3bfa10d1e1bbd73d89211b4a59ffb4ce27:.gitleaksignore:generic-api-key:5
+# Pre-AWS-22 test fixtures in deleted/revised files — these were non-functional
+# placeholder strings, not real credentials. They were fixed in later commits.
+fb572ef0d3eea5e68677ec74ba0cd089ac87e9b0:internal/aws/phases/phase17f_bigip_onboard_test.go:generic-api-key:109
+fb572ef0d3eea5e68677ec74ba0cd089ac87e9b0:internal/aws/phases/phase17f_bigip_onboard_test.go:generic-api-key:306
+8fbc706db73f694cc84ce1582b3e74ef42aee15c:internal/exec/k8s.go:generic-api-key:93
+2f7c908e3e5e0e2273793a8fa99b9f47da5873e9:internal/exec/k8s.go:generic-api-key:90
+2f7c908e3e5e0e2273793a8fa99b9f47da5873e9:internal/exec/k8s_test.go:generic-api-key:473
