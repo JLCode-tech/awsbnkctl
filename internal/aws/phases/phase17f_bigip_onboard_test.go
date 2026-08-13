@@ -131,11 +131,11 @@ func frameworkUpResponses() map[string]string {
 		// Final durable-password step's token-auth verify (the ssh command carries the
 		// loginProviderName JSON + the CODE=/LOGIN= echo): HTTP 200 + a token.
 		"loginProviderName": `CODE=200
-LOGIN={"token":{"token":"ABCDEF0123456789","timeout":1200}}`,
+LOGIN={"token":{"token":"fake-token-for-test-only","timeout":1200}}`,
 	}
 }
 
-const testPW = "S3cr3t-Pa55!word"
+const testPW = "test-password-not-real"
 
 // --- tests ---
 
@@ -331,7 +331,7 @@ func TestPhase17fOnboard_PasswordNeverOnArgv(t *testing.T) {
 func TestPhase17fOnboard_IdempotentSkip(t *testing.T) {
 	// Onboarded body: a TOKEN-auth login succeeds (a "token" object) — the new
 	// idempotency gate — plus AS3 pinned + cis partition present.
-	onboarded := `LOGIN={"token":{"token":"ABCDEF0123456789","timeout":1200}} ` +
+	onboarded := `LOGIN={"token":{"token":"fake-token-for-test-only","timeout":1200}} ` +
 		`AS3={"version":"3.56.0","release":"10"} ` +
 		`PART={"name":"cis"}`
 
