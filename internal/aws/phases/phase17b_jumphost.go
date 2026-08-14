@@ -247,7 +247,7 @@ func Phase17bJumphostDown(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	if eiceID == "" {
 		eiceID = lookupEICEByTag(ctx, clients.EC2, name, tags.CompJumphostEICE)
 	}
-	if eiceID != "" && eiceID != "eice-dry-run" {
+	if eiceID != "" && eiceID != "eice-dry-run" && eiceID != "skipped" {
 		fmt.Fprintf(os.Stderr, "[phase 17b down] deleting EICE %s\n", eiceID)
 		if _, err := clients.EC2.DeleteInstanceConnectEndpoint(ctx, &ec2.DeleteInstanceConnectEndpointInput{
 			InstanceConnectEndpointId: ptr(eiceID),
@@ -534,8 +534,7 @@ func ensureJumphostInstance(ctx context.Context, ec2c EC2API, clusterName, subne
 			inst := descOut.Reservations[0].Instances[0]
 			if inst.State != nil && inst.State.Name == ec2types.InstanceStateNameRunning {
 				fmt.Fprintf(os.Stderr, "[phase 17b] instance %s already running — skipping launch\n", instanceID)
-				mgmtENIID := st.Get("JUMPHOST_MGMT_ENI_ID")
-				mgmtENIIP := st.Get("JUMPHOST_MGMT_ENI_IP")
+				mgmtENIID, mgmtENIIP := getPrimaryENIDetails(ctx, ec2c, instanceID)
 				return instanceID, mgmtENIID, mgmtENIIP, nil
 			}
 		}
@@ -544,7 +543,8 @@ func ensureJumphostInstance(ctx context.Context, ec2c EC2API, clusterName, subne
 	// Tag-discovery fallback: look for a running (non-terminated) instance.
 	if instanceID := lookupInstanceByTag(ctx, ec2c, clusterName, tags.CompJumphostInstance); instanceID != "" {
 		fmt.Fprintf(os.Stderr, "[phase 17b] instance found via tags: %s — skipping launch\n", instanceID)
-		return instanceID, "", "", nil
+		mgmtENIID, mgmtENIIP := getPrimaryENIDetails(ctx, ec2c, instanceID)
+		return instanceID, mgmtENIID, mgmtENIIP, nil
 	}
 
 	userData := jumphostUserData()
@@ -591,29 +591,7 @@ func ensureJumphostInstance(ctx context.Context, ec2c EC2API, clusterName, subne
 	}
 
 	// Re-describe to get the primary ENI details.
-	descOut, err := ec2c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-		InstanceIds: []string{instanceID},
-	})
-	if err != nil || len(descOut.Reservations) == 0 || len(descOut.Reservations[0].Instances) == 0 {
-		return instanceID, "", "", nil
-	}
-	latest := descOut.Reservations[0].Instances[0]
-	mgmtENIID := ""
-	mgmtENIIP := ""
-	if latest.NetworkInterfaces != nil {
-		for _, ni := range latest.NetworkInterfaces {
-			if ni.Attachment != nil && ni.Attachment.DeviceIndex != nil && *ni.Attachment.DeviceIndex == 0 {
-				if ni.NetworkInterfaceId != nil {
-					mgmtENIID = *ni.NetworkInterfaceId
-				}
-				if ni.PrivateIpAddress != nil {
-					mgmtENIIP = *ni.PrivateIpAddress
-				}
-				break
-			}
-		}
-	}
-
+	mgmtENIID, mgmtENIIP := getPrimaryENIDetails(ctx, ec2c, instanceID)
 	return instanceID, mgmtENIID, mgmtENIIP, nil
 }
 
@@ -625,14 +603,19 @@ func ensureJumphostSecondaryENI(ctx context.Context, ec2c EC2API, clusterName, s
 
 	// Check state first.
 	if eniID := st.Get("JUMPHOST_BNK_EXT_ENI_ID"); eniID != "" {
+		eniIP := st.Get("JUMPHOST_BNK_EXT_ENI_IP")
+		if eniIP == "" {
+			eniIP = getENIPrivateIP(ctx, ec2c, eniID)
+		}
 		fmt.Fprintf(os.Stderr, "[phase 17b] BNK_EXT ENI found in state: %s\n", eniID)
-		return eniID, st.Get("JUMPHOST_BNK_EXT_ENI_IP"), nil
+		return eniID, eniIP, nil
 	}
 
 	// Tag-discovery fallback.
 	if eniID := lookupENIByTag(ctx, ec2c, clusterName, tags.CompJumphostENIExt); eniID != "" {
+		eniIP := getENIPrivateIP(ctx, ec2c, eniID)
 		fmt.Fprintf(os.Stderr, "[phase 17b] BNK_EXT ENI found via tags: %s\n", eniID)
-		return eniID, "", nil
+		return eniID, eniIP, nil
 	}
 
 	eniName := clusterName + "-jumphost-bnk-ext"
@@ -695,6 +678,42 @@ for attempt in $(seq 1 10); do
   sleep 2
 done
 `
+}
+
+func getPrimaryENIDetails(ctx context.Context, ec2c EC2API, instanceID string) (string, string) {
+	descOut, err := ec2c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	})
+	if err != nil || len(descOut.Reservations) == 0 || len(descOut.Reservations[0].Instances) == 0 {
+		return "", ""
+	}
+	latest := descOut.Reservations[0].Instances[0]
+	if latest.NetworkInterfaces != nil {
+		for _, ni := range latest.NetworkInterfaces {
+			if ni.Attachment != nil && ni.Attachment.DeviceIndex != nil && *ni.Attachment.DeviceIndex == 0 {
+				eniID := ""
+				if ni.NetworkInterfaceId != nil {
+					eniID = *ni.NetworkInterfaceId
+				}
+				eniIP := ""
+				if ni.PrivateIpAddress != nil {
+					eniIP = *ni.PrivateIpAddress
+				}
+				return eniID, eniIP
+			}
+		}
+	}
+	return "", ""
+}
+
+func getENIPrivateIP(ctx context.Context, ec2c EC2API, eniID string) string {
+	out, err := ec2c.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
+		NetworkInterfaceIds: []string{eniID},
+	})
+	if err == nil && len(out.NetworkInterfaces) > 0 && out.NetworkInterfaces[0].PrivateIpAddress != nil {
+		return *out.NetworkInterfaces[0].PrivateIpAddress
+	}
+	return ""
 }
 
 // waitInstanceRunning polls until the instance is in "running" state.
