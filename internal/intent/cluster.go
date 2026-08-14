@@ -155,6 +155,12 @@ type Cluster struct {
 	// between sessions. Omitting the block (or setting enabled: false) is the
 	// default — all existing cluster.yaml files are unaffected.
 	AI *AISpec `yaml:"ai,omitempty"`
+
+	// SourcePath is the filesystem path of the cluster.yaml this Cluster was
+	// loaded from. It is NOT part of the YAML schema; it is set by Load so that
+	// relative paths inside the intent (e.g. bnk.farArchive, bnk.jwt) can be
+	// resolved against the config file's directory instead of the process CWD.
+	SourcePath string
 }
 
 // EndpointAccessSpec controls who can reach the EKS control-plane API endpoint.
@@ -638,6 +644,7 @@ func Load(path string) (*Cluster, error) {
 	if err := validate(&c); err != nil {
 		return nil, fmt.Errorf("validating cluster.yaml %s: %w", path, err)
 	}
+	c.SourcePath = path
 	return &c, nil
 }
 
