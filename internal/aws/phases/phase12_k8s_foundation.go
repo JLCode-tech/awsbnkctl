@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -334,14 +335,30 @@ func Phase12K8sFoundationDown(ctx context.Context, cl *intent.Cluster, st *state
 
 // --- helpers ---
 
-// resolveBnkFilePaths returns the absolute-or-relative file paths for the FAR
-// archive and JWT, resolving them against the cluster.yaml directory if needed.
-// For now returns the values as-is (operators supply paths relative to their CWD).
+// resolveBnkFilePaths returns the file paths for the FAR archive and JWT.
+// Relative paths are resolved against the directory containing cluster.yaml
+// (c.SourcePath) so that operators can keep credential files next to their
+// config without being forced to run awsbnkctl from that directory. Absolute
+// paths and paths constructed by tests that bypass intent.Load are returned
+// unchanged.
 func resolveBnkFilePaths(cl *intent.Cluster) (farPath, jwtPath string, err error) {
 	if cl.Bnk == nil {
 		return "", "", fmt.Errorf("bnk block is nil")
 	}
-	return cl.Bnk.FARArchive, cl.Bnk.JWT, nil
+	farPath = resolveConfigPath(cl.SourcePath, cl.Bnk.FARArchive)
+	jwtPath = resolveConfigPath(cl.SourcePath, cl.Bnk.JWT)
+	return farPath, jwtPath, nil
+}
+
+// resolveConfigPath returns path unchanged when it is absolute or when the
+// source cluster.yaml path is unknown; otherwise it joins path to the
+// cluster.yaml directory.
+func resolveConfigPath(sourcePath, path string) string {
+	if path == "" || filepath.IsAbs(path) || sourcePath == "" {
+		return path
+	}
+	base := filepath.Dir(sourcePath)
+	return filepath.Join(base, path)
 }
 
 // ensureNamespaces creates each namespace if it does not already exist.
