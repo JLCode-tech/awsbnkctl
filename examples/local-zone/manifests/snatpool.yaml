@@ -1,0 +1,10 @@
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKSnatpool
+metadata:
+  name: test-snatpool
+  namespace: f5-cne-system
+spec:
+  name: test-snatpool
+  sharedSnatAddressEnabled: true
+  addressList:
+  - - 10.0.20.240

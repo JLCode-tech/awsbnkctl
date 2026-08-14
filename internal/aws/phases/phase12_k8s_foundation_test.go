@@ -243,6 +243,38 @@ func TestPhase12_DryRun_BnkProvidedButFilesNotFound_ReturnsError(t *testing.T) {
 	}
 }
 
+// ─── Test 3a: Dry-run resolves relative FAR/JWT paths against cluster.yaml dir ─
+
+func TestPhase12_DryRun_RelativePathsResolvedAgainstConfigDir(t *testing.T) {
+	awsmw.ResetForTest()
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	_ = writeTempFile(t, cfgDir, "far.json", `{"auths":{}}`)
+	_ = writeTempFile(t, cfgDir, "license.jwt", "jwt-token-content")
+
+	// Cluster references files relative to the cluster.yaml directory.
+	cl := p12Cluster(t, "./far.json", "./license.jwt")
+	cl.SourcePath = filepath.Join(cfgDir, "cluster.yaml")
+
+	st, _ := state.Load(dir)
+	clients := p12ClientsDryRun()
+
+	if err := Phase12K8sFoundation(context.Background(), cl, st, clients, true); err != nil {
+		t.Fatalf("Phase12K8sFoundation dry-run with relative paths: %v", err)
+	}
+
+	// Sanity: the function found the files and set the expected state keys.
+	if st.Get("BNK_FAR_SECRET_NAME") == "" {
+		t.Error("expected BNK_FAR_SECRET_NAME to be set")
+	}
+	if st.Get("BNK_LICENSE_JWT_SECRET") == "" {
+		t.Error("expected BNK_LICENSE_JWT_SECRET to be set")
+	}
+}
+
 // ─── Test 3b: Live path with FAR archive file not found → error ────────────────
 
 func TestPhase12_LivePath_FARArchiveNotFound_ReturnsError(t *testing.T) {
