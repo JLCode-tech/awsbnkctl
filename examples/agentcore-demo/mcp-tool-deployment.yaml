@@ -15,11 +15,15 @@ data:
         """Get the financial forecast for a given quarter."""
         growth = random.randint(5, 20)
         return f"{quarter} Revenue expected to increase by {growth}%"
-
-    if __name__ == "__main__":
-        mcp.settings.port = 8080
-        mcp.settings.host = "0.0.0.0"
-        mcp.run(transport="sse")
+  agent-card.json: |
+    {
+      "name": "Finance Tool",
+      "description": "Financial forecasting tool",
+      "capabilities": ["mcp"],
+      "endpoints": {
+        "mcp": "/v1/mcp/forecast"
+      }
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -41,12 +45,19 @@ spec:
         image: python:3.11-slim
         command: ["/bin/sh", "-c"]
         args:
-          - "pip install mcp[fastmcp] uvicorn && python /app/mcp-server.py"
+          - "pip install mcp[fastmcp] uvicorn && mcp run /app/mcp-server.py --transport sse --port 8080 --host 0.0.0.0"
         ports:
         - containerPort: 8080
         volumeMounts:
         - name: code
           mountPath: /app
+      - name: agent-card-server
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: code
+          mountPath: /usr/share/nginx/html/.well-known
       volumes:
       - name: code
         configMap:
@@ -61,6 +72,11 @@ spec:
   selector:
     app: mcp-financial-tool
   ports:
-    - protocol: TCP
+    - name: mcp
+      protocol: TCP
       port: 80
       targetPort: 8080
+    - name: agent-card
+      protocol: TCP
+      port: 8081
+      targetPort: 80

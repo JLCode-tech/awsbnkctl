@@ -34,3 +34,41 @@ spec:
     backendRefs:
     - name: mcp-financial-tool
       port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-discovery-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: bnk-agentcore-demo-gateway
+  hostnames:
+  - "bnk-ingress.aws.corp"
+  rules:
+  - matches:
+    - path:
+        type: Exact
+        value: /.well-known/agent-card.json
+    backendRefs:
+    - name: mcp-financial-tool
+      port: 8081
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bedrock-agentcore-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: bnk-agentcore-demo-gateway
+  hostnames:
+  - "bnk-ingress.aws.corp"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /v1/agentcore/invoke
+    backendRefs:
+    - name: bedrock-agentcore-runtime
+      port: 443
