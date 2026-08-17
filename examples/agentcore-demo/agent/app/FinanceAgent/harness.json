@@ -1,0 +1,22 @@
+{
+  "name": "FinanceAgent",
+  "model": {
+    "provider": "bedrock",
+    "modelId": "global.anthropic.claude-sonnet-4-6"
+  },
+  "tools": [
+    {
+      "type": "remote_mcp",
+      "name": "finance-tool",
+      "config": {
+        "remoteMcp": {
+          "url": "http://bnk-ingress.aws.corp/v1/mcp/forecast"
+        }
+      }
+    }
+  ],
+  "skills": [],
+  "memory": {
+    "mode": "disabled"
+  }
+}
