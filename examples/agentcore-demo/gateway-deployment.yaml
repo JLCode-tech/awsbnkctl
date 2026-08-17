@@ -19,7 +19,7 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: mcp-financial-route
+  name: external-agent-route
   namespace: default
 spec:
   parentRefs:
@@ -30,7 +30,7 @@ spec:
   - matches:
     - path:
         type: PathPrefix
-        value: /v1/mcp/forecast
+        value: /v1/agentcore/invoke
     backendRefs:
-    - name: mcp-financial-tool
-      port: 80
+    - name: bedrock-agentcore-runtime
+      port: 443
