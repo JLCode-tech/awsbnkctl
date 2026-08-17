@@ -1,3 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-server-code
+  namespace: default
+data:
+  mcp-server.py: |
+    from mcp.server.fastmcp import FastMCP
+    import random
+
+    mcp = FastMCP("Finance")
+
+    @mcp.tool()
+    def get_forecast(quarter: str) -> str:
+        """Get the financial forecast for a given quarter."""
+        growth = random.randint(5, 20)
+        return f"{quarter} Revenue expected to increase by {growth}%"
+
+    if __name__ == "__main__":
+        mcp.settings.port = 8080
+        mcp.settings.host = "0.0.0.0"
+        mcp.run(transport="sse")
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,12 +38,19 @@ spec:
     spec:
       containers:
       - name: mcp-server
-        image: hashicorp/http-echo:latest
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
         args:
-          - "-text={\"forecast\": \"Q3 Revenue expected to increase by 15%\", \"status\": \"bullish\"}"
-          - "-listen=:8080"
+          - "pip install mcp[fastmcp] uvicorn && python /app/mcp-server.py"
         ports:
         - containerPort: 8080
+        volumeMounts:
+        - name: code
+          mountPath: /app
+      volumes:
+      - name: code
+        configMap:
+          name: mcp-server-code
 ---
 apiVersion: v1
 kind: Service

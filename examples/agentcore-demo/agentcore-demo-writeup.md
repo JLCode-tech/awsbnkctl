@@ -12,18 +12,18 @@ This demo showcases how **F5 BIG-IP Next for Kubernetes (BNK)**, provisioned aut
 
 ### Architecture
 
-1.  **External AI Agent:** An agent running outside the AWS VPC (simulated by our EC2 Jump Host).
+1.  **AWS Bedrock AgentCore:** The fully managed Agent runtime (deployed via the AgentCore CLI) living outside our EKS cluster boundary. It acts as the "Client".
 2.  **F5 BNK (Ingress Data Plane):** Deployed natively in EKS, attached to multiple AWS ENIs (External/Internal) for high-performance data path routing. It terminates the inbound traffic, applies security policies, and load balances to the internal services.
-3.  **Internal MCP Tool:** A simple HTTP-based MCP server (`mcp-financial-tool`) deployed in the EKS cluster, exposing a `/v1/mcp/forecast` endpoint.
+3.  **Internal MCP Tool:** A real Python FastMCP server (`mcp-financial-tool`) deployed in the EKS cluster, exposing financial forecasting tools.
 
 ### Flow of Execution
 
-1.  **Inbound Request:** The external agent makes an HTTP request to the MCP tool's public endpoint (`bnk-ingress.aws.corp`).
+1.  **Agent Action:** The AWS Bedrock AgentCore agent reasons that it needs financial data and attempts to invoke its configured MCP tool via the public endpoint (`bnk-ingress.aws.corp`).
 2.  **BNK Interception:** The traffic hits the BNK data plane's external IP address (`10.0.10.100` in our data subnet).
 3.  **L7 Routing (Gateway API):** BNK inspects the `Host` header and path. Using the modern Kubernetes **Gateway API** (`Gateway` and `HTTPRoute` resources), BNK dynamically routes traffic destined for `bnk-ingress.aws.corp/v1/mcp/forecast` to the correct internal pod.
-4.  **Secure Delivery:** BNK forwards the sanitized request to the internal MCP tool.
-5.  **Action Execution:** The MCP tool processes the request and returns the result (e.g., `{"forecast": "Q3 Revenue expected to increase by 15%", "status": "bullish"}`).
-6.  **Response:** BNK sends the response back to the external agent.
+4.  **Secure Delivery:** BNK forwards the sanitized request to the internal Python FastMCP tool.
+5.  **Action Execution:** The MCP tool executes the Python tool logic (e.g. `get_forecast`) and returns the result (e.g., `Q3 Revenue expected to increase by 15%`).
+6.  **Response:** BNK sends the response back to the AgentCore runtime, which uses the data to answer the user's prompt.
 
 ## Provisioning the Demo
 
@@ -47,7 +47,7 @@ The tool then deploys the F5 BNK software stack into the cluster:
 
 ### 3. Application & Gateway API Configuration
 
-Finally, we deploy the MCP tool and the Gateway API resources to expose it through BNK.
+We deploy the Python FastMCP tool and the Gateway API resources to expose it through BNK.
 
 ```yaml
 # The Gateway binds to the BNK GatewayClass and listens on port 80
@@ -68,40 +68,20 @@ spec:
   addresses:
   - type: IPAddress
     value: 10.0.10.100 # The External VIP
-
----
-# The HTTPRoute maps the specific host/path to the MCP Tool service
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: mcp-financial-route
-  namespace: default
-spec:
-  parentRefs:
-  - name: bnk-agentcore-demo-gateway
-  hostnames:
-  - "bnk-ingress.aws.corp"
-  rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /v1/mcp/forecast
-    backendRefs:
-    - name: mcp-financial-tool
-      port: 80
 ```
 
-## Validating the Setup
+### 4. Deploying the AgentCore Agent
 
-We can simulate the external AI agent querying the MCP tool by sending a request from our EC2 jump host to the BNK external IP:
+Using the `agentcore` CLI, you deploy the agent defined in `examples/agentcore-demo/agent/`. 
+The `agentcore.yaml` connects the agent directly to the BNK gateway IP:
 
-```bash
-curl -v -H 'Host: bnk-ingress.aws.corp' http://10.0.10.100/v1/mcp/forecast
+```yaml
+tools:
+  - name: internal-finance-mcp
+    type: mcp
+    config:
+      endpoint: "http://bnk-ingress.aws.corp/v1/mcp/forecast"
+      transport: sse
 ```
 
-**Result:**
-```json
-{"forecast": "Q3 Revenue expected to increase by 15%", "status": "bullish"}
-```
-
-The request successfully traverses the external network, is intercepted and routed by F5 BNK using the Gateway API, reaches the internal MCP tool, and the response is securely returned to the caller.
+Once deployed (`agentcore deploy`), the AWS Bedrock AgentCore environment is actively secured and governed by F5 BNK on every tool invocation!
