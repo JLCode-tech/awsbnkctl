@@ -85,3 +85,13 @@ tools:
 ```
 
 Once deployed (`agentcore deploy`), the AWS Bedrock AgentCore environment is actively secured and governed by F5 BNK on every tool invocation!
+
+### AgentCore CLI Project
+
+The agent configuration in this demo was generated entirely using the official **AgentCore CLI**.
+
+Instead of writing manual SDK code, the agent is defined declaratively using an `AgentCoreProjectSpec` and a **Harness**:
+
+1.  **Harness:** `examples/agentcore-demo/agent/app/FinanceAgent/harness.json` defines the `FinanceAgent` using Anthropic Claude 3.5 Sonnet on Bedrock.
+2.  **Tools:** The agent natively references the `remote_mcp` tool (`http://bnk-ingress.aws.corp/v1/mcp/forecast`) configured via the CLI, ensuring traffic flows correctly through the F5 BNK Gateway.
+3.  **Deployment:** A user simply runs `agentcore deploy` in the `agent/` folder to synthesize the AWS CDK construct and provision the Agent into the Bedrock ecosystem.
