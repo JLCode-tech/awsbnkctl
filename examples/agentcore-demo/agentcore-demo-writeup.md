@@ -1,87 +1,70 @@
-# AgentCore + F5 BNK: Securing the AI Action Path
+# Governing the Agentic Action Path: F5 BNK + AWS Bedrock AgentCore
 
-## The Challenge: External AI Agents Interacting with Internal AWS Tooling
+## The Challenge: External Agents Accessing AWS AgentCore
+In a multi-cloud or distributed AI architecture, you often have **external AI agents** (running outside of AWS, such as in another cloud, a local datacenter, or an external SaaS orchestrator). These external agents frequently need to coordinate with or invoke your internal **Amazon Bedrock AgentCore** agents using the Agent-to-Agent (A2A) protocol.
 
-In modern GenAI architectures, AI agents often run outside of your direct AWS perimeter (e.g., in a SaaS platform, a 3rd-party orchestrator, or a user's local rig). These external agents frequently need to invoke **Model Context Protocol (MCP)** tools hosted securely within your AWS infrastructure to perform "actions" or retrieve sensitive context.
+The challenge is securely governing this inbound traffic. How do you allow an external, non-AWS agent to reach your Bedrock AgentCore endpoint while enforcing strict token counting, L7 API security, tenant attribution, and AI risk governance?
 
-The challenge is providing these external agents secure, governed, and deeply inspected access to your internal MCP tools *without* exposing the tools directly to the public internet or relying solely on rudimentary API keys.
+## The Solution: F5 BNK as the Ingress AI Gateway
+Instead of exposing the Bedrock AgentCore API directly to the internet, we route the inbound external agent traffic through an **F5 BIG-IP Next for Kubernetes (BNK)** gateway deployed on AWS EKS. 
 
-## The Solution: F5 BNK as the AI Security Gateway
-
-This demo showcases how **F5 BIG-IP Next for Kubernetes (BNK)**, provisioned automatically via `awsbnkctl`, solves this challenge. BNK sits at the edge of the EKS cluster and acts as an intelligent, L7-aware AI Security Gateway for inbound MCP traffic.
+BNK acts as a high-performance, L7-aware AI Security Gateway that governs the traffic *before* it reaches the AWS Bedrock service.
 
 ### Architecture
 
-1.  **AWS Bedrock AgentCore:** The fully managed Agent runtime (deployed via the AgentCore CLI) living outside our EKS cluster boundary. It acts as the "Client".
-2.  **F5 BNK (Ingress Data Plane):** Deployed natively in EKS, attached to multiple AWS ENIs (External/Internal) for high-performance data path routing. It terminates the inbound traffic, applies security policies, and load balances to the internal services.
-3.  **Internal MCP Tool:** A real Python FastMCP server (`mcp-financial-tool`) deployed in the EKS cluster, exposing financial forecasting tools.
+1.  **External AI Agent (The Client):** An agent running outside AWS that needs to communicate with the AWS AgentCore agent.
+2.  **F5 BNK (Ingress Data Plane):** Deployed natively in EKS, attached to AWS ENIs for high-performance data path routing. It terminates the inbound A2A traffic from the external agent, applies security policies (like Token Counting via dSSM and API firewalling), and load balances.
+3.  **Amazon Bedrock AgentCore (The Target):** The fully managed Agent runtime hosted by AWS. BNK securely proxies the sanitized traffic to the Bedrock AgentCore runtime (`bedrock-agent-runtime.ap-southeast-2.amazonaws.com`).
 
 ### Flow of Execution
 
-1.  **Agent Action:** The AWS Bedrock AgentCore agent reasons that it needs financial data and attempts to invoke its configured MCP tool via the public endpoint (`bnk-ingress.aws.corp`).
-2.  **BNK Interception:** The traffic hits the BNK data plane's external IP address (`10.0.10.100` in our data subnet).
-3.  **L7 Routing (Gateway API):** BNK inspects the `Host` header and path. Using the modern Kubernetes **Gateway API** (`Gateway` and `HTTPRoute` resources), BNK dynamically routes traffic destined for `bnk-ingress.aws.corp/v1/mcp/forecast` to the correct internal pod.
-4.  **Secure Delivery:** BNK forwards the sanitized request to the internal Python FastMCP tool.
-5.  **Action Execution:** The MCP tool executes the Python tool logic (e.g. `get_forecast`) and returns the result (e.g., `Q3 Revenue expected to increase by 15%`).
-6.  **Response:** BNK sends the response back to the AgentCore runtime, which uses the data to answer the user's prompt.
+1.  **Inbound Invocation:** The external non-AWS agent attempts to invoke the AWS AgentCore agent via our public EKS endpoint (`bnk-ingress.aws.corp/v1/agentcore/invoke`).
+2.  **BNK Interception:** The traffic hits the BNK data plane's external IP address (`10.0.10.100`).
+3.  **Governance & Inspection:** BNK inspects the request. It can apply Identity scoping, count inference tokens, enforce tenant rate limits, and scrub the payload.
+4.  **L7 Routing (Gateway API):** Using the Kubernetes Gateway API (`Gateway` and `HTTPRoute` resources), BNK dynamically routes the traffic to a Kubernetes `ExternalName` service that points directly to the Amazon Bedrock AgentCore runtime endpoint.
+5.  **AgentCore Execution:** AWS Bedrock AgentCore receives the governed request, performs the reasoning/action, and returns the response.
+6.  **Response & Telemetry:** BNK returns the response to the external agent while emitting usage telemetry (tokens consumed, latency) to your observability stack.
 
 ## Provisioning the Demo
 
-The entire infrastructure and security gateway are provisioned using `awsbnkctl`.
+### 1. AWS Infrastructure & BNK Deployment
+`awsbnkctl up` automatically creates the foundational AWS resources (VPC, Subnets, EKS Cluster, ENIs) and deploys the F5 BNK software stack into the cluster.
 
-### 1. AWS Infrastructure
+### 2. Application & Gateway API Configuration
+We deploy the Kubernetes Gateway API resources to configure BNK, along with an `ExternalName` service representing the AWS Bedrock AgentCore endpoint.
 
-`awsbnkctl up` automatically creates the foundational AWS resources:
-*   VPC, Subnets (Control Plane, External Data, Internal Data).
-*   EKS Cluster (`bnk-agentcore-demo`).
-*   Node Groups (using high-performance `m6i.4xlarge` instances suitable for data-plane workloads).
-*   Secondary ENIs attached to the EKS nodes for direct, high-throughput network access.
-
-### 2. F5 BNK Deployment
-
-The tool then deploys the F5 BNK software stack into the cluster:
-*   Installs the F5 Lifecycle Operator (FLO).
-*   Configures the CNE (Cloud Native Environment) instance.
-*   Binds the F5 SPK VLANs to the secondary AWS ENIs.
-*   Spins up the high-performance TMM (Traffic Management Microkernel) pods to handle the data plane.
-
-### 3. Application & Gateway API Configuration
-
-We deploy the Python FastMCP tool and the Gateway API resources to expose it through BNK.
-
+**External Service (`mcp-tool-deployment.yaml`):**
 ```yaml
-# The Gateway binds to the BNK GatewayClass and listens on port 80
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
+apiVersion: v1
+kind: Service
 metadata:
-  name: bnk-agentcore-demo-gateway
+  name: bedrock-agentcore-runtime
   namespace: default
 spec:
-  gatewayClassName: bnk-agentcore-demo-gatewayclass
-  listeners:
-  - name: http
-    protocol: HTTP
-    port: 80
-    allowedRoutes:
-      namespaces:
-        from: All
-  addresses:
-  - type: IPAddress
-    value: 10.0.10.100 # The External VIP
+  type: ExternalName
+  externalName: bedrock-agent-runtime.ap-southeast-2.amazonaws.com
 ```
 
-### 4. Deploying the AgentCore Agent
-
-Using the `agentcore` CLI, you deploy the agent defined in `examples/agentcore-demo/agent/`. 
-The `agentcore.yaml` connects the agent directly to the BNK gateway IP:
-
+**Gateway Route (`gateway-deployment.yaml`):**
 ```yaml
-tools:
-  - name: internal-finance-mcp
-    type: mcp
-    config:
-      endpoint: "http://bnk-ingress.aws.corp/v1/mcp/forecast"
-      transport: sse
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: external-agent-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: bnk-agentcore-demo-gateway
+  hostnames:
+  - "bnk-ingress.aws.corp"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /v1/agentcore/invoke
+    backendRefs:
+    - name: bedrock-agentcore-runtime
+      port: 443
 ```
 
-Once deployed (`agentcore deploy`), the AWS Bedrock AgentCore environment is actively secured and governed by F5 BNK on every tool invocation!
+By pointing the external agent to `http://bnk-ingress.aws.corp`, all agent-to-agent communication flowing back into AWS is fully secured and governed by F5 BNK!
