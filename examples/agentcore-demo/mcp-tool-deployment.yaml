@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-financial-tool
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-financial-tool
+  template:
+    metadata:
+      labels:
+        app: mcp-financial-tool
+    spec:
+      containers:
+      - name: mcp-server
+        image: hashicorp/http-echo:latest
+        args:
+          - "-text={\"forecast\": \"Q3 Revenue expected to increase by 15%\", \"status\": \"bullish\"}"
+          - "-listen=:8080"
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-financial-tool
+  namespace: default
+spec:
+  selector:
+    app: mcp-financial-tool
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080

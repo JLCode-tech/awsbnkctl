@@ -1,0 +1,36 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: bnk-agentcore-demo-gateway
+  namespace: default
+spec:
+  gatewayClassName: bnk-agentcore-demo-gatewayclass
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: All
+  addresses:
+  - type: IPAddress
+    value: 10.0.10.100
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-financial-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: bnk-agentcore-demo-gateway
+  hostnames:
+  - "bnk-ingress.aws.corp"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /v1/mcp/forecast
+    backendRefs:
+    - name: mcp-financial-tool
+      port: 80
