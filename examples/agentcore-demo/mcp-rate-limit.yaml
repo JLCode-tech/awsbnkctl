@@ -1,0 +1,24 @@
+apiVersion: k8s.f5net.com/v1
+kind: F5BigFwPolicy
+metadata:
+  name: mcp-firewall
+  namespace: default
+spec:
+  rule:
+  - name: allow-all
+    action: accept
+---
+apiVersion: gateway.k8s.f5net.com/v1alpha1
+kind: BNKSecPolicy
+metadata:
+  name: mcp-sec-policy
+  namespace: default
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: bnk-agentcore-demo-gateway
+  extensionRefs:
+  - group: k8s.f5net.com
+    kind: F5BigFwPolicy
+    name: mcp-firewall
