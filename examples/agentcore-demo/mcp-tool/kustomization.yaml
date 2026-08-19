@@ -36,6 +36,20 @@ configMapGenerator:
   files:
   - mcp-server.py
 
+# DEMO CREDENTIALS. These are shared secrets baked into the repo on purpose so
+# the sample runs out of the box — they are not credentials in any real sense.
+# For anything beyond a demo, replace with a real Secret (External Secrets,
+# Secrets Manager CSI driver, sealed-secrets) and rotate.
+#
+# Two tokens so authorization has something to decide:
+#   agent    — the AgentCore runtime; may call every tool
+#   external — the unmanaged caller; forecast only, enforced at BNK
+secretGenerator:
+- name: mcp-server-tokens
+  literals:
+  - MCP_AGENT_TOKEN=demo-agent-token-a7f3c1
+  - MCP_EXTERNAL_TOKEN=demo-external-token-4b9e2d
+
 generatorOptions:
   labels:
     app.kubernetes.io/part-of: bnk-agentcore-demo

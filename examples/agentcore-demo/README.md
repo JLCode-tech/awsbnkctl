@@ -356,12 +356,60 @@ BNK 2.3 attaches policy to a Gateway through two policy-attachment CRs:
 | `BNKNetPolicy` | `F5BigCneIrule` | L7 request rate limiting on the MCP route |
 | `BNKSecPolicy` | `F5BigFwPolicy`, `F5BigLogProfile`, `F5BigDdosGlobal` | L4 firewall attached to the Gateway |
 
-**Rate limiting (`F5BigCneIrule` + `BNKNetPolicy`).** A per-client-IP window of
-10 requests / 60 s on `/v1/mcp/forecast`, returning `429` with a JSON-RPC error
-body. Because the key is the client IP, the Bedrock AgentCore runtime and an
-external caller get independent budgets — a single `agentcore invoke` never
-trips the limit, but a tight external loop does. `/.well-known/agent-card.json`
-is exempt so Forge discovery keeps working.
+**Two tools, so authorization has something to be about.** The MCP server
+exposes `forecast(symbol, days)` — benign — and `get_account_balance(account_id)`
+— privileged. That second tool is what makes every control below concrete rather
+than theoretical.
+
+**Two demo callers, with different rights.** Both tokens live in
+`mcp-tool/kustomization.yaml` as a `secretGenerator` (clearly-marked demo
+values — replace them for anything real):
+
+| Caller | Token | May call |
+| --- | --- | --- |
+| AgentCore runtime | `MCP_AGENT_TOKEN` | both tools |
+| Unmanaged external caller | `MCP_EXTERNAL_TOKEN` | `forecast` only |
+
+**What BNK enforces, in the data path:**
+
+| Control | Result |
+| --- | --- |
+| Per-client-IP rate limit, 10 / 60 s | `429` with a JSON-RPC error and `Retry-After: 60` |
+| Privileged-tool gate — `get_account_balance` requires the agent token | `403`, request never reaches the pod |
+| L4 firewall — accept from `10.0.0.0/16`, explicit reject otherwise | connection refused |
+
+**What the tool enforces**, as defence in depth: a valid bearer token (`401`
+otherwise), fail-closed if the Secret is missing, constant-time comparison.
+Discovery (`/.well-known/agent-card.json`) stays unauthenticated by design — A2A
+clients and Forge read it before they hold a credential, and it exposes no data.
+
+Because the rate limit is keyed on client IP, the AgentCore runtime and an
+external caller get independent budgets: a single `agentcore invoke` never trips
+it, a tight external loop does.
+
+The full behaviour matrix, verified live:
+
+```text
+no token                → 401  unauthorized: missing or malformed Authorization header
+bad token               → 401  unauthorized: unrecognised bearer token
+external + forecast     → 200  Forecast for NVDA over 30 days: up ...
+external + BALANCE      → 403  tool 'get_account_balance' requires a privileged caller
+agent    + BALANCE      → 200  Account ACC-1001 balance: $93,505.55
+11th request in 60 s    → 429  rate limit exceeded: 10 requests per 60s per client
+agent-card discovery    → 200  (always — unauthenticated by design)
+```
+
+Three layers, four distinct refusals, and every one of them shows up in Forge
+with the JSON-RPC body that caused it.
+
+> [!NOTE]
+> The privileged-tool gate keys on a static token, which is coarse. It is the
+> right control *here* because no AgentCore component is in the trusted-agent or
+> stranger paths, so BNK is the only place a decision can be made. When an
+> AgentCore Gateway **is** in the path, its Cedar policy engine does
+> identity-aware per-tool authorization properly — principal from the JWT,
+> action from the tool, context from the tool arguments. Do not reimplement that
+> in an iRule; see section 7.4.
 
 **Token counting is intentionally NOT enabled on this Gateway.** BNK configures
 it via `spec.infrastructure.annotations` (not `metadata.annotations`) and it
@@ -388,6 +436,9 @@ does front an LLM backend.
 | Rate-limit window never rolls over | `table incr` + `table lifetime` refreshes the idle timer on every hit. Use `table set KEY VALUE TIMEOUT LIFETIME` once, then `-notouch` on every read. |
 | VIP goes dark after applying a policy file | A second manifest re-declared the `Gateway` with only `metadata`. `kubectl apply` prunes `spec` fields from the previous last-applied — including `listeners`. |
 | `HSL::send` from an iRule delivers nothing | Not wired in BNK 2.3. `log local0.` works; that is what the collector tails. |
+| `httpx.ReadError` / `MCPClientInitializationError` from the agent right after redeploying the MCP pod | A warm agent container holds a pooled connection to the pod that was just replaced. Transient — invoke again. BNK is not involved; verify by replaying `initialize` through the VIP with curl. |
+| Agent politely refuses a tool instead of calling it | The model read the tool's own description and declined — a model guardrail, not a network one. Keep sensitivity wording out of the model-facing docstring, or you will never see the policy decision. |
+| Pinned pip versions fail and the pod crash-loops | Do not guess versions. Read them off a working pod: `kubectl exec deploy/mcp-financial-tool -- pip list`. |
 
 ---
 
@@ -564,6 +615,43 @@ And the 429 body:
 
 with `Retry-After: 60`. Wait 65 s and the window rolls over — the next 10
 requests succeed again.
+
+### Step 2b — Walk the refusals
+
+This is the part worth demoing. Same route, same tool server, four outcomes:
+
+```bash
+cd /tmp   # on the jumphost, where external-agent.py was staged
+
+# benign tool, valid external token  -> allowed
+python3 external-agent.py --prompt "forecast NVDA"
+
+# privileged tool, same token        -> 403 from BNK, never reaches the pod
+python3 external-agent.py --tool get_account_balance --account ACC-1001
+
+# privileged tool, agent's token     -> allowed
+python3 external-agent.py --tool get_account_balance --account ACC-1001 \
+  --token demo-agent-token-a7f3c1
+
+# no credential at all               -> 401 from the tool
+python3 external-agent.py --prompt "forecast NVDA" --token ""
+```
+
+`external-agent.py` exits `0` when allowed, `1` when refused by policy
+(401/403/429) and `2` on a transport error, so it drops straight into a script.
+
+And through the agent, which holds the privileged token:
+
+```bash
+cd examples/agentcore-demo/agent
+AWS_PROFILE=<profile> ./node_modules/.bin/agentcore invoke \
+  --runtime FinanceAgentV2Agent --target demo-v2 \
+  --prompt "get the account balance for ACC-1001"
+# -> "The current balance for account ACC-1001 is $93,505.55, as of today."
+```
+
+The contrast is the point: **the agent may read balances, the stranger may not,
+and the decision is made in the network before the tool is reached.**
 
 Discovery stays exempt; this returns `200` however many times you run it:
 
