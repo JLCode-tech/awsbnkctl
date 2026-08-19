@@ -4,17 +4,7 @@
     "provider": "bedrock",
     "modelId": "global.anthropic.claude-sonnet-4-6"
   },
-  "tools": [
-    {
-      "type": "remote_mcp",
-      "name": "finance-tool",
-      "config": {
-        "remoteMcp": {
-          "url": "http://{{ .BnkIngressHost }}/v1/mcp/forecast"
-        }
-      }
-    }
-  ],
+  "tools": [],
   "skills": [],
   "memory": {
     "mode": "disabled"

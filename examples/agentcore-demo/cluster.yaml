@@ -48,9 +48,13 @@ addons:
   lbController:
     enabled: true
 
+# Private F5 supply-chain credentials. Both are gitignored repo-wide
+# (`cne_pull_64.json`, `*.jwt`) and must NEVER be committed — supply your own
+# copies here, or symlink them in from wherever you keep them locally.
+# Relative paths resolve against this file's directory, not your shell's CWD.
 bnk:
-  farArchive: /Users/j.lucia/Code/jwt-evals/cne_pull_64.json
-  jwt: /Users/j.lucia/Code/jwt-evals/neysa1.jwt
+  farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
+  jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
 
 testing:
   jumphost:

@@ -35,6 +35,12 @@ if [ "$VPC_ID" == "None" ] || [ -z "$VPC_ID" ]; then
 fi
 echo "Found VPC: $VPC_ID"
 
+echo "Discovering VPC CIDR..."
+VPC_CIDR=$(aws ec2 describe-vpcs \
+    --vpc-ids "$VPC_ID" \
+    --query "Vpcs[0].CidrBlock" --output text)
+echo "Found VPC CIDR: $VPC_CIDR"
+
 echo "Discovering BNK VIP from Gateway bnk-agentcore-demo-gateway..."
 if ! VIP_IP=$(kubectl get gateway bnk-agentcore-demo-gateway -n default -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null); then
     echo "Failed to read Gateway. Is KUBECONFIG set and pointing at the right cluster?"
@@ -80,6 +86,11 @@ if [ "$AGENT_SG_ID" == "None" ] || [ -z "$AGENT_SG_ID" ]; then
 else
     echo "Found existing Agent SG: $AGENT_SG_ID"
 fi
+
+echo "Authorizing ingress from VPC CIDR ($VPC_CIDR) to Agent SG ($AGENT_SG_ID) on port 8080..."
+aws ec2 authorize-security-group-ingress \
+    --group-id "$AGENT_SG_ID" \
+    --protocol tcp --port 8080 --cidr "$VPC_CIDR" 2>/dev/null || echo "Ingress rules already exist."
 
 TMM_SG_NAME="${CLUSTER_NAME}-bnk-data"
 echo "Discovering TMM external ENI SG ($TMM_SG_NAME)..."
@@ -172,6 +183,12 @@ sed -e "s|{{ .VpcId }}|$VPC_ID|g" \
 echo "Rendering harness.json from template..."
 sed -e "s|{{ .BnkIngressHost }}|$BNK_INGRESS_HOST|g" \
     agent/app/FinanceAgentV2/harness.json.tmpl > agent/app/FinanceAgentV2/harness.json
+
+# The AgentCore Gateway tool ARN is dynamic and cannot be templated without
+# knowing the deployed gateway ARN. The supported CLI path is to add it after
+# rendering the base harness.
+echo "Adding BnkGatewayTool to harness via agentcore CLI..."
+(cd agent && npx agentcore add tool --harness FinanceAgentV2 --type agentcore_gateway --name BnkGatewayTool --gateway BnkGateway --outbound-auth awsIam)
 
 echo "AgentCore network seam setup complete."
 echo "Variables written to .agentcore-network-env.json"
