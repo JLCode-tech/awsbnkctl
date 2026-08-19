@@ -794,22 +794,36 @@ None of them are wired today.
 
 ### 7.1 Completing the double-checked path
 
-Path 2 needs an AgentCore Gateway that can actually reach the private BNK VIP.
-Two things are missing:
+AWS has published a lab for exactly this topology:
+[`01-features/.../01-gateway/03-private-connectivity/connect-gateway-to-private-resources/05-eks-deployment`](https://github.com/awslabs/agentcore-samples/tree/main/01-features/07-centralize-and-govern-your-ai-infrastructure/01-gateway/03-private-connectivity/connect-gateway-to-private-resources/05-eks-deployment).
+Its reference data path is:
 
-*   **No Gateway is deployed.** `agentcore.json` has `agentCoreGateways: []`, and
-    `agentcore status` lists none. The `BnkGatewayTool` in the harness points at
-    a gateway ARN this project does not manage.
-*   **Private reachability.** AgentCore Gateway reaches private VPC targets via
-    **VPC Lattice egress** — a resource gateway provisions ENIs in your subnets,
-    and its security group governs what they can reach. Supported for MCP and
-    OpenAPI target types, in managed or self-managed modes. The TMM security
-    group would need to accept those ENIs, exactly as it already does for the
-    runtime ENIs.
+```text
+AgentCore Gateway
+  → VPC Lattice (routingDomain = NLB *.elb.amazonaws.com)
+    → Resource gateway ENIs (in your subnets)
+      → Internal NLB (TLS :443, ACM public cert)
+        → NGINX Ingress Controller (HTTP :80, path-based routing)   ◄── BNK's slot
+          → EKS pods (FastMCP :8000/:8080)
+```
 
-Refs: [Gateway VPC egress](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-vpc-egress.html),
-[VPC Lattice private endpoints](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/vpc-egress-private-endpoints.html),
-[private connectivity patterns](https://aws.amazon.com/blogs/networking-and-content-delivery/private-connectivity-patterns-for-amazon-bedrock-agentcore-gateway-targets/).
+**That NGINX Ingress Controller position is where F5 BNK goes.** AWS's own
+architecture says an in-cluster ingress data plane belongs in this path; the lab
+fills it with NGINX. Substituting BNK is a drop-in that adds per-source rate
+limiting, L4 DDoS vectors, MCP payload visibility, iRule extensibility and the
+unified telemetry in section 4 — in a slot the reference design already requires.
+
+Requirements the lab makes explicit, which this demo does **not** currently meet:
+
+| Requirement | Today | Needed |
+| --- | --- | --- |
+| Target presents a **publicly trusted TLS cert** | BNK VIP is plain HTTP on :80/:443 | Internal NLB terminating TLS with an ACM public cert, forwarding plain HTTP to BNK. Private CA / self-signed needs the ALB proxy workaround. |
+| **Inbound auth** on the Gateway | n/a | `privateEndpoint` targets cannot use `NO_AUTH` — Cognito (or another IdP) OAuth client-credentials, unless an interceptor Lambda is configured |
+| **DNS** | private Route 53 zone → VIP | private hosted zone plus `routingDomain` pointing at the NLB's public DNS name |
+| **Gateway + target** | none deployed | managed VPC resource mode: create the target with `--vpc-id --subnet-ids --security-group-ids` so AgentCore provisions the VPC Lattice resource gateway |
+
+awsbnkctl already provisions the AWS Load Balancer Controller, so the internal
+NLB in front of BNK is available rather than new work.
 
 ### 7.2 Identity enforcement at BNK
 
@@ -867,23 +881,28 @@ Refs: [Policy in AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest
 
 ### 7.5 Where this demo sits relative to the AWS samples
 
-Reviewing [`awslabs/agentcore-samples`](https://github.com/awslabs/agentcore-samples/tree/main/02-use-cases)
-(18 use cases across conversational, workflow-automation and coding agents):
+An earlier draft of this README claimed no AWS sample runs an MCP server on
+Kubernetes. **That was wrong** — the claim came from the `02-use-cases`
+assessment file, and the relevant material is under `01-features`. Corrected:
 
-*   **No sample runs an MCP server on Kubernetes.** MCP appears either as
-    Gateway-aggregated managed endpoints, or Lambda targets, or local Docker for
-    development. There is no "your tool is a pod in your cluster" example.
-*   **One sample touches VPC networking** — `customer-support-assistant-vpc` —
-    and it is about running the *Runtime* inside a VPC with private endpoints,
-    not about governing traffic to a self-hosted tool.
+*   **`01-features/.../03-private-connectivity/05-eks-deployment`** covers this
+    directly: FastMCP servers on EKS, behind NGINX Ingress and an internal NLB,
+    connected to an AgentCore Gateway over VPC Lattice egress. Two labs —
+    `mcp-server-gateway-managed` and `api-server-gateway-managed`.
+*   `01-features/.../03-registry/03-advanced/strands-mcp-ecs-registry` covers the
+    ECS equivalent, and `04-ecs-deployment` sits alongside the EKS lab.
+*   In `02-use-cases`, `customer-support-assistant-vpc` is about running the
+    *Runtime* in a VPC with private endpoints, not about governing traffic to a
+    self-hosted tool. `claude-code-gateway-mcp-server` fronts the AWS-managed
+    Knowledge MCP Server — no VPC, no self-hosted compute, notebook only, and
+    marked "not intended for direct use in production".
 
-That is the gap this demo fills, and it is a positioning worth being precise
-about: not "F5 secures agents better than AWS", but "**when your MCP tool is a
-workload you operate, something has to govern the traffic reaching it, and
-that something lives in the cluster**". AgentCore Gateway can reach such a tool
-over VPC Lattice egress (7.1), which makes Path 2 — Cedar authorization at the
-AWS front door, network and workload policy at the pod — the joint architecture
-worth demonstrating.
+So self-hosted MCP on EKS is a pattern AWS has already documented, not a gap.
+The honest position is narrower and stronger: **AWS's reference design puts an
+ingress data plane in front of the pods and fills it with NGINX. That slot is
+the one F5 BNK is built for.** The demo's contribution is showing what changes
+when a full ADC occupies it — governance, workload protection and unified
+evidence — rather than claiming a scenario nobody has covered.
 
 ---
 
