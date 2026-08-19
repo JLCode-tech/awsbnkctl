@@ -14,25 +14,57 @@ This is where **F5 BIG-IP Next for Kubernetes (BNK)** operates. BNK does not rep
 
 ## The Joint Architecture
 
-The topology proves the **"Four Moves"** of the agentic operating model across **three distinct scenarios**:
+### First, why a tool call exists at all
 
-**Test A — Egress: AWS AgentCore to Internal EKS Tool**
-1.  **Build:** The AI Agent runs securely inside Bedrock AgentCore.
-2.  **Connect:** We expose a Kubernetes-hosted MCP Tool Server on a private Route 53 name (`bnk-ingress.bnk-demo.internal`) resolvable inside the VPC.
-3.  **Deploy:** F5 BNK sits at the internal EKS network edge, listening on the BNK VIP.
-4.  **Govern:** BNK enforces L7 policies (routing, ACLs, per-client request rate limits) on traffic entering the cluster.
+The model does not know the answer. Ask the agent to forecast NFLX and Bedrock's
+first response is not prose — it is a request:
 
-**Test B1 — Egress Control: AWS AgentCore Agent → Internal EKS Tool via AgentCore Gateway**
-1.  **Build:** An agent running inside Bedrock AgentCore needs to call a corporate tool hosted in the EKS cluster.
-2.  **Connect:** The agent routes its outbound tool call through the AWS AgentCore Gateway, which forwards to the F5 BNK VIP.
-3.  **Govern (Semantic):** AgentCore Gateway validates identity (JWT/SigV4), applies Cedar per-tool authorization, and runs guardrails.
-4.  **Govern (Network):** F5 BNK intercepts the forwarded traffic, enforcing TLS, ACLs, quotas, and L7 routing *before* it reaches the tool pod.
+```json
+"text":    "Sure! Let me fetch the latest forecast for Netflix (NFLX)."
+"toolUse": { "name": "forecast", "input": {"symbol": "NFLX"} }
+"stopReason": "tool_use"          ← it stopped. It did not answer.
+```
 
-**Test B2 — Ingress: External Agent to EKS-Hosted Tool**
-1.  **Build:** An unmanaged external agent (e.g., running locally, in Azure, or GCP) attempts to reach a corporate tool hosted in the EKS cluster.
-2.  **Connect:** The tool is exposed via public/private Ingress through F5 BNK.
-3.  **Deploy:** F5 BNK sits at the VPC edge, acting as the secure front door to the EKS cluster.
-4.  **Govern:** Before the external agent can reach the EKS tool, BNK intercepts the traffic to rate limit the agent per source, apply the L4 firewall policy, and prevent unauthorized actions from entering the corporate network. Note: AgentCore Gateway is *not* in this path.
+The runtime executes that call — **through BNK** — and gets back `growth = 12%`,
+a number our Python pod generated a second earlier with `random.randint(5, 20)`.
+Only then does Bedrock produce prose, and it quotes `12%`.
+
+**Bedrock supplies the reasoning and the language. The tool supplies the facts.**
+Bedrock is called twice per request — once to decide, once to narrate — and the
+tool hop sits between them. That hop is the one F5 BNK is in. An agent without
+its tool call is useless, so whoever controls that hop controls the agent's
+reach.
+
+### The three paths
+
+Three ways a caller can reach that same MCP tool. They differ by **who is
+calling** and **how much of the stack is allowed to police them**.
+
+| Path | Who calls | Governed by | Status |
+| --- | --- | --- | --- |
+| **Trusted agent path** | Our own AgentCore runtime | F5 BNK only | ✅ runs today |
+| **Double-checked path** | Our own agent, via AgentCore Gateway | AgentCore Gateway **and** F5 BNK | ⚠️ not built — see below |
+| **Stranger path** | Anything else — another cloud, a script, a compromised workload | F5 BNK only | ✅ runs today |
+
+**Trusted agent path.** The agent runs in Bedrock AgentCore with VPC-mode ENIs in
+our subnets. It resolves `bnk-ingress.bnk-demo.internal` via a private Route 53
+zone to the BNK VIP and calls the tool. BNK routes it, rate limits it per source
+IP, and logs the decision. AWS never inspects this hop — as far as AgentCore is
+concerned the agent made an ordinary outbound HTTP call.
+
+**Double-checked path.** The same agent, but its tool call is routed through an
+AgentCore Gateway first. The Gateway adds *semantic* authority BNK does not
+have: it knows which principal is asking for which tool, and can apply Cedar
+per-tool authorization and guardrails before anything reaches the network. BNK
+then applies network policy on the forwarded traffic. Two independent checks,
+different questions. **This is not currently wired** — see "Making the
+double-checked path real" below.
+
+**Stranger path.** A caller that never touched AWS. No JWT, no Cedar policy, no
+guardrail — because none of those components are in the path. BNK is the *only*
+thing between them and the tool. This is the case AgentCore structurally cannot
+help with, and it is why the two products are complementary rather than
+redundant.
 
 ### The Chain of Governed Actions
 
@@ -49,107 +81,170 @@ When the Agent acts, it follows this workflow:
 
 ### Architectural Data Paths
 
-Because both platforms use the term "Gateway," it is important to understand their distinct roles in a Defense-in-Depth AI architecture. Below are the architectural data paths for the three test scenarios.
+Because both platforms use the term "Gateway," their roles need separating. The
+split is **not** "AWS does semantics, F5 does network" — BNK can validate JWTs,
+run access policy, and (via iRule integration) apply guardrails itself. The real
+difference is **coverage**: AgentCore Gateway only sees agents that route
+through it; BNK sees everything that reaches the cluster.
 
-#### Test A — Egress: Agent → Tool in your cluster
+In the diagrams below, `[on]` marks a control active in this demo today and
+`[available]` marks one BNK supports but which this demo has not configured.
+
+#### Path 1 — Trusted agent path  ✅ runs today
+
+Our own AgentCore agent calling its tool. Note the model loop: Bedrock is hit
+twice, and the tool hop between them is the only leg BNK is in.
 
 ```text
-    ┌─────────┐
-    │  Agent  │  MCP tool call
-    └────┬────┘
-         │
-         ▼
-    ╔══════════════════════════════════════╗   ◄── CHECKPOINT 1 (semantic)
-    ║      AgentCore Gateway  (AWS)        ║
-    ║  ┌────────────────────────────────┐  ║   • JWT: aud / client_id  →  admit?
-    ║  │ Inbound auth (JWT / SigV4)     │  ║   • Cedar: may THIS principal
-    ║  ├────────────────────────────────┤  ║     call THIS tool?
-    ║  │ Cedar policy engine            │  ║   • Guardrails: violence/hate/
-    ║  │  · contentFilter               │  ║     jailbreak/PII detected?
-    ║  │  · promptAttack                │  ║       → forbid = 403, no mask
-    ║  │  · sensitiveInformation        │  ║
-    ║  ├────────────────────────────────┤  ║
-    ║  │ MCP ──translate──► HTTP        │  ║
-    ║  └────────────────────────────────┘  ║
-    ╚══════════════════┬═══════════════════╝
-                       │  plain HTTPS  (MCP framing now invisible)
-                       ▼
-    ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
-          Kubernetes cluster boundary
-    │                  ▼                                     │
-       ╔══════════════════════════════════════╗  ◄── CHECKPOINT 2 (network)
-    │  ║          F5 BNK  (N/S gateway)       ║              │
-       ║  ┌────────────────────────────────┐  ║  • F5BigFwPolicy: ACL / trusted src
-    │  ║  │ F5BigFwPolicy   (ACL, L3/L4)   │  ║  • F5BigDdosGlobal: L4 flood vectors
-       ║  │ F5BigDdosGlobal (L4 DDoS)      │  ║  • TLS termination
-    │  ║  │ TLS termination                │  ║  • HTTPRoute: path match,          │
-       ║  │ HTTPRoute + URLRewrite         │  ║    URLRewrite, header mod
-    │  ║  │ RequestHeaderModifier          │  ║  • LB to pod                       │
-       ║  │ Load balance                   │  ║
-    │  ║  └────────────────────────────────┘  ║  ✗ no WAF  ✗ no SNI                │
-       ╚══════════════════┬═══════════════════╝  ✗ no client mTLS  ✗ no MCP parsing
-    │                     ▼                                   │
-                ┌───────────────────┐
-    │           │  mcp-server pod   │                         │
+    ┌──────────────────────┐         ┌────────────────────┐
+    │  AgentCore Runtime   │────1───►│  Amazon Bedrock    │  "I need forecast()"
+    │  ENI 10.0.11.15      │◄────────│  stopReason:       │   ← no answer yet
+    │  (VPC mode, your     │         │    tool_use        │
+    │   subnets)           │         └────────────────────┘
+    └──────────┬───────────┘                   ▲
+               │                               │
+               │ 2. MCP tools/call             │ 4. tool result appended,
+               │    POST /v1/mcp/forecast      │    model narrates "12%"
+               ▼                               │
+    ┌ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
+       EKS cluster                             │
+    │          ▼                               │                  │
+       ╔══════════════════════════════════════╗│  ◄── THE ONLY CHECKPOINT
+    │  ║          F5 BNK  (TMM)               ║│                  │
+       ║  VIP 10.0.10.100  :80  :443          ║│
+    │  ║ ┌──────────────────────────────────┐ ║│                  │
+       ║ │ HTTPRoute + URLRewrite      [on] │ ║│
+    │  ║ │ rate limit 10/60s per IP    [on] │ ║│                  │
+       ║ │ MCP payload capture         [on] │ ║│
+    │  ║ │ F5BigFwPolicy ACL           [on] │ ║│                  │
+       ║ │ JWT validation        [available]│ ║│
+    │  ║ │ OAuth / access policy [available]│ ║│                  │
+       ║ │ F5BigDdosGlobal       [available]│ ║│
+    │  ║ └──────────────────────────────────┘ ║│                  │
+       ╚══════════════════┬═══════════════════╝│
+    │                     ▼                    │                  │
+                ┌───────────────────┐   3. forecast = 12%
+    │           │  mcp-server pod   │──────────┘                  │
                 └───────────────────┘
-    └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
+    └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
+
+    AgentCore is not in step 2 by construction — the agent simply made an
+    outbound call. BNK is what governs that hop.
 ```
 
-#### Test B1 — Egress control: your agent → AWS
-  
+#### Path 2 — Double-checked path  ⚠️ not built
+
+The same agent, but the tool call is routed through an AgentCore Gateway first,
+so two independent policy engines see it. The value here is **separation of
+duties**, not extra capability — BNK can do JWT and policy itself; putting
+AWS-owned authorization in front means a BNK misconfiguration alone does not
+open the tool, and vice versa.
+
 ```text
-    ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
-         Kubernetes cluster
-    │   ┌─────────────┐                              │
-        │  Agent pod  │
-    │   └──────┬──────┘                              │
-               │
-    │          ▼                                     │
-        ╔══════════════════════════════╗   ◄── CHECKPOINT 1 (network, outbound)
-    │   ║   F5 BNK  (egress)           ║             │
-        ║  · ACL: which externals may  ║   "may this workload reach
-    │   ║    this workload reach?      ║    api.bedrock-agentcore...?"
-        ║  · token governance quota    ║   "has this user burned
-    │   ║    (429 on exceed)           ║    their token budget?"        │
-        ║  · connection limits         ║
-    │   ╚══════════════┬═══════════════╝             │
-    └ ─ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
-                       ▼
-        ╔══════════════════════════════╗   ◄── CHECKPOINT 2 (semantic)
-        ║  AgentCore Gateway  (AWS)    ║
-        ║  · JWT admission             ║   BNK gates the wire FIRST,
-        ║  · Cedar per-tool authz      ║   AgentCore gates the intent SECOND
-        ║  · guardrail categories      ║
-        ╚══════════════┬═══════════════╝
-                       ▼
-              ┌─────────────────┐
-              │  target / tool  │
-              └─────────────────┘
+    ┌──────────────────────┐
+    │  AgentCore Runtime   │
+    └──────────┬───────────┘
+               │  MCP over SigV4
+               ▼
+    ╔══════════════════════════════════════╗   ◄── CHECKPOINT 1 (AWS-owned)
+    ║      AgentCore Gateway  (AWS)        ║
+    ║  · inbound auth (JWT / SigV4)        ║   • may THIS principal call
+    ║  · Cedar per-tool authorization      ║     THIS tool?
+    ║  · guardrails (content, prompt       ║   • jailbreak / PII detected?
+    ║    attack, sensitive info)           ║   • MCP ──translate──► HTTP
+    ╚══════════════════┬═══════════════════╝
+                       │  VPC Lattice resource gateway
+                       │  (ENIs in your subnets)
+    ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
+          EKS cluster  ▼
+    │  ╔══════════════════════════════════════╗              │  ◄── CHECKPOINT 2
+       ║          F5 BNK  (TMM)               ║                    (yours)
+    │  ║  everything from Path 1, applied to  ║              │
+       ║  the forwarded traffic               ║
+    │  ╚══════════════════┬═══════════════════╝              │
+                          ▼
+    │           ┌───────────────────┐                        │
+                │  mcp-server pod   │
+    │           └───────────────────┘                        │
+    └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
+
+    Blocked on: no AgentCore Gateway is deployed in this project
+    (`agentcore status` lists no gateways), and reaching a private VIP from a
+    Gateway needs VPC-Lattice egress. See "7. Future capabilities" below.
 ```
 
-#### Test B2 — Ingress: external agent → your tools
+#### Path 3 — Stranger path  ✅ runs today
+
+A caller that never touched AWS: another cloud, a script, a compromised
+workload, a partner integration. **No AgentCore component is in this path** — no
+JWT check, no Cedar policy, no guardrail — because none of them are reachable
+from here. Whatever protects the tool pod has to be in the cluster.
 
 ```text
     ┌──────────────────┐
-    │  External agent  │   (unmanaged, untrusted)
+    │  External agent  │   unmanaged, untrusted, never authenticated to AWS
     └────────┬─────────┘
-             │
+             │  POST /v1/mcp/forecast
     ┌ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
-             ▼   Kubernetes cluster
-    │  ╔══════════════════════════════╗              │   ◄── ONLY CHECKPOINT
-       ║   F5 BNK  (ingress)          ║
-    │  ║  · F5BigFwPolicy ACL         ║              │   AgentCore Gateway is
-       ║  · F5BigDdosGlobal (L4)      ║                  NOT in this path.
-    │  ║  · TLS termination           ║              │
-       ║  · rate limiting             ║                  ⚠ no WAF, no client-cert
-    │  ║  · HTTPRoute → pod           ║              │     auth, no MCP inspection
-       ╚══════════════┬═══════════════╝                  → tool-level authz is
-    │                 ▼                              │     YOUR app's job here
-          ┌───────────────────┐
-    │     │  tool / mcp pod   │                      │
-          └───────────────────┘
+             ▼   EKS cluster
+    │  ╔══════════════════════════════════════╗     │  ◄── THE ONLY CHECKPOINT
+       ║          F5 BNK  (TMM)               ║           No AgentCore component
+    │  ║ ┌──────────────────────────────────┐ ║     │     is in this path.
+       ║ │ rate limit 10/60s per IP    [on] │ ║
+    │  ║ │   → 429 at request 11            │ ║     │
+       ║ │ F5BigFwPolicy ACL           [on] │ ║
+    │  ║ │ MCP payload capture         [on] │ ║     │
+       ║ │ JWT validation        [available]│ ║
+    │  ║ │ MCP method/tool allowlist        │ ║     │
+       ║ │                       [proposed] │ ║
+    │  ║ └──────────────────────────────────┘ ║     │
+       ╚══════════════════┬═══════════════════╝
+    │                     ▼                         │
+                ┌───────────────────┐
+    │           │  mcp-server pod   │               │
+                └───────────────────┘
     └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
 ```
+
+### The AWS + F5 story: what each side brings
+
+This is an **AND**, not a comparison. Bedrock AgentCore and F5 BNK solve
+adjacent problems, and the interesting architecture is the one that uses both.
+
+**What AgentCore brings.** A managed runtime so you are not operating agent
+infrastructure. Managed model access. And — where a Gateway is in the path —
+identity-aware, per-tool authorization in Cedar, guardrails for content and
+prompt attacks, and MCP↔HTTP translation for tools that are not MCP-native.
+That is real authorization semantics, owned and operated by AWS, that you do
+not have to build.
+
+**What BNK adds.** BNK sits in the cluster, next to the workloads, and is in the
+path for *everything* that reaches them:
+
+1.  **Reach beyond the managed path.** Path 3 is traffic that never touched
+    AWS — another cloud, a partner, a script, a compromised workload. BNK
+    extends the same governance to callers no managed front door is positioned
+    to see.
+2.  **One policy surface across agent estates.** The same BNK config governs an
+    AgentCore agent, a self-hosted agent, and a third party's caller. As agent
+    frameworks and clouds multiply, the enforcement point stays put.
+3.  **Protection of the workload itself.** DDoS vectors, per-source rate limits
+    and connection limits sit beside the pods, protecting them from
+    over-consumption and abuse regardless of which door traffic came through.
+4.  **Consolidation where you want it.** JWT validation, OAuth, access policy
+    and iRule-based guardrail integration are available as BNK CRDs — 25
+    identity-related CRDs ship in this cluster. Teams that prefer authorization
+    at the network edge can put it there; teams that prefer it in AgentCore can
+    leave it there. Both work, and they compose.
+5.  **Unified evidence.** One telemetry stream covering every path, joined with
+    Bedrock's own token records so the governance view and the cost view sit
+    side by side (section 6).
+
+**Together.** Path 2 is the shape worth aiming at: AWS makes the authorization
+decision it is best placed to make, BNK enforces network and workload policy in
+the cluster, and neither is a single point of failure for the other. Path 3
+exists because not every caller will take Path 2 — and that gap is where the
+in-cluster data plane earns its place.
 
 ---
 
@@ -397,7 +492,7 @@ Expect the Gateway `PROGRAMMED=True` with address `10.0.10.100`, the iRule
 `READY=True` ("CR config sent to all grpc endpoints"), two BNKNetPolicies
 (`-http`, `-http443`), and `loki` + `bnkgov-collector` pods Running.
 
-### Step 1 — Test A / B1: AgentCore agent → BNK → MCP tool
+### Step 1 — Trusted agent path: AgentCore agent → BNK → MCP tool
 
 ```bash
 cd examples/agentcore-demo/agent
@@ -409,17 +504,28 @@ Expect a forecast table with an "Expected Growth" percentage — that number is
 generated by the MCP tool pod, so seeing it proves the whole path. First run
 after a cold start can take ~90 s.
 
-> The runtime's MCP client calls `http://bnk-ingress.bnk-demo.internal/v1/mcp/forecast`
-> directly (port 80). The `FinanceAgentV2` **harness** additionally defines an
-> `agentcore_gateway` tool, `BnkGatewayTool`, pointing at
-> `https://bnk-ingress.bnk-demo.internal/v1/mcp/forecast` — which is why the
-> Gateway carries a plain-HTTP listener on 443: AgentCore Gateway targets
-> require an `https://` URL, but the hop into the cluster is plaintext here.
+> [!IMPORTANT]
+> This is the **trusted agent path**, not the double-checked one. The runtime's
+> MCP client (`agent/app/FinanceAgentV2Agent/mcp_client/client.py`) calls
+> `http://bnk-ingress.bnk-demo.internal/v1/mcp/forecast` directly on port 80 —
+> the URL is hardcoded. The `FinanceAgentV2` harness does declare an
+> `agentcore_gateway` tool called `BnkGatewayTool`, but that reference is
+> currently dangling: `agentcore status` reports no deployed gateways, and
+> `agentcore invoke --gateway BnkGateway` answers
+> `Gateway 'BnkGateway' is not deployed`.
+>
+> The evidence is in the telemetry — every request BNK has logged on this route
+> came from either the runtime ENI (`10.0.11.15`, interface type `agentic_ai`)
+> or the jumphost (`10.0.10.29`). Nothing has ever arrived from a Gateway.
+>
+> The port-443 listener exists because AgentCore Gateway targets require an
+> `https://` URL scheme; it is plain HTTP on the wire and currently unused by
+> any AWS component.
 
 Run it three times in a row. All three must succeed — the rate limit is
 per-client-IP and one invoke uses only a few requests of the budget.
 
-### Step 2 — Test B2: external agent → BNK → MCP tool
+### Step 2 — Stranger path: external agent → BNK → MCP tool
 
 The BNK VIP is private. Run the external agent from a host inside the VPC.
 The jumphost has a second ENI on the VIP's subnet, so it works unmodified:
@@ -680,9 +786,75 @@ buffered, so a throttled request is never read or forwarded.
 
 ---
 
+## 7. Future capabilities
+
+The demo is deliberately light — it proves the paths, not the full control set.
+These are the capabilities BNK already has that a fuller build would turn on.
+None of them are wired today.
+
+### 7.1 Completing the double-checked path
+
+Path 2 needs an AgentCore Gateway that can actually reach the private BNK VIP.
+Two things are missing:
+
+*   **No Gateway is deployed.** `agentcore.json` has `agentCoreGateways: []`, and
+    `agentcore status` lists none. The `BnkGatewayTool` in the harness points at
+    a gateway ARN this project does not manage.
+*   **Private reachability.** AgentCore Gateway reaches private VPC targets via
+    **VPC Lattice egress** — a resource gateway provisions ENIs in your subnets,
+    and its security group governs what they can reach. Supported for MCP and
+    OpenAPI target types, in managed or self-managed modes. The TMM security
+    group would need to accept those ENIs, exactly as it already does for the
+    runtime ENIs.
+
+Refs: [Gateway VPC egress](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-vpc-egress.html),
+[VPC Lattice private endpoints](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/vpc-egress-private-endpoints.html),
+[private connectivity patterns](https://aws.amazon.com/blogs/networking-and-content-delivery/private-connectivity-patterns-for-amazon-bedrock-agentcore-gateway-targets/).
+
+### 7.2 Identity enforcement at BNK
+
+BNK can validate tokens itself — 25 identity CRDs are installed in this cluster.
+`F5BigAccessJwtConfig` carries `audience`, `allowedSigningAlgorithms`,
+`allowedKeys` (JWK references) and token blacklisting; there are also OAuth
+provider/server, SAML and access-policy CRDs with explicit allow/deny endings.
+
+This matters for Path 3, where no AWS component is present to check a token. It
+also means teams can choose where authorization lives — at the AWS front door,
+at the network edge, or both — rather than having the split imposed.
+
+### 7.3 Guardrails via iRule integration
+
+BNK supports iRule-based integration with external inspection services, which is
+the hook for content filtering, prompt-attack detection and PII handling on
+traffic that does not pass through an AgentCore Gateway.
+
+### 7.4 MCP-aware inspection — protecting the pods from rogue agents
+
+The most common question this demo raises: *authn/authz may be the agent's
+responsibility, but how does the customer protect the tool pods themselves?*
+
+BNK already **reads** the MCP payload — the governance iRule parses the JSON-RPC
+body and logs `method` and tool `name` (that is where `tools/call forecast` in
+the Forge logs comes from). Turning that from observation into enforcement is a
+short step, and would give:
+
+*   a **method allowlist** — permit `tools/list` and `tools/call`, reject
+    anything else at the edge;
+*   a **per-tool allowlist** — this caller may invoke `forecast` and nothing
+    else, enforced in the data path rather than in the tool;
+*   **argument-shape checks** — reject malformed or oversized tool arguments
+    before they reach the pod.
+
+Combined with the per-source rate limit that already runs, and `F5BigDdosGlobal`
+for L4 flood vectors, this is the workload-protection story: the tool pod is
+shielded from over-consumption and malformed or unauthorised calls regardless of
+which door the caller came through.
+
+---
+
 ## Troubleshooting
 
-> Test B2 requires the external caller to have network reachability to the private BNK VIP. The demo does not expose the BNK VIP to the public internet.
+> The stranger path requires the external caller to have network reachability to the private BNK VIP. The demo does not expose the BNK VIP to the public internet.
 
 ### AgentCore Initialization Timeout (ECR Image Missing)
 If `agentcore invoke` times out after 120s with "Runtime initialization time exceeded", the ECS task is likely failing to start because its container image is missing.
@@ -704,6 +876,7 @@ To fix this:
 4. Apply the governance policies (`mcp-security-policy.yaml`) once the base paths are proven.
 5. Apply the observability stack (`mcp-observability.yaml`) and confirm Forge's LLM Observability panel goes `available: true`.
 6. Enable Bedrock model invocation logging and deploy `mcp-bedrock-token-shipper.yaml` (section 6) so real token counts appear alongside BNK's governance records.
+7. Review [section 7](#7-future-capabilities) for the capabilities a fuller build would add — completing the double-checked path, identity enforcement at BNK, guardrail integration, and MCP-aware inspection.
 
 ## Manifest map
 
@@ -715,5 +888,5 @@ To fix this:
 | `mcp-security-policy.yaml` | Governance iRule, per-listener `BNKNetPolicy`, `F5BigFwPolicy`, `BNKSecPolicy` |
 | `mcp-observability.yaml` | `llm-egress` namespace, Loki, `bnkgov-collector` Fluent Bit DaemonSet |
 | `mcp-bedrock-token-shipper.yaml` | IRSA ServiceAccount + shipper that pulls Bedrock token counts into Loki |
-| `external-agent.py` | Test B2 client (run from inside the VPC) |
+| `external-agent.py` | Stranger-path client (run from inside the VPC) |
 | `scripts/setup-agentcore-network.sh` | SGs, SG-to-SG ingress, private Route 53 zone |
