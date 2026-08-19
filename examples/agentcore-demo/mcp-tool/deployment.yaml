@@ -27,7 +27,15 @@ spec:
         - /bin/sh
         - -c
         args:
-        - pip install fastmcp uvicorn starlette httpx -q && python /app/mcp-server.py
+        # Versions pinned: an unpinned install makes pod startup depend on
+        # whatever PyPI serves that day, which is not reproducible.
+        - >-
+          pip install --no-cache-dir -q
+          'fastmcp==3.4.7' 'uvicorn==0.52.3' 'starlette==1.6.0' 'httpx==0.28.1'
+          && exec python /app/mcp-server.py
+        envFrom:
+        - secretRef:
+            name: mcp-server-tokens
         ports:
         - containerPort: 8080
           name: mcp
