@@ -1,0 +1,207 @@
+# F5 BNK 2.3 governance policies for the AgentCore demo.
+#
+# This file contains POLICY resources only. It deliberately does NOT contain a
+# Gateway object: the Gateway is owned by gateway-deployment.yaml. An earlier
+# revision re-declared the Gateway with only `metadata` — `kubectl apply` then
+# prunes every `spec` field recorded in the previous last-applied-configuration,
+# wiping `spec.listeners` and taking the VIP down.
+#
+# Apply with:
+#   KUBECONFIG=.awsbnkctl/bnk-agentcore-demo/kubeconfig \
+#     kubectl apply -f mcp-security-policy.yaml
+#
+# BNK 2.3 attaches policy to a Gateway through two policy-attachment CRs:
+#   * BNKNetPolicy -> attaches F5BigCneIrule (general L7 extensions)
+#   * BNKSecPolicy -> attaches F5BigFwPolicy / F5BigLogProfile / F5BigDdosGlobal
+#
+# What is enforced here is a REQUEST-RATE limit, not a token quota. BNK's token
+# enforcement (`k8s.f5.com/ai-token-counting`) only works on LLM inference
+# payloads and rejects everything else with 400 model_missing — see the comment
+# block in gateway-deployment.yaml. Real token counts for this demo come from
+# Bedrock's own invocation logs; see mcp-bedrock-token-shipper.yaml.
+
+---
+# Governance iRule for the MCP tool route: rate limit + telemetry.
+#
+# GOTCHA: the iRule body below carries no `#` comments on purpose. BNK's
+# `f5validate.f5net.com` admission webhook rejects any F5BigCneIrule whose
+# script contains a comment line, with the misleading message
+# `braces are required around the expression`. Keep explanation out here.
+#
+# Rate limit and telemetry live in ONE iRule on purpose. iRule variables are not
+# shared between rules, so a separate telemetry rule could not see the rate
+# limiter's decision — and locally generated 429s never reach HTTP_RESPONSE, so
+# the 429 record has to be emitted at the point the limiter fires.
+#
+# Path matching: the route matches /v1/mcp/forecast, and the HTTPRoute
+# URLRewrite filter rewrites it to `/` BEFORE this iRule runs (confirmed live —
+# the URI the iRule observes is `/`). Both spellings are matched so the policy
+# holds either way. /.well-known/agent-card.json (discovery) stays exempt.
+#
+# Window mechanics: `table set KEY VALUE TIMEOUT LIFETIME` stamps BOTH the idle
+# timeout and the absolute lifetime at creation, and every later hit uses
+# `-notouch` so a client under flood cannot keep refreshing the idle timer and
+# pin the counter open. Setting only `table lifetime` after `table incr` does
+# NOT work — the entry keeps getting touched and the window never rolls over.
+#
+# Telemetry: `log local0.` lands on the f5-fluentbit sidecar's stdout inside the
+# TMM pod, where the collector in mcp-observability.yaml tails it. HSL::send was
+# tried first and produced nothing; see that file for the detail. The record
+# shape is what BNK Forge's LLM Observability panel reads. Token fields are
+# honestly zero: BNK is in-path for the agent-to-tool hop, not for the model
+# call, so it has no tokens of its own to report.
+#
+# Payload capture: the MCP hop is plaintext and BNK terminates it, so the full
+# JSON-RPC request and response are visible. `HTTP::collect` buffers bodies up
+# to 4 KB and they are logged into `req_body` / `resp_body`, which is what fills
+# Forge's raw request/response pane. `userq` is derived from the JSON-RPC
+# `method` and tool `name` so the log list reads `tools/call forecast` rather
+# than the rewritten URI. Bodies larger than 4 KB are not collected — the record
+# is still emitted, just without a payload.
+#
+# Note that rate-limited records carry an empty `req_body` by design: the limit
+# fires before the payload is buffered, so a throttled request is never read or
+# forwarded. That is the point — a throttled agent costs nothing downstream.
+apiVersion: k8s.f5net.com/v1
+kind: F5BigCneIrule
+metadata:
+  name: mcp-rate-limit-irule
+  namespace: default
+spec:
+  iRule: |
+    when HTTP_REQUEST {
+        set gov_t0 [clock clicks -milliseconds]
+        set gov_client [IP::client_addr]
+        set gov_uri [HTTP::uri]
+        set gov_req ""
+        set gov_resp ""
+        set gov_userq [HTTP::uri]
+
+        set gov_mcp 0
+        if { [HTTP::path] starts_with "/v1/mcp/forecast" } { set gov_mcp 1 }
+        if { [HTTP::path] equals "/" } { set gov_mcp 1 }
+        if { $gov_mcp == 0 } { return }
+
+        if { [table lookup -notouch -subtable "mcp_rl" $gov_client] eq "" } {
+            table set -subtable "mcp_rl" $gov_client 1 60 60
+            set gov_count 1
+        } else {
+            set gov_count [table incr -notouch -subtable "mcp_rl" $gov_client]
+        }
+
+        if { $gov_count > 10 } {
+            log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"429\",\"latency_ms\":0,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_uri\",\"client\":\"$gov_client\",\"action\":\"rate_limited\",\"req_body\":\"\",\"resp_body\":\"rate limit exceeded\"}"
+            HTTP::respond 429 \
+                content "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"rate limit exceeded: 10 requests per 60s per client\"}}" \
+                "Content-Type" "application/json" \
+                "Retry-After" "60"
+            return
+        }
+
+        if { [HTTP::header exists "Content-Length"] } {
+            set gov_clen [HTTP::header "Content-Length"]
+            if { $gov_clen > 0 && $gov_clen <= 4096 } {
+                HTTP::collect $gov_clen
+            }
+        }
+    }
+    when HTTP_REQUEST_DATA {
+        set gov_req [string map {\\ \\\\ \" \\\" \n {} \r {} \t { }} [HTTP::payload]]
+        set gov_method [findstr [HTTP::payload] "\"method\":\"" 10 "\""]
+        set gov_tool [findstr [HTTP::payload] "\"name\":\"" 8 "\""]
+        if { $gov_method ne "" } { set gov_userq "$gov_method $gov_tool" }
+        HTTP::release
+    }
+    when HTTP_RESPONSE {
+        if { ![info exists gov_mcp] } { return }
+        if { $gov_mcp == 0 } { return }
+        set gov_status [HTTP::status]
+        if { [HTTP::header exists "Content-Length"] } {
+            set gov_clen [HTTP::header "Content-Length"]
+            if { $gov_clen > 0 && $gov_clen <= 4096 } {
+                HTTP::collect $gov_clen
+                return
+            }
+        }
+        set gov_lat [expr {[clock clicks -milliseconds] - $gov_t0}]
+        log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"$gov_status\",\"latency_ms\":$gov_lat,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_userq\",\"client\":\"$gov_client\",\"action\":\"allow\",\"req_body\":\"$gov_req\",\"resp_body\":\"\"}"
+    }
+    when HTTP_RESPONSE_DATA {
+        set gov_resp [string map {\\ \\\\ \" \\\" \n {} \r {} \t { }} [HTTP::payload]]
+        set gov_lat [expr {[clock clicks -milliseconds] - $gov_t0}]
+        log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"$gov_status\",\"latency_ms\":$gov_lat,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_userq\",\"client\":\"$gov_client\",\"action\":\"allow\",\"req_body\":\"$gov_req\",\"resp_body\":\"$gov_resp\"}"
+        HTTP::release
+    }
+---
+# One BNKNetPolicy per listener. Two reasons this is listener-scoped
+# (`sectionName`) rather than Gateway-scoped:
+#
+#   1. BNK Forge's Gateway Topology view only renders iRule attachments under a
+#      listener. A BNKNetPolicy with no `sectionName` attaches and works, but is
+#      invisible in Forge — verified live 2026-08-19.
+#   2. BNKNetPolicy allows exactly one targetRef, so covering both listeners
+#      needs two CRs.
+#
+# Do NOT also attach the same iRule at Gateway scope: gateway-level iRules run
+# first and listener-level second, so the rule would execute twice per request
+# and the counter would trip at half the configured limit.
+apiVersion: gateway.k8s.f5net.com/v1alpha1
+kind: BNKNetPolicy
+metadata:
+  name: mcp-net-policy-http
+  namespace: default
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: bnk-agentcore-demo-gateway
+    sectionName: http
+  extensionRefs:
+  - group: k8s.f5net.com
+    kind: F5BigCneIrule
+    name: mcp-rate-limit-irule
+---
+apiVersion: gateway.k8s.f5net.com/v1alpha1
+kind: BNKNetPolicy
+metadata:
+  name: mcp-net-policy-http443
+  namespace: default
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: bnk-agentcore-demo-gateway
+    sectionName: http443
+  extensionRefs:
+  - group: k8s.f5net.com
+    kind: F5BigCneIrule
+    name: mcp-rate-limit-irule
+---
+# L4 firewall attached to the Gateway. Kept permissive for the demo — its job
+# is to show the AFM attachment seam, and Forge renders its rules under the
+# Gateway. Tighten `source.addresses` to the agent subnets to make the Gateway
+# default-deny.
+apiVersion: k8s.f5net.com/v1
+kind: F5BigFwPolicy
+metadata:
+  name: mcp-firewall
+  namespace: default
+spec:
+  rule:
+  - name: allow-all
+    action: accept
+---
+apiVersion: gateway.k8s.f5net.com/v1alpha1
+kind: BNKSecPolicy
+metadata:
+  name: mcp-sec-policy
+  namespace: default
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: bnk-agentcore-demo-gateway
+  extensionRefs:
+  - group: k8s.f5net.com
+    kind: F5BigFwPolicy
+    name: mcp-firewall

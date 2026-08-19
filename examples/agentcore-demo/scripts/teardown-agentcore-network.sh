@@ -34,6 +34,9 @@ else
         --query "Vpcs[0].VpcId" --output text 2>/dev/null || echo "None")
 
     if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; then
+        VPC_CIDR=$(aws ec2 describe-vpcs \
+            --vpc-ids "$VPC_ID" \
+            --query "Vpcs[0].CidrBlock" --output text)
         AGENT_SG_NAME="${CLUSTER_NAME}-agent"
         AGENT_SG_ID=$(aws ec2 describe-security-groups \
             --filters \
@@ -92,6 +95,21 @@ else
 fi
 
 if [ -n "$AGENT_SG_ID" ] && [ "$AGENT_SG_ID" != "None" ]; then
+    # We might not have discovered VPC_CIDR if .agentcore-network-env.json was used, so fetch it if needed.
+    if [ -z "${VPC_CIDR:-}" ]; then
+        # Try to infer VPC ID from SG if we don't have it.
+        VPC_ID=$(aws ec2 describe-security-groups --group-ids "$AGENT_SG_ID" --query "SecurityGroups[0].VpcId" --output text 2>/dev/null || echo "")
+        if [ -n "$VPC_ID" ]; then
+            VPC_CIDR=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" --query "Vpcs[0].CidrBlock" --output text 2>/dev/null || echo "")
+        fi
+    fi
+    if [ -n "${VPC_CIDR:-}" ]; then
+        echo "Revoking ingress from VPC CIDR ($VPC_CIDR) to Agent SG ($AGENT_SG_ID) on port 8080..."
+        aws ec2 revoke-security-group-ingress \
+            --group-id "$AGENT_SG_ID" \
+            --protocol tcp --port 8080 --cidr "$VPC_CIDR" 2>/dev/null || echo "Ingress rule already removed or does not exist."
+    fi
+
     echo "Deleting Agent SG $AGENT_SG_ID..."
     aws ec2 delete-security-group --group-id "$AGENT_SG_ID" || echo "Warning: Failed to delete SG $AGENT_SG_ID. Ensure AgentCore is torn down first."
 else
