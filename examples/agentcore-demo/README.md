@@ -818,37 +818,72 @@ BNK can validate tokens itself — 25 identity CRDs are installed in this cluste
 `allowedKeys` (JWK references) and token blacklisting; there are also OAuth
 provider/server, SAML and access-policy CRDs with explicit allow/deny endings.
 
-This matters for Path 3, where no AWS component is present to check a token. It
-also means teams can choose where authorization lives — at the AWS front door,
-at the network edge, or both — rather than having the split imposed.
+This matters for Path 3, where no AWS component is present to check a token. For
+Path 1 and Path 2 it is a placement choice, not a capability gap on either side:
+AgentCore Identity and Policy cover the managed path well, and BNK can carry the
+same check at the network edge for callers that never reach a Gateway.
 
 ### 7.3 Guardrails via iRule integration
 
-BNK supports iRule-based integration with external inspection services, which is
-the hook for content filtering, prompt-attack detection and PII handling on
-traffic that does not pass through an AgentCore Gateway.
+BNK supports iRule-based integration with external inspection services — the
+hook for content filtering, prompt-attack detection and PII handling. Scope this
+carefully: for traffic through an AgentCore Gateway, Guardrails already feed
+those signals into Cedar policy decisions. The BNK hook is for the traffic that
+never passes a Gateway, or for estates spanning clouds where a single inspection
+path is wanted.
 
-### 7.4 MCP-aware inspection — protecting the pods from rogue agents
+### 7.4 MCP-aware inspection — and what NOT to build
 
-The most common question this demo raises: *authn/authz may be the agent's
-responsibility, but how does the customer protect the tool pods themselves?*
+The obvious next step looks like enforcement in the iRule: a JSON-RPC method
+allowlist, a per-tool allowlist, argument-shape checks. **Do not build it as a
+differentiator.** AgentCore already does this, natively and better:
 
-BNK already **reads** the MCP payload — the governance iRule parses the JSON-RPC
-body and logs `method` and tool `name` (that is where `tools/call forecast` in
-the Forge logs comes from). Turning that from observation into enforcement is a
-short step, and would give:
+*   **Policy in AgentCore** is a Cedar-based authorization layer that intercepts
+    every tool call through a Gateway. The principal comes from the JWT, the
+    action is the tool, and the **context is the tool arguments** — so
+    parameter-level decisions are first-class. Default-deny and forbid-wins are
+    enforced automatically.
+*   **Tool filtering at list time** uses Cedar partial evaluation to omit tools
+    the caller could never invoke, so the model never even sees them.
+*   **Fine-grained access control** is documented at four levels — gateway,
+    tool, **operation** (`tools/list`, `tools/call`) and **parameter**.
+*   **Temporal policies (Dogwood)** add session-aware rules and **rate limiting**
+    at the gateway, judging a request against what the agent already did.
+*   **Guardrails** feed prompt-injection and sensitive-information signals into
+    the same deterministic policy decision.
 
-*   a **method allowlist** — permit `tools/list` and `tools/call`, reject
-    anything else at the edge;
-*   a **per-tool allowlist** — this caller may invoke `forecast` and nothing
-    else, enforced in the data path rather than in the tool;
-*   **argument-shape checks** — reject malformed or oversized tool arguments
-    before they reach the pod.
+A TCL reimplementation of that would be strictly worse and would not survive
+contact with an AWS architect. Where BNK's payload visibility genuinely earns
+its place is the traffic Cedar never evaluates — **Path 3**, where no Gateway is
+in the path, and where the question is not "may this principal call this tool"
+but "is my pod being abused". For that, per-source rate limiting (running today)
+and `F5BigDdosGlobal` L4 vectors are the right controls, and they are network
+controls, not authorization ones.
 
-Combined with the per-source rate limit that already runs, and `F5BigDdosGlobal`
-for L4 flood vectors, this is the workload-protection story: the tool pod is
-shielded from over-consumption and malformed or unauthorised calls regardless of
-which door the caller came through.
+Refs: [Policy in AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html) ·
+[Fine-grained access control](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-fine-grained-access-control.html) ·
+[Why Cedar](https://aws.amazon.com/blogs/security/why-policy-in-amazon-bedrock-agentcore-chose-cedar-for-securing-agentic-workflows/) ·
+[Temporal policies and rate limiting](https://aws.amazon.com/blogs/machine-learning/control-agent-behaviors-and-cost-beyond-a-single-action-new-capabilities-in-amazon-bedrock-agentcore/)
+
+### 7.5 Where this demo sits relative to the AWS samples
+
+Reviewing [`awslabs/agentcore-samples`](https://github.com/awslabs/agentcore-samples/tree/main/02-use-cases)
+(18 use cases across conversational, workflow-automation and coding agents):
+
+*   **No sample runs an MCP server on Kubernetes.** MCP appears either as
+    Gateway-aggregated managed endpoints, or Lambda targets, or local Docker for
+    development. There is no "your tool is a pod in your cluster" example.
+*   **One sample touches VPC networking** — `customer-support-assistant-vpc` —
+    and it is about running the *Runtime* inside a VPC with private endpoints,
+    not about governing traffic to a self-hosted tool.
+
+That is the gap this demo fills, and it is a positioning worth being precise
+about: not "F5 secures agents better than AWS", but "**when your MCP tool is a
+workload you operate, something has to govern the traffic reaching it, and
+that something lives in the cluster**". AgentCore Gateway can reach such a tool
+over VPC Lattice egress (7.1), which makes Path 2 — Cedar authorization at the
+AWS front door, network and workload policy at the pod — the joint architecture
+worth demonstrating.
 
 ---
 
