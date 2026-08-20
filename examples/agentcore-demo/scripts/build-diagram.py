@@ -3,6 +3,7 @@
 
   python3 scripts/build-diagram.py     -> images/three-paths.svg
                                        -> images/estate-token-governance.svg
+                                       -> images/network-and-paths.svg
 
 No dependencies. Convert to PNG with:
   rsvg-convert -w 2400 images/three-paths.svg -o images/three-paths.png
@@ -270,6 +271,172 @@ def build_estate():
     return "\n".join(out)
 
 
+def build_network():
+    """VPC / subnet / component layout, with the three paths drawn on it.
+
+    Every address here was read off the live cluster on 2026-08-20. If the
+    cluster is rebuilt, re-check them before reusing the diagram — subnet CIDRs
+    are stable (awsbnkctl assigns them) but ENI and pod addresses are not.
+    """
+    out.clear()
+    W4, H4 = 1460, 1030
+    TINT = "#fff5f6"          # BNK-owned subnets
+    out.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W4} {H4}" width="{W4}" height="{H4}">'
+    )
+    marks = "".join(
+        f'<marker id="m{k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" '
+        f'markerHeight="7" orient="auto-start-reverse">'
+        f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{v}"/></marker>'
+        for k, v in (("l", LINE), ("f", F5), ("o", OK), ("i", INK))
+    )
+    out.append(f"<defs>{marks}</defs>")
+    out.append(f'<rect width="{W4}" height="{H4}" fill="{BG}"/>')
+
+    mk = {LINE: "ml", F5: "mf", OK: "mo", INK: "mi"}
+
+    def ar(pts, colour=LINE, dash=None, label=None, lx=None, ly=None, lanchor="middle"):
+        """Arrow along a polyline of (x, y) points."""
+        d = f' stroke-dasharray="{dash}"' if dash else ""
+        p = " ".join(f"{x},{y}" for x, y in pts)
+        out.append(
+            f'<polyline points="{p}" fill="none" stroke="{colour}" stroke-width="2" '
+            f'marker-end="url(#{mk[colour]})"{d}/>'
+        )
+        if label:
+            mx = lx if lx is not None else (pts[0][0] + pts[-1][0]) / 2
+            my = ly if ly is not None else (pts[0][1] + pts[-1][1]) / 2
+            text(mx, my, label, 10, colour, "700", lanchor, mono=True)
+
+    def rows(x, y, items, gap=18, size=10.5):
+        for i, s in enumerate(items):
+            text(x, y + i * gap, s, size, MUTED, mono=True)
+
+    text(40, 44, "Where BNK sits in the VPC", 23, INK, "700")
+    text(40, 68, "bnk-agentcore-demo · vpc-06dbebcc9fe3e1bad · 10.0.0.0/16 · ap-southeast-2 · "
+                 "addresses read live 2026-08-20", 12.5, MUTED)
+
+    # ── AWS-managed, outside the VPC ─────────────────────────────────────────
+    text(40, 112, "AWS-MANAGED · OUTSIDE YOUR VPC", 10, MUTED, "700")
+    box(40, 124, 210, 54, "Amazon Bedrock", "Converse · tool_use", AWS)
+    box(40, 196, 210, 58, "AgentCore Runtime", "microVM", AWS)
+    box(40, 272, 210, 56, "AgentCore Gateway", "not deployed", MUTED, dash="5 4")
+    box(40, 346, 210, 56, "VPC Lattice res-gw", "ENIs in your subnets", MUTED, dash="5 4")
+    ar([(145, 328), (145, 344)], LINE, dash="4 3")
+    text(40, 424, "Path 2 is blocked here: AgentCore", 10, DENY, "600")
+    text(40, 438, "will not trust our in-cluster CA.", 10, DENY, "600")
+
+    # ── the VPC ──────────────────────────────────────────────────────────────
+    frame(280, 96, 1140, 736, LINE, "#fbfcfd", None, 1.6)
+    text(296, 120, "VPC  10.0.0.0/16", 13, INK, "700")
+    text(1404, 120, "IGW igw-00ca152dbf662b6a9", 10, MUTED, anchor="end", mono=True)
+
+    # Band A — private subnets, where AWS puts its ENIs
+    for fx, name, cidr, az, items in (
+        (296, "subnet-private-1", "10.0.11.0/24", "2a",
+         ["AgentCore runtime ENI  10.0.11.15   agentic_ai",
+          "EKS control plane ENI  10.0.11.20",
+          "AgentCore Lambda ENI   10.0.11.228"]),
+        (859, "subnet-private-2", "10.0.12.0/24", "2b",
+         ["AgentCore runtime ENI  10.0.12.191  agentic_ai",
+          "EKS control plane ENI  10.0.12.193",
+          "AgentCore Lambda ENI   10.0.12.248"]),
+    ):
+        frame(fx, 140, 545, 128, LINE, PANEL)
+        text(fx + 12, 160, f"{name} · {cidr} · {az}", 11, INK, "700")
+        rows(fx + 12, 182, items)
+    text(871, 254, "the same logical agent as private-1", 10.5, DENY, "600", mono=True)
+
+    # Band B — bnk-ext: the VIP lives here
+    frame(296, 288, 1108, 122, F5, TINT, None, 1.6)
+    text(308, 310, "subnet-bnk-ext · 10.0.10.0/24 · 2a", 11, INK, "700")
+    text(1392, 310, "BNK's external side", 10, F5, "700", "end")
+    box(320, 324, 230, 66, "VIP  10.0.10.100", ":80  ·  :443 TLS", F5, "#fff", lw=2.4)
+    box(596, 324, 230, 66, "TMM  ens8", "10.0.10.209", F5)
+    box(872, 324, 230, 66, "jumphost", "10.0.10.29", LINE)
+
+    # Band C — bnk-int: TMM's second NIC
+    frame(296, 438, 1108, 88, F5, TINT, None, 1.6)
+    text(308, 460, "subnet-bnk-int · 10.0.20.0/24 · 2a", 11, INK, "700")
+    text(1392, 460, "BNK's internal side", 10, F5, "700", "end")
+    box(596, 470, 230, 44, "TMM  ens7", "10.0.20.171", F5)
+    text(848, 486, "same f5-tmm pod, second NIC — DPDK over vfio.", 10.5, MUTED)
+    text(848, 502, "This is the host-device pattern: TMM owns both interfaces.", 10.5, MUTED)
+
+    # Band D — public subnets: the nodes and the pods
+    frame(296, 554, 745, 184, LINE, PANEL)
+    text(308, 574, "subnet-public-1 · 10.0.1.0/24 · 2a", 11, INK, "700")
+    text(1029, 574, "nodes + pods", 10, MUTED, anchor="end")
+    box(312, 588, 228, 58, "node 10.0.1.11", "f5-tmm", F5)
+    box(556, 588, 228, 58, "node 10.0.1.32", "—", LINE)
+    box(800, 588, 226, 58, "node 10.0.1.181", "mcp-financial-tool", LINE)
+    box(800, 660, 226, 44, "mcp pod 10.0.1.62", None, OK)
+    text(312, 676, "pod IPs come from the subnet —", 10, MUTED)
+    text(312, 691, "VPC CNI prefix delegation.", 10, MUTED)
+    text(312, 726, "NAT 10.0.1.176 · EICE 10.0.1.33 · jumphost eth0 10.0.1.187", 10, MUTED, mono=True)
+    frame(1059, 554, 345, 184, LINE, PANEL, "4 3")
+    text(1071, 574, "subnet-public-2 · 10.0.2.0/24 · 2b", 11, MUTED, "700")
+    text(1071, 598, "no workloads — capacity for a", 10.5, MUTED)
+    text(1071, 614, "second AZ, unused by the demo.", 10.5, MUTED)
+
+    # in-VPC services strip
+    frame(296, 756, 1108, 58, LINE, "#fff")
+    text(308, 780, "Route 53 private zone", 11, INK, "700")
+    text(308, 798, "bnk-demo.internal  →  10.0.10.100", 10.5, MUTED, mono=True)
+    text(700, 780, "NAT gateway", 11, INK, "700")
+    text(700, 798, "nat-041ed9c3206186bac  (egress only)", 10.5, MUTED, mono=True)
+    text(1080, 780, "Security groups", 11, INK, "700")
+    text(1080, 798, "SG-to-SG rule lets the runtime ENIs reach TMM", 10.5, MUTED, mono=True)
+
+    # ── the paths ────────────────────────────────────────────────────────────
+    # Path 1: runtime ENIs (both AZs) -> VIP. Both start below the subnet frame
+    # so the line never crosses the addresses it is coming from.
+    # Entry points sit to the right of the subnet label so the lines do not
+    # cross it.
+    ar([(505, 270), (505, 322)], OK, label="path 1", lx=513, ly=266, lanchor="start")
+    ar([(1200, 270), (1200, 284), (538, 284), (538, 322)], OK, dash="6 4")
+    # Path 3: jumphost -> VIP. Routed through the gap below band B rather than
+    # straight across, which would run through the TMM box.
+    ar([(987, 392), (987, 424), (435, 424), (435, 392)], INK,
+       label="path 3", lx=711, ly=420)
+    # Path 2: Lattice ENIs -> VIP (not built)
+    ar([(252, 374), (300, 374), (300, 352), (318, 352)], F5, dash="6 4",
+       label="path 2", lx=262, ly=338, lanchor="start")
+    # BNK internals: VIP -> ens8 -> ens7 -> node -> pod
+    ar([(552, 357), (594, 357)], F5)
+    ar([(711, 392), (711, 468)], F5)
+    ar([(711, 516), (711, 540), (913, 540), (913, 584)], F5, label="to pod", lx=840, ly=534)
+    ar([(913, 648), (913, 658)], LINE)
+
+    # ── legend ───────────────────────────────────────────────────────────────
+    ly0 = 866
+    text(40, ly0 - 16, "THE THREE PATHS", 10.5, MUTED, "700")
+    for i, (colour, dash, name, desc) in enumerate((
+        (OK, None, "1  trusted agent",
+         "AgentCore Runtime ENI → VIP → pod.  Runs today."),
+        (F5, "6 4", "2  double-checked",
+         "AgentCore Gateway → Lattice ENIs → VIP → pod.  Not built."),
+        (INK, None, "3  stranger",
+         "any caller that can route to the VIP → pod.  Runs today."),
+    )):
+        y = ly0 + i * 26
+        d = f' stroke-dasharray="{dash}"' if dash else ""
+        out.append(f'<line x1="40" y1="{y}" x2="86" y2="{y}" stroke="{colour}" '
+                   f'stroke-width="2.4" marker-end="url(#{mk[colour]})"{d}/>')
+        text(98, y + 4, name, 11.5, INK, "700")
+        text(240, y + 4, desc, 11, MUTED)
+
+    text(40, 972, "Everything inside the VPC frame is ours to control. Paths 1 and 3 terminate "
+                  "on the same VIP and the same route — one policy surface, whatever door the "
+                  "traffic came", 11, MUTED)
+    text(40, 988, "through. Nothing reaches the pod without passing TMM. The runtime is "
+                  "multi-homed across both AZs, so one logical agent presents two source IPs — "
+                  "which is why the", 11, MUTED)
+    text(40, 1004, "rate limiter keys on caller identity, not client IP.", 11, MUTED)
+    out.append("</svg>")
+    return "\n".join(out)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", default=None)
@@ -278,7 +445,8 @@ if __name__ == "__main__":
         pathlib.Path(__file__).resolve().parent.parent / "images"
     outdir.mkdir(parents=True, exist_ok=True)
     for name, fn in (("three-paths.svg", build),
-                     ("estate-token-governance.svg", build_estate)):
+                     ("estate-token-governance.svg", build_estate),
+                     ("network-and-paths.svg", build_network)):
         dest = outdir / name
         dest.write_text(fn(), encoding="utf-8")
         print(f"wrote {dest} ({dest.stat().st_size:,} bytes)")

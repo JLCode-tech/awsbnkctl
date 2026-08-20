@@ -48,8 +48,8 @@ calling** and **how much of the stack is allowed to police them**.
 
 **Trusted agent path.** The agent runs in Bedrock AgentCore with VPC-mode ENIs in
 our subnets. It resolves `bnk-ingress.bnk-demo.internal` via a private Route 53
-zone to the BNK VIP and calls the tool. BNK routes it, rate limits it per source
-IP, and logs the decision. AWS never inspects this hop — as far as AgentCore is
+zone to the BNK VIP and calls the tool. BNK routes it, rate limits it per caller
+identity, and logs the decision. AWS never inspects this hop — as far as AgentCore is
 concerned the agent made an ordinary outbound HTTP call.
 
 **Double-checked path.** The same agent, but its tool call is routed through an
@@ -83,8 +83,16 @@ When the Agent acts, it follows this workflow:
 
 ![The three governed paths](images/three-paths.svg)
 
-*Regenerate with `python3 scripts/build-diagram.py`; convert for slides with
-`rsvg-convert -w 2400 images/three-paths.svg -o three-paths.png`.*
+And the same three paths drawn on the actual network, so it is clear which
+subnet each hop lands in and which addresses are AWS's versus ours:
+
+![Where BNK sits in the VPC](images/network-and-paths.svg)
+
+*Regenerate all three with `python3 scripts/build-diagram.py`; convert for
+slides with `rsvg-convert -w 2400 images/three-paths.svg -o three-paths.png`.
+Every address in the network diagram was read off the live cluster — subnet
+CIDRs are assigned by `awsbnkctl` and stable, but ENI and pod addresses are
+not, so re-check them after a rebuild.*
 
 
 Because both platforms use the term "Gateway," their roles need separating. The
@@ -120,7 +128,7 @@ twice, and the tool hop between them is the only leg BNK is in.
        ║  VIP 10.0.10.100  :80  :443          ║│
     │  ║ ┌──────────────────────────────────┐ ║│                  │
        ║ │ HTTPRoute + URLRewrite      [on] │ ║│
-    │  ║ │ rate limit 10/60s per IP    [on] │ ║│                  │
+    │  ║ │ rate limit 10/60s/caller    [on] │ ║│                  │
        ║ │ MCP payload capture         [on] │ ║│
     │  ║ │ F5BigFwPolicy ACL           [on] │ ║│                  │
        ║ │ JWT validation        [available]│ ║│
@@ -196,7 +204,7 @@ from here. Whatever protects the tool pod has to be in the cluster.
     │  ╔══════════════════════════════════════╗     │  ◄── THE ONLY CHECKPOINT
        ║          F5 BNK  (TMM)               ║           No AgentCore component
     │  ║ ┌──────────────────────────────────┐ ║     │     is in this path.
-       ║ │ rate limit 10/60s per IP    [on] │ ║
+       ║ │ rate limit 10/60s/caller    [on] │ ║
     │  ║ │   → 429 at request 11            │ ║     │
        ║ │ F5BigFwPolicy ACL           [on] │ ║
     │  ║ │ MCP payload capture         [on] │ ║     │
@@ -1119,5 +1127,5 @@ To fix this:
 | `mcp-bedrock-token-shipper.yaml` | IRSA ServiceAccount + shipper that pulls Bedrock token counts into Loki |
 | `external-agent.py` | Stranger-path client (run from inside the VPC) |
 | `scripts/demo.sh` | Guided walk-through / smoke test of both live paths |
-| `scripts/build-diagram.py` | Regenerates `images/three-paths.svg` |
+| `scripts/build-diagram.py` | Regenerates all three SVGs in `images/` |
 | `scripts/setup-agentcore-network.sh` | SGs, SG-to-SG ingress, private Route 53 zone |
