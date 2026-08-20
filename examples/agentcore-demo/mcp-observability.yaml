@@ -182,6 +182,18 @@ data:
         Parser       bnkgov_json
         Reserve_Data Off
 
+    # Fail closed on unparsable records. When bnkgov_json cannot parse its input
+    # the record passes through UNCHANGED rather than being dropped, so the raw
+    # container-log wrapper lands in Loki and renders as junk in Forge. Requiring
+    # a `client` field means only records that actually parsed are shipped.
+    # The upstream cause of malformed input was syslog truncating oversized
+    # records; that is fixed by clipping the bodies in the iRule
+    # (see mcp-security-policy.yaml). This filter is the backstop.
+    [FILTER]
+        Name    grep
+        Match   bnkgov
+        Regex   client .
+
     [OUTPUT]
         Name         loki
         Match        bnkgov

@@ -59,9 +59,34 @@
 # than the rewritten URI. Bodies larger than 4 KB are not collected — the record
 # is still emitted, just without a payload.
 #
+# Why `req_body` / `resp_body` are clipped to 300 characters: `log local0.` goes
+# out over syslog, which truncates the message at 1024 bytes. A longer record is
+# cut mid-byte — we observed `tools/list` responses (both tool descriptions, the
+# largest payload this demo produces) sliced through a multi-byte character at
+# ~1024, which makes the JSON unparsable, so the collector shipped the raw
+# wrapper text to Loki instead of a governance record. Three of 118 records were
+# landing corrupted that way. Clipping each body keeps the whole record inside
+# the syslog budget (~210 bytes of fixed fields + 2 × 300 + `userq`), so every
+# record is valid JSON. A clipped body ends in `[clipped]`. If you need full
+# payloads, the fix is a real log transport, not a bigger clip — HSL::send is not
+# wired in BNK 2.3.
+#
 # Note that rate-limited records carry an empty `req_body` by design: the limit
 # fires before the payload is buffered, so a throttled request is never read or
 # forwarded. That is the point — a throttled agent costs nothing downstream.
+#
+# Rate-limit bucket key (`gov_key`) is the CALLER IDENTITY, not the client IP.
+# The AgentCore runtime is multi-homed across both agent subnets — we have logged
+# 10.0.11.15 and 10.0.12.191 for the same logical agent — so keying on
+# `IP::client_addr` hands one caller a fresh 10-request budget per ENI, and AWS
+# decides how many ENIs it gets. The bearer token resolves to a stable label
+# (`agent` / `external`); an unauthenticated caller has no identity to key on and
+# falls back to `ip:<addr>`.
+#
+# The token itself is NEVER logged. `caller` carries the resolved label and
+# `client` keeps the ENI address, so Forge can group by identity while still
+# showing which interface a request came from. Writing `$gov_bearer` into a log
+# record would put a live credential into Loki and Forge.
 apiVersion: k8s.f5net.com/v1
 kind: F5BigCneIrule
 metadata:
@@ -72,6 +97,7 @@ spec:
     when RULE_INIT {
         set static::mcp_privileged_tools [list "get_account_balance"]
         set static::mcp_privileged_token "demo-agent-token-a7f3c1"
+        set static::mcp_external_token "demo-external-token-4b9e2d"
     }
     when HTTP_REQUEST {
         set gov_t0 [clock clicks -milliseconds]
@@ -85,22 +111,29 @@ spec:
         set gov_resp ""
         set gov_userq [HTTP::uri]
 
+        set gov_caller "anonymous"
+        if { $gov_bearer eq $static::mcp_privileged_token } { set gov_caller "agent" }
+        if { $gov_bearer eq $static::mcp_external_token } { set gov_caller "external" }
+
+        set gov_key $gov_caller
+        if { $gov_caller eq "anonymous" } { set gov_key "ip:$gov_client" }
+
         set gov_mcp 0
         if { [HTTP::path] starts_with "/v1/mcp/forecast" } { set gov_mcp 1 }
         if { [HTTP::path] equals "/" } { set gov_mcp 1 }
         if { $gov_mcp == 0 } { return }
 
-        if { [table lookup -notouch -subtable "mcp_rl" $gov_client] eq "" } {
-            table set -subtable "mcp_rl" $gov_client 1 60 60
+        if { [table lookup -notouch -subtable "mcp_rl" $gov_key] eq "" } {
+            table set -subtable "mcp_rl" $gov_key 1 60 60
             set gov_count 1
         } else {
-            set gov_count [table incr -notouch -subtable "mcp_rl" $gov_client]
+            set gov_count [table incr -notouch -subtable "mcp_rl" $gov_key]
         }
 
         if { $gov_count > 10 } {
-            log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"429\",\"latency_ms\":0,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_uri\",\"client\":\"$gov_client\",\"action\":\"rate_limited\",\"req_body\":\"\",\"resp_body\":\"rate limit exceeded\"}"
+            log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"429\",\"latency_ms\":0,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_uri\",\"client\":\"$gov_client\",\"caller\":\"$gov_caller\",\"action\":\"rate_limited\",\"req_body\":\"\",\"resp_body\":\"rate limit exceeded\"}"
             HTTP::respond 429 \
-                content "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"rate limit exceeded: 10 requests per 60s per client\"}}" \
+                content "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"rate limit exceeded: 10 requests per 60s per caller\"}}" \
                 "Content-Type" "application/json" \
                 "Retry-After" "60"
             return
@@ -115,13 +148,18 @@ spec:
     }
     when HTTP_REQUEST_DATA {
         set gov_req [string map {\\ \\\\ \" \\\" \n {} \r {} \t { }} [HTTP::payload]]
+        if { [string length $gov_req] > 300 } {
+            set gov_req [string range $gov_req 0 299]
+            if { [string index $gov_req end] eq "\\" } { set gov_req [string range $gov_req 0 end-1] }
+            append gov_req {[clipped]}
+        }
         set gov_method [findstr [HTTP::payload] "\"method\":\"" 10 "\""]
         set gov_tool [findstr [HTTP::payload] "\"name\":\"" 8 "\""]
         if { $gov_method ne "" } { set gov_userq "$gov_method $gov_tool" }
 
         if { $gov_method eq "tools/call" && [lsearch -exact $static::mcp_privileged_tools $gov_tool] != -1 } {
             if { $gov_bearer ne $static::mcp_privileged_token } {
-                log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"403\",\"latency_ms\":0,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_userq\",\"client\":\"$gov_client\",\"action\":\"tool_forbidden\",\"req_body\":\"$gov_req\",\"resp_body\":\"privileged tool\"}"
+                log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"403\",\"latency_ms\":0,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_userq\",\"client\":\"$gov_client\",\"caller\":\"$gov_caller\",\"action\":\"tool_forbidden\",\"req_body\":\"$gov_req\",\"resp_body\":\"privileged tool\"}"
                 HTTP::respond 403 \
                     content "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32003,\"message\":\"tool '$gov_tool' requires a privileged caller\"}}" \
                     "Content-Type" "application/json"
@@ -144,12 +182,17 @@ spec:
             }
         }
         set gov_lat [expr {[clock clicks -milliseconds] - $gov_t0}]
-        log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"$gov_status\",\"latency_ms\":$gov_lat,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_userq\",\"client\":\"$gov_client\",\"action\":\"$gov_action\",\"req_body\":\"$gov_req\",\"resp_body\":\"\"}"
+        log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"$gov_status\",\"latency_ms\":$gov_lat,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_userq\",\"client\":\"$gov_client\",\"caller\":\"$gov_caller\",\"action\":\"$gov_action\",\"req_body\":\"$gov_req\",\"resp_body\":\"\"}"
     }
     when HTTP_RESPONSE_DATA {
         set gov_resp [string map {\\ \\\\ \" \\\" \n {} \r {} \t { }} [HTTP::payload]]
+        if { [string length $gov_resp] > 300 } {
+            set gov_resp [string range $gov_resp 0 299]
+            if { [string index $gov_resp end] eq "\\" } { set gov_resp [string range $gov_resp 0 end-1] }
+            append gov_resp {[clipped]}
+        }
         set gov_lat [expr {[clock clicks -milliseconds] - $gov_t0}]
-        log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"$gov_status\",\"latency_ms\":$gov_lat,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_userq\",\"client\":\"$gov_client\",\"action\":\"$gov_action\",\"req_body\":\"$gov_req\",\"resp_body\":\"$gov_resp\"}"
+        log local0. "BNKGOV {\"job\":\"llm-gateway\",\"model\":\"mcp:finance-tool\",\"status\":\"$gov_status\",\"latency_ms\":$gov_lat,\"prompt_tk\":0,\"comp_tk\":0,\"total_tk\":0,\"cached\":0,\"cost\":0,\"userq\":\"$gov_userq\",\"client\":\"$gov_client\",\"caller\":\"$gov_caller\",\"action\":\"$gov_action\",\"req_body\":\"$gov_req\",\"resp_body\":\"$gov_resp\"}"
         HTTP::release
     }
 ---
