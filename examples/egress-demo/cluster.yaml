@@ -74,13 +74,22 @@ testing:
     instanceType: t3.small
     mgmtSubnetIndex: 0
 
-# Register the new cluster into the running localhost bnk-forge after `up`,
-# and unregister on `down`. Password supplied via $AWSBNKCTL_FORGE_PASSWORD.
+# forge: register this cluster with a running BNK Forge instance after `up`, and
+# unregister on `down`. Forge is the web UI for the *bnkctl tools — set one up
+# from https://github.com/f5devcentral/bnk-forge and it serves on :8000. Worth
+# having for this demo: the best beat is flipping the egress toggle from the UI
+# (see README.md, "Optional Forge beats").
+#
+# Left ENABLED on purpose, and harmless if you have no Forge: Phase 09 soft-fails
+# when the instance is unreachable — it writes a pending link, warns, and exits 0.
+# `up` still succeeds. Set enabled: false below to skip the handoff entirely.
+#
+# Supply the password via $AWSBNKCTL_FORGE_PASSWORD — never write it in this file.
 forge:
-  enabled: true
-  url: http://localhost:8000
+  enabled: true                    # set false to skip the Forge handoff
+  url: http://localhost:8000       # also overridable via $AWSBNKCTL_FORGE_URL
   mcpUrl: http://localhost:8081/mcp/
-  credentialTemplateId: 1
+  credentialTemplateId: 1          # forge "AWS Production" template
   username: admin
 
 tags:

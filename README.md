@@ -111,16 +111,14 @@ The `pattern:` field selects the TMM data-plane interface topology and binding. 
 Ready-to-edit topologies live under [`examples/`](examples/) — see the
 [examples index](examples/README.md) for patterns and running costs side by side.
 
-- **[`examples/full-cluster/`](examples/full-cluster/)** - Complete BNK cluster reference config
-- **[`examples/external-only/`](examples/external-only/)** - Single-interface `external-only` pattern
-- **[`examples/sriov-external/`](examples/sriov-external/)** - Single-interface SR-IOV / `vfio-pci` DPDK data path (experimental)
-- **[`examples/demo/`](examples/demo/)** - Full demo cluster + curated walkthroughs
+- **[`examples/full-cluster/`](examples/full-cluster/)** - Complete BNK cluster reference config; also the demo cluster (`demo:` block) and the BIG-IP migration story
+- **[`examples/external-only/`](examples/external-only/)** - Single-interface `external-only` pattern, and the experimental `sriov-external` DPDK variant (one-line swap)
 - **[`examples/demo-ai/`](examples/demo-ai/)** - Combined BNK protocol demo + SageMaker AI rig
 - **[`examples/ai-rig/`](examples/ai-rig/)** - BNK in front of GPU inference + a managed SageMaker endpoint
 - **[`examples/egress-demo/`](examples/egress-demo/)** - Transparent egress + egress firewall, toggled by one CR
 - **[`examples/local-zone/`](examples/local-zone/)** - Reference telco/edge custom resources (no `cluster.yaml`)
 
-Check out the [Demo Guide](examples/demo/README.md) for full walkthroughs.
+Check out the [Demo Guide](examples/full-cluster/README.md#demo-mode) for full walkthroughs.
 
 ---
 

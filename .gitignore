@@ -36,7 +36,6 @@ dist/
 
 # --- Generated HTML mirrors of Markdown docs (do not track) ---
 docs/DEMOS.html
-examples/demo/README.html
 
 # --- Local environment overrides ---
 .env

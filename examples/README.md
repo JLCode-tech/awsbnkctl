@@ -3,18 +3,23 @@
 Each directory is a self-contained topology: a `cluster.yaml` intent file that
 `awsbnkctl up` can provision, plus a README explaining what it demonstrates and
 what it costs. Copy one, point the two F5 credential paths at your own files, and
-run it.
+run it. (`local-zone` is the exception — reference manifests, no `cluster.yaml`.)
 
 | Example | Pattern | Approx. $/hr | What it demonstrates |
 | --- | --- | --- | --- |
-| [`full-cluster`](full-cluster/) | `dual-interface` (`host-device`) | ~3 | The complete reference stack: VPC, both TMM data-path subnets, EKS, BNK 2.3, jumphost |
-| [`external-only`](external-only/) | `external-only` | ~3 | Single-interface TMM reaching pods over the CNI — no internal VLAN |
-| [`sriov-external`](sriov-external/) | `sriov-external` (experimental) | ~3 | TMM driving the data plane with DPDK over an ENA bound to `vfio-pci` |
-| [`demo`](demo/) | `dual-interface` (`host-device`) | ~3 | `full-cluster` marked as a demo, plus the curated protocol walkthroughs (`awsbnkctl demo run`) |
+| [`full-cluster`](full-cluster/) | `dual-interface` (`host-device`) | ~3 | The complete reference stack: VPC, both TMM data-path subnets, EKS, BNK 2.3, jumphost. Uncomment `demo:` for the protocol walkthroughs, `bigipVE:` for the BIG-IP migration story |
+| [`external-only`](external-only/) | `external-only`, or `sriov-external` | ~3 | Single-interface TMM reaching pods over the CNI — no internal VLAN. One-line `pattern:` swap gets the experimental SR-IOV / `vfio-pci` DPDK data path |
 | [`egress-demo`](egress-demo/) | `external-only` | ~3 | Transparent egress and an egress firewall ACL, flipped on and off by applying one CR |
 | [`ai-rig`](ai-rig/) | `external-only` | ~6 | BNK fronting GPU inference, with an optional disposable SageMaker endpoint |
-| [`demo-ai`](demo-ai/) | `dual-interface` (`host-device`) | ~12 | `demo` and `ai-rig` composed into one cluster: all protocol demos plus managed inference |
+| [`demo-ai`](demo-ai/) | `dual-interface` (`host-device`) | ~12 | `full-cluster` and `ai-rig` composed into one cluster: all protocol demos plus managed inference |
 | [`local-zone`](local-zone/) | n/a — no `cluster.yaml` | n/a | Reference telco/edge custom resources (SCTP, Diameter, HTTP/2, SNAT pool) to apply to an existing cluster |
+
+Six directories, not one per permutation. Where two topologies differed by a
+single field, they are one file with the alternative documented in place —
+`full-cluster` carries demo mode and the BIG-IP appliance as commented blocks,
+and `external-only` carries the SR-IOV pattern as a one-line swap. That keeps
+the variants from drifting apart, which is how the old `sriov-external` file
+ended up describing the wrong pattern in three of its comments.
 
 Costs are rough `ap-southeast-2` on-demand estimates for the whole footprint while
 it is up, excluding data transfer and EBS. None of these topologies scales to
@@ -37,9 +42,14 @@ Every `cluster.yaml` here follows the same rules:
   your real credentials can never be committed by accident.
 - **Relative paths resolve against the directory holding the `cluster.yaml`**,
   not your shell's working directory. `./cne_pull_64.json` in
-  `examples/demo/cluster.yaml` means `examples/demo/cne_pull_64.json` no matter
-  where you invoke `awsbnkctl` from. Use an absolute path to keep credentials
-  elsewhere.
+  `examples/full-cluster/cluster.yaml` means
+  `examples/full-cluster/cne_pull_64.json` no matter where you invoke
+  `awsbnkctl` from. Use an absolute path to keep credentials elsewhere.
+- **`forge:` is enabled in every example**, pointing at `localhost:8000`. Forge
+  is the web UI for the `*bnkctl` tools —
+  [f5devcentral/bnk-forge](https://github.com/f5devcentral/bnk-forge). If you
+  don't run one, nothing breaks: Phase 09 soft-fails, writes a pending link,
+  warns, and `up` still exits 0. Set `enabled: false` to skip it.
 - **Secrets are never written to YAML.** Passwords and tokens come from the
   environment: `AWSBNKCTL_FORGE_PASSWORD`, `AWSBNKCTL_BIGIP_PASSWORD`,
   `HF_TOKEN`.
