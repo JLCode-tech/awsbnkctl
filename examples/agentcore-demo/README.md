@@ -633,8 +633,10 @@ after a cold start can take ~90 s.
 > or the jumphost (`10.0.10.29`). Nothing has ever arrived from a Gateway.
 >
 > The port-443 listener exists because AgentCore Gateway targets require an
-> `https://` URL scheme; it is plain HTTP on the wire and currently unused by
-> any AWS component.
+> `https://` URL scheme. It is a real HTTPS listener — BNK terminates TLS
+> itself with a cert from the in-cluster CA — but no AWS component uses it yet,
+> because AgentCore additionally requires the target's certificate to be
+> *publicly trusted*. See section 7.1.
 
 Run it three times in a row. All three must succeed — the rate limit is
 keyed on caller identity, and one invoke uses only a few requests of the budget.
@@ -964,17 +966,39 @@ fills it with NGINX. Substituting BNK is a drop-in that adds per-source rate
 limiting, L4 DDoS vectors, MCP payload visibility, iRule extensibility and the
 unified telemetry in section 4 — in a slot the reference design already requires.
 
+The lab reaches for an NLB because its ingress tier speaks plain HTTP. BNK does
+not need that hop: it terminates TLS itself (see the `:443` listener above) and
+can rewrite the Host header in the data path, which are the only two jobs the
+load balancer was doing. **The intended shape is therefore shorter than the
+lab's:**
+
+```text
+AgentCore Gateway
+  → Resource gateway ENIs (in your subnets)
+    → F5 BNK, :443, holding a publicly trusted cert   ◄── terminates + routes
+      → EKS pods (FastMCP :8000/:8080)
+```
+
 Requirements the lab makes explicit, which this demo does **not** currently meet:
 
 | Requirement | Today | Needed |
 | --- | --- | --- |
-| Target presents a **publicly trusted TLS cert** | BNK VIP is plain HTTP on :80/:443 | Internal NLB terminating TLS with an ACM public cert, forwarding plain HTTP to BNK. Private CA / self-signed needs the ALB proxy workaround. |
+| Target presents a **publicly trusted TLS cert** | BNK terminates TLS on :443, but with a cert from the **in-cluster CA** — AWS requires a *publicly trusted* one, so this cert cannot serve the path | A publicly trusted cert installed on BNK. Cheapest: cert-manager + Let's Encrypt via the Route 53 DNS-01 solver, which emits the `kubernetes.io/tls` Secret the listener already consumes. Alternative: an exportable public ACM cert. Either way, **a domain we own is the prerequisite** |
 | **Inbound auth** on the Gateway | n/a | `privateEndpoint` targets cannot use `NO_AUTH` — Cognito (or another IdP) OAuth client-credentials, unless an interceptor Lambda is configured |
-| **DNS** | private Route 53 zone → VIP | private hosted zone plus `routingDomain` pointing at the NLB's public DNS name |
-| **Gateway + target** | none deployed | managed VPC resource mode: create the target with `--vpc-id --subnet-ids --security-group-ids` so AgentCore provisions the VPC Lattice resource gateway |
+| **DNS** | private Route 53 zone → VIP | the same name registered publicly (for cert validation) and resolving to the VIP inside the VPC — split-horizon. The cert SAN must match the MCP endpoint URL |
+| **Gateway + target** | none deployed | managed VPC resource mode: `privateEndpoint.managedVpcResource` with VPC, subnets and security groups, so AgentCore provisions the VPC Lattice resource gateway. The CLI has no VPC flags — use the raw API |
 
-awsbnkctl already provisions the AWS Load Balancer Controller, so the internal
-NLB in front of BNK is available rather than new work.
+Two constraints are worth stating plainly, because they bound the design:
+
+* **TLS is not optional.** `McpServerTargetConfiguration.endpoint` carries the
+  pattern `https://.*`, so a plain-HTTP target is rejected at validation.
+* **The trust decision is AWS's, not ours.** AWS's fleet validates the target
+  cert against a public trust store, and there is no documented way to supply a
+  custom CA bundle. No BNK-side configuration can substitute for a publicly
+  trusted certificate — which is why AWS documents an internal **ALB** (holding
+  a public ACM cert, with a host-header transform) as the workaround for
+  private-CA backends. Given a publicly trusted cert on BNK, that ALB has no
+  remaining job.
 
 ### 7.2 Identity enforcement at BNK
 
