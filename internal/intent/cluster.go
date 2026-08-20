@@ -1107,11 +1107,17 @@ func parseGPUAZDenyEnv(val string) map[string][]string {
 // MinKubernetesVersion is the mandated EKS control-plane floor for real
 // clusters, and the default when cluster.kubernetesVersion is omitted.
 //
-// Why 1.32 and not lower: 1.30 and 1.31 are past or nearing the end of EKS
-// standard support, which puts a new cluster straight onto extended support
-// pricing and blocks addon versions the BNK stack expects. Nothing below the
-// floor is exercised in CI any more, so allowing it would ship an untested path.
-const MinKubernetesVersion = "1.32"
+// Why 1.34: the floor tracks EKS *standard* support, because anything past it
+// puts a new cluster straight onto extended-support pricing and blocks addon
+// versions the BNK stack expects. As of 2026-08 that rules out 1.31
+// (EOL 2025-11-26), 1.32 (EOL 2026-03-23) and 1.33 (EOL 2026-07-29). Nothing
+// below the floor is exercised in CI, so allowing it would ship an untested path.
+//
+// NOTE: this constant is time-sensitive by design. 1.34 leaves standard support
+// on 2026-12-02; raise the floor then. Together with maxTestedKubernetesMinor
+// below, the currently supported window is 1.34-1.35 — only two versions wide,
+// so review both when either date passes.
+const MinKubernetesVersion = "1.34"
 
 // maxTestedKubernetesMinor is the highest 1.x minor the BNK 2.3 stack is known
 // to install cleanly on. At 1.36 the apiserver started rejecting the f5-spk-pools
@@ -1142,8 +1148,10 @@ func validateKubernetesVersion(v string) error {
 	}
 	if major < minMajor || (major == minMajor && minor < minMinor) {
 		return fmt.Errorf("cluster.kubernetesVersion %q is below the mandated floor %s: "+
-			"1.30/1.31 are at or past the end of EKS standard support and are not exercised in CI; "+
-			"set %s or newer", v, MinKubernetesVersion, MinKubernetesVersion)
+			"everything below it is past the end of EKS standard support (1.31, 1.32 and 1.33 all "+
+			"expired between 2025-11 and 2026-07), which forces extended-support pricing and is not "+
+			"exercised in CI; set %s or newer (1.%d is the highest BNK 2.3 installs on)",
+			v, MinKubernetesVersion, MinKubernetesVersion, maxTestedKubernetesMinor)
 	}
 	if major == minMajor && minor > maxTestedKubernetesMinor {
 		fmt.Fprintf(os.Stderr,
