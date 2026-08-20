@@ -413,6 +413,7 @@ values — replace them for anything real):
 | --- | --- |
 | TLS termination on :443, cert from the in-cluster CA | encrypted transport; verify with `--cacert` |
 | Rate limit, 10 / 60 s, keyed on **caller identity** | `429` with a JSON-RPC error and `Retry-After: 60` |
+| L4 firewall, accept `10.0.0.0/16` / reject the rest | TCP **reset** before the connection completes — proven from a source on a secondary VPC CIDR (`scripts/setup-stranger.sh`) |
 | Privileged-tool gate — `get_account_balance` requires the agent token | `403`, request never reaches the pod |
 | L4 firewall — accept from `10.0.0.0/16`, explicit reject otherwise | connection refused |
 
@@ -1128,4 +1129,6 @@ To fix this:
 | `external-agent.py` | Stranger-path client (run from inside the VPC) |
 | `scripts/demo.sh` | Guided walk-through / smoke test of both live paths |
 | `scripts/build-diagram.py` | Regenerates all three SVGs in `images/` |
+| `scripts/setup-stranger.sh` | Builds the Path 3 caller: own SG, own subnet, another AZ, plus a second NIC on a secondary VPC CIDR so the firewall's reject branch can actually be tested |
+| `scripts/teardown-stranger.sh` | Removes it. **Run before `awsbnkctl down`** — the secondary CIDR, its subnet and the SG cross-reference all block VPC deletion |
 | `scripts/setup-agentcore-network.sh` | SGs, SG-to-SG ingress, private Route 53 zone |

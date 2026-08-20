@@ -98,6 +98,30 @@ JUMPHOST=$(aws ec2 describe-instances --region "$REGION" \
 [ -n "$JUMPHOST" ] && ok "jumphost $JUMPHOST (drives the stranger path)" \
   || bad "no running jumphost found — stranger-path steps cannot run"
 
+# The purpose-built stranger: its own SG, subnet-public-2, plus a second NIC on
+# a secondary VPC CIDR that is deliberately outside the firewall's accept list.
+# Optional — provision with scripts/setup-stranger.sh. Act 6 degrades to a
+# policy-only assertion when it is absent.
+STRANGER=$(aws ec2 describe-instances --region "$REGION" \
+  --filters "Name=tag:Name,Values=$CLUSTER-stranger" "Name=instance-state-name,Values=running" \
+  --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null | awk '{print $1}')
+if [ -n "$STRANGER" ]; then
+  STRANGER_IN=$(aws ec2 describe-instances --region "$REGION" --instance-ids "$STRANGER" \
+    --query 'Reservations[].Instances[].NetworkInterfaces[?Attachment.DeviceIndex==`0`].PrivateIpAddress' \
+    --output text 2>/dev/null | awk '{print $1}')
+  STRANGER_OUT=$(aws ec2 describe-network-interfaces --region "$REGION" \
+    --filters "Name=tag:Name,Values=$CLUSTER-stranger-outside-eni" \
+    --query 'NetworkInterfaces[].PrivateIpAddress' --output text 2>/dev/null | awk '{print $1}')
+  if [ -n "$STRANGER_IN" ] && [ -n "$STRANGER_OUT" ]; then
+    ok "stranger $STRANGER ($STRANGER_IN in-range, $STRANGER_OUT out-of-range)"
+  else
+    warn "stranger $STRANGER found but its NICs did not resolve — act 6 will fall back"
+    STRANGER=""
+  fi
+else
+  warn "no stranger instance — act 6 cannot test the firewall reject (setup-stranger.sh)"
+fi
+
 [ "$FAILED" -gt 0 ] && { echo; echo "  ${RED}preflight failed${R} — fix the above before demoing."; exit 1; }
 [ "$CHECK_ONLY" -eq 1 ] && { echo; ok "preflight clean"; exit 0; }
 
@@ -106,6 +130,7 @@ JUMPHOST=$(aws ec2 describe-instances --region "$REGION" \
 # reach it is driven from inside the VPC.
 ssm_run() {
   local cmd="$1"
+  local JUMPHOST="${2:-$JUMPHOST}"     # optional: run on a different instance
   local id
   id=$(aws ssm send-command --region "$REGION" --instance-ids "$JUMPHOST" \
         --document-name AWS-RunShellScript \
@@ -261,9 +286,64 @@ if printf '%s' "$FW_RULES" | grep -q 'accept from .*10\.0\.0\.0/16' \
 else
   bad "firewall policy is not the expected accept-VPC / reject-all shape"
 fi
-warn "NOT a data-path test: every source that can route to this private VIP is"
-warn "inside 10.0.0.0/16, so the reject branch cannot be exercised from here."
-warn "Proving it needs a source outside the VPC CIDR — see the design doc."
+
+if [ -n "$STRANGER" ]; then
+  note ""
+  note "Now the data path, from a caller that is genuinely foreign: its own SG,"
+  note "its own subnet in another AZ, admitted by ONE rule (tcp/443). It has two"
+  note "NICs — one inside 10.0.0.0/16, one outside it on a secondary VPC CIDR."
+  note "Same host, same SG, same port. Only the source range differs, so"
+  note "anything that differs in the result is the firewall and nothing else."
+  # Written to a file via base64: SSM flattens a multi-line command, so an
+  # inline script loses its line structure.
+  FW_SCRIPT=$(cat <<EOSCRIPT
+#!/bin/bash
+OUT=$STRANGER_OUT; VIP=$VIP; HOST=$INGRESS_HOST; TOK=$EXTERNAL_TOKEN
+DEV=\$(ip -o -4 addr show | awk -v ip="\$OUT/" '\$4 ~ ip {print \$2}')
+OUTGW=\$(echo "\$OUT" | awk -F. '{print \$1"."\$2"."\$3".1"}')
+# source-based routing, so packets from the out-of-range NIC leave via it
+ip route replace default via "\$OUTGW" dev "\$DEV" table 200 >/dev/null 2>&1
+ip rule add from "\$OUT" table 200 >/dev/null 2>&1
+ip route flush cache >/dev/null 2>&1
+for SRC in $STRANGER_IN \$OUT; do
+  C=\$(curl -sk -o /dev/null -w '%{http_code}' --max-time 12 --interface "\$SRC" \
+    "https://\$VIP/v1/mcp/forecast" -H "Host: \$HOST" -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' -H "Authorization: Bearer \$TOK" \
+    -d '$FORECAST_BODY' 2>/dev/null); R=\$?
+  echo "\$SRC http=\$C rc=\$R"
+done
+EOSCRIPT
+)
+  FW_B64=$(printf '%s' "$FW_SCRIPT" | base64 | tr -d '\n')
+  FW_OUT=$(ssm_run "echo '$FW_B64' | base64 -d > /tmp/fw.sh; sudo bash /tmp/fw.sh; rm -f /tmp/fw.sh" "$STRANGER")
+  IN_LINE=$(printf '%s\n' "$FW_OUT" | grep "^$STRANGER_IN " | head -1)
+  OUT_LINE=$(printf '%s\n' "$FW_OUT" | grep "^$STRANGER_OUT " | head -1)
+  note "$IN_LINE"
+  note "$OUT_LINE"
+  if printf '%s' "$IN_LINE" | grep -q 'http=200'; then
+    ok "in-range source $STRANGER_IN accepted → 200"
+  else
+    bad "in-range source $STRANGER_IN should have been accepted"
+  fi
+  # rc=7 is a TCP reset: the firewall actively refused. rc=28 would be a
+  # timeout, which cannot be distinguished from a missing route, so only 7
+  # counts as proof.
+  if printf '%s' "$OUT_LINE" | grep -q 'rc=7'; then
+    ok "out-of-range source $STRANGER_OUT REJECTED before TCP completed (RST)"
+    note "rc=7 is a reset, not a timeout — the firewall refused it, rather than"
+    note "the packet being lost. That distinction is the whole proof."
+  elif printf '%s' "$OUT_LINE" | grep -q 'http=200'; then
+    bad "out-of-range source $STRANGER_OUT was ALLOWED — the firewall is not enforcing"
+  else
+    warn "out-of-range source did not connect, but with a timeout rather than a"
+    warn "reset. That is consistent with the firewall, but also with a routing"
+    warn "problem, so it does not prove enforcement on its own."
+  fi
+else
+  warn "No stranger instance, so the reject branch is NOT exercised: every source"
+  warn "that can route to this private VIP is inside the accepted 10.0.0.0/16."
+  warn "Run scripts/setup-stranger.sh to make this a real test."
+fi
 pause
 
 # ── act 7: the evidence ──────────────────────────────────────────────────────
@@ -307,8 +387,18 @@ if [ "$FAILED" -eq 0 ]; then
     401  no / wrong credential            (the TOOL — not BNK; BNK logs it)
     403  privileged tool, wrong caller    (BNK, before the pod)
     429  too many requests                (BNK, before the pod)
-    ---  non-VPC source                   (BNK firewall — policy asserted,
-                                           data path not exercised, see act 6)
+EOS
+  if [ -n "$STRANGER" ]; then
+    cat <<'EOS'
+    RST  source outside 10.0.0.0/16       (BNK firewall, before TCP completed)
+EOS
+  else
+    cat <<'EOS'
+    ---  source outside 10.0.0.0/16       (BNK firewall — policy asserted only,
+                                           no stranger host to prove it)
+EOS
+  fi
+  cat <<'EOS'
 
   Plus: TLS terminated by BNK itself on :443, chain validated against the
   cluster CA, and discovery left deliberately open.
