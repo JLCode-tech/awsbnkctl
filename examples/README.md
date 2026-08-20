@@ -58,6 +58,11 @@ Every `cluster.yaml` here follows the same rules:
   under `.awsbnkctl/`. Pick something unique in your account so tag-based
   discovery on `down` never collides with another cluster.
 - **`metadata.region` is always explicit** — `awsbnkctl` never guesses a region.
+- **`cluster.kubernetesVersion` is 1.32 or newer.** 1.32 is both the mandated
+  floor and the default when the key is omitted; `validate` rejects anything
+  lower before making an AWS call. BNK 2.3 installs cleanly up to 1.35 — 1.36+
+  gets a warning, because the apiserver there rejects two core BNK CRDs. See
+  [the version policy](../docs/ARCHITECTURE.md#kubernetes-version-policy).
 
 ## Before you run one
 

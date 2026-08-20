@@ -76,7 +76,7 @@ network:
 # the other BNK patterns: instanceType m6i.4xlarge, desired/min 3, max 4,
 # role=bnk on the first node group (3 nodes for the dSSM quorum).
 cluster:
-  kubernetesVersion: "1.30"
+  kubernetesVersion: "1.32"
   nodeGroups:
     - name: default
       instanceType: m6i.4xlarge

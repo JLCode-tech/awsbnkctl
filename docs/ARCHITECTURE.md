@@ -50,7 +50,7 @@ network:
   natGateways: 1              
 
 cluster:                      
-  kubernetesVersion: "1.30"
+  kubernetesVersion: "1.32"   # mandated floor, and the default when omitted
   nodeGroups:
     - name: default
       instanceType: m6i.4xlarge
@@ -65,6 +65,35 @@ bnk:                          # Supply-chain credentials
 - **Strict Validation:** Typos are caught immediately. Unknown fields cause a validation error.
 - **Explicit AZs:** `network.azs` is explicit to ensure reproducible deployments.
 - **`metadata.name`:** Becomes the AWS resource tag (`awsbnkctl:cluster`) and the local state folder name.
+- **`kubernetesVersion` has a mandated floor of 1.32** — see below.
+
+### Kubernetes version policy
+
+`cluster.kubernetesVersion` must be **1.32 or newer**. It is also the default when
+the key is omitted. Anything lower is rejected by `validate`, before any AWS call:
+
+```
+cluster.kubernetesVersion "1.30" is below the mandated floor 1.32: 1.30/1.31 are
+at or past the end of EKS standard support and are not exercised in CI; set 1.32
+or newer
+```
+
+Two reasons for the floor. EKS moves 1.30 and 1.31 onto extended support, so a new
+cluster on them starts out costing more for no benefit; and nothing below 1.32 is
+exercised by CI any more, so allowing it would ship an untested path.
+
+There is a soft **upper** bound as well. BNK 2.3 is known to install cleanly up to
+**1.35**. From 1.36 the apiserver rejects the `f5-spk-pools` and HSL CRDs, whose
+integer fields declare `format: int32` alongside `maximum: 4294967295` — a value
+that does not fit in an int32. Those CRDs are core to BNK, so the install fails at
+CRD apply; turning telemetry off does not avoid them. `validate` warns rather than
+errors, because the fix belongs in a future BNK manifest and because the CRDs
+arrive from the FAR archive at run time, where we cannot inspect them in advance.
+
+The floor and the tested ceiling live in one place each —
+`intent.MinKubernetesVersion` and `maxTestedKubernetesMinor` in
+`internal/intent/cluster.go`. `TestExampleConfigs_MeetVersionFloor` keeps every
+published example above the floor.
 
 ---
 

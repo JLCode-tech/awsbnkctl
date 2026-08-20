@@ -452,7 +452,7 @@ network:
         az: %sb
   natGateways: 1
 cluster:
-  kubernetesVersion: "1.30"
+  kubernetesVersion: "1.32"
   nodeGroups:
     - name: default
       instanceType: t3.medium

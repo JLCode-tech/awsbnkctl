@@ -65,7 +65,7 @@ network:
   natGateways: 1
 
 cluster:
-  kubernetesVersion: "1.30"
+  kubernetesVersion: "1.32"
   nodeGroups:
     # Index 0: BNK TMM control nodegroup. role=bnk injected automatically.
     # Three nodes for dSSM quorum (required by all BNK patterns).
