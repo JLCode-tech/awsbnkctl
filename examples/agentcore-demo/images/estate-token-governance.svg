@@ -7,7 +7,8 @@
 <rect x="40" y="130" width="322" height="34" rx="7" fill="#fff" stroke="#9aa5b1" stroke-width="1.4"/>
 <text x="52" y="152" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="11" fill="#1c2530" font-weight="600" text-anchor="start">Agent via AgentCore Gateway</text>
 <rect x="370" y="135" width="84" height="24" rx="7" fill="#fff8ee" stroke="#ff9900" stroke-width="1.2"/>
-<text x="412" y="151" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="9" fill="#8a5200" font-weight="700" text-anchor="middle">AWS TPM</text>
+<text x="412" y="151" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="8" fill="#8a5200" font-weight="700" text-anchor="middle">RPM·TPM·CPS</text>
+<text x="412" y="170" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="8.5" fill="#6b7785" font-weight="normal" text-anchor="middle">AWS covers this row</text>
 <line x1="462" y1="147" x2="543" y2="208" stroke="#e4002b" stroke-width="1.6" marker-end="url(#a)"/>
 <rect x="40" y="174" width="322" height="34" rx="7" fill="#fff" stroke="#9aa5b1" stroke-width="1.4"/>
 <text x="52" y="196" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="11" fill="#1c2530" font-weight="600" text-anchor="start">Agents on EKS / ECS / EC2</text>
@@ -59,5 +60,6 @@
 <text x="40" y="638" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="10.5" fill="#6b7785" font-weight="normal" text-anchor="start">• Enforcement needs BNK in the path. Rows it does not front are visible but not stoppable.</text>
 <text x="40" y="656" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="10.5" fill="#6b7785" font-weight="normal" text-anchor="start">• BNK token counting parses OpenAI-shaped usage; Bedrock-native responses meter as zero today (F5 feature request).</text>
 <text x="40" y="674" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="10.5" fill="#6b7785" font-weight="normal" text-anchor="start">• The CloudWatch lane is accounting after the fact — it reports spend, it cannot prevent it.</text>
-<text x="40" y="692" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="10.5" fill="#6b7785" font-weight="normal" text-anchor="start">• AgentCore Gateway TPM is real on its own path, but path-scoped, excludes pass-through, and fails open.</text>
+<text x="40" y="692" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="10.5" fill="#6b7785" font-weight="normal" text-anchor="start">• AgentCore Gateway limits are real and cover requests, tokens AND connections — but only on its own path,</text>
+<text x="40" y="710" font-family="-apple-system,Segoe UI,Inter,Helvetica,Arial,sans-serif" font-size="10.5" fill="#6b7785" font-weight="normal" text-anchor="start">   scoped to /v1/chat|messages|responses, excluding pass-through targets, and they fail open by design.</text>
 </svg>
