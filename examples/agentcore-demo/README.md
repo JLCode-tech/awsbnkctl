@@ -1129,6 +1129,7 @@ To fix this:
 | `external-agent.py` | Stranger-path client (run from inside the VPC) |
 | `scripts/demo.sh` | Guided walk-through / smoke test of both live paths |
 | `scripts/build-diagram.py` | Regenerates all three SVGs in `images/` |
+| `scripts/rebuild.sh` | **Start here for a rebuild.** Runs the whole sequence in the right order, waits for what needs waiting for, and refuses to start with less than an hour of SSO session left |
 | `scripts/setup-stranger.sh` | Builds the Path 3 caller: own SG, own subnet, another AZ, plus a second NIC on a secondary VPC CIDR so the firewall's reject branch can actually be tested |
 | `scripts/teardown-stranger.sh` | Removes it. **Run before `awsbnkctl down`** — the secondary CIDR, its subnet and the SG cross-reference all block VPC deletion |
 | `scripts/setup-agentcore-network.sh` | SGs, SG-to-SG ingress, private Route 53 zone |

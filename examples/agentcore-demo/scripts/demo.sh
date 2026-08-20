@@ -13,18 +13,32 @@
 #
 # Nothing here mutates cluster config — it is read-and-exercise only.
 #
-# Seven acts. One caveat worth knowing: act 6 asserts that the L4 firewall
-# policy is programmed, it does not exercise the reject branch. Every source
-# that can route to this private VIP is inside the accepted 10.0.0.0/16, so a
-# real reject test needs a source outside the VPC CIDR — which would mean
-# provisioning one, and this script does not mutate infrastructure.
+# Seven acts. Act 6 exercises the L4 firewall for real, provided
+# scripts/setup-stranger.sh has been run: that builds a caller with one NIC
+# inside 10.0.0.0/16 and one on a secondary VPC CIDR outside it, so the accept
+# and reject branches can be compared from the same host with the same SG.
+# Without it, act 6 degrades to asserting the policy is programmed and says so.
 
 set -uo pipefail
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export KUBECONFIG="${KUBECONFIG:-$DEMO_DIR/.awsbnkctl/bnk-agentcore-demo/kubeconfig}"
+REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
 
 CLUSTER="${CLUSTER:-bnk-agentcore-demo}"
+
+# `up` writes the kubeconfig to .awsbnkctl/<cluster>/kubeconfig RELATIVE TO THE
+# DIRECTORY IT RAN FROM — in practice the repo root, because that is where
+# state.env lives. A stale copy can linger under the example directory pointing
+# at a cluster that no longer exists, and every kubectl call then fails in
+# confusing ways instead of saying so. Prefer the repo root, fall back to the
+# example dir, and verify the thing actually answers (see preflight).
+if [ -z "${KUBECONFIG:-}" ]; then
+  for _kc in "$REPO_ROOT/.awsbnkctl/$CLUSTER/kubeconfig" \
+             "$DEMO_DIR/.awsbnkctl/$CLUSTER/kubeconfig"; do
+    if [ -f "$_kc" ]; then KUBECONFIG="$_kc"; break; fi
+  done
+fi
+export KUBECONFIG="${KUBECONFIG:-}"
 REGION="${REGION:-ap-southeast-2}"
 VIP="${VIP:-10.0.10.100}"
 INGRESS_HOST="${INGRESS_HOST:-bnk-ingress.bnk-demo.internal}"
@@ -65,6 +79,19 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "required tool missing: $1" >
 
 # ── preflight ────────────────────────────────────────────────────────────────
 say "Preflight"
+if [ -z "$KUBECONFIG" ] || [ ! -f "$KUBECONFIG" ]; then
+  bad "no kubeconfig found for cluster $CLUSTER"
+  note "looked in $REPO_ROOT/.awsbnkctl/$CLUSTER/ and $DEMO_DIR/.awsbnkctl/$CLUSTER/"
+  note "has 'awsbnkctl up' been run? it writes the kubeconfig beside state.env."
+  echo; echo "  ${RED}preflight failed${R}"; exit 1
+fi
+note "kubeconfig: ${KUBECONFIG#$REPO_ROOT/}"
+if ! kubectl get --raw=/readyz >/dev/null 2>&1; then
+  bad "kubeconfig exists but the cluster does not answer"
+  note "this is what a STALE kubeconfig looks like — it may point at a cluster"
+  note "that was torn down. Delete it and re-run 'awsbnkctl up'."
+  echo; echo "  ${RED}preflight failed${R}"; exit 1
+fi
 need aws; need kubectl; need python3
 [ -n "${AWS_PROFILE:-}" ] || warn "AWS_PROFILE is unset; relying on ambient credentials"
 
