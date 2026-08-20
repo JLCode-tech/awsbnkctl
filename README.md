@@ -36,6 +36,12 @@ Edit `my-cluster.yaml` to set:
 - `bnk.farArchive` (FAR pull credentials JSON)
 - `bnk.jwt` (subscription JWT)
 
+> [!IMPORTANT]
+> `cluster.kubernetesVersion` must be **1.32 or newer** — that is also the default
+> if you omit it. `validate` rejects anything lower before touching AWS. BNK 2.3
+> installs cleanly through 1.35; 1.36+ warns. See the
+> [Kubernetes version policy](docs/ARCHITECTURE.md#kubernetes-version-policy).
+
 ### 3. Authenticate to AWS
 
 Authenticate using the standard credential chain (e.g., if using SSO):

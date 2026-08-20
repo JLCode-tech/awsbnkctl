@@ -97,7 +97,7 @@ network:
 # cluster: EKS control plane + managed node group configuration.
 # Phases 08 (EKS cluster), 10 (node group), 11 (kubeconfig) require this block.
 cluster:
-  kubernetesVersion: "1.30"
+  kubernetesVersion: "1.32"
   nodeGroups:
     - name: default
       # m6i.4xlarge x 3 is the documented BNK 2.3 Small minimum:

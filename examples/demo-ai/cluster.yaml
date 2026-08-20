@@ -72,10 +72,10 @@ network:
   natGateways: 1
 
 cluster:
-  # 1.31 from the start: the optional Envoy AI Gateway shootout leg needs k8s
-  # >=1.31 (its CRDs use the isIP CEL function). Starting at 1.31 avoids an
-  # in-place control-plane upgrade later.
-  kubernetesVersion: "1.31"
+  # 1.32 is the mandated floor (intent.MinKubernetesVersion). It also clears the
+  # >=1.31 requirement of the optional Envoy AI Gateway shootout leg, whose CRDs
+  # use the isIP CEL function.
+  kubernetesVersion: "1.32"
   nodeGroups:
     # Index 0: BNK TMM control nodegroup (role=bnk injected by defaults). Three
     # nodes for the dSSM quorum + headroom for the full BNK control plane + TMM.
