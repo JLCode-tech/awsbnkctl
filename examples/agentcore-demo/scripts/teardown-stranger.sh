@@ -8,14 +8,24 @@ set -uo pipefail
 #
 # RUN THIS BEFORE `awsbnkctl down`.
 #
-# `awsbnkctl down` does not know about any of this, and three of these
-# resources will block VPC deletion if left behind:
+# `awsbnkctl down` does not know about any of this. It is phase-symmetric: each
+# phase deletes exactly what its Up created, from state.env, and it never sweeps
+# the VPC for foreign resources (which is the right call — it must be safe to run
+# in a shared VPC).
 #
-#   - the subnet in the secondary CIDR (a VPC will not delete with subnets in it)
-#   - the secondary CIDR association itself (will not disassociate while a
-#     subnet still uses it, and blocks VPC deletion)
-#   - the SG rule on bnk-data referencing the stranger SG (a security group
-#     cannot be deleted while another SG's rule references it)
+# What actually blocks a teardown, in order of severity:
+#
+#   - THE INSTANCE. Its eth0 is in subnet-public-2, which awsbnkctl manages and
+#     deletes during phase 03. A running instance there aborts `down` with a
+#     DependencyViolation on awsbnkctl's OWN subnet. This is the real hazard.
+#   - the extra subnet in the secondary CIDR — awsbnkctl never created it, so it
+#     is left behind, and a VPC will not delete while any subnet remains
+#   - the SG rule on bnk-data referencing the stranger SG — a security group
+#     cannot be deleted while another SG's rule references it
+#
+# The secondary CIDR association is NOT a blocker on its own: DeleteVpc removes
+# CIDR associations with the VPC. It is disassociated here for tidiness and so a
+# rebuild starts from a known state.
 #
 # Order below is therefore load-bearing: revoke the cross-reference, detach and
 # delete the ENI, terminate the instance and WAIT for it, then the SG, then the
