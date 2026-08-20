@@ -12,6 +12,12 @@
 # SSM. Agent invokes run locally against the AgentCore control plane.
 #
 # Nothing here mutates cluster config — it is read-and-exercise only.
+#
+# Seven acts. One caveat worth knowing: act 6 asserts that the L4 firewall
+# policy is programmed, it does not exercise the reject branch. Every source
+# that can route to this private VIP is inside the accepted 10.0.0.0/16, so a
+# real reject test needs a source outside the VPC CIDR — which would mean
+# provisioning one, and this script does not mutate infrastructure.
 
 set -uo pipefail
 
@@ -95,14 +101,11 @@ JUMPHOST=$(aws ec2 describe-instances --region "$REGION" \
 [ "$FAILED" -gt 0 ] && { echo; echo "  ${RED}preflight failed${R} — fix the above before demoing."; exit 1; }
 [ "$CHECK_ONLY" -eq 1 ] && { echo; ok "preflight clean"; exit 0; }
 
-# ── helper: run a curl on the jumphost via SSM and echo "<status> <body>" ────
-ssm_curl() {
-  local body="$1"; shift
-  local hdrs=""
-  for h in "$@"; do hdrs="$hdrs -H '$h'"; done
-  local cmd="curl -s -o /tmp/dbody -w '%{http_code}' --max-time 15 -X POST http://$VIP/v1/mcp/forecast \
--H 'Host: $INGRESS_HOST' -H 'Content-Type: application/json' -H 'Accept: application/json' $hdrs \
--d '$body'; echo; head -c 220 /tmp/dbody"
+# ── helper: run an arbitrary shell command on the jumphost via SSM ───────────
+# Echoes StandardOutputContent. The BNK VIP is private, so anything that has to
+# reach it is driven from inside the VPC.
+ssm_run() {
+  local cmd="$1"
   local id
   id=$(aws ssm send-command --region "$REGION" --instance-ids "$JUMPHOST" \
         --document-name AWS-RunShellScript \
@@ -117,6 +120,16 @@ ssm_curl() {
   done
   aws ssm get-command-invocation --region "$REGION" --command-id "$id" \
     --instance-id "$JUMPHOST" --query 'StandardOutputContent' --output text 2>/dev/null
+}
+
+# ── helper: POST to the MCP route on the jumphost, echo "<status>\n<body>" ────
+ssm_curl() {
+  local body="$1"; shift
+  local hdrs=""
+  for h in "$@"; do hdrs="$hdrs -H '$h'"; done
+  ssm_run "curl -s -o /tmp/dbody -w '%{http_code}' --max-time 15 -X POST http://$VIP/v1/mcp/forecast \
+-H 'Host: $INGRESS_HOST' -H 'Content-Type: application/json' -H 'Accept: application/json' $hdrs \
+-d '$body'; echo; head -c 220 /tmp/dbody"
 }
 
 FORECAST_BODY='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"forecast","arguments":{"symbol":"NVDA","days":30}}}'
@@ -192,8 +205,69 @@ fi
 note "A throttled request is never buffered or forwarded: it costs nothing downstream."
 pause
 
-# ── act 5: the evidence ──────────────────────────────────────────────────────
-say "Act 5 — the evidence, in Forge"
+# ── act 5: TLS on the MCP hop ────────────────────────────────────────────────
+say "Act 5 — TLS termination on the MCP hop"
+note "BNK holds the certificate and terminates :443 itself — no load balancer in"
+note "the path. The CA comes from the cluster, so --cacert is a real validation."
+# The CA travels as one base64 line: SSM flattens the command, so a heredoc
+# would lose its line structure and the here-document never terminates.
+CA_B64=$(kubectl get secret mcp-tls -o jsonpath='{.data.ca\.crt}' 2>/dev/null)
+if [ -z "$CA_B64" ]; then
+  bad "could not read ca.crt from the mcp-tls Secret"
+else
+TLS_CMD="umask 077; echo '$CA_B64' | base64 -d > /tmp/bnkca.crt; \
+curl -s -o /tmp/tbody -w '%{http_code}' --max-time 15 --cacert /tmp/bnkca.crt \
+--resolve $INGRESS_HOST:443:$VIP -X POST https://$INGRESS_HOST/v1/mcp/forecast \
+-H 'Content-Type: application/json' -H 'Accept: application/json' \
+-H 'Authorization: Bearer $EXTERNAL_TOKEN' -d '$FORECAST_BODY'; echo; \
+echo | openssl s_client -connect $VIP:443 -servername $INGRESS_HOST 2>/dev/null \
+| openssl x509 -noout -subject -issuer 2>/dev/null; rm -f /tmp/bnkca.crt"
+  TLS_OUT=$(ssm_run "$TLS_CMD")
+  TLS_CODE=$(printf '%s\n' "$TLS_OUT" | head -1 | tr -d '[:space:]')
+  if [ "$TLS_CODE" = "200" ]; then
+    ok "chain validated against the cluster CA → 200"
+  else
+    bad "TLS :443 → got '$TLS_CODE', wanted 200"
+  fi
+  while IFS= read -r l; do
+    [ -n "$l" ] && note "$l"
+  done <<EOT
+$(printf '%s\n' "$TLS_OUT" | grep -E '^(subject|issuer)=')
+EOT
+  if printf '%s\n' "$TLS_OUT" | grep -qE "^subject=CN *= *$INGRESS_HOST"; then
+    ok "certificate subject matches the ingress hostname"
+  else
+    bad "certificate subject does not match $INGRESS_HOST"
+  fi
+fi
+pause
+
+# ── act 6: what is deliberately open, and what the firewall says ─────────────
+say "Act 6 — discovery stays open; the L4 firewall is programmed"
+note "Agent-card discovery is unauthenticated by design — a client must be able to"
+note "learn what the server offers before it holds a credential."
+CARD=$(ssm_run "curl -s -o /tmp/cbody -w '%{http_code}' --max-time 15 \
+http://$VIP/.well-known/agent-card.json -H 'Host: $INGRESS_HOST'; echo; head -c 120 /tmp/cbody")
+expect 200 "agent-card, no credential  " "$CARD"
+
+note ""
+note "The L4 firewall accepts 10.0.0.0/16 and rejects everything else."
+FW_RULES=$(kubectl get fwpol mcp-firewall \
+  -o jsonpath='{range .spec.rule[*]}{.name}: {.action} from {.source.addresses}{"\n"}{end}' 2>/dev/null)
+if printf '%s' "$FW_RULES" | grep -q 'accept from .*10\.0\.0\.0/16' \
+   && printf '%s' "$FW_RULES" | grep -qE 'reject from (\[\]|$)'; then
+  printf '%s\n' "$FW_RULES" | while read -r l; do note "$l"; done
+  ok "firewall policy programmed on TMM (accept VPC, reject all else)"
+else
+  bad "firewall policy is not the expected accept-VPC / reject-all shape"
+fi
+warn "NOT a data-path test: every source that can route to this private VIP is"
+warn "inside 10.0.0.0/16, so the reject branch cannot be exercised from here."
+warn "Proving it needs a source outside the VPC CIDR — see the design doc."
+pause
+
+# ── act 7: the evidence ──────────────────────────────────────────────────────
+say "Act 7 — the evidence, in Forge"
 CLUSTER_ID=""
 TOKEN=$(curl -s -X POST "$FORGE/api/auth/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin123"}' --max-time 8 2>/dev/null \
@@ -230,10 +304,14 @@ if [ "$FAILED" -eq 0 ]; then
   cat <<'EOS'
 
   Three layers, four distinct refusals, one route:
-    401  no / wrong credential            (the tool)
+    401  no / wrong credential            (the TOOL — not BNK; BNK logs it)
     403  privileged tool, wrong caller    (BNK, before the pod)
     429  too many requests                (BNK, before the pod)
-    ---  non-VPC source                   (BNK firewall, before TCP completes)
+    ---  non-VPC source                   (BNK firewall — policy asserted,
+                                           data path not exercised, see act 6)
+
+  Plus: TLS terminated by BNK itself on :443, chain validated against the
+  cluster CA, and discovery left deliberately open.
 
   And the point of it: an agent is useless without its tool call, so whoever
   controls that hop controls the agent's reach. That hop is where BNK sits.
