@@ -75,8 +75,10 @@ cluster:
       maxSize: 4
       diskSize: 50
 
-# bnk: F5 supply-chain credentials, required by Phase 12. Replace both paths
-# with your own files before running `up` (gitignored).
+# bnk: F5 supply-chain credentials, required by Phase 12. Replace both paths with
+# your own files before running `up`. Relative paths resolve against the
+# directory holding THIS file, not your shell's working directory. Both names are
+# gitignored (cne_pull_64.json, *.jwt) so they are never committed.
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
   jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
