@@ -66,34 +66,27 @@ ACCT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) \
   || die "no valid AWS credentials — run: aws sso login --profile $AWS_PROFILE"
 ok "account $ACCT, profile $AWS_PROFILE"
 
-# The single most expensive lesson from the last cycle: a lifecycle run that
-# outlives its SSO token leaves half-built, billing infrastructure behind. And
-# `aws sts get-caller-identity` keeps working from a separate CLI credential
-# cache after the SSO token has expired, so it is NOT a safe check on its own.
-EXP=$(python3 - <<'PY' 2>/dev/null
-import json,glob,datetime
-best=None
-for f in glob.glob(__import__('os').path.expanduser('~/.aws/sso/cache/*.json')):
-    try: d=json.load(open(f))
-    except Exception: continue
-    if 'expiresAt' in d and 'registrationExpiresAt' in d:
-        best=d['expiresAt']
-print(best or '')
-PY
-)
-if [ -n "$EXP" ]; then
-  MINS=$(python3 -c "
-import datetime,sys
-e=datetime.datetime.fromisoformat('$EXP'.replace('Z','+00:00'))
-print(int((e-datetime.datetime.now(datetime.timezone.utc)).total_seconds()//60))
-" 2>/dev/null || echo 0)
-  if [ "${MINS:-0}" -lt 60 ]; then
-    warn "SSO token expires in ${MINS} min. A full rebuild needs ~60."
-    warn "Re-run 'aws sso login --profile $AWS_PROFILE' NOW, then start again."
-    die "refusing to start with less than an hour — this is how you get half-built infra"
-  fi
-  ok "SSO token good for ${MINS} more minutes"
+# SSO note, corrected. `expiresAt` in ~/.aws/sso/cache is the ACCESS token and
+# lives only ~1 hour — but a refreshToken is cached alongside it and both the
+# CLI and the Go SDK refresh silently, so the effective session is the IAM
+# Identity Center session duration (~11 h here), not one hour. An earlier
+# version of this script refused to start with under 60 minutes left on the
+# access token, which meant it refused almost always. Removed.
+#
+# The REAL hazard is refresh-token rotation. Each refresh returns a new refresh
+# token and invalidates the previous one, so two processes refreshing the same
+# profile concurrently will burn each other: one wins, the other dies with
+# InvalidGrantException, and it stays dead until the next `aws sso login`. That
+# is the most likely cause of the mid-run failure we saw, which killed `down`
+# thirteen phases in and left half-built billing infrastructure.
+#
+# So: DO NOT run other AWS commands against this profile while this script is
+# running. Poll by reading its output, not by hitting the API in a loop.
+if [ -n "${EXP:-}" ]; then
+  note "SSO access token expires $EXP (auto-refreshes; session is much longer)"
 fi
+warn "Do not run other AWS CLI commands on this profile until this finishes —"
+warn "concurrent SSO refresh rotates the token and kills whichever loses."
 
 for f in cne_pull_64.json license.jwt; do
   [ -s "$DEMO_DIR/$f" ] || die "missing or empty $DEMO_DIR/$f (gitignored; must be present)"
