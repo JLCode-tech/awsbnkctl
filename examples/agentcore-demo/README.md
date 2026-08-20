@@ -214,6 +214,21 @@ from here. Whatever protects the tool pod has to be in the cluster.
 
 ### The AWS + F5 story: what each side brings
 
+![Token governance across the AWS AI estate](images/estate-token-governance.svg)
+
+This demo is scoped to AgentCore, but the governance argument is wider than
+AgentCore. AWS shipped token-per-minute rate limiting on AgentCore Gateway in
+August 2026 — real, and it covers traffic through *that* Gateway. It does not
+cover agents on EKS outside Runtime, applications calling Bedrock directly,
+self-hosted models on your own GPUs, SageMaker endpoints, third-party LLM APIs,
+or batch inference. An in-path layer can meter all of those under one policy,
+with one chargeback feed.
+
+Two limits to state plainly: BNK has to be *in* the path (it cannot see a
+Lambda's Bedrock call that never traverses it), and its token counting parses
+OpenAI-shaped `usage`, so a Bedrock-native response currently meters as zero.
+
+
 This is an **AND**, not a comparison. Bedrock AgentCore and F5 BNK solve
 adjacent problems, and the interesting architecture is the one that uses both.
 
