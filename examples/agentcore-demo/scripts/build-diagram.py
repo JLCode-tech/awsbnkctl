@@ -100,18 +100,20 @@ def build():
     # ── Path 1 ───────────────────────────────────────────────────────────────
     py = 96
     panel(40, py, W - 80, 178, "1", "Trusted agent path", "runs today", OK)
-    box(70, py + 52, 168, 62, "AgentCore Runtime", "ENI 10.0.11.15", AWS)
+    box(70, py + 52, 168, 62, "AgentCore Runtime", "ENIs .11.15 / .12.191", AWS)
+    text(70, py + 130, "multi-homed — key limits on", 9.5, MUTED)
+    text(70, py + 144, "caller identity, not client IP", 9.5, MUTED)
     box(302, py + 34, 150, 52, "Amazon Bedrock", "stopReason: tool_use", AWS)
     arrow(238, py + 62, 302, py + 50, "1. reason", AWS)
     arrow(302, py + 74, 240, py + 80, "4. narrate", AWS, above=False)
     frame(520, py + 40, 210, 104, F5, "#fff", None, 2)
     text(625, py + 64, "F5 BNK  (TMM)", 12.5, INK, "600", "middle")
     text(625, py + 84, "VIP 10.0.10.100", 10.5, MUTED, anchor="middle", mono=True)
-    text(625, py + 102, "authn · authz · rate · log", 10, MUTED, anchor="middle", mono=True)
+    text(625, py + 102, "authz · rate · firewall · log", 10, MUTED, anchor="middle", mono=True)
     text(625, py + 126, "ONLY CHECKPOINT", 9.5, F5, "700", "middle")
     arrow(238, py + 100, 520, py + 100, "2. tools/call", LINE, above=False)
     box(792, py + 62, 150, 58, "MCP tool pod", "forecast()", LINE)
-    arrow(730, py + 92, 792, py + 92, "3. $", OK)
+    arrow(730, py + 92, 792, py + 92, "3. fact", OK)
     text(1000, py + 84, "AgentCore is not in", 10.5, MUTED)
     text(1000, py + 99, "the tool hop, by design.", 10.5, MUTED)
 
@@ -136,18 +138,20 @@ def build():
     panel(40, py, W - 80, 200, "3", "Stranger path", "runs today", OK)
     box(70, py + 62, 176, 62, "Unmanaged caller", "another cloud · a script", MUTED)
     frame(330, py + 34, 250, 130, F5, "#fff", None, 2)
-    text(455, py + 54, "F5 BNK  (TMM)", 12.5, INK, "600", "middle")
+    text(455, py + 52, "F5 BNK  (TMM)", 12.5, INK, "600", "middle")
+    text(455, py + 68, "refused before the pod", 9.5, MUTED, anchor="middle", mono=True)
     for i, (line, col) in enumerate([
-        ("401  no / wrong credential", DENY),
         ("403  privileged tool", DENY),
         ("429  rate limit exceeded", DENY),
         ("---  non-VPC source rejected", DENY),
-        ("200  forecast allowed", OK),
+        ("200  forecast → forwarded", OK),
     ]):
-        text(348, py + 78 + i * 17, line, 10.5, col, "600", mono=True)
+        text(348, py + 90 + i * 17, line, 10.5, col, "600", mono=True)
     arrow(246, py + 99, 330, py + 99, "POST", LINE)
     box(646, py + 70, 150, 58, "MCP tool pod", None, LINE)
     arrow(580, py + 99, 646, py + 99)
+    text(646, py + 148, "401  no / wrong credential", 10.5, DENY, "600", mono=True)
+    text(646, py + 163, "issued by the tool, not BNK", 9.5, MUTED)
     text(830, py + 74, "No AgentCore component is in", 11, INK, "600")
     text(830, py + 91, "this path — no JWT check, no", 10.5, MUTED)
     text(830, py + 106, "Cedar, no guardrail. This is the", 10.5, MUTED)
@@ -199,7 +203,8 @@ def build_estate():
         text(52, y + 22, label, 11, INK if inpath else MUTED, "600")
         if tpm:
             frame(370, y + 5, 84, 24, AWS, "#fff8ee", None, 1.2)
-            text(412, y + 21, "AWS TPM", 9, "#8a5200", "700", "middle")
+            text(412, y + 21, "RPM·TPM·CPS", 8, "#8a5200", "700", "middle")
+            text(412, y + 40, "AWS covers this row", 8.5, MUTED, anchor="middle")
         if inpath:
             arrow(462, y + 17, 543, 208, None, F5)
         elif cwlogs:
@@ -256,9 +261,10 @@ def build_estate():
         "Enforcement needs BNK in the path. Rows it does not front are visible but not stoppable.",
         "BNK token counting parses OpenAI-shaped usage; Bedrock-native responses meter as zero today (F5 feature request).",
         "The CloudWatch lane is accounting after the fact \u2014 it reports spend, it cannot prevent it.",
-        "AgentCore Gateway TPM is real on its own path, but path-scoped, excludes pass-through, and fails open.",
+        "AgentCore Gateway limits are real and cover requests, tokens AND connections \u2014 but only on its own path,",
+        "   scoped to /v1/chat|messages|responses, excluding pass-through targets, and they fail open by design.",
     ]):
-        text(40, 638 + i * 18, "\u2022 " + line, 10.5, MUTED)
+        text(40, 638 + i * 18, ("\u2022 " if not line.startswith("  ") else "") + line, 10.5, MUTED)
 
     out.append("</svg>")
     return "\n".join(out)
