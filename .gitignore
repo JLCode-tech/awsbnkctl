@@ -82,3 +82,10 @@ docs/demo/
 # assessments of gaps. Kept off the public repo like docs/design/ and docs/spikes/;
 # the settled outcome belongs in docs/ARCHITECTURE.md instead.
 docs/adr/
+
+# --- Internal remediation tracker (local-only) ---
+# Maintainer-facing punch list: open defects, unmerged security items, and repo
+# housekeeping. Naming an unfixed security issue in a public repo hands a reader
+# a map of where we are weak, so this stays local. Anything in it that users need
+# belongs in the issue tracker or the docs proper.
+docs/REMEDIATION.md
