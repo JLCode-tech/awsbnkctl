@@ -21,8 +21,8 @@ from the AWS Local Zone validation described in
 | `manifests/http2.yaml` | HTTP/2: namespace, `F5BnkGateway` VIP pool (`10.0.10.202/32`), backend, `HTTPRoute` | Control plane **passed** (`Programmed=True`); data plane **timed out** — VPC CNI claimed the VIP on the node's primary ENI, then return traffic bypassed TMM for want of SNAT |
 | `manifests/diameter.yaml` | Diameter over TCP 3868: namespace, VIP pool (`10.0.10.201/32`), backend, `L4Route` | Control plane **passed**; data plane **timed out** — same asymmetric-routing cause |
 | `manifests/sctp.yaml` | SCTP on 9000: namespace, VIP pool (`10.0.10.200/32`), echo backend, `L4Route` | Control plane **failed** — the Gateway listener rejects `protocol: SCTP` outright (`Listener protocol not supported: SCTP`). This manifest cannot be applied successfully as written |
-| `manifests/snatpool.yaml` | `F5SPKSnatpool` with a shared SNAT address (`10.0.20.240`) | Not covered by the report |
-| `manifests/egress.yaml` | `F5SPKEgress` capturing the three namespaces above | Uses the layout that breaks on AWS — **see the warning below** |
+| `manifests/egress.yaml` | `F5SPKEgress` (`perth-test-egress`) capturing the three namespaces above: `SRC_TRANS_AUTOMAP` + a pseudo-CNI VxLAN tunnel on the node's `ens5` | **This was the fix we tried, and it did not work.** Applied to force pod return traffic back through TMM. Control plane accepted it (`Programmed=True`); the data plane still timed out. Suspected VxLAN encapsulation trouble or Security Group drops on the worker→TMM return path |
+| `manifests/snatpool.yaml` | `F5SPKSnatpool` with a shared SNAT address (`10.0.20.240`) | Part of the same SNAT remediation attempt |
 
 The VIP and SNAT addresses assume the standard data-path layout used across
 `examples/` (`10.0.10.0/24` external, `10.0.20.0/24` internal). Adjust them to
@@ -64,19 +64,26 @@ awsbnkctl k delete namespace sctp-scenario
 kubectl delete -f examples/local-zone/manifests/sctp.yaml
 ```
 
-## Warning: `egress.yaml` uses the pattern that does not work on AWS
+## About `egress.yaml` — the attempted fix
+
+`egress.yaml` is not a working configuration and was never meant to be read as
+one. The HTTP/2 and Diameter data paths failed because backend pods sent return
+traffic out via the AWS default gateway instead of back through TMM, so this
+`F5SPKEgress` was applied to force that traffic through TMM. It did not help:
+the control plane accepted it, and the data plane still timed out. The report's
+§3.1 records the suspected causes — VxLAN encapsulation, or Security Group drops
+on the worker-node→TMM return path.
 
 > [!WARNING]
-> `manifests/egress.yaml` sets `pseudoCNIConfig.vxlan.create: true` with
-> `tmmInterfaceName: int-vlan` — the **dual-interface** egress layout. On EKS with
-> the AWS VPC CNI this black-holes TMM traffic: the node-side `vxlan100` VTEP
-> fails to come up, while TMM still installs a broad route pointing at it, which
-> breaks **ingress** as well as egress.
+> Independently of that result, this manifest uses a layout that is known not to
+> work on AWS: `pseudoCNIConfig.vxlan.create: true` with
+> `tmmInterfaceName: int-vlan` is the **dual-interface** egress shape, and on EKS
+> with the AWS VPC CNI the node-side `vxlan100` VTEP does not come up while TMM
+> still installs a broad route pointing at it — which breaks **ingress** as well
+> as egress.
 >
-> For transparent egress on AWS use the `external-only` pattern instead — see
-> [`examples/egress-demo/`](../egress-demo/), which is validated end to end.
-> Treat `egress.yaml` here as a reference for non-AWS / edge CNI environments
-> only.
+> For transparent egress that does work on AWS, use the `external-only` pattern:
+> [`examples/egress-demo/`](../egress-demo/) is validated end to end.
 
-It also hardcodes `nodeInterfaceName: ens5`, which is correct for AL2023 on Nitro
-instances but will not match every node type.
+It also hardcodes `nodeInterfaceName: ens5`, correct for AL2023 on Nitro
+instances but not for every node type.

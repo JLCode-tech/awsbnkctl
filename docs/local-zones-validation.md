@@ -45,13 +45,14 @@ We deployed 3 core validation scenarios targeting typical 5G edge workload profi
 * **Data Plane Status:** **FAIL (Timeouts)**
   * **Observation:** Client traffic sent to `10.0.10.202:80` timed out.
   * **Root Cause:** Asymmetric routing / EKS VPC CNI IPAM conflict. The VPC CNI automatically reserved `10.0.10.202` on the worker node's primary ENI before F5 could utilize it. After manually correcting the ENI secondary IP assignments to point to TMM, traffic reached TMM but failed to return to the client. This indicates missing Source NAT (SNAT) rules, causing the backend pod to route its return traffic via the AWS default gateway rather than back through TMM.
+  * **Remediation Attempted:** We deployed an `F5SPKEgress` policy (`perth-test-egress`) configured with `SRC_TRANS_AUTOMAP` and a pseudo-CNI VxLAN tunnel targeting the worker node's primary interface (`ens5`) to force pod return traffic to route through TMM. While the control plane successfully processed this (`Programmed=True`), data-plane traffic continued to time out, indicating potential VxLAN encapsulation issues or AWS Security Group drops on the return path between the worker node and the TMM node. The manifests for this attempt are preserved as [`examples/local-zone/manifests/egress.yaml`](../examples/local-zone/manifests/egress.yaml) and [`snatpool.yaml`](../examples/local-zone/manifests/snatpool.yaml).
 
 ### 3.2. Diameter (TCP L4)
 * **Configuration:** `Gateway` (TCP 3868) and `L4Route` mapped to `diameter-backend`.
 * **Control Plane Status:** **PASS**
   * `L4Route` successfully deployed and reached `Programmed=True`.
 * **Data Plane Status:** **FAIL (Timeouts)**
-  * **Observation:** Identical to HTTP/2. The L4 connection established through the `BNK_EXT` subnet but timed out awaiting server reply due to SNAT/Asymmetric routing constraints.
+  * **Observation:** Identical to HTTP/2. The L4 connection established through the `BNK_EXT` subnet but timed out awaiting server reply due to the same SNAT/Asymmetric routing constraints, despite `F5SPKEgress` being applied.
 
 ### 3.3. SCTP (Signaling)
 * **Configuration:** `Gateway` (SCTP 9000) and `L4Route` mapped to `sctp-echo-backend`.
