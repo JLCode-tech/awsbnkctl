@@ -81,6 +81,12 @@ When the Agent acts, it follows this workflow:
 
 ### Architectural Data Paths
 
+![The three governed paths](images/three-paths.svg)
+
+*Regenerate with `python3 scripts/build-diagram.py`; convert for slides with
+`rsvg-convert -w 2400 images/three-paths.svg -o three-paths.png`.*
+
+
 Because both platforms use the term "Gateway," their roles need separating. The
 split is **not** "AWS does semantics, F5 does network" — BNK can validate JWTs,
 run access policy, and (via iRule integration) apply guardrails itself. The real
@@ -536,6 +542,25 @@ See "Closing the token gap" below.
 ---
 
 ## 5. Running the End-to-End Test
+
+**Shortcut — run the whole thing:**
+
+```bash
+cd examples/agentcore-demo
+AWS_PROFILE=<profile> ./scripts/demo.sh          # guided walk-through
+AWS_PROFILE=<profile> ./scripts/demo.sh --check  # preflight only
+AWS_PROFILE=<profile> ./scripts/demo.sh --quick  # skip agent invokes (~2 min)
+```
+
+`demo.sh` drives both live paths, asserts every expected status, and prints the
+Forge URLs to open. It exits non-zero if any outcome does not match, so it
+doubles as a smoke test. Stranger-path calls run on the jumphost over SSM,
+because the VIP is private. It changes no cluster config.
+
+The manual runbook below is the same sequence, step by step, if you want to
+narrate it yourself.
+
+---
 
 A runbook you can follow top to bottom. Each step states what you should see.
 
@@ -1043,4 +1068,6 @@ To fix this:
 | `mcp-observability.yaml` | `llm-egress` namespace, Loki, `bnkgov-collector` Fluent Bit DaemonSet |
 | `mcp-bedrock-token-shipper.yaml` | IRSA ServiceAccount + shipper that pulls Bedrock token counts into Loki |
 | `external-agent.py` | Stranger-path client (run from inside the VPC) |
+| `scripts/demo.sh` | Guided walk-through / smoke test of both live paths |
+| `scripts/build-diagram.py` | Regenerates `images/three-paths.svg` |
 | `scripts/setup-agentcore-network.sh` | SGs, SG-to-SG ingress, private Route 53 zone |
