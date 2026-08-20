@@ -6,20 +6,31 @@
 > read. These are standalone BNK custom resources you apply to a cluster you
 > already have.
 
-Reference manifests for specialised BNK edge and telco configurations, originally
-captured from Local Zone / edge work:
+Reference manifests for specialised BNK edge and telco configurations, captured
+from the AWS Local Zone validation described in
+[`docs/local-zones-validation.md`](../../docs/local-zones-validation.md).
 
-| File | What it declares |
-| --- | --- |
-| `manifests/sctp.yaml` | SCTP routing: namespace, `F5BnkGateway` VIP pool (`10.0.10.200/32`), echo backend |
-| `manifests/diameter.yaml` | Diameter routing: namespace, `F5BnkGateway` VIP pool (`10.0.10.201/32`), backend |
-| `manifests/http2.yaml` | HTTP/2 routing: namespace, `F5BnkGateway` VIP pool (`10.0.10.202/32`), backend |
-| `manifests/snatpool.yaml` | `F5SPKSnatpool` with a shared SNAT address (`10.0.20.240`) |
-| `manifests/egress.yaml` | `F5SPKEgress` capturing the three namespaces above — **see the warning below** |
+> [!IMPORTANT]
+> **None of the three protocol manifests reached a working data path in that
+> validation.** They are preserved as a starting point and as the reproduction
+> case for the findings, not as configurations known to carry traffic. Read the
+> report before assuming any of them works.
+
+| File | What it declares | Validation result |
+| --- | --- | --- |
+| `manifests/http2.yaml` | HTTP/2: namespace, `F5BnkGateway` VIP pool (`10.0.10.202/32`), backend, `HTTPRoute` | Control plane **passed** (`Programmed=True`); data plane **timed out** — VPC CNI claimed the VIP on the node's primary ENI, then return traffic bypassed TMM for want of SNAT |
+| `manifests/diameter.yaml` | Diameter over TCP 3868: namespace, VIP pool (`10.0.10.201/32`), backend, `L4Route` | Control plane **passed**; data plane **timed out** — same asymmetric-routing cause |
+| `manifests/sctp.yaml` | SCTP on 9000: namespace, VIP pool (`10.0.10.200/32`), echo backend, `L4Route` | Control plane **failed** — the Gateway listener rejects `protocol: SCTP` outright (`Listener protocol not supported: SCTP`). This manifest cannot be applied successfully as written |
+| `manifests/snatpool.yaml` | `F5SPKSnatpool` with a shared SNAT address (`10.0.20.240`) | Not covered by the report |
+| `manifests/egress.yaml` | `F5SPKEgress` capturing the three namespaces above | Uses the layout that breaks on AWS — **see the warning below** |
 
 The VIP and SNAT addresses assume the standard data-path layout used across
 `examples/` (`10.0.10.0/24` external, `10.0.20.0/24` internal). Adjust them to
 match your own subnets before applying.
+
+For a protocol path that *is* proven on AWS, see the `http2` and `diameter`
+entries in `awsbnkctl demo list` — both are rated green and drive real traffic
+through a BNK VIP.
 
 ## Prerequisites
 

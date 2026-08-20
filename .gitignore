@@ -76,4 +76,9 @@ docs/demo/
 
 # --- HuggingFace token (gated model auth; never commit) ---
 .hf_token
+
+# --- Architecture decision records (local-only) ---
+# ADRs capture in-flight design debate, including rejected options and candid
+# assessments of gaps. Kept off the public repo like docs/design/ and docs/spikes/;
+# the settled outcome belongs in docs/ARCHITECTURE.md instead.
 docs/adr/

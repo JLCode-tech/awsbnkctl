@@ -47,7 +47,7 @@ pattern: host-device
 # testing.jumphost.enabled: true (every demo use-case drives traffic from it).
 #
 # ttl is a lifetime HINT only: DEMO_EXPIRY = now + ttl, surfaced as a countdown by
-# `awsbnkctl inspect`. No reaper acts on it — nothing deletes the cluster when it
+# `awsbnkctl status`. No reaper acts on it — nothing deletes the cluster when it
 # expires. Tear it down yourself.
 #
 # demo:
