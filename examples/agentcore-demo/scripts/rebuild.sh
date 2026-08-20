@@ -127,13 +127,15 @@ step "Gateway, HTTPRoutes and the TLS certificate"
 ./awsbnkctl k apply -f examples/agentcore-demo/gateway-deployment.yaml \
   || die "gateway apply failed"
 note "waiting for cert-manager to issue mcp-tls from the in-cluster CA..."
+# NB: do not name this R — R is the ANSI reset used by the helpers above.
+CERT_READY=""
 for i in $(seq 1 60); do
-  R=$(kubectl get certificate mcp-tls -n default \
+  CERT_READY=$(kubectl get certificate mcp-tls -n default \
       -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
-  [ "$R" = "True" ] && break
+  [ "$CERT_READY" = "True" ] && break
   sleep 5
 done
-[ "$R" = "True" ] || die "mcp-tls certificate never went Ready — the :443 listener will not bind"
+[ "$CERT_READY" = "True" ] || die "mcp-tls certificate never went Ready — the :443 listener will not bind"
 ok "mcp-tls issued"
 for i in $(seq 1 60); do
   P=$(kubectl get gateway "$CLUSTER-gateway" -n default \
@@ -173,12 +175,13 @@ ok "loki + collectors applied"
 
 # ── 7. bedrock token shipper ─────────────────────────────────────────────────
 step "Bedrock token shipper  (out-of-path accounting lane)"
-if ! aws bedrock get-model-invocation-logging-configuration \
-      --query 'loggingConfig.cloudWatchConfig.logGroupName' --output text >/dev/null 2>&1; then
+LG=$(aws bedrock get-model-invocation-logging-configuration \
+      --query 'loggingConfig.cloudWatchConfig.logGroupName' --output text 2>/dev/null)
+if [ -z "$LG" ] || [ "$LG" = "None" ]; then
   warn "Bedrock model-invocation logging is NOT configured — the shipper will find nothing."
   warn "See design doc section 9 step 7 to recreate it (needs \${ACCT} not \$ACCT in zsh)."
 else
-  ok "Bedrock invocation logging already configured (kept across teardown)"
+  ok "Bedrock invocation logging already configured → $LG"
 fi
 # The tracked manifest keeps a <account-id> placeholder on purpose: this repo is
 # public. Substitute into a temp file and apply that; never write it back.
