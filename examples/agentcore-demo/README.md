@@ -380,6 +380,7 @@ values — replace them for anything real):
 
 | Control | Result |
 | --- | --- |
+| TLS termination on :443, cert from the in-cluster CA | encrypted transport; verify with `--cacert` |
 | Rate limit, 10 / 60 s, keyed on **caller identity** | `429` with a JSON-RPC error and `Retry-After: 60` |
 | Privileged-tool gate — `get_account_balance` requires the agent token | `403`, request never reaches the pod |
 | L4 firewall — accept from `10.0.0.0/16`, explicit reject otherwise | connection refused |
@@ -454,7 +455,8 @@ does front an LLM backend.
 | Rate-limit window never rolls over | `table incr` + `table lifetime` refreshes the idle timer on every hit. Use `table set KEY VALUE TIMEOUT LIFETIME` once, then `-notouch` on every read. |
 | VIP goes dark after applying a policy file | A second manifest re-declared the `Gateway` with only `metadata`. `kubectl apply` prunes `spec` fields from the previous last-applied — including `listeners`. |
 | `HSL::send` from an iRule delivers nothing | Not wired in BNK 2.3. `log local0.` works; that is what the collector tails. |
-| HTTPS listener reports healthy but nothing listens on the port | BNK 2.3 accepts a `protocol: HTTPS` + `tls.mode: Terminate` listener, reports `Accepted/Programmed/ResolvedRefs=True`, and TMM logs CREATEs for `virtual_server`, `profile_clientssl` and `key_certificate_pair` — yet the port refuses connections. Ruled out: security group (443 allowed), `F5BigFwPolicy` (reject rule not the cause — still refused with the port constraint removed), and the listener SNI `hostname` (removed, no change). Unresolved; see §7.2. |
+| HTTPS listener reports healthy but nothing listens on the port | **Do not change a listener's protocol in place on the same port.** Converting 443 from HTTP to HTTPS on a live Gateway leaves it dead: BNK deletes the old listener's TMM objects, creates the new ones, reports `Programmed=True`, and never binds the port. `kubectl delete` the Gateway and re-apply — a fresh listener works. Not `tls.mode`, not the SNI hostname, not the firewall, not the security group (all ruled out by experiment). |
+| `Gateway` with `infrastructure.parametersRef` → `F5BnkGateway` gets no address | That path allocates the VIP through F5 IPAM (`provider: f5-ip-provider`), and no `IPAM`/`IPAMRange` CR exists in this cluster — the Gateway is accepted, gets no address, and no TMM objects are created at all. Use `spec.addresses` with an explicit `IPAddress` instead, which is what this demo does. |
 | `httpx.ReadError` / `MCPClientInitializationError` from the agent right after redeploying the MCP pod | A warm agent container holds a pooled connection to the pod that was just replaced. Transient — invoke again. BNK is not involved; verify by replaying `initialize` through the VIP with curl. |
 | Agent politely refuses a tool instead of calling it | The model read the tool's own description and declined — a model guardrail, not a network one. Keep sensitivity wording out of the model-facing docstring, or you will never see the policy decision. |
 | Pinned pip versions fail and the pod crash-loops | Do not guess versions. Read them off a working pod: `kubectl exec deploy/mcp-financial-tool -- pip list`. |
