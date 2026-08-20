@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,7 +239,7 @@ network:
         az: ap-southeast-2a
   natGateways: 1
 cluster:
-  kubernetesVersion: "1.32"
+  kubernetesVersion: "1.35"
   nodeGroups:
     - name: default
       instanceType: t3.medium
@@ -259,8 +260,9 @@ func TestLoad_ClusterSpecParsed(t *testing.T) {
 	if c.ClusterSpec == nil {
 		t.Fatal("ClusterSpec: nil, want populated struct")
 	}
-	if c.ClusterSpec.KubernetesVersion != "1.32" {
-		t.Errorf("KubernetesVersion: got %q, want 1.32", c.ClusterSpec.KubernetesVersion)
+	if c.ClusterSpec.KubernetesVersion != "1.35" {
+		t.Errorf("KubernetesVersion: got %q, want 1.35 (the value in the fixture above)",
+			c.ClusterSpec.KubernetesVersion)
 	}
 	if len(c.ClusterSpec.NodeGroups) != 1 {
 		t.Fatalf("NodeGroups len: got %d, want 1", len(c.ClusterSpec.NodeGroups))
@@ -293,7 +295,7 @@ cluster:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.ClusterSpec.KubernetesVersion != "1.32" {
+	if c.ClusterSpec.KubernetesVersion != MinKubernetesVersion {
 		t.Errorf("default KubernetesVersion: got %q, want %s", c.ClusterSpec.KubernetesVersion, MinKubernetesVersion)
 	}
 	ng := c.ClusterSpec.NodeGroups[0]
@@ -317,7 +319,7 @@ cluster:
 func TestLoad_ClusterSpecRejectsEmptyNodeGroups(t *testing.T) {
 	yaml := minimalYAML + `
 cluster:
-  kubernetesVersion: "1.32"
+  kubernetesVersion: "1.35"
   nodeGroups: []
 `
 	dir := t.TempDir()
@@ -2093,8 +2095,24 @@ func TestLoad_KubernetesVersion_BelowFloorRejected(t *testing.T) {
 
 // TestLoad_KubernetesVersion_AtOrAboveFloorAccepted covers the floor itself and
 // versions above it, including the ones that only warn.
+//
+// The floor moves as EKS standard support expires, so derive the cases from
+// MinKubernetesVersion rather than hardcoding them — a hardcoded list silently
+// becomes a list of rejected versions the next time the floor is raised, which
+// is exactly what happened when it went 1.32 -> 1.34.
 func TestLoad_KubernetesVersion_AtOrAboveFloorAccepted(t *testing.T) {
-	for _, v := range []string{"1.32", "1.33", "1.35", "1.36", "2.0"} {
+	floorMajor, floorMinor, err := parseKubernetesVersion(MinKubernetesVersion)
+	if err != nil {
+		t.Fatalf("MinKubernetesVersion %q does not parse: %v", MinKubernetesVersion, err)
+	}
+	cases := []string{
+		MinKubernetesVersion,                                         // the floor
+		fmt.Sprintf("%d.%d", floorMajor, floorMinor+1),               // one above
+		fmt.Sprintf("%d.%d", floorMajor, maxTestedKubernetesMinor),   // highest tested
+		fmt.Sprintf("%d.%d", floorMajor, maxTestedKubernetesMinor+1), // warns, still accepted
+		"2.0", // a future major
+	}
+	for _, v := range cases {
 		t.Run(v, func(t *testing.T) {
 			dir := t.TempDir()
 			c, err := Load(writeFile(t, dir, "cluster.yaml", versionYAML(v)))
