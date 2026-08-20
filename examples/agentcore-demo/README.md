@@ -224,9 +224,17 @@ self-hosted models on your own GPUs, SageMaker endpoints, third-party LLM APIs,
 or batch inference. An in-path layer can meter all of those under one policy,
 with one chargeback feed.
 
-Two limits to state plainly: BNK has to be *in* the path (it cannot see a
-Lambda's Bedrock call that never traverses it), and its token counting parses
-OpenAI-shaped `usage`, so a Bedrock-native response currently meters as zero.
+**Forge closes the rest.** The out-of-path traffic BNK never sees is still
+accounted for: `mcp-bedrock-token-shipper.yaml` pulls Bedrock's own invocation
+logs from CloudWatch into the same Loki stream Forge reads. That is how Forge
+already shows real Bedrock token counts alongside BNK's governance records in
+this demo. Two lanes — **BNK enforces in path, Forge accounts for everything AWS
+logs** — and Forge is where they join.
+
+Two limits to state plainly. Enforcement needs BNK in the path; rows it does not
+front are visible but not stoppable, and the CloudWatch lane is accounting after
+the fact rather than prevention. And BNK's token counting parses OpenAI-shaped
+`usage`, so a Bedrock-native response currently meters as zero.
 
 
 This is an **AND**, not a comparison. Bedrock AgentCore and F5 BNK solve

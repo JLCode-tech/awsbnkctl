@@ -163,9 +163,9 @@ def build():
 
 
 def build_estate():
-    """BNK as the token-governance layer for the whole AWS AI estate."""
+    """BNK enforces in-path; Forge accounts for everything AWS logs."""
     out.clear()
-    W2, H2 = 1180, 700
+    W2, H2 = 1220, 720
     out.append(
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W2} {H2}" width="{W2}" height="{H2}">'
     )
@@ -177,71 +177,88 @@ def build_estate():
     out.append(f'<rect width="{W2}" height="{H2}" fill="{BG}"/>')
 
     text(40, 44, "Token governance across the AWS AI estate", 23, INK, "700")
-    text(40, 68, "AgentCore Gateway meters its own path. BNK can meter everything you route through it.",
-         13, MUTED)
+    text(40, 68, "BNK enforces where it is in the path. Forge accounts for everything AWS logs. "
+                 "Together they cover the estate.", 13, MUTED)
 
-    # where tokens are actually burned
+    # (label, AWS TPM covers it, BNK can be in path, AWS writes CloudWatch logs)
     rows = [
-        ("Agent via AgentCore Gateway", True, True),
-        ("Agents on EKS / ECS / EC2", False, True),
-        ("Self-hosted vLLM / NIM on GPU nodes", False, True),
-        ("Third-party LLM APIs (OpenAI, …)", False, True),
-        ("SageMaker endpoints", False, True),
-        ("Batch / offline inference", False, True),
-        ("Apps calling Bedrock over the AWS backbone", False, False),
+        ("Agent via AgentCore Gateway", True, True, True),
+        ("Agents on EKS / ECS / EC2", False, True, True),
+        ("Self-hosted vLLM / NIM on GPU nodes", False, True, False),
+        ("Third-party LLM APIs (OpenAI, ...)", False, True, False),
+        ("SageMaker endpoints", False, True, True),
+        ("Apps calling Bedrock over the AWS backbone", False, False, True),
     ]
     text(40, 112, "WHERE THE TOKENS ARE BURNED", 10.5, MUTED, "700")
-    y0 = 128
-    for i, (label, aws_tpm, routable) in enumerate(rows):
-        y = y0 + i * 46
-        stroke = LINE if routable else "#d8dee5"
-        fill = "#fff" if routable else "#f4f6f8"
-        frame(40, y, 330, 36, stroke, fill, None if routable else "4 3")
-        text(54, y + 23, label, 11.5, INK if routable else MUTED, "600")
-        if aws_tpm:
-            frame(378, y + 6, 96, 24, AWS, "#fff8ee", None, 1.2)
-            text(426, y + 22, "AWS TPM", 9.5, "#8a5200", "700", "middle")
-        if routable:
-            arrow(486, y + 18, 560, y + 18)
-        else:
-            text(486, y + 22, "not in path", 9.5, MUTED, "italic", mono=True)
+    y0 = 130
+    for i, (label, tpm, inpath, cwlogs) in enumerate(rows):
+        y = y0 + i * 44
+        stroke = LINE if inpath else "#d8dee5"
+        fill = "#fff" if inpath else "#f4f6f8"
+        frame(40, y, 322, 34, stroke, fill, None if inpath else "4 3")
+        text(52, y + 22, label, 11, INK if inpath else MUTED, "600")
+        if tpm:
+            frame(370, y + 5, 84, 24, AWS, "#fff8ee", None, 1.2)
+            text(412, y + 21, "AWS TPM", 9, "#8a5200", "700", "middle")
+        if inpath:
+            arrow(462, y + 17, 543, 208, None, F5)
+        elif cwlogs:
+            arrow(462, y + 17, 543, 372, None, "#c9d2db", "3 3")
 
-    # BNK
-    frame(560, 128, 250, 268, F5, "#fff", None, 2)
-    text(685, 156, "F5 BNK", 14, INK, "700", "middle")
-    text(685, 174, "one enforcement point", 10, MUTED, anchor="middle")
+    # lane A: BNK, in-path enforcement
+    frame(545, 122, 232, 172, F5, "#fff", None, 2)
+    text(661, 148, "F5 BNK", 14, INK, "700", "middle")
+    text(661, 165, "in path \u2014 CAN STOP IT", 9.5, F5, "700", "middle")
     for i, line in enumerate([
         "per-user / per-model limits",
-        "429 when a budget is spent",
-        "counts persisted in dSSM",
-        "HSL export for chargeback",
-        "one policy, not one per gateway",
+        "429 when budget is spent",
+        "counts in dSSM",
     ]):
-        text(578, 204 + i * 22, "\u2022 " + line, 10.5, INK, mono=True)
-    text(685, 336, "parses OpenAI-shaped usage", 9.5, DENY, "700", "middle")
-    text(685, 352, "Bedrock-native meters ZERO today", 9.5, DENY, "600", "middle")
-    text(685, 376, "see \u00a74.3 \u2014 F5 feature request", 9, MUTED, anchor="middle")
+        text(560, 190 + i * 20, "\u2022 " + line, 10, INK, mono=True)
+    text(661, 262, "parses OpenAI-shaped usage;", 9, DENY, "600", "middle")
+    text(661, 276, "Bedrock-native meters ZERO today", 9, DENY, "600", "middle")
 
-    arrow(810, 200, 880, 200)
-    box(880, 172, 250, 58, "Metering / chargeback", "OpenMeter \u00b7 per team, per model", LINE)
-    arrow(810, 300, 880, 300)
-    box(880, 272, 250, 58, "BNK Forge", "usage \u00b7 latency \u00b7 refusals", LINE)
+    # lane B: CloudWatch, out-of-path accounting
+    frame(545, 316, 232, 112, "#c9d2db", "#f8fafb", "4 3", 1.4)
+    text(661, 342, "CloudWatch logs", 13, INK, "700", "middle")
+    text(661, 359, "out of path \u2014 SEES ONLY", 9.5, MUTED, "700", "middle")
+    text(560, 382, "\u2022 Bedrock invocation logs", 10, INK, mono=True)
+    text(560, 400, "\u2022 real inputTokens / outputTokens", 10, INK, mono=True)
+
+    # Forge joins both
+    frame(838, 178, 210, 214, LINE, "#fff", None, 1.8)
+    text(943, 206, "BNK Forge", 14, INK, "700", "middle")
+    text(943, 224, "the join point", 10, MUTED, anchor="middle")
+    for i, line in enumerate([
+        "BNK: who was allowed,",
+        "  throttled, refused",
+        "AWS: what it cost",
+        "  in real tokens",
+        "one view, whole estate",
+    ]):
+        text(852, 250 + i * 19, line, 10, INK, mono=True)
+    arrow(779, 208, 836, 245, None, F5)
+    arrow(779, 372, 836, 330, None, "#9aa5b1")
+
+    box(838, 424, 210, 50, "Chargeback", "per team \u00b7 per model", LINE)
+    arrow(943, 392, 943, 424)
 
     # the point
-    frame(40, 452, 1090, 92, "#e3e8ee", PANEL, None, 1)
-    text(60, 480, "The question this answers", 12, INK, "700")
-    text(60, 502, "\u201cWhat is our AI spend, by team, and who is about to blow the budget?\u201d",
-         12.5, INK, "600")
-    text(60, 524, "The Gateway limiter answers it for one row. An in-path layer answers it for the estate.",
-         11, MUTED)
+    frame(40, 500, 1140, 84, "#e3e8ee", PANEL, None, 1)
+    text(60, 528, "\u201cWhat is our AI spend, by team, and who is about to blow the budget?\u201d",
+         13, INK, "700")
+    text(60, 552, "The Gateway limiter answers it for one row. BNK + Forge answers it for every row \u2014 "
+                  "enforcing on the ones BNK fronts,", 11, MUTED)
+    text(60, 570, "accounting for the rest from AWS's own logs.", 11, MUTED)
 
-    text(40, 580, "HONEST LIMITS", 10.5, DENY, "700")
+    text(40, 618, "HONEST LIMITS", 10.5, DENY, "700")
     for i, line in enumerate([
-        "BNK must be in the path \u2014 it cannot meter a Lambda's Bedrock call that never traverses it (bottom row).",
-        "Token counting parses OpenAI-shaped usage. Bedrock returns inputTokens/outputTokens and meters as zero today.",
-        "AgentCore Gateway TPM is real on its own path \u2014 but path-scoped, excludes pass-through, and fails open.",
+        "Enforcement needs BNK in the path. Rows it does not front are visible but not stoppable.",
+        "BNK token counting parses OpenAI-shaped usage; Bedrock-native responses meter as zero today (F5 feature request).",
+        "The CloudWatch lane is accounting after the fact \u2014 it reports spend, it cannot prevent it.",
+        "AgentCore Gateway TPM is real on its own path, but path-scoped, excludes pass-through, and fails open.",
     ]):
-        text(40, 600 + i * 18, "\u2022 " + line, 10.5, MUTED)
+        text(40, 638 + i * 18, "\u2022 " + line, 10.5, MUTED)
 
     out.append("</svg>")
     return "\n".join(out)
