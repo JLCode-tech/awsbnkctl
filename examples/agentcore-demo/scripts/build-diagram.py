@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Render the three governed paths as an SVG, for slides.
+"""Render the demo's diagrams as SVGs, for slides.
 
-  python3 scripts/build-diagram.py            -> images/three-paths.svg
-  python3 scripts/build-diagram.py --out X.svg
+  python3 scripts/build-diagram.py     -> images/three-paths.svg
+                                       -> images/estate-token-governance.svg
 
 No dependencies. Convert to PNG with:
   rsvg-convert -w 2400 images/three-paths.svg -o images/three-paths.png
@@ -82,6 +82,7 @@ def panel(x, y, w, h, n, title, status, colour):
 
 
 def build():
+    out.clear()
     out.append(
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">'
     )
@@ -159,12 +160,102 @@ def build():
     return "\n".join(out)
 
 
+
+
+def build_estate():
+    """BNK as the token-governance layer for the whole AWS AI estate."""
+    out.clear()
+    W2, H2 = 1180, 700
+    out.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W2} {H2}" width="{W2}" height="{H2}">'
+    )
+    out.append(
+        f'<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" '
+        f'markerHeight="7" orient="auto-start-reverse">'
+        f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{LINE}"/></marker></defs>'
+    )
+    out.append(f'<rect width="{W2}" height="{H2}" fill="{BG}"/>')
+
+    text(40, 44, "Token governance across the AWS AI estate", 23, INK, "700")
+    text(40, 68, "AgentCore Gateway meters its own path. BNK can meter everything you route through it.",
+         13, MUTED)
+
+    # where tokens are actually burned
+    rows = [
+        ("Agent via AgentCore Gateway", True, True),
+        ("Agents on EKS / ECS / EC2", False, True),
+        ("Self-hosted vLLM / NIM on GPU nodes", False, True),
+        ("Third-party LLM APIs (OpenAI, …)", False, True),
+        ("SageMaker endpoints", False, True),
+        ("Batch / offline inference", False, True),
+        ("Apps calling Bedrock over the AWS backbone", False, False),
+    ]
+    text(40, 112, "WHERE THE TOKENS ARE BURNED", 10.5, MUTED, "700")
+    y0 = 128
+    for i, (label, aws_tpm, routable) in enumerate(rows):
+        y = y0 + i * 46
+        stroke = LINE if routable else "#d8dee5"
+        fill = "#fff" if routable else "#f4f6f8"
+        frame(40, y, 330, 36, stroke, fill, None if routable else "4 3")
+        text(54, y + 23, label, 11.5, INK if routable else MUTED, "600")
+        if aws_tpm:
+            frame(378, y + 6, 96, 24, AWS, "#fff8ee", None, 1.2)
+            text(426, y + 22, "AWS TPM", 9.5, "#8a5200", "700", "middle")
+        if routable:
+            arrow(486, y + 18, 560, y + 18)
+        else:
+            text(486, y + 22, "not in path", 9.5, MUTED, "italic", mono=True)
+
+    # BNK
+    frame(560, 128, 250, 268, F5, "#fff", None, 2)
+    text(685, 156, "F5 BNK", 14, INK, "700", "middle")
+    text(685, 174, "one enforcement point", 10, MUTED, anchor="middle")
+    for i, line in enumerate([
+        "per-user / per-model limits",
+        "429 when a budget is spent",
+        "counts persisted in dSSM",
+        "HSL export for chargeback",
+        "one policy, not one per gateway",
+    ]):
+        text(578, 204 + i * 22, "\u2022 " + line, 10.5, INK, mono=True)
+    text(685, 336, "parses OpenAI-shaped usage", 9.5, DENY, "700", "middle")
+    text(685, 352, "Bedrock-native meters ZERO today", 9.5, DENY, "600", "middle")
+    text(685, 376, "see \u00a74.3 \u2014 F5 feature request", 9, MUTED, anchor="middle")
+
+    arrow(810, 200, 880, 200)
+    box(880, 172, 250, 58, "Metering / chargeback", "OpenMeter \u00b7 per team, per model", LINE)
+    arrow(810, 300, 880, 300)
+    box(880, 272, 250, 58, "BNK Forge", "usage \u00b7 latency \u00b7 refusals", LINE)
+
+    # the point
+    frame(40, 452, 1090, 92, "#e3e8ee", PANEL, None, 1)
+    text(60, 480, "The question this answers", 12, INK, "700")
+    text(60, 502, "\u201cWhat is our AI spend, by team, and who is about to blow the budget?\u201d",
+         12.5, INK, "600")
+    text(60, 524, "The Gateway limiter answers it for one row. An in-path layer answers it for the estate.",
+         11, MUTED)
+
+    text(40, 580, "HONEST LIMITS", 10.5, DENY, "700")
+    for i, line in enumerate([
+        "BNK must be in the path \u2014 it cannot meter a Lambda's Bedrock call that never traverses it (bottom row).",
+        "Token counting parses OpenAI-shaped usage. Bedrock returns inputTokens/outputTokens and meters as zero today.",
+        "AgentCore Gateway TPM is real on its own path \u2014 but path-scoped, excludes pass-through, and fails open.",
+    ]):
+        text(40, 600 + i * 18, "\u2022 " + line, 10.5, MUTED)
+
+    out.append("</svg>")
+    return "\n".join(out)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=None)
+    ap.add_argument("--outdir", default=None)
     args = ap.parse_args()
-    dest = pathlib.Path(args.out) if args.out else \
-        pathlib.Path(__file__).resolve().parent.parent / "images" / "three-paths.svg"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(build(), encoding="utf-8")
-    print(f"wrote {dest} ({dest.stat().st_size:,} bytes)")
+    outdir = pathlib.Path(args.outdir) if args.outdir else \
+        pathlib.Path(__file__).resolve().parent.parent / "images"
+    outdir.mkdir(parents=True, exist_ok=True)
+    for name, fn in (("three-paths.svg", build),
+                     ("estate-token-governance.svg", build_estate)):
+        dest = outdir / name
+        dest.write_text(fn(), encoding="utf-8")
+        print(f"wrote {dest} ({dest.stat().st_size:,} bytes)")
