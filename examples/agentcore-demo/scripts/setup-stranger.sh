@@ -40,8 +40,12 @@ set -euo pipefail
 # assertion.
 #
 # Idempotent: re-running finds existing resources by tag and leaves them alone.
-# Tear down with ./scripts/teardown-stranger.sh BEFORE `awsbnkctl down` — a
-# subnet in a secondary CIDR and a cross-referenced SG both block VPC deletion.
+#
+# Tear down with ./scripts/teardown-stranger.sh BEFORE `awsbnkctl down`. The
+# reason is sharper than 'extra resources lying around': this instance's eth0
+# sits in subnet-public-2, which awsbnkctl DOES manage and WILL try to delete
+# (it is listed in PUBLIC_SUBNETS in state.env). Leave the instance running and
+# `down` aborts at phase 03 with a DependencyViolation on its own subnet.
 
 CLUSTER_NAME="${1:-bnk-agentcore-demo}"
 REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || echo "ap-southeast-2")}"
