@@ -374,7 +374,7 @@ values — replace them for anything real):
 
 | Control | Result |
 | --- | --- |
-| Per-client-IP rate limit, 10 / 60 s | `429` with a JSON-RPC error and `Retry-After: 60` |
+| Rate limit, 10 / 60 s, keyed on **caller identity** | `429` with a JSON-RPC error and `Retry-After: 60` |
 | Privileged-tool gate — `get_account_balance` requires the agent token | `403`, request never reaches the pod |
 | L4 firewall — accept from `10.0.0.0/16`, explicit reject otherwise | connection refused |
 
@@ -383,9 +383,21 @@ otherwise), fail-closed if the Secret is missing, constant-time comparison.
 Discovery (`/.well-known/agent-card.json`) stays unauthenticated by design — A2A
 clients and Forge read it before they hold a credential, and it exposes no data.
 
-Because the rate limit is keyed on client IP, the AgentCore runtime and an
-external caller get independent budgets: a single `agentcore invoke` never trips
-it, a tight external loop does.
+The rate limit is keyed on **caller identity** (resolved from the bearer token),
+not on client IP. That matters: the AgentCore runtime is multi-homed across both
+agent subnets — we have logged `10.0.11.15` and `10.0.12.191` for the same
+logical agent — so an IP-keyed bucket would hand one caller a fresh budget per
+ENI, with AWS deciding how many ENIs it gets. An unauthenticated caller has no
+identity to key on and falls back to `ip:<addr>`.
+
+The agent and an external caller therefore get genuinely independent budgets: a
+single `agentcore invoke` never trips the limit, a tight external loop does.
+
+> [!NOTE]
+> The token is never written to a log record. `caller` carries the resolved
+> label (`agent` / `external` / `anonymous`) and `client` keeps the ENI address,
+> so Forge can group by identity while still showing which interface a request
+> arrived on. Logging `$gov_bearer` would put a live credential into Loki.
 
 The full behaviour matrix, verified live:
 
@@ -574,7 +586,7 @@ after a cold start can take ~90 s.
 > any AWS component.
 
 Run it three times in a row. All three must succeed — the rate limit is
-per-client-IP and one invoke uses only a few requests of the budget.
+keyed on caller identity, and one invoke uses only a few requests of the budget.
 
 ### Step 2 — Stranger path: external agent → BNK → MCP tool
 
@@ -595,7 +607,7 @@ Copy `external-agent.py` to that host and run it, or drive it over SSM:
 INSTANCE=<jumphost-instance-id>
 aws ssm send-command --region ap-southeast-2 --instance-ids "$INSTANCE" \
   --document-name AWS-RunShellScript \
-  --parameters 'commands=["for i in $(seq 1 20); do curl -s -o /dev/null -w \"%{http_code} \" -X POST http://10.0.10.100/v1/mcp/forecast -H \"Host: bnk-ingress.bnk-demo.internal\" -H \"Content-Type: application/json\" -H \"Accept: application/json\" -H \"Authorization: Bearer external-agent-token-123\" -d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"tools/call\\\",\\\"params\\\":{\\\"name\\\":\\\"forecast\\\",\\\"arguments\\\":{\\\"symbol\\\":\\\"NVDA\\\",\\\"days\\\":30}}}\"; done"]' \
+  --parameters 'commands=["for i in $(seq 1 20); do curl -s -o /dev/null -w \"%{http_code} \" -X POST http://10.0.10.100/v1/mcp/forecast -H \"Host: bnk-ingress.bnk-demo.internal\" -H \"Content-Type: application/json\" -H \"Accept: application/json\" -H \"Authorization: Bearer demo-external-token-4b9e2d\" -d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"tools/call\\\",\\\"params\\\":{\\\"name\\\":\\\"forecast\\\",\\\"arguments\\\":{\\\"symbol\\\":\\\"NVDA\\\",\\\"days\\\":30}}}\"; done"]' \
   --query 'Command.CommandId' --output text
 # then: aws ssm get-command-invocation --region ap-southeast-2 \
 #         --command-id <id> --instance-id "$INSTANCE" --query StandardOutputContent --output text
