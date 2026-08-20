@@ -93,7 +93,8 @@ cluster:
 
 # bnk: BNK supply-chain credentials, required for phase 12.
 # Replace farArchive and jwt with paths to your own files before running `up`;
-# placeholder paths will cause phase 12 to error at entry.
+# placeholder paths will cause phase 12 to error at entry. Relative paths resolve
+# against the directory holding THIS file, not your shell's working directory.
 #
 # farArchive: path to F5's FAR pull credentials JSON (from the F5 portal).
 #             Type in k8s: kubernetes.io/dockerconfigjson secret named 'far-secret'.

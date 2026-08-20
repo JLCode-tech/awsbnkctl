@@ -1,14 +1,14 @@
-# cluster.yaml — AI rig: BNK load-balancer + GPU inference nodegroup (PRD-11 slice 1)
+# cluster.yaml — AI rig: BNK load-balancer + GPU inference nodegroup.
 #
 # Deploys two nodegroups:
 #   - NodeGroups[0] (bnk): the BNK TMM control nodegroup (3×m6i.4xlarge, on-demand,
 #       pinned to the data-path AZ). Role=bnk is injected automatically by defaults.
-#   - NodeGroups[1] (gpu): NVIDIA GPU inference nodegroup (1×g5.2xlarge, spot,
+#   - NodeGroups[1] (gpu): NVIDIA GPU inference nodegroup (1×g5.xlarge, on-demand,
 #       pinned to ap-southeast-2a + ap-southeast-2c). g5 is NOT available in 2b
 #       — awsbnkctl validate will reject a 2b AZ entry with a clear error.
 #
 # The GPU nodegroup is tainted nvidia.com/gpu=present:NoSchedule so only workloads
-# that tolerate the taint (e.g. vLLM, slice 2) land on it. Phase 11c installs the
+# that tolerate the taint (e.g. vLLM) land on it. Phase 11c installs the
 # NVIDIA k8s-device-plugin DaemonSet (v0.17.1), which advertises nvidia.com/gpu
 # once the g5 node is ACTIVE.
 #
@@ -32,7 +32,8 @@ metadata:
     purpose: bnk-ai-inference
 
 # external-only: BNK TMM gets one external (ingress) interface; GPU inference
-# pods reach the backend over the CNI. The BNK VIP is the slice-2 entry point.
+# pods reach the backend over the CNI. The BNK VIP is the entry point for
+# inference traffic.
 pattern: external-only
 
 network:
@@ -95,15 +96,15 @@ cluster:
       azs:
         - ap-southeast-2a
         - ap-southeast-2c
-      # Taint keeps non-GPU workloads off this nodegroup. vLLM pods (slice 2)
-      # must tolerate nvidia.com/gpu=present:NoSchedule to schedule here.
+      # Taint keeps non-GPU workloads off this nodegroup. Inference pods (e.g.
+      # vLLM) must tolerate nvidia.com/gpu=present:NoSchedule to schedule here.
       taints:
         - key: nvidia.com/gpu
           value: "present"
           effect: NoSchedule
 
 # addons: opt-in cluster add-ons. The AWS Load Balancer Controller (Phase 14b)
-# is REQUIRED for the Envoy-vs-BNK proxy shootout (PRD-11): forge deploys the
+# is REQUIRED for the Envoy-vs-BNK proxy shootout: forge deploys the
 # Envoy proxy as a Service that the controller exposes on an INTERNAL data-path
 # NLB, which the benchmark's external_url resolver reads for the non-BNK leg.
 # Without this the envoy arm fails-closed (no NLB → no front-end to benchmark).
@@ -143,8 +144,10 @@ ai:
     # maxModelLen: 8192
     # scaleToZero: false
 
-# bnk: F5 supply-chain credentials, required by Phase 12. Replace both paths
-# with your own files before running `up` (gitignored).
+# bnk: F5 supply-chain credentials, required by Phase 12. Replace both paths with
+# your own files before running `up`. Relative paths resolve against the
+# directory holding THIS file, not your shell's working directory. Both names are
+# gitignored (cne_pull_64.json, *.jwt) so they are never committed.
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
   jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT

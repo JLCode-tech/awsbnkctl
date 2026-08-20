@@ -43,6 +43,23 @@ awsbnkctl down --config examples/demo/cluster.yaml --yes
 > [!TIP]
 > Reverse-order destroy ensures demo use-cases are cleaned before the underlying infrastructure.
 
+## Cost & teardown
+
+Billable while up: 3x `m6i.4xlarge` workers, the EKS control plane, one NAT
+gateway, and the `t3.small` jumphost — roughly **$3/hour** at `ap-southeast-2`
+on-demand rates, excluding data transfer and EBS. Enabling the optional
+`bigipVE` block adds a chargeable `c5n.2xlarge` plus PAYG BIG-IP licensing on top
+of that.
+
+`demo.ttl` (default `24h`) only records an expiry: `DEMO_EXPIRY` in `state.env`
+and an `awsbnkctl:demo-expiry` tag on every resource, which `awsbnkctl inspect`
+renders as a countdown. **No reaper acts on it — nothing deletes the cluster when
+it expires.** Tear it down yourself:
+
+```bash
+awsbnkctl down --config examples/demo/cluster.yaml --yes
+```
+
 ## Migration Scenarios
 
 This topology includes two core scenarios that highlight the **"migrate to BNK"** story:

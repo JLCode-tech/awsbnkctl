@@ -67,7 +67,16 @@ Then re-check the probe shows `1.1.1.1` BLOCKED. (The egress SNAT flip is unaffe
 
 ---
 
-## Teardown
+## Cost & teardown
+
+Billable while up: 3x `m6i.4xlarge` workers, the EKS control plane, one NAT
+gateway, and a `t3.small` jumphost — roughly **$3/hour** at `ap-southeast-2`
+on-demand rates, excluding data transfer and EBS. The NAT gateway matters here
+beyond its hourly rate: this demo deliberately sends pod traffic to the internet,
+so watch NAT data-processing charges if you leave the probe looping.
+
+Remove the demo resources, then the cluster:
+
 ```bash
 kubectl delete -f examples/egress-demo/egress-toggle.yaml
 kubectl delete -f examples/egress-demo/workload.yaml

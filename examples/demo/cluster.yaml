@@ -128,8 +128,11 @@ cluster:
 #                from the F5 portal; grants the registry pull + license rights.
 #   jwt        — F5 subscription JWT (Opaque secret, key license.jwt) from the
 #                F5 portal / entitlement email.
-# Paths are resolved relative to your working directory. These files are
-# gitignored (cne_pull_64.json, *.jwt) so they are never committed.
+# Relative paths are resolved against the directory holding THIS file, not your
+# shell's working directory — so `./cne_pull_64.json` means
+# examples/demo/cne_pull_64.json regardless of where you run awsbnkctl from.
+# Use an absolute path to keep the files elsewhere. Both names are gitignored
+# (cne_pull_64.json, *.jwt) so they are never committed.
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
   jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT

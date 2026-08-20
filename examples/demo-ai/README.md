@@ -39,6 +39,28 @@ awsbnkctl demo run --all --config examples/demo-ai/cluster.yaml
 awsbnkctl down --config examples/demo-ai/cluster.yaml --yes
 ```
 
+## Cost & teardown
+
+The most expensive topology in `examples/`. Approximate `ap-southeast-2`
+on-demand rates while up, excluding data transfer and EBS:
+
+| Component | Qty | Approx. $/hr |
+| --- | --- | --- |
+| SageMaker `ml.g6.12xlarge` endpoint | 1 | 7.50 |
+| `m6i.4xlarge` BNK worker | 3 | 2.80 |
+| `g5.xlarge` GPU inference node | 1 | 1.30 |
+| `c6i.4xlarge` load-generator jumphost | 1 | 0.90 |
+| EKS control plane | 1 | 0.10 |
+| NAT gateway | 1 | 0.06 |
+
+`down` deletes the SageMaker Endpoint, EndpointConfig and Model in reverse order,
+then the GPU node group, so no AI infrastructure bills between sessions. The
+endpoint alone is over half the hourly cost — confirm it is gone:
+
+```bash
+aws sagemaker list-endpoints --region ap-southeast-2
+```
+
 ## Proxy Shootout (Advanced)
 A manual shootout comparing BNK vs HAProxy vs Envoy AI Gateway. All proxies forward to a shared SigV4 hop that rewrites the path and signs requests before sending to SageMaker. 
 > [!TIP]

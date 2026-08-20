@@ -127,13 +127,16 @@ ai:
     maxModelLen: 8192               # cap the KV cache to fit the 32B weights in 96 GiB
     scaleToZero: false              # OPTION_SERVED_MODEL_NAME stays "llama3" (served name unchanged)
 
-# bnk: F5 supply-chain credentials (Phase 12). Gitignored symlinks in repo root.
+# bnk: F5 supply-chain credentials, required by Phase 12. Relative paths are
+# resolved against the directory holding THIS file, not your shell's working
+# directory — `./cne_pull_64.json` means examples/demo-ai/cne_pull_64.json. Use
+# an absolute path to keep the files elsewhere. Both names are gitignored.
 bnk:
-  farArchive: ./cne_pull_64.json
-  jwt: ./license.jwt
+  farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
+  jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
 
 # testing.jumphost: required for demo mode AND the AI benchmark client.
-# c6i.2xlarge (non-burstable) so the aiperf load generator never becomes the
+# Non-burstable on purpose, so the aiperf load generator never becomes the
 # bottleneck during the SageMaker/vLLM benchmark sweep.
 testing:
   jumphost:
