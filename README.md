@@ -7,7 +7,28 @@
 
 **awsbnkctl** is a single Go binary that provisions **F5 BIG-IP Next for Kubernetes (BNK)** on AWS EKS. It manages the entire lifecycle — VPC, EKS cluster, node groups, IAM, secondary ENIs for the data plane, BNK install, and end-to-end traffic validation — using the AWS SDK directly.
 
-No Terraform. No host `kubectl`. No `aws` CLI. **One binary, one intent file.**
+No Terraform. No host `kubectl`. **One binary, one intent file.**
+
+Provisioning and teardown talk to AWS through the SDK, so `up`, `down`, `validate`
+and every `k` verb need nothing else installed. Two things do reach for host
+binaries, and only these: `aws sso login` if that is how you authenticate, and the
+`aws` + `ssh` pair used to open an EC2 Instance Connect tunnel when a scenario or
+demo drives traffic from the jumphost (`internal/jumphost`). See
+[Prerequisites](#prerequisites).
+
+---
+
+## Prerequisites
+
+| Need | Required for |
+| --- | --- |
+| **Go 1.25+** | Building from source (skip if you use a release binary) |
+| An AWS account + credentials | Everything that touches AWS |
+| F5 FAR pull credentials + subscription JWT | The BNK install (phase 12) |
+| `aws` CLI | `aws sso login`, and the EICE tunnel used by scenarios/demos |
+| `ssh` | The EICE tunnel used by scenarios/demos |
+
+You do **not** need Terraform, `kubectl`, or `helm`.
 
 ---
 
@@ -79,13 +100,19 @@ Run the built-in data-plane traffic validation, and once finished, tear down the
 ./awsbnkctl down -f my-cluster.yaml --yes
 ```
 
+> [!NOTE]
+> The scenario curls the VIP *from inside the VPC*, over an EC2 Instance Connect
+> tunnel — so it needs `testing.jumphost.enabled: true` in your `cluster.yaml`,
+> plus `aws` and `ssh` on your PATH. `awsbnkctl scenarios list` shows the rest of
+> the catalogue.
+
 ---
 
 ## Features & Capabilities
 
-- **Imperative phased provisioner:** ~30 ordered phases run via the AWS Go SDK. AWS resource tags act as the single source of truth; a local `state.env` cache speeds up re-runs and is rebuildable from tags.
+- **Imperative phased provisioner:** ~35 ordered phases run via the AWS Go SDK — the exact count depends on the `pattern:` and which opt-in blocks are present. AWS resource tags act as the single source of truth; a local `state.env` cache speeds up re-runs and is rebuildable from tags.
 - **`cluster.yaml` intent file:** Declarative inputs (VPC, network, node group, BNK credentials) seamlessly map to imperative AWS calls. Validated up-front before any mutation.
-- **Built-in `scenarios` framework:** End-to-end traffic validation against the provisioned cluster (5 green data-plane scenarios + curated demo catalogue).
+- **Built-in `scenarios` framework:** End-to-end traffic validation against the provisioned cluster (6 green data-plane scenarios, 3 amber, plus a curated demo catalogue). `awsbnkctl scenarios list` shows the current set and each one's rating.
 - **`demo` experience:** Audience-friendly walkthrough surface with a rocket-themed launch renderer (gated on `--demo` + TTY), including migration scenarios that run BNK side-by-side with ingress-nginx/HAProxy and external BIG-IP VE + CIS.
 
 ---
@@ -117,12 +144,12 @@ The `pattern:` field selects the TMM data-plane interface topology and binding. 
 Ready-to-edit topologies live under [`examples/`](examples/) — see the
 [examples index](examples/README.md) for patterns and running costs side by side.
 
-- **[`examples/full-cluster/`](examples/full-cluster/)** - Complete BNK cluster reference config; also the demo cluster (`demo:` block) and the BIG-IP migration story
-- **[`examples/external-only/`](examples/external-only/)** - Single-interface `external-only` pattern, and the experimental `sriov-external` DPDK variant (one-line swap)
-- **[`examples/demo-ai/`](examples/demo-ai/)** - Combined BNK protocol demo + SageMaker AI rig
-- **[`examples/ai-rig/`](examples/ai-rig/)** - BNK in front of GPU inference + a managed SageMaker endpoint
-- **[`examples/egress-demo/`](examples/egress-demo/)** - Transparent egress + egress firewall, toggled by one CR
-- **[`examples/local-zone/`](examples/local-zone/)** - Reference telco/edge custom resources (no `cluster.yaml`)
+- **[`examples/full-cluster/`](examples/full-cluster/)** — Complete BNK cluster reference config; also the demo cluster (`demo:` block) and the BIG-IP migration story
+- **[`examples/external-only/`](examples/external-only/)** — Single-interface `external-only` pattern, and the experimental `sriov-external` DPDK variant (one-line swap)
+- **[`examples/egress-demo/`](examples/egress-demo/)** — Transparent egress + egress firewall, toggled by one CR
+- **[`examples/ai-rig/`](examples/ai-rig/)** — BNK in front of GPU inference + a managed SageMaker endpoint
+- **[`examples/demo-ai/`](examples/demo-ai/)** — Combined BNK protocol demo + SageMaker AI rig
+- **[`examples/local-zone/`](examples/local-zone/)** — Reference telco/edge custom resources (no `cluster.yaml`)
 
 Check out the [Demo Guide](examples/full-cluster/README.md#demo-mode) for full walkthroughs.
 
@@ -132,12 +159,21 @@ Check out the [Demo Guide](examples/full-cluster/README.md#demo-mode) for full w
 
 Run `awsbnkctl --help` for the complete command tree. Some highlights:
 
+- `validate <cfg>` : Parse and validate a `cluster.yaml`. No AWS API calls.
 - `up -f <cfg>` : Provision everything. Add `--dry-run` to preview, `--demo` for audience-mode.
 - `down -f <cfg> --yes` : Tear down in reverse.
 - `status` : Workspace summary (cluster state, BNK components, phases).
 - `doctor` : Health check for AWS creds, reachability, and BNK subsystem.
+- `scenarios {list,run,clean}` : End-to-end data-plane validation scenarios.
+- `demo {list,run,clean}` : The curated, audience-facing walkthroughs.
+- `topology` : Render the cluster data path (VPC, TMM VLANs, jumphost, gateways).
 - `k <verb> [args]` : Kubernetes passthrough (`get`, `apply`, `delete`, etc.). No host `kubectl` needed!
 - `forge {register,status,unregister}` : Optional handoff to a running [bnk-forge](docs/FORGE_INTEGRATION.md) instance.
+
+> [!NOTE]
+> The `k` subcommands take no cluster flag — they follow `$KUBECONFIG`, falling
+> back to `~/.kube/config`. Point it at the cluster you mean:
+> `export KUBECONFIG=.awsbnkctl/<cluster-name>/kubeconfig`.
 
 ---
 

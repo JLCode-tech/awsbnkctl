@@ -1,5 +1,15 @@
 # F5 BNK/SPK Multi-Protocol Ingress Validation on AWS Local Zones
 
+> [!NOTE]
+> **Point-in-time report.** Findings reflect the environment as tested; they are
+> not a statement about current behaviour. The manifests used are preserved at
+> [`examples/local-zone/manifests/`](../examples/local-zone/manifests/), whose
+> README summarises the per-protocol outcome below.
+>
+> Two results carry forward and are worth reading before reusing anything here:
+> the HTTP/2 and Diameter data paths **timed out** (asymmetric routing / missing
+> SNAT), and the SCTP listener was **rejected by the Gateway API** outright.
+
 ## Executive Summary
 This report summarizes the technical validation of deploying F5 BNK (SPK) 5G Multi-Protocol Ingress within an AWS Local Zone. The objective was to validate 5G edge ingress capabilities across HTTP/2, TCP (Diameter), and SCTP. 
 

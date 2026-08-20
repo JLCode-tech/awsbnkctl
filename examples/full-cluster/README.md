@@ -60,7 +60,7 @@ awsbnkctl demo run --all --config my-cluster.yaml
 
 > [!NOTE]
 > `demo.ttl` (default `24h`) only records an expiry — `DEMO_EXPIRY` in `state.env`
-> plus an `awsbnkctl:demo-expiry` tag, which `awsbnkctl inspect` shows as a
+> plus an `awsbnkctl:demo-expiry` tag, which `awsbnkctl status` shows as a
 > countdown. No reaper acts on it. Nothing deletes the cluster when it expires.
 
 ### Migration scenarios
