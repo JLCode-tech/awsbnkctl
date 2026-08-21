@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,7 +175,9 @@ type EndpointAccessSpec struct {
 // ClusterSpec holds the EKS control plane and node group configuration.
 // Corresponds to the `cluster:` block in cluster.yaml.
 type ClusterSpec struct {
-	// KubernetesVersion is the EKS Kubernetes version to deploy. Default "1.30".
+	// KubernetesVersion is the EKS Kubernetes version to deploy.
+	// Default and mandated floor: MinKubernetesVersion ("1.32"). Versions below
+	// the floor are rejected by validate; see validateKubernetesVersion.
 	KubernetesVersion string `yaml:"kubernetesVersion,omitempty"`
 	// NodeGroups defines one or more managed node groups. At least one is required
 	// when the cluster block is present.
@@ -687,7 +690,7 @@ func applyDefaults(c *Cluster) {
 
 	if c.ClusterSpec != nil {
 		if c.ClusterSpec.KubernetesVersion == "" {
-			c.ClusterSpec.KubernetesVersion = "1.30"
+			c.ClusterSpec.KubernetesVersion = MinKubernetesVersion
 		}
 		for i := range c.ClusterSpec.NodeGroups {
 			ng := &c.ClusterSpec.NodeGroups[i]
@@ -917,6 +920,9 @@ func validate(c *Cluster) error {
 		return fmt.Errorf("network.vpcCidr is required")
 	}
 	if c.ClusterSpec != nil {
+		if err := validateKubernetesVersion(c.ClusterSpec.KubernetesVersion); err != nil {
+			return err
+		}
 		if len(c.ClusterSpec.NodeGroups) == 0 {
 			return fmt.Errorf("cluster.nodeGroups must contain at least one node group when cluster block is present")
 		}
@@ -1097,6 +1103,82 @@ func parseGPUAZDenyEnv(val string) map[string][]string {
 //     single-interface patterns must NOT set an internal block.
 //   - Every referenced AZ must appear in network.azs.
 //   - All BNK patterns require desiredSize >= 3 (dSSM quorum).
+//
+// MinKubernetesVersion is the mandated EKS control-plane floor for real
+// clusters, and the default when cluster.kubernetesVersion is omitted.
+//
+// Why 1.34: the floor tracks EKS *standard* support, because anything past it
+// puts a new cluster straight onto extended-support pricing and blocks addon
+// versions the BNK stack expects. As of 2026-08 that rules out 1.31
+// (EOL 2025-11-26), 1.32 (EOL 2026-03-23) and 1.33 (EOL 2026-07-29). Nothing
+// below the floor is exercised in CI, so allowing it would ship an untested path.
+//
+// NOTE: this constant is time-sensitive by design. 1.34 leaves standard support
+// on 2026-12-02; raise the floor then. Together with maxTestedKubernetesMinor
+// below, the currently supported window is 1.34-1.35 — only two versions wide,
+// so review both when either date passes.
+const MinKubernetesVersion = "1.34"
+
+// maxTestedKubernetesMinor is the highest 1.x minor the BNK 2.3 stack is known
+// to install cleanly on. At 1.36 the apiserver started rejecting the f5-spk-pools
+// and HSL CRDs, whose integer fields declare `format: int32` together with
+// `maximum: 4294967295` — a value that does not fit an int32. Those CRDs are core
+// to BNK (turning telemetry off does not avoid them), so the install fails at
+// CRD apply. Reproduced on kind 1.36.1 during the on-prem BNK 2.3.0 work; F5 case
+// open. This is a warning rather than an error because the fix lives in a future
+// BNK manifest, not here — and because those CRDs come from the FAR archive at
+// runtime, so we cannot inspect them ahead of time.
+const maxTestedKubernetesMinor = 35
+
+// validateKubernetesVersion enforces the MinKubernetesVersion floor and warns
+// above the highest minor BNK 2.3 is known to install on.
+//
+// The value is a "<major>.<minor>" EKS version string. Anything that is not two
+// dot-separated integers is rejected outright rather than passed through to
+// CreateCluster, which would otherwise fail much later with an opaque AWS error.
+func validateKubernetesVersion(v string) error {
+	major, minor, err := parseKubernetesVersion(v)
+	if err != nil {
+		return err
+	}
+	minMajor, minMinor, err := parseKubernetesVersion(MinKubernetesVersion)
+	if err != nil {
+		// Unreachable: MinKubernetesVersion is a compile-time constant.
+		return fmt.Errorf("internal: bad MinKubernetesVersion %q: %w", MinKubernetesVersion, err)
+	}
+	if major < minMajor || (major == minMajor && minor < minMinor) {
+		return fmt.Errorf("cluster.kubernetesVersion %q is below the mandated floor %s: "+
+			"everything below it is past the end of EKS standard support (1.31, 1.32 and 1.33 all "+
+			"expired between 2025-11 and 2026-07), which forces extended-support pricing and is not "+
+			"exercised in CI; set %s or newer (1.%d is the highest BNK 2.3 installs on)",
+			v, MinKubernetesVersion, MinKubernetesVersion, maxTestedKubernetesMinor)
+	}
+	if major == minMajor && minor > maxTestedKubernetesMinor {
+		fmt.Fprintf(os.Stderr,
+			"[warn] cluster.kubernetesVersion %s is above the highest minor BNK 2.3 is known to install on (1.%d): "+
+				"the f5-spk-pools and HSL CRDs declare format:int32 with maximum:4294967295, which a 1.36+ "+
+				"apiserver rejects, so phase 12 may fail at CRD apply\n", v, maxTestedKubernetesMinor)
+	}
+	return nil
+}
+
+// parseKubernetesVersion splits a "<major>.<minor>" EKS version string.
+func parseKubernetesVersion(v string) (major, minor int, err error) {
+	parts := strings.Split(v, ".")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("cluster.kubernetesVersion %q must be \"<major>.<minor>\" (e.g. %q)", v, MinKubernetesVersion)
+	}
+	major, err = strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("cluster.kubernetesVersion %q has a non-numeric major version", v)
+	}
+	minor, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("cluster.kubernetesVersion %q has a non-numeric minor version", v)
+	}
+	return major, minor, nil
+}
+
 func validatePattern(c *Cluster) error {
 	if c.Pattern == "" {
 		return nil

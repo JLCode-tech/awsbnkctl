@@ -57,7 +57,7 @@ jobs:
           echo "The live-apply run provisions a real EKS cluster, installs BNK,"
           echo "drives traffic, and tears down. It requires AWS credentials and"
           echo "F5 supply-chain files, so it is run by an operator with:"
-          echo "    awsbnkctl up   --config examples/demo/cluster.yaml"
-          echo "    awsbnkctl demo run --all -f examples/demo/cluster.yaml"
-          echo "    awsbnkctl down --config examples/demo/cluster.yaml --yes"
+          echo "    awsbnkctl up   --config examples/full-cluster/cluster.yaml"
+          echo "    awsbnkctl demo run --all -f examples/full-cluster/cluster.yaml"
+          echo "    awsbnkctl down --config examples/full-cluster/cluster.yaml --yes"
           exit 0

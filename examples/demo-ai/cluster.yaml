@@ -1,7 +1,7 @@
 # cluster.yaml — combined BNK demo + SageMaker AI rig.
 #
 # Composes two reviewed configs into one cluster:
-#   - examples/demo/cluster.yaml   — host-device demo (the 7 protocol use-cases
+#   - examples/full-cluster/cluster.yaml — host-device demo (the protocol use-cases
 #                                    via `awsbnkctl demo run --all`) + jumphost.
 #   - examples/ai-rig/cluster.yaml — managed SageMaker LMI (vLLM) inference leg,
 #                                    a GPU nodegroup for the in-cluster
@@ -72,10 +72,10 @@ network:
   natGateways: 1
 
 cluster:
-  # 1.31 from the start: the optional Envoy AI Gateway shootout leg needs k8s
-  # >=1.31 (its CRDs use the isIP CEL function). Starting at 1.31 avoids an
-  # in-place control-plane upgrade later.
-  kubernetesVersion: "1.31"
+  # 1.32 is the mandated floor (intent.MinKubernetesVersion). It also clears the
+  # >=1.31 requirement of the optional Envoy AI Gateway shootout leg, whose CRDs
+  # use the isIP CEL function.
+  kubernetesVersion: "1.35"
   nodeGroups:
     # Index 0: BNK TMM control nodegroup (role=bnk injected by defaults). Three
     # nodes for the dSSM quorum + headroom for the full BNK control plane + TMM.
@@ -127,13 +127,16 @@ ai:
     maxModelLen: 8192               # cap the KV cache to fit the 32B weights in 96 GiB
     scaleToZero: false              # OPTION_SERVED_MODEL_NAME stays "llama3" (served name unchanged)
 
-# bnk: F5 supply-chain credentials (Phase 12). Gitignored symlinks in repo root.
+# bnk: F5 supply-chain credentials, required by Phase 12. Relative paths are
+# resolved against the directory holding THIS file, not your shell's working
+# directory — `./cne_pull_64.json` means examples/demo-ai/cne_pull_64.json. Use
+# an absolute path to keep the files elsewhere. Both names are gitignored.
 bnk:
-  farArchive: ./cne_pull_64.json
-  jwt: ./license.jwt
+  farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
+  jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
 
 # testing.jumphost: required for demo mode AND the AI benchmark client.
-# c6i.2xlarge (non-burstable) so the aiperf load generator never becomes the
+# Non-burstable on purpose, so the aiperf load generator never becomes the
 # bottleneck during the SageMaker/vLLM benchmark sweep.
 testing:
   jumphost:
@@ -144,13 +147,21 @@ testing:
     instanceType: c6i.4xlarge
     mgmtSubnetIndex: 0
 
-# forge: register with the running bnk-forge instance after `up` (unregister on
-# `down`). Password via AWSBNKCTL_FORGE_PASSWORD env var (never in this file).
+# forge: register this cluster with a running BNK Forge instance after `up`, and
+# unregister on `down`. Forge is the web UI for the *bnkctl tools — set one up
+# from https://github.com/f5devcentral/bnk-forge and it serves on :8000. Forge is
+# also what orchestrates the aiperf benchmark runs against the inference legs.
+#
+# Left ENABLED on purpose, and harmless if you have no Forge: Phase 09 soft-fails
+# when the instance is unreachable — it writes a pending link, warns, and exits 0.
+# `up` still succeeds. Set enabled: false below to skip the handoff entirely.
+#
+# Supply the password via $AWSBNKCTL_FORGE_PASSWORD — never write it in this file.
 forge:
-  enabled: true
-  url: http://localhost:8000
+  enabled: true                    # set false to skip the Forge handoff
+  url: http://localhost:8000       # also overridable via $AWSBNKCTL_FORGE_URL
   mcpUrl: http://localhost:8081/mcp/
-  credentialTemplateId: 1
+  credentialTemplateId: 1          # forge "AWS Production" template
   username: admin
 
 tags:

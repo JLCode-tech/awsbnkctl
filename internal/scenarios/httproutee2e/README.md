@@ -12,7 +12,7 @@ End-to-end HTTP traffic through the BNK data plane via the jumphost.
 Operator laptop
      │
      ▼
-awsbnkctl scenarios run http-routing-e2e
+awsbnkctl scenarios run http-routing-e2e -f cluster.yaml
      │
      ├─[1/3] Render 5 manifests to .awsbnkctl/<cluster>/artifacts/scenarios/http-routing-e2e/
      │         01-namespace.yaml         — Namespace
@@ -38,7 +38,8 @@ awsbnkctl scenarios run http-routing-e2e
 2. State keys present in `.awsbnkctl/<cluster>/state.env`:
    - `JUMPHOST_INSTANCE_ID`
    - `JUMPHOST_BNK_EXT_ENI_IP`
-3. `aws` CLI and `ssh` on PATH (for EICE tunnel).
+3. `aws` CLI and `ssh` on PATH — the verification step opens an EC2 Instance
+   Connect tunnel and curls the VIP from the jumphost. See `internal/jumphost`.
 
 ## VIP derivation
 

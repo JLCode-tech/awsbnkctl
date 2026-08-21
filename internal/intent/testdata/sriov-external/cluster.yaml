@@ -1,3 +1,15 @@
+# CI FIXTURE — not a published example. Do not copy this to start a cluster.
+#
+# This is the sriov-external pattern's only end-to-end exercise: CI runs
+# `validate` plus `up`/`down --dry-run` against it so the pattern's phase
+# branches (17 ENI attach, 20 NAD, 20b vfio-node-prep, 23b vlan/GatewayClass)
+# stay covered. The user-facing config lives in examples/external-only/cluster.yaml
+# as a documented one-line `pattern:` swap.
+#
+# Referenced by .github/workflows/ci.yml, scripts/test-integration-aws.sh, and
+# internal/intent/{gpu,sagemaker}_test.go. Keep it in sync with
+# examples/external-only/cluster.yaml.
+#
 # cluster.yaml — sriov-external (single-interface, SR-IOV/vfio DPDK) BNK-on-EKS.
 #
 # Pattern C: like external-only (ONE external/ingress interface, CNI backend) but
@@ -14,10 +26,8 @@
 #     driver; the device plugin injects /dev/vfio + PCIDEVICE_INTEL_COM_ENS8.
 #   - Single external ENI (preflight floor 2); no internal interface.
 #
-# Quick start:
-#   awsbnkctl validate examples/sriov-external/cluster.yaml
-#   awsbnkctl up --config examples/sriov-external/cluster.yaml --dry-run
-#   awsbnkctl up --config examples/sriov-external/cluster.yaml
+# To run this pattern for real, copy examples/external-only/cluster.yaml and set
+# `pattern: sriov-external` — that file documents the swap.
 
 apiVersion: awsbnkctl/v1
 kind: Cluster
@@ -53,7 +63,8 @@ network:
   # dataPath: external subnet ONLY for single-interface patterns. The default
   # Gateway VIP is derived as <external network>.100 (10.0.10.100) and the TMM
   # external SelfIP as <subnet>.240 (10.0.10.240) unless overridden. Do NOT add
-  # an `internal:` block here — validation rejects it for external-only.
+  # an `internal:` block here — validation rejects it for every single-interface
+  # pattern, sriov-external included.
   dataPath:
     external:
       cidr: 10.0.10.0/24      # BNK_EXT — TMM client-side / ingress VLAN
@@ -61,11 +72,11 @@ network:
 
   natGateways: 1
 
-# cluster: EKS control plane + managed node group. external-only defaults match
+# cluster: EKS control plane + managed node group. sriov-external defaults match
 # the other BNK patterns: instanceType m6i.4xlarge, desired/min 3, max 4,
 # role=bnk on the first node group (3 nodes for the dSSM quorum).
 cluster:
-  kubernetesVersion: "1.30"
+  kubernetesVersion: "1.35"
   nodeGroups:
     - name: default
       instanceType: m6i.4xlarge
@@ -74,13 +85,15 @@ cluster:
       maxSize: 4
       diskSize: 50
 
-# bnk: F5 supply-chain credentials, required by Phase 12. Replace both paths
-# with your own files before running `up` (gitignored).
+# bnk: F5 supply-chain credentials, required by Phase 12. Replace both paths with
+# your own files before running `up`. Relative paths resolve against the
+# directory holding THIS file, not your shell's working directory. Both names are
+# gitignored (cne_pull_64.json, *.jwt) so they are never committed.
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
   jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
 
-# testing.jumphost works for external-only too — it lives in the BNK_EXT subnet,
+# testing.jumphost works for sriov-external too — it lives in the BNK_EXT subnet,
 # which every BNK pattern creates. Use it to curl the VIP without standing up EC2.
 testing:
   jumphost:

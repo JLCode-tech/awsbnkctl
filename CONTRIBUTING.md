@@ -13,10 +13,15 @@ This project is tested on Linux and macOS hosts.
 - **git**, **make**, **docker**
 - Standard dev utilities: `jq`, `unzip`, `gnupg`, `openssh-client`, `python3`, and `helm 3` (for chart operations)
 
+**Required for live runs that drive traffic:**
+- `aws` CLI and `ssh` — `internal/jumphost` shells out to
+  `aws ec2-instance-connect open-tunnel` piped into `ssh` to curl the VIP from
+  inside the VPC. Every scenario and demo that validates the data plane goes
+  through this path. Not needed for unit tests or dry-runs.
+
 **NOT Required:**
 - `terraform` (awsbnkctl uses the AWS SDK directly)
 - `kubectl` (Internalized via `client-go`)
-- `aws` CLI (Internalized via the AWS SDK, unless you need `aws sso login`)
 - `goreleaser` (Pulled at release time automatically)
 
 ---
@@ -37,14 +42,29 @@ go build -o awsbnkctl ./cmd/awsbnkctl
 ## Testing
 
 ### Running Tests
-The unit suite runs entirely without external dependencies. Always run these locally before pushing your code.
+The unit suite runs entirely without external dependencies. Always run these locally before pushing your code — CI enforces all four, and `gofmt` plus `staticcheck` catch things `go build`, `go vet` and `go test` do not.
 
 ```bash
-gofmt -l .     # Must be empty
-go vet ./...   # Must be clean
+gofmt -l .        # Must be empty
+go vet ./...      # Must be clean
 staticcheck ./... # Must be clean
-go test ./...   # Must pass
+go test ./...     # Must pass
 ```
+
+> [!TIP]
+> **If you have built the AgentCore demo's Node dependencies, `./...` breaks.**
+> `examples/agentcore-demo/agent/**/node_modules/` ships Go template files named
+> `%name%.template.go`, which the Go toolchain rejects as invalid input file
+> names. All four commands above then fail on files that have nothing to do with
+> your change. Those directories are gitignored, so CI and a fresh clone are
+> unaffected — but locally, scope the gates to the real packages:
+>
+> ```bash
+> gofmt -l internal cmd
+> go vet ./internal/... ./cmd/...
+> staticcheck ./internal/... ./cmd/...
+> go test ./internal/... ./cmd/...
+> ```
 
 ### Credential-Free Dry-Run
 The `AWSBNKCTL_SKIP_AUTH=1` environment variable lets `up --dry-run` and

@@ -2,8 +2,10 @@
 #
 # This is the complete topology: VPC + subnets, the BNK external/internal TMM
 # data-plane subnets, an EKS control plane + 3-node managed node group, the full
-# BNK 2.3 stack, and an optional test jumphost. For a demo-marked variant of the
-# same cluster, see examples/demo/cluster.yaml.
+# BNK 2.3 stack, and an optional test jumphost.
+#
+# It is also the demo cluster: uncomment the `demo:` block below (or pass --demo)
+# to unlock the curated protocol walkthroughs, `awsbnkctl demo run …`.
 #
 # Prerequisites before `up`:
 #   aws sso login --profile <your-profile>
@@ -15,6 +17,11 @@
 #   awsbnkctl up   --config examples/full-cluster/cluster.yaml
 #   awsbnkctl down --config examples/full-cluster/cluster.yaml --yes
 #   awsbnkctl down --config examples/full-cluster/cluster.yaml --yes --keep-irsa
+#
+# With demo mode on:
+#   awsbnkctl demo list
+#   awsbnkctl demo run http2 --config examples/full-cluster/cluster.yaml
+#   awsbnkctl demo run --all --config examples/full-cluster/cluster.yaml
 #
 # State written to: .awsbnkctl/full-cluster/state.env
 
@@ -32,6 +39,20 @@ metadata:
 #              Requires network.dataPath for BNK ext/int subnet creation (phase 03).
 #              Activates phases 16 (TMM node label), 17 (secondary ENIs), 18 (IRSA).
 pattern: host-device
+
+# demo marks this as a demo deployment. Equivalent to passing --demo on the CLI.
+# When enabled, `up` writes DEMO_MODE / DEMO_STAGED_AT / DEMO_EXPIRY to state.env,
+# tags every resource with awsbnkctl:demo=true, pre-stages the demo test clients
+# on the jumphost, and `down` cleans the demo use-cases first. Requires
+# testing.jumphost.enabled: true (every demo use-case drives traffic from it).
+#
+# ttl is a lifetime HINT only: DEMO_EXPIRY = now + ttl, surfaced as a countdown by
+# `awsbnkctl status`. No reaper acts on it — nothing deletes the cluster when it
+# expires. Tear it down yourself.
+#
+# demo:
+#   enabled: true
+#   ttl: 24h          # optional; default 24h
 
 network:
   vpcCidr: 10.0.0.0/16
@@ -76,7 +97,7 @@ network:
 # cluster: EKS control plane + managed node group configuration.
 # Phases 08 (EKS cluster), 10 (node group), 11 (kubeconfig) require this block.
 cluster:
-  kubernetesVersion: "1.30"
+  kubernetesVersion: "1.35"
   nodeGroups:
     - name: default
       # m6i.4xlarge x 3 is the documented BNK 2.3 Small minimum:
@@ -93,7 +114,8 @@ cluster:
 
 # bnk: BNK supply-chain credentials, required for phase 12.
 # Replace farArchive and jwt with paths to your own files before running `up`;
-# placeholder paths will cause phase 12 to error at entry.
+# placeholder paths will cause phase 12 to error at entry. Relative paths resolve
+# against the directory holding THIS file, not your shell's working directory.
 #
 # farArchive: path to F5's FAR pull credentials JSON (from the F5 portal).
 #             Type in k8s: kubernetes.io/dockerconfigjson secret named 'far-secret'.
@@ -127,12 +149,18 @@ testing:
     instanceType: t3.small      # optional; default t3.small
     mgmtSubnetIndex: 0           # optional; default 0 (first public subnet)
 
-# Optional: register the cluster with a running bnk-forge instance after `up`.
-# When omitted, forge handoff is skipped. credentialTemplateId=1 is forge's
-# default "AWS Production" template; set to 0 to skip credential attachment.
-# Enabled here so Phase09 registers on `up` and unregisters on `down`; the
-# standalone `awsbnkctl forge {register,status,unregister} --config <this>` also
-# works against the same link in the cluster state dir.
+# forge: register this cluster with a running BNK Forge instance after `up`, and
+# unregister on `down`. Forge is the web UI for the *bnkctl tools — set one up
+# from https://github.com/f5devcentral/bnk-forge and it serves on :8000.
+#
+# Left ENABLED on purpose, and harmless if you have no Forge: Phase 09 soft-fails
+# when the instance is unreachable — it writes a pending link, warns, and exits 0.
+# `up` still succeeds. Set enabled: false below to skip the handoff entirely.
+#
+# credentialTemplateId=1 is forge's default "AWS Production" template; set to 0 to
+# skip credential attachment. The standalone
+# `awsbnkctl forge {register,status,unregister} --config <this>` works against the
+# same link in the cluster state dir.
 #
 # Credential resolution (REST login):
 #   username: forge.username (yaml) -> default "admin"
@@ -142,12 +170,31 @@ testing:
 # Supply the password via the AWSBNKCTL_FORGE_PASSWORD environment variable —
 # never write the real password in this file.
 forge:
-  enabled: true
+  enabled: true                    # set false to skip the Forge handoff
   url: http://localhost:8000       # also overridable via $AWSBNKCTL_FORGE_URL
   mcpUrl: http://localhost:8081/mcp/
-  credentialTemplateId: 1          # forge AWS Production template
+  credentialTemplateId: 1          # forge "AWS Production" template
   username: admin                  # optional; default "admin"
   # password: ""                   # dev-only; prefer $AWSBNKCTL_FORGE_PASSWORD
+
+# bigipVE: opt-in F5 BIG-IP VE appliance for the BIG-IP → BNK migration demo.
+# DISABLED by default. Set enabled: true only when you intend to run it, and only
+# with demo: enabled above.
+#
+# WARNING: this provisions a chargeable c5n.2xlarge PAYG BIG-IP VE appliance
+# (roughly 15 min extra onboarding, plus ongoing EC2 + licensing costs). Tear it
+# down with `awsbnkctl down` to stop the charges.
+#
+# Admin password: supply via the AWSBNKCTL_BIGIP_PASSWORD environment variable —
+# it is NEVER stored in this file.
+#
+# bigipVE:
+#   enabled: false              # set true to provision the BIG-IP VE appliance
+#   instanceType: c5n.2xlarge   # default; minimum for PAYG Good/Better/Best
+#   mgmtSubnetIndex: 0          # public subnet index for the mgmt ENI (default 0)
+#   vip: 10.0.10.120            # BIG-IP virtual-server IP in the external subnet
+#   licenseTier: Good           # PAYG tier: Good | Better | Best
+#   # version: "17.5.1*"        # optional AMI version glob; omit for newest
 
 # tags merged into every AWS resource alongside the mandatory awsbnkctl:* keys.
 tags:

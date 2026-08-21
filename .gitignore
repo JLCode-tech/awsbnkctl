@@ -36,7 +36,6 @@ dist/
 
 # --- Generated HTML mirrors of Markdown docs (do not track) ---
 docs/DEMOS.html
-examples/demo/README.html
 
 # --- Local environment overrides ---
 .env
@@ -77,4 +76,16 @@ docs/demo/
 
 # --- HuggingFace token (gated model auth; never commit) ---
 .hf_token
+
+# --- Architecture decision records (local-only) ---
+# ADRs capture in-flight design debate, including rejected options and candid
+# assessments of gaps. Kept off the public repo like docs/design/ and docs/spikes/;
+# the settled outcome belongs in docs/ARCHITECTURE.md instead.
 docs/adr/
+
+# --- Internal remediation tracker (local-only) ---
+# Maintainer-facing punch list: open defects, unmerged security items, and repo
+# housekeeping. Naming an unfixed security issue in a public repo hands a reader
+# a map of where we are weak, so this stays local. Anything in it that users need
+# belongs in the issue tracker or the docs proper.
+docs/REMEDIATION.md
