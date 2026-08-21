@@ -417,6 +417,20 @@ jobs:
             echo 'dummy-license-jwt' > "$example_dir/license.jwt"
           done
 
+      - name: Stage dry-run credential placeholders
+        run: |
+          set -eo pipefail
+          # The example bnk: blocks reference FAR + JWT files relative to the
+          # cluster.yaml directory. Create inert placeholders so the offline
+          # dry-run path can stat them without committing real secrets.
+          for example_dir in \
+            examples/full-cluster \
+            examples/external-only \
+            examples/sriov-external; do
+            echo '{"auths":{}}' > "$example_dir/cne_pull_64.json"
+            echo 'dummy-license-jwt' > "$example_dir/license.jwt"
+          done
+
       - name: awsbnkctl up --dry-run (full-cluster)
         env:
           AWSBNKCTL_SKIP_AUTH: "1"
