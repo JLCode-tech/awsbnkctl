@@ -22,6 +22,26 @@
 //     the registered singleton (safe default); the fn-pointer upgrades
 //     the runtime result to Green when every data-path assertion passes.
 //
+// # Hazard: the annotation is Gateway-scoped and rejects non-LLM payloads
+//
+// Enabling token_counting makes the TMM AI profile require an LLM `model`
+// field in EVERY request body on that Gateway, and reject anything without
+// one:
+//
+//	HTTP/1.1 400 Bad Request
+//	{"error":"model_missing"}
+//
+// There is no per-listener or per-route opt-in, so a Gateway carrying mixed
+// traffic (e.g. an MCP tool alongside an inference backend) loses the non-LLM
+// traffic entirely. Give inference its own Gateway. Observed live on
+// bnk-agentcore-demo, 2026-08-19, while adding the annotation to a Gateway
+// fronting an MCP JSON-RPC service — see examples/agentcore-demo.
+//
+// Related: the profile parses OpenAI-shaped usage fields
+// (usage.prompt_tokens / completion_tokens / total_tokens). Amazon Bedrock
+// returns usage.inputTokens / outputTokens, so a Bedrock-native backend
+// meters as zero even when counting is enabled.
+//
 // # Why the static Rating() stays Amber
 //
 // Rating() is called before any cluster interaction (e.g. by `scenarios

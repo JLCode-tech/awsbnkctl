@@ -2,7 +2,7 @@ module github.com/JLCode-tech/awsbnkctl
 
 go 1.25.11
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.42.0

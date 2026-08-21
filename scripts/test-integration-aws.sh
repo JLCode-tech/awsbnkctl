@@ -79,7 +79,7 @@ trap 'rm -rf "$artifacts_dir"' EXIT
 for example_dir in \
     examples/full-cluster \
     examples/external-only \
-    examples/sriov-external
+    internal/intent/testdata/sriov-external
 do
     echo '{"auths":{}}' > "$example_dir/cne_pull_64.json"
     echo 'dummy-license-jwt' > "$example_dir/license.jwt"
@@ -89,7 +89,7 @@ done
 echo "→ full-up-dryrun: validate example configs" >&2
 ./bin/awsbnkctl validate examples/full-cluster/cluster.yaml
 ./bin/awsbnkctl validate examples/external-only/cluster.yaml
-./bin/awsbnkctl validate examples/sriov-external/cluster.yaml
+./bin/awsbnkctl validate internal/intent/testdata/sriov-external/cluster.yaml
 
 run_up_dryrun() {
     local config_path=$1
@@ -136,8 +136,8 @@ run_up_dryrun   examples/full-cluster/cluster.yaml     up-dryrun-full-cluster.lo
 run_down_dryrun examples/full-cluster/cluster.yaml     down-dryrun-full-cluster.log   || fail=1
 run_up_dryrun   examples/external-only/cluster.yaml    up-dryrun-external-only.log    || fail=1
 run_down_dryrun examples/external-only/cluster.yaml    down-dryrun-external-only.log  || fail=1
-run_up_dryrun   examples/sriov-external/cluster.yaml   up-dryrun-sriov-external.log   || fail=1
-run_down_dryrun examples/sriov-external/cluster.yaml   down-dryrun-sriov-external.log || fail=1
+run_up_dryrun   internal/intent/testdata/sriov-external/cluster.yaml   up-dryrun-sriov-external.log   || fail=1
+run_down_dryrun internal/intent/testdata/sriov-external/cluster.yaml   down-dryrun-sriov-external.log || fail=1
 
 if [[ "$fail" -ne 0 ]]; then
     echo "✗ full-up-dryrun: one or more dry-run gates failed" >&2

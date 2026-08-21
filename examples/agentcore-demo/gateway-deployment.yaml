@@ -1,0 +1,145 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-tls
+  namespace: default
+spec:
+  secretName: mcp-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: bnk-ingress.bnk-demo.internal
+  dnsNames:
+  - bnk-ingress.bnk-demo.internal
+  issuerRef:
+    name: bnk-agentcore-demo-ca-cluster-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: bnk-agentcore-demo-gateway
+  namespace: default
+spec:
+  gatewayClassName: bnk-agentcore-demo-gatewayclass
+  # ---------------------------------------------------------------------
+  # AI token counting — DELIBERATELY NOT ENABLED ON THIS GATEWAY.
+  #
+  # BNK 2.3 configures token counting through Gateway *infrastructure*
+  # annotations (spec.infrastructure.annotations), not metadata.annotations,
+  # and it operates at gateway scope — there is no per-listener or per-route
+  # opt-in. When token_counting=enabled, TMM's AI profile parses every request
+  # body for an LLM `model` field and rejects anything without one:
+  #
+  #     HTTP/1.1 400 Bad Request
+  #     {"error":"model_missing"}
+  #
+  # (verified live on this cluster, 2026-08-19). MCP JSON-RPC bodies have no
+  # `model` field, so enabling it here breaks every MCP call. The only LLM leg
+  # in this demo — AgentCore runtime -> Bedrock — is AWS-internal and never
+  # traverses this Gateway, so there is nothing here for it to meter either.
+  #
+  # To meter an LLM backend, route it through its own Gateway carrying:
+  #
+  #   infrastructure:
+  #     annotations:
+  #       k8s.f5.com/ai-token-counting: |
+  #         token_counting=enabled,
+  #         user_id_source=api_key,
+  #         user_id_header=Authorization,
+  #         fallback_to_ip=true,
+  #         enforcement=enabled,
+  #         rate_limit_policy=per_user,
+  #         rate_limit_tokens=100000,
+  #         rate_limit_window=3600,
+  #         rate_limit_action=drop,
+  #         hsl_pool=<logging-pool>
+  #
+  # Request-rate limiting for this (non-LLM) MCP route is done with an iRule —
+  # see mcp-security-policy.yaml.
+  # ---------------------------------------------------------------------
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+  # Real TLS, terminated by BNK, using a cert from the in-cluster CA that
+  # awsbnkctl provisions during `up`. Verify from a client with:
+  #   kubectl get secret mcp-tls -n default -o jsonpath='{.data.ca\.crt}' \
+  #     | base64 -d > /tmp/bnk-ca.crt
+  #   curl --cacert /tmp/bnk-ca.crt --resolve bnk-ingress.bnk-demo.internal:443:10.0.10.100 \
+  #     https://bnk-ingress.bnk-demo.internal/v1/mcp/forecast
+  #
+  # GOTCHA: do NOT convert a listener's protocol in place on the same port.
+  # Changing this port from HTTP to HTTPS on a live Gateway leaves it dead —
+  # BNK deletes the old listener's TMM objects, creates the new ones, reports
+  # Programmed=True, and never binds the port. Delete and re-apply the Gateway
+  # instead. Diagnosed 2026-08-20 (see README gotchas).
+  #
+  # Note for Path 2: this CA-issued cert is fine for our own callers but will
+  # NOT satisfy AgentCore Gateway, which requires a publicly trusted cert on
+  # the target. See README §7.1.
+  - name: https
+    protocol: HTTPS
+    port: 443
+    tls:
+      certificateRefs:
+      - kind: Secret
+        group: ""
+        name: mcp-tls
+        namespace: default
+    allowedRoutes:
+      namespaces:
+        from: All
+      kinds:
+      - kind: HTTPRoute
+  addresses:
+  - type: IPAddress
+    value: 10.0.10.100
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-financial-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: bnk-agentcore-demo-gateway
+  hostnames:
+  - "bnk-ingress.bnk-demo.internal"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /v1/mcp/forecast
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /
+    # The upstream MCP server exposes streamable-http at root (/).
+    # Both AgentCore Gateway and external-agent.py POST to
+    # /v1/mcp/forecast; this rewrite strips the prefix so the
+    # tool pod receives the call at /.
+    backendRefs:
+    - name: mcp-financial-tool
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-discovery-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: bnk-agentcore-demo-gateway
+  hostnames:
+  - "bnk-ingress.bnk-demo.internal"
+  rules:
+  - matches:
+    - path:
+        type: Exact
+        value: /.well-known/agent-card.json
+    backendRefs:
+    - name: mcp-financial-tool
+      port: 80

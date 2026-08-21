@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,7 +239,7 @@ network:
         az: ap-southeast-2a
   natGateways: 1
 cluster:
-  kubernetesVersion: "1.30"
+  kubernetesVersion: "1.35"
   nodeGroups:
     - name: default
       instanceType: t3.medium
@@ -259,8 +260,9 @@ func TestLoad_ClusterSpecParsed(t *testing.T) {
 	if c.ClusterSpec == nil {
 		t.Fatal("ClusterSpec: nil, want populated struct")
 	}
-	if c.ClusterSpec.KubernetesVersion != "1.30" {
-		t.Errorf("KubernetesVersion: got %q, want 1.30", c.ClusterSpec.KubernetesVersion)
+	if c.ClusterSpec.KubernetesVersion != "1.35" {
+		t.Errorf("KubernetesVersion: got %q, want 1.35 (the value in the fixture above)",
+			c.ClusterSpec.KubernetesVersion)
 	}
 	if len(c.ClusterSpec.NodeGroups) != 1 {
 		t.Fatalf("NodeGroups len: got %d, want 1", len(c.ClusterSpec.NodeGroups))
@@ -293,8 +295,8 @@ cluster:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.ClusterSpec.KubernetesVersion != "1.30" {
-		t.Errorf("default KubernetesVersion: got %q, want 1.30", c.ClusterSpec.KubernetesVersion)
+	if c.ClusterSpec.KubernetesVersion != MinKubernetesVersion {
+		t.Errorf("default KubernetesVersion: got %q, want %s", c.ClusterSpec.KubernetesVersion, MinKubernetesVersion)
 	}
 	ng := c.ClusterSpec.NodeGroups[0]
 	if ng.InstanceType != "t3.medium" {
@@ -317,7 +319,7 @@ cluster:
 func TestLoad_ClusterSpecRejectsEmptyNodeGroups(t *testing.T) {
 	yaml := minimalYAML + `
 cluster:
-  kubernetesVersion: "1.30"
+  kubernetesVersion: "1.35"
   nodeGroups: []
 `
 	dir := t.TempDir()
@@ -2037,5 +2039,143 @@ bigipVE:
 	_, err := Load(p)
 	if err != nil {
 		t.Fatalf("disabled bigipVE block should not fail validation: %v", err)
+	}
+}
+
+// ─── kubernetesVersion floor ─────────────────────────────────────────────────
+
+// versionYAML builds a minimal cluster with an explicit kubernetesVersion.
+// An empty version omits the key entirely so applyDefaults supplies the default.
+func versionYAML(v string) string {
+	line := ""
+	if v != "" {
+		line = "\n  kubernetesVersion: \"" + v + "\""
+	}
+	return minimalYAML + `
+cluster:` + line + `
+  nodeGroups:
+    - name: ng
+`
+}
+
+// TestLoad_KubernetesVersion_DefaultsToFloor pins the documented default so a
+// change to MinKubernetesVersion cannot silently move it.
+func TestLoad_KubernetesVersion_DefaultsToFloor(t *testing.T) {
+	dir := t.TempDir()
+	c, err := Load(writeFile(t, dir, "cluster.yaml", versionYAML("")))
+	if err != nil {
+		t.Fatalf("Load with no kubernetesVersion: %v", err)
+	}
+	if c.ClusterSpec.KubernetesVersion != MinKubernetesVersion {
+		t.Errorf("default KubernetesVersion = %q, want %q",
+			c.ClusterSpec.KubernetesVersion, MinKubernetesVersion)
+	}
+}
+
+// TestLoad_KubernetesVersion_BelowFloorRejected covers the mandate: the two
+// versions the examples used to ship must now be refused, with an error that
+// names both the offending value and the floor.
+func TestLoad_KubernetesVersion_BelowFloorRejected(t *testing.T) {
+	for _, v := range []string{"1.30", "1.31", "1.24", "0.9"} {
+		t.Run(v, func(t *testing.T) {
+			dir := t.TempDir()
+			_, err := Load(writeFile(t, dir, "cluster.yaml", versionYAML(v)))
+			if err == nil {
+				t.Fatalf("Load(kubernetesVersion %s): expected error, got nil", v)
+			}
+			if !strings.Contains(err.Error(), v) {
+				t.Errorf("error %q must name the rejected version %s", err.Error(), v)
+			}
+			if !strings.Contains(err.Error(), MinKubernetesVersion) {
+				t.Errorf("error %q must name the floor %s", err.Error(), MinKubernetesVersion)
+			}
+		})
+	}
+}
+
+// TestLoad_KubernetesVersion_AtOrAboveFloorAccepted covers the floor itself and
+// versions above it, including the ones that only warn.
+//
+// The floor moves as EKS standard support expires, so derive the cases from
+// MinKubernetesVersion rather than hardcoding them — a hardcoded list silently
+// becomes a list of rejected versions the next time the floor is raised, which
+// is exactly what happened when it went 1.32 -> 1.34.
+func TestLoad_KubernetesVersion_AtOrAboveFloorAccepted(t *testing.T) {
+	floorMajor, floorMinor, err := parseKubernetesVersion(MinKubernetesVersion)
+	if err != nil {
+		t.Fatalf("MinKubernetesVersion %q does not parse: %v", MinKubernetesVersion, err)
+	}
+	cases := []string{
+		MinKubernetesVersion,                                         // the floor
+		fmt.Sprintf("%d.%d", floorMajor, floorMinor+1),               // one above
+		fmt.Sprintf("%d.%d", floorMajor, maxTestedKubernetesMinor),   // highest tested
+		fmt.Sprintf("%d.%d", floorMajor, maxTestedKubernetesMinor+1), // warns, still accepted
+		"2.0", // a future major
+	}
+	for _, v := range cases {
+		t.Run(v, func(t *testing.T) {
+			dir := t.TempDir()
+			c, err := Load(writeFile(t, dir, "cluster.yaml", versionYAML(v)))
+			if err != nil {
+				t.Fatalf("Load(kubernetesVersion %s): %v", v, err)
+			}
+			if c.ClusterSpec.KubernetesVersion != v {
+				t.Errorf("KubernetesVersion = %q, want %q", c.ClusterSpec.KubernetesVersion, v)
+			}
+		})
+	}
+}
+
+// TestLoad_KubernetesVersion_Malformed rejects anything that is not
+// "<major>.<minor>" here rather than letting CreateCluster fail much later with
+// an opaque AWS error.
+func TestLoad_KubernetesVersion_Malformed(t *testing.T) {
+	for _, v := range []string{"1", "1.32.4", "v1.32", "latest", "1.x", ".32", "1."} {
+		t.Run(v, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := Load(writeFile(t, dir, "cluster.yaml", versionYAML(v))); err == nil {
+				t.Errorf("Load(kubernetesVersion %q): expected error, got nil", v)
+			}
+		})
+	}
+}
+
+// TestValidateKubernetesVersion_WarnsAboveTestedMinor documents that 1.36+ is
+// allowed through with a warning, not blocked: the BNK 2.3 CRD overflow is fixed
+// in a future manifest, not here.
+func TestValidateKubernetesVersion_WarnsAboveTestedMinor(t *testing.T) {
+	if err := validateKubernetesVersion("1.36"); err != nil {
+		t.Errorf("1.36 must warn, not error: %v", err)
+	}
+	if err := validateKubernetesVersion("1.35"); err != nil {
+		t.Errorf("1.35 is the highest tested minor and must pass cleanly: %v", err)
+	}
+}
+
+// TestExampleConfigs_MeetVersionFloor guards the examples themselves: every
+// published cluster.yaml must satisfy the mandate, so nobody copies a config
+// that validate would reject.
+func TestExampleConfigs_MeetVersionFloor(t *testing.T) {
+	paths := []string{
+		"../../examples/full-cluster/cluster.yaml",
+		"../../examples/external-only/cluster.yaml",
+		"../../examples/egress-demo/cluster.yaml",
+		"../../examples/ai-rig/cluster.yaml",
+		"../../examples/demo-ai/cluster.yaml",
+		"testdata/sriov-external/cluster.yaml",
+	}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			c, err := Load(p)
+			if err != nil {
+				t.Fatalf("Load(%s): %v", p, err)
+			}
+			if c.ClusterSpec == nil {
+				t.Fatalf("Load(%s): no cluster block", p)
+			}
+			if err := validateKubernetesVersion(c.ClusterSpec.KubernetesVersion); err != nil {
+				t.Errorf("%s: %v", p, err)
+			}
+		})
 	}
 }
