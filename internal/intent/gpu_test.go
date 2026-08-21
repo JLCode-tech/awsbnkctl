@@ -643,14 +643,15 @@ func TestGPURig_Example2bRejected(t *testing.T) {
 	}
 }
 
-// TestAllExamplesContinueToLoad ensures backward compatibility — all examples/
-// cluster.yaml files that existed before this feature must still load cleanly.
+// TestAllExamplesContinueToLoad ensures backward compatibility — every
+// non-AI-rig cluster.yaml must still load cleanly.
 func TestAllExamplesContinueToLoad(t *testing.T) {
 	examples := []string{
 		"../../examples/external-only/cluster.yaml",
-		"../../examples/sriov-external/cluster.yaml",
-		"../../examples/demo/cluster.yaml",
 		"../../examples/full-cluster/cluster.yaml",
+		// sriov-external is no longer a published example; it survives as the
+		// CI fixture for the pattern (examples/external-only documents the swap).
+		"testdata/sriov-external/cluster.yaml",
 	}
 	for _, path := range examples {
 		t.Run(path, func(t *testing.T) {
