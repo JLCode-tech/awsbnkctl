@@ -63,7 +63,7 @@ testing:
     mgmtSubnetIndex: 0
 
 forge:
-  enabled: true
+  enabled: false
   url: http://localhost:8000
   mcpUrl: http://localhost:8081/mcp/
   credentialTemplateId: 1
