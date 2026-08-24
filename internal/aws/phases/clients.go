@@ -364,7 +364,8 @@ func isNotFoundCode(code string) bool {
 		"InvalidNetworkInterfaceID.NotFound",
 		"InvalidInstanceID.NotFound",
 		"InvalidGroup.NotFound",
-		"InvalidInstanceConnectEndpoint.NotFound":
+		"InvalidInstanceConnectEndpoint.NotFound",
+		"InvalidInstanceConnectEndpointId.NotFound":
 		return true
 	}
 	return false
