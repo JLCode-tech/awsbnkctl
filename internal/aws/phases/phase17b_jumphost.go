@@ -325,13 +325,9 @@ func ensureJumphostInstanceProfile(ctx context.Context, iamClient IAMAPI, cluste
 		fmt.Fprintf(os.Stderr, "[phase 17b] IAM role %s already exists\n", roleName)
 	}
 
-	// Attach AmazonSSMManagedInstanceCore (idempotent).
-	if _, err := iamClient.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
-		RoleName:  ptr(roleName),
-		PolicyArn: ptr(jumphostSSMPolicyARN),
-	}); err != nil && !isDuplicatePolicy(err) {
-		return "", "", fmt.Errorf("iam:AttachRolePolicy %s: %w", roleName, err)
-	}
+	// Attach AmazonSSMManagedInstanceCore was here (removed per AWS-17 security issue).
+	// EICE does not require SSM on the instance itself.
+
 
 	// Ensure instance profile.
 	profileTagSlice := tags.IAMTags(
@@ -888,13 +884,7 @@ func deleteJumphostIAM(ctx context.Context, iamClient IAMAPI, profileName, roleN
 	}
 	fmt.Fprintf(os.Stderr, "[phase 17b down] deleted instance profile %s\n", profileName)
 
-	// Detach managed policy then delete role.
-	if _, err := iamClient.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{
-		RoleName:  ptr(roleName),
-		PolicyArn: ptr(jumphostSSMPolicyARN),
-	}); err != nil && !isNoSuchEntity(err) {
-		return fmt.Errorf("iam:DetachRolePolicy %s: %w", roleName, err)
-	}
+	// Detach managed policy was here (removed per AWS-17 security issue).
 	if _, err := iamClient.DeleteRole(ctx, &iam.DeleteRoleInput{
 		RoleName: ptr(roleName),
 	}); err != nil && !isNoSuchEntity(err) {
