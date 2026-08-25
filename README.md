@@ -148,6 +148,7 @@ Ready-to-edit topologies live under [`examples/`](examples/) — see the
 - **[`examples/external-only/`](examples/external-only/)** — Single-interface `external-only` pattern, and the experimental `sriov-external` DPDK variant (one-line swap)
 - **[`examples/egress-demo/`](examples/egress-demo/)** — Transparent egress + egress firewall, toggled by one CR
 - **[`examples/ai-rig/`](examples/ai-rig/)** — BNK in front of GPU inference + a managed SageMaker endpoint
+- **[`examples/agentcore-demo/`](examples/agentcore-demo/)** — Integrated AI Agent infrastructure demonstrating MCP tool provisioning, knowledge graphs, and LLM orchestration behind BNK
 - **[`examples/demo-ai/`](examples/demo-ai/)** — Combined BNK protocol demo + SageMaker AI rig
 - **[`examples/local-zone/`](examples/local-zone/)** — Reference telco/edge custom resources (no `cluster.yaml`)
 

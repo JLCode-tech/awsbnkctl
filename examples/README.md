@@ -12,6 +12,7 @@ run it. (`local-zone` is the exception — reference manifests, no `cluster.yaml
 | [`egress-demo`](egress-demo/) | `external-only` | ~3 | Transparent egress and an egress firewall ACL, flipped on and off by applying one CR |
 | [`ai-rig`](ai-rig/) | `external-only` | ~6 | BNK fronting GPU inference, with an optional disposable SageMaker endpoint |
 | [`demo-ai`](demo-ai/) | `dual-interface` (`host-device`) | ~12 | `full-cluster` and `ai-rig` composed into one cluster: all protocol demos plus managed inference |
+| [`agentcore-demo`](agentcore-demo/) | `external-only` | ~4 | Integrated AI Agent infrastructure: provisions MCP tools, LLM orchestrators, and AI APIs safely behind BNK |
 | [`local-zone`](local-zone/) | n/a — no `cluster.yaml` | n/a | Reference telco/edge custom resources (SCTP, Diameter, HTTP/2, SNAT pool) to apply to an existing cluster |
 
 Six directories, not one per permutation. Where two topologies differed by a
@@ -25,9 +26,6 @@ Costs are rough `ap-southeast-2` on-demand estimates for the whole footprint whi
 it is up, excluding data transfer and EBS. None of these topologies scales to
 zero — an idle cluster bills the same as a busy one, so tear them down. Each
 README has the breakdown and the `down` command.
-
-There is also `agentcore-demo/`, which is under active development; see its own
-README rather than this table.
 
 ## Conventions
 
