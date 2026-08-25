@@ -89,3 +89,4 @@ docs/adr/
 # a map of where we are weak, so this stays local. Anything in it that users need
 # belongs in the issue tracker or the docs proper.
 docs/REMEDIATION.md
+*.maf.new

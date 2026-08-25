@@ -133,3 +133,10 @@ func orStr(v, def string) string {
 	}
 	return def
 }
+
+// Phase20bSriovDataplaneDown is a no-op down counterpart. The SR-IOV resources
+// (DaemonSet, ConfigMap, NAD) are destroyed when the cluster is terminated in Phase08.
+func Phase20bSriovDataplaneDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
+	fmt.Fprintln(os.Stderr, "[phase 20b down] sriov-dataplane: cluster termination handles cleanup")
+	return nil
+}

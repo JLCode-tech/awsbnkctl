@@ -110,7 +110,7 @@ Run the built-in data-plane traffic validation, and once finished, tear down the
 
 ## Features & Capabilities
 
-- **Imperative phased provisioner:** ~35 ordered phases run via the AWS Go SDK — the exact count depends on the `pattern:` and which opt-in blocks are present. AWS resource tags act as the single source of truth; a local `state.env` cache speeds up re-runs and is rebuildable from tags.
+- **Imperative phased provisioner:** exactly 39 ordered phases via the AWS Go SDK (see [Provisioning Phases](docs/PHASES.md) for the full sequence). AWS resource tags act as the single source of truth; a local `state.env` cache speeds up re-runs and is rebuildable from tags.
 - **`cluster.yaml` intent file:** Declarative inputs (VPC, network, node group, BNK credentials) seamlessly map to imperative AWS calls. Validated up-front before any mutation.
 - **Built-in `scenarios` framework:** End-to-end traffic validation against the provisioned cluster (6 green data-plane scenarios, 3 amber, plus a curated demo catalogue). `awsbnkctl scenarios list` shows the current set and each one's rating.
 - **`demo` experience:** Audience-friendly walkthrough surface with a rocket-themed launch renderer (gated on `--demo` + TTY), including migration scenarios that run BNK side-by-side with ingress-nginx/HAProxy and external BIG-IP VE + CIS.
@@ -160,7 +160,7 @@ Check out the [Demo Guide](examples/full-cluster/README.md#demo-mode) for full w
 Run `awsbnkctl --help` for the complete command tree. Some highlights:
 
 - `validate <cfg>` : Parse and validate a `cluster.yaml`. No AWS API calls.
-- `up -f <cfg>` : Provision everything. Add `--dry-run` to preview, `--demo` for audience-mode.
+- `up -f <cfg>` : Provision everything. Add `--dry-run` to preview, `--demo` for audience-mode. (See [Provisioning Phases](docs/PHASES.md) for a detailed breakdown of the 39 steps).
 - `down -f <cfg> --yes` : Tear down in reverse.
 - `status` : Workspace summary (cluster state, BNK components, phases).
 - `doctor` : Health check for AWS creds, reachability, and BNK subsystem.

@@ -792,6 +792,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 		{4, "license", func() error { return phases.Phase23LicenseDown(ctx, cl, st, clients) }},
 		{4, "cne-instance", func() error { return phases.Phase22CNEInstanceDown(ctx, cl, st, clients) }},
 		{4, "irsa-sa", func() error { return phases.Phase21IRSASADown(ctx, cl, st, clients) }},
+		{4, "sriov-dataplane", func() error { return phases.Phase20bSriovDataplaneDown(ctx, cl, st, clients) }},
 		{4, "nads", func() error { return phases.Phase20NADsDown(ctx, cl, st, clients) }},
 		{4, "cloud-network-mapping", func() error { return phases.Phase19CloudNetworkMappingDown(ctx, cl, st, clients) }},
 		{4, "flo-helm", func() error { return phases.Phase14FLOHelmDown(ctx, cl, st, clients) }},
@@ -813,6 +814,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 		}},
 		{3, "kubeconfig", func() error { return phases.Phase11KubeconfigDown(ctx, cl, st, clients) }},
 		{3, "irsa-oidc", func() error { return phases.Phase18IrsaOidcDown(ctx, cl, st, clients, flagKeepIRSA) }},
+		{3, "demo-stage", func() error { return phases.Phase17dDemoStageDown(ctx, cl, st, clients) }},
 		{3, "iface-discovery", func() error { return phases.Phase17cIfaceDiscoveryDown(ctx, cl, st, clients) }},
 		// Phase 17e down: BIG-IP VE teardown (no-op when !BigIPVEEnabled — the phase
 		// self-gates on BIGIP_INSTANCE_ID / tag-discovery and tolerates not-found).
@@ -827,7 +829,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 		{3, "node-group", func() error { return phases.Phase10NodeGroupDown(ctx, cl, st, clients) }},
 		// STAGE 2 — EKS control plane.
 		{2, "forge-benchmark-cleanup", func() error { return phases.Phase09bBenchmarkDown(ctx, cl, st, clients) }},
-		{2, "forge-unregister", func() error { return phases.Phase09ForgeRegisterDown(ctx, cl, st, clients, flagKeepForgeLink) }},
+		{2, "forge-register", func() error { return phases.Phase09ForgeRegisterDown(ctx, cl, st, clients, flagKeepForgeLink) }},
 		{2, "vpc-cni-prefix", func() error { return phases.Phase08bVPCCNIPrefixDown(ctx, cl, st, clients) }},
 		{2, "eks-cluster", func() error { return phases.Phase08EKSClusterDown(ctx, cl, st, clients) }},
 		// STAGE 1 — VPC · subnets · IGW · NAT · IAM.

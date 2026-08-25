@@ -135,3 +135,9 @@ func Phase17dDemoStage(ctx context.Context, cl *intent.Cluster, st *state.State,
 	fmt.Fprintln(os.Stderr, "[phase 17d] demo client staging complete")
 	return nil
 }
+
+// Phase17dDemoStageDown clears demo stage state.
+func Phase17dDemoStageDown(ctx context.Context, cl *intent.Cluster, st *state.State, _ *Clients) error {
+	st.Set("DEMO_CLIENT_STAGED_AT", "")
+	return st.Save()
+}
