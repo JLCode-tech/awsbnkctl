@@ -328,7 +328,6 @@ func ensureJumphostInstanceProfile(ctx context.Context, iamClient IAMAPI, cluste
 	// Attach AmazonSSMManagedInstanceCore was here (removed per AWS-17 security issue).
 	// EICE does not require SSM on the instance itself.
 
-
 	// Ensure instance profile.
 	profileTagSlice := tags.IAMTags(
 		tags.Required(clusterName, tags.CompJumphostProfile),
