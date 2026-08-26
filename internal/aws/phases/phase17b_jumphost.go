@@ -936,22 +936,3 @@ func isResourceLimitExceeded(err error) bool {
 }
 
 // isDuplicatePolicy returns true for IAM DuplicatePolicyAttachmentException.
-func isDuplicatePolicy(err error) bool {
-	if err == nil {
-		return false
-	}
-	type coder interface{ ErrorCode() string }
-	e := err
-	for e != nil {
-		if ce, ok := e.(coder); ok {
-			return ce.ErrorCode() == "DuplicatePolicyAttachmentException"
-		}
-		type unwrapper interface{ Unwrap() error }
-		if u, ok := e.(unwrapper); ok {
-			e = u.Unwrap()
-		} else {
-			break
-		}
-	}
-	return false
-}
