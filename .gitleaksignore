@@ -15,3 +15,13 @@ fb572ef0d3eea5e68677ec74ba0cd089ac87e9b0:internal/aws/phases/phase17f_bigip_onbo
 8fbc706db73f694cc84ce1582b3e74ef42aee15c:internal/exec/k8s.go:generic-api-key:93
 2f7c908e3e5e0e2273793a8fa99b9f47da5873e9:internal/exec/k8s.go:generic-api-key:90
 2f7c908e3e5e0e2273793a8fa99b9f47da5873e9:internal/exec/k8s_test.go:generic-api-key:473
+7498d9090581fe9303c08734e3e083636f69ab8d:internal/jumphost/staging_test.go:private-key:316
+e45e5490088dbb8289510623d1bddfbeef4d78e5:.gitleaksignore:generic-api-key:5
+8abcc2388803e2042ea8b0f0c9468c14a075e787:internal/scenarios/aiinferencee2e/scenario.go:generic-api-key:9
+7161a87aa94f079f9e73c1979296c9b06698258c:internal/jumphost/staging_test.go:private-key:316
+7b01030acf7304afb00a1eb94154862d3b18f279:internal/aws/phases/mock_ec2_test.go:private-key:452
+7b01030acf7304afb00a1eb94154862d3b18f279:internal/aws/phases/phase17f_bigip_onboard_test.go:generic-api-key:109
+7b01030acf7304afb00a1eb94154862d3b18f279:internal/aws/phases/phase17f_bigip_onboard_test.go:generic-api-key:306
+c2a49a4c61f5de0a605a1d7a8d0aa9347eab01bd:internal/config/applied_tfvars_test.go:aws-access-token:102
+c2a49a4c61f5de0a605a1d7a8d0aa9347eab01bd:internal/config/applied_tfvars_test.go:aws-access-token:117
+93cee5ef72f0b3dcf019b65ecc94384962c4f7b6:internal/exec/ssh_wrapper_test.go:private-key:251
