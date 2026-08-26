@@ -22,9 +22,6 @@ const (
 	// al2023AMIParam is the SSM parameter path for the latest x86_64 AL2023 AMI.
 	al2023AMIParam = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 
-	// jumphostSSMPolicyARN is the AWS-managed policy that enables EC2 Instance
-	// Connect Endpoint to initiate SSH sessions to the instance.
-	jumphostSSMPolicyARN = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 
 	// jumphostInstancePollInterval is the interval between instance-state polls.
 	jumphostInstancePollInterval = 5 * time.Second
