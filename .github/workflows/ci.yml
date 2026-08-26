@@ -595,6 +595,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: remove node_modules (un-parseable templates)
+        run: find . -type d -name "node_modules" -prune -exec rm -rf {} +
+
       - name: gosec (Go static security analyzer)
         # The official upstream-maintained action, pinned to a tagged
         # release (not @master) for supply-chain stability. Default args
