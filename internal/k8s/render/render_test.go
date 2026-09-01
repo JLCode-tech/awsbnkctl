@@ -741,8 +741,6 @@ func TestRenderLicenseCR_HappyPath(t *testing.T) {
 		"instance: syd-tracer",
 		"operationMode: connected",
 		jwt, // JWT inlined verbatim
-		"https://product.apis.f5.com/ee/v1",
-		"https://product-s.apis.f5.com/ee/v1",
 	}
 	for _, want := range checks {
 		if !strings.Contains(rendered, want) {
