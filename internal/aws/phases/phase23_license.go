@@ -77,9 +77,10 @@ func Phase23License(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 	fmt.Fprintf(os.Stderr, "[phase 23] CRD %s ready\n", licenseCRDName)
 
 	// Read and trim the JWT file.
-	jwtRaw, err := os.ReadFile(cl.Bnk.JWT)
+	jwtPath := resolveConfigPath(cl.SourcePath, cl.Bnk.JWT)
+	jwtRaw, err := os.ReadFile(jwtPath)
 	if err != nil {
-		return fmt.Errorf("phase23: reading JWT file %s: %w", cl.Bnk.JWT, err)
+		return fmt.Errorf("phase23: reading JWT file %s: %w", jwtPath, err)
 	}
 	jwt := strings.TrimSpace(string(jwtRaw))
 

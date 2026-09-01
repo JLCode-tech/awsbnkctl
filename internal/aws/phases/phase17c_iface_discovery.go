@@ -82,19 +82,13 @@ func Phase17cIfaceDiscovery(ctx context.Context, cl *intent.Cluster, st *state.S
 		return fmt.Errorf("phase17c: TMM_NODE_NAME not in state (run phase16 first)")
 	}
 
-	// Idempotency: if the iface mapping is already resolved in state AND a TMM pod
-	// is Running, the secondary ENIs have already been claimed by the running TMM
-	// pod (moved into its netns) — a host-netns discovery pod cannot see them, so
-	// re-discovery would spuriously fail. Skip and keep the resolved mapping.
+	// Idempotency: if the iface mapping is already resolved in state,
+	// secondary ENIs have already been discovered and potentially claimed by TMM.
+	// Skip re-discovery to avoid failing against host-netns probe pods.
 	if ifaceMappingResolved(st, hasInternal) {
-		running, err := tmmPodRunning(ctx, clients.K8s, InstanceNamespace)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[phase 17c] warning: could not check TMM pod status (%v); proceeding with discovery\n", err)
-		} else if shouldSkipIfaceDiscovery(true, running) {
-			fmt.Fprintf(os.Stderr, "[phase 17c] iface mapping already resolved and TMM Running — secondary ENIs claimed by TMM, skipping re-discovery (EXTERNAL_IFNAME=%s INTERNAL_IFNAME=%s)\n",
-				st.Get("EXTERNAL_IFNAME"), st.Get("INTERNAL_IFNAME"))
-			return nil
-		}
+		fmt.Fprintf(os.Stderr, "[phase 17c] iface mapping already resolved in state — skipping re-discovery (EXTERNAL_IFNAME=%s INTERNAL_IFNAME=%s)\n",
+			st.Get("EXTERNAL_IFNAME"), st.Get("INTERNAL_IFNAME"))
+		return nil
 	}
 
 	// Best-effort delete any stale pod from a previous run.

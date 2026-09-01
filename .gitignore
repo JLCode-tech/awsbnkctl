@@ -91,3 +91,9 @@ docs/adr/
 docs/REMEDIATION.md
 *.maf.new
 node_modules/
+clusters/
+*.orig
+patch.diff
+.agentcore-network-env.json
+.govulncheck-ignore.sh
+
