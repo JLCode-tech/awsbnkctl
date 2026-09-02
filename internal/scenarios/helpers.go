@@ -64,12 +64,13 @@ func WaitDeploymentAvailable(ctx context.Context, sctx *Context, ns, name string
 }
 
 // WaitCondition polls a resource (identified by gvr) for a named condition
-// with status=True in .status.conditions.
+// with status=True in .status.conditions or .status.parents[*].conditions.
 func WaitCondition(ctx context.Context, sctx *Context, gvr schema.GroupVersionResource, ns, name, condType string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		obj, err := sctx.Dynamic.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
+			// Check standard .status.conditions
 			conditions, _, _ := NestedSlice(obj.Object, "status", "conditions")
 			for _, cRaw := range conditions {
 				c, ok := cRaw.(map[string]interface{})
@@ -78,6 +79,25 @@ func WaitCondition(ctx context.Context, sctx *Context, gvr schema.GroupVersionRe
 				}
 				if c["type"] == condType && c["status"] == "True" {
 					return nil
+				}
+			}
+
+			// Check route-style .status.parents[*].conditions
+			parents, _, _ := NestedSlice(obj.Object, "status", "parents")
+			for _, pRaw := range parents {
+				p, ok := pRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				pConditions, _, _ := NestedSlice(p, "conditions")
+				for _, cRaw := range pConditions {
+					c, ok2 := cRaw.(map[string]interface{})
+					if !ok2 {
+						continue
+					}
+					if c["type"] == condType && c["status"] == "True" {
+						return nil
+					}
 				}
 			}
 		}

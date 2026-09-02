@@ -82,19 +82,13 @@ func Phase17cIfaceDiscovery(ctx context.Context, cl *intent.Cluster, st *state.S
 		return fmt.Errorf("phase17c: TMM_NODE_NAME not in state (run phase16 first)")
 	}
 
-	// Idempotency: if the iface mapping is already resolved in state AND a TMM pod
-	// is Running, the secondary ENIs have already been claimed by the running TMM
-	// pod (moved into its netns) — a host-netns discovery pod cannot see them, so
-	// re-discovery would spuriously fail. Skip and keep the resolved mapping.
+	// Idempotency: if the iface mapping is already resolved in state,
+	// secondary ENIs have already been discovered and potentially claimed by TMM.
+	// Skip re-discovery to avoid failing against host-netns probe pods.
 	if ifaceMappingResolved(st, hasInternal) {
-		running, err := tmmPodRunning(ctx, clients.K8s, InstanceNamespace)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[phase 17c] warning: could not check TMM pod status (%v); proceeding with discovery\n", err)
-		} else if shouldSkipIfaceDiscovery(true, running) {
-			fmt.Fprintf(os.Stderr, "[phase 17c] iface mapping already resolved and TMM Running — secondary ENIs claimed by TMM, skipping re-discovery (EXTERNAL_IFNAME=%s INTERNAL_IFNAME=%s)\n",
-				st.Get("EXTERNAL_IFNAME"), st.Get("INTERNAL_IFNAME"))
-			return nil
-		}
+		fmt.Fprintf(os.Stderr, "[phase 17c] iface mapping already resolved in state — skipping re-discovery (EXTERNAL_IFNAME=%s INTERNAL_IFNAME=%s)\n",
+			st.Get("EXTERNAL_IFNAME"), st.Get("INTERNAL_IFNAME"))
+		return nil
 	}
 
 	// Best-effort delete any stale pod from a previous run.
@@ -251,22 +245,4 @@ func ifaceMappingResolved(st *state.State, hasInternal bool) bool {
 		return st.Get("INTERNAL_IFNAME") != "" && st.Get("INTERNAL_PCI") != ""
 	}
 	return true
-}
-
-// shouldSkipIfaceDiscovery is the pure skip decision: skip only when the mapping
-// is already resolved AND a TMM pod is Running (so the ENIs are already claimed).
-func shouldSkipIfaceDiscovery(resolved, tmmRunning bool) bool { return resolved && tmmRunning }
-
-// tmmPodRunning reports whether at least one f5-tmm pod is in the Running phase.
-func tmmPodRunning(ctx context.Context, k8s kubernetes.Interface, namespace string) (bool, error) {
-	pods, err := k8s.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=f5-tmm"})
-	if err != nil {
-		return false, err
-	}
-	for i := range pods.Items {
-		if pods.Items[i].Status.Phase == corev1.PodRunning {
-			return true, nil
-		}
-	}
-	return false, nil
 }

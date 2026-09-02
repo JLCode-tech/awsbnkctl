@@ -379,9 +379,10 @@ func Phase14FLOHelmDown(ctx context.Context, cl *intent.Cluster, st *state.State
 	farPath := ""
 	farKeyB64 := ""
 	if cl.Bnk != nil {
-		farData, err := os.ReadFile(cl.Bnk.FARArchive) // #nosec G304
+		resolvedFarPath := resolveConfigPath(cl.SourcePath, cl.Bnk.FARArchive)
+		farData, err := os.ReadFile(resolvedFarPath) // #nosec G304
 		if err == nil && len(farData) > 0 {
-			farPath = cl.Bnk.FARArchive
+			farPath = resolvedFarPath
 			farKeyB64 = strings.TrimSpace(string(farData))
 		}
 	}

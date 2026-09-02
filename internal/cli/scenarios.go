@@ -29,6 +29,18 @@ import (
 	_ "github.com/JLCode-tech/awsbnkctl/internal/scenarios/multivip"
 	// Side-effect import: registers egress-snat in init().
 	_ "github.com/JLCode-tech/awsbnkctl/internal/scenarios/egresssnat"
+	// Side-effect import: registers grpc-loadbalance in init().
+	_ "github.com/JLCode-tech/awsbnkctl/internal/scenarios/grpcroute"
+	// Side-effect import: registers tcp-l4-loadbalance in init().
+	_ "github.com/JLCode-tech/awsbnkctl/internal/scenarios/tcpl4lb"
+	// Side-effect import: registers udp-l4-loadbalance in init().
+	_ "github.com/JLCode-tech/awsbnkctl/internal/scenarios/udpl4lb"
+	// Side-effect import: registers cluster-wide-watch in init().
+	_ "github.com/JLCode-tech/awsbnkctl/internal/scenarios/clusterwidewatch"
+	// Side-effect import: registers cwc-admin-access in init().
+	_ "github.com/JLCode-tech/awsbnkctl/internal/scenarios/cwcadminaccess"
+	// Side-effect import: registers core-file-collection in init().
+	_ "github.com/JLCode-tech/awsbnkctl/internal/scenarios/corefiles"
 )
 
 // topoSort returns the registered scenarios in dependency order using Kahn's

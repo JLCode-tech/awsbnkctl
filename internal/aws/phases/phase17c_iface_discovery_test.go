@@ -251,28 +251,6 @@ func TestIfaceMappingResolved_SingleInterface(t *testing.T) {
 	}
 }
 
-// ─── shouldSkipIfaceDiscovery tests ──────────────────────────────────────────
-
-func TestShouldSkipIfaceDiscovery(t *testing.T) {
-	tests := []struct {
-		resolved   bool
-		tmmRunning bool
-		want       bool
-	}{
-		{true, true, true},
-		{true, false, false},
-		{false, true, false},
-		{false, false, false},
-	}
-	for _, tc := range tests {
-		got := shouldSkipIfaceDiscovery(tc.resolved, tc.tmmRunning)
-		if got != tc.want {
-			t.Errorf("shouldSkipIfaceDiscovery(resolved=%v, tmmRunning=%v) = %v, want %v",
-				tc.resolved, tc.tmmRunning, got, tc.want)
-		}
-	}
-}
-
 // ─── Cross-phase ordering test ────────────────────────────────────────────────
 
 // TestCrossPhase_17cThenPhase19_DiscoveredKeysSurvive verifies the critical

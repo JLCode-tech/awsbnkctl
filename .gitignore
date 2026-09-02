@@ -89,5 +89,12 @@ docs/adr/
 # a map of where we are weak, so this stays local. Anything in it that users need
 # belongs in the issue tracker or the docs proper.
 docs/REMEDIATION.md
+docs/ALIGNMENT.md
 *.maf.new
 node_modules/
+clusters/
+*.orig
+patch.diff
+.agentcore-network-env.json
+.govulncheck-ignore.sh
+
