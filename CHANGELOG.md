@@ -4,6 +4,22 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [1.2.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.1.0...v1.2.0) (2026-09-02)
+
+
+### Features
+
+* **alignment:** port cloud-compatible scenarios, agentic tooling, and manifest probing from bnkctl family ([7fec861](https://github.com/JLCode-tech/awsbnkctl/commit/7fec861a1d3a6d848c0fbcd1e52e863958637eea))
+* **test-hosts:** support -y / --yes flags on clear subcommand ([b8e1d7d](https://github.com/JLCode-tech/awsbnkctl/commit/b8e1d7dded42cdba7f51015a5a56d4fbd2ffbb40))
+
+
+### Bug Fixes
+
+* **ci:** format manifest, resolve gosec warnings and clean up unused func ([421287b](https://github.com/JLCode-tech/awsbnkctl/commit/421287b17f36c1777b934775611cb9c58e2787fc))
+* **phases:** remove teem url overrides, resolve config paths, and improve iface discovery idempotency ([7abc055](https://github.com/JLCode-tech/awsbnkctl/commit/7abc055dd41884565284649893e1d8619b3fbcb2))
+* **scenarios/cwcadminaccess:** support BNK 2.3 certificatechain fallback for mTLS verification ([d8ac132](https://github.com/JLCode-tech/awsbnkctl/commit/d8ac1324d05f73c53844b4096cd2980afccbc658))
+* **scenarios:** enhance live verification for routes, corefiles, and cwc certs ([f07f546](https://github.com/JLCode-tech/awsbnkctl/commit/f07f546a554ccbcd0775c99669e55f44f40dc5aa))
+
 ## [1.1.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.0.0...v1.1.0) (2026-08-26)
 
 
