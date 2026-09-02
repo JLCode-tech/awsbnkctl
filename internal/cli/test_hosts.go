@@ -73,7 +73,8 @@ No; pass ` + "`--auto`" + ` to skip the prompt.`,
 }
 
 func init() {
-	testHostsClearCmd.Flags().BoolVar(&flagTestHostsClearAuto, "auto", false, "skip the confirmation prompt")
+	testHostsClearCmd.Flags().BoolVarP(&flagTestHostsClearAuto, "yes", "y", false, "skip the confirmation prompt")
+	testHostsClearCmd.Flags().BoolVar(&flagTestHostsClearAuto, "auto", false, "skip the confirmation prompt (alias for --yes)")
 	testHostsCmd.AddCommand(testHostsListCmd, testHostsAddCmd, testHostsRemoveCmd, testHostsClearCmd)
 }
 
