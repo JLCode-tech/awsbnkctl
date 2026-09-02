@@ -669,6 +669,11 @@
   ],
   "ignorePaths": [
     "go.sum",
-    "*.lock.hcl"
+    "*.lock.hcl",
+    "docs/design/**",
+    "docs/spikes/**",
+    "docs/audits/**",
+    "docs/adr/**",
+    "docs/upstream-issues/**"
   ]
 }
