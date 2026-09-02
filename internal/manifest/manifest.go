@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	FARRegistryHost       = "repo.f5.com"
-	ReleaseManifestRepo   = "oci://repo.f5.com/release"
-	ReleaseManifestChart  = "f5-bigip-k8s-manifest"
+	FARRegistryHost        = "repo.f5.com"
+	ReleaseManifestRepo    = "oci://repo.f5.com/release"
+	ReleaseManifestChart   = "f5-bigip-k8s-manifest"
 	DefaultManifestVersion = "2.3.0-3.2598.3-0.0.170"
 )
 
@@ -132,7 +132,7 @@ func PrintFullBOM(w io.Writer, m *ReleaseManifest) {
 // ExtractFARAuth extracts the password and username for repo.f5.com from a FAR archive.
 // Supports both .tar.gz / .tgz archives containing cne_pull_64.json or raw base64 JSON.
 func ExtractFARAuth(farPath string) (username, password string, err error) {
-	data, err := os.ReadFile(farPath)
+	data, err := os.ReadFile(farPath) // #nosec G304 -- operator-supplied path via cluster.yaml or CLI
 	if err != nil {
 		return "", "", fmt.Errorf("read FAR file %s: %w", farPath, err)
 	}
@@ -188,7 +188,7 @@ func PullReleaseManifest(ctx context.Context, username, password, manifestVersio
 	if manifestVersion == "" {
 		manifestVersion = DefaultManifestVersion
 	}
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir cache %s: %w", cacheDir, err)
 	}
 	absCache, err := filepath.Abs(cacheDir)
@@ -197,7 +197,7 @@ func PullReleaseManifest(ctx context.Context, username, password, manifestVersio
 	}
 
 	// Login to Helm registry
-	loginCmd := exec.CommandContext(ctx, "helm", "registry", "login",
+	loginCmd := exec.CommandContext(ctx, "helm", "registry", "login", // #nosec G204 -- helm login with fixed host and stdin auth
 		FARRegistryHost, "--username", username, "--password-stdin")
 	loginCmd.Stdin = strings.NewReader(password + "\n")
 	var loginErr bytes.Buffer
@@ -213,7 +213,7 @@ func PullReleaseManifest(ctx context.Context, username, password, manifestVersio
 	_ = os.Remove(tgzPath)
 	_ = os.RemoveAll(extractedDir)
 
-	pullCmd := exec.CommandContext(ctx, "helm", "pull",
+	pullCmd := exec.CommandContext(ctx, "helm", "pull", // #nosec G204 -- helm pull with validated version and cache dir
 		ReleaseManifestRepo+"/"+ReleaseManifestChart,
 		"--version", manifestVersion,
 		"-d", absCache)
@@ -225,13 +225,13 @@ func PullReleaseManifest(ctx context.Context, username, password, manifestVersio
 			manifestVersion, err, strings.TrimSpace(pullErr.String()))
 	}
 
-	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", tgzPath, "-C", absCache)
+	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", tgzPath, "-C", absCache) // #nosec G204 -- tar extraction of downloaded archive
 	if err := tarCmd.Run(); err != nil {
 		return nil, fmt.Errorf("tar -xzf %s: %w", tgzPath, err)
 	}
 
 	manifestPath := filepath.Join(extractedDir, fmt.Sprintf("bigip-k8s-manifest-%s.yaml", manifestVersion))
-	body, err := os.ReadFile(manifestPath)
+	body, err := os.ReadFile(manifestPath) // #nosec G304 -- reading extracted manifest yaml
 	if err != nil {
 		return nil, fmt.Errorf("read manifest %s: %w", manifestPath, err)
 	}
@@ -241,6 +241,6 @@ func PullReleaseManifest(ctx context.Context, username, password, manifestVersio
 		return nil, err
 	}
 
-	_ = os.WriteFile(filepath.Join(absCache, "manifest.yaml"), body, 0o644)
+	_ = os.WriteFile(filepath.Join(absCache, "manifest.yaml"), body, 0o600) // #nosec G306,G703 -- cache write
 	return m, nil
 }

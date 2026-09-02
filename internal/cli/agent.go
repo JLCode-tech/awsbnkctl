@@ -164,7 +164,7 @@ func runAgentInit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating workspace dir %s: %w", dir, err)
 	}
 
@@ -172,7 +172,7 @@ func runAgentInit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "journal"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "journal"), 0o750); err != nil {
 		return fmt.Errorf("creating journal dir: %w", err)
 	}
 
@@ -181,7 +181,7 @@ func runAgentInit(cmd *cobra.Command, _ []string) error {
 	if _, statErr := os.Stat(jpath); os.IsNotExist(statErr) {
 		entry := fmt.Sprintf("## %s — agentic mode initialised\n\nWorkspace scaffolded with AGENTS.md + personas/. Start with the solution-architect persona and confirm scope against cluster.yaml.\n",
 			time.Now().UTC().Format("2006-01-02 15:04 UTC"))
-		if werr := os.WriteFile(jpath, []byte(entry), 0o644); werr == nil {
+		if werr := os.WriteFile(jpath, []byte(entry), 0o600); werr == nil {
 			written = append(written, "journal/"+filepath.Base(jpath))
 		}
 	}
@@ -209,7 +209,7 @@ func copyEmbeddedFiles(dir string) (written, skipped []string, err error) {
 		}
 		dst := filepath.Join(dir, rel)
 		if d.IsDir() {
-			return os.MkdirAll(dst, 0o755)
+			return os.MkdirAll(dst, 0o750)
 		}
 		if _, statErr := os.Stat(dst); statErr == nil {
 			skipped = append(skipped, rel)
@@ -219,10 +219,10 @@ func copyEmbeddedFiles(dir string) (written, skipped []string, err error) {
 		if readErr != nil {
 			return readErr
 		}
-		if mkErr := os.MkdirAll(filepath.Dir(dst), 0o755); mkErr != nil {
+		if mkErr := os.MkdirAll(filepath.Dir(dst), 0o750); mkErr != nil {
 			return mkErr
 		}
-		if wErr := os.WriteFile(dst, data, 0o644); wErr != nil {
+		if wErr := os.WriteFile(dst, data, 0o600); wErr != nil {
 			return wErr
 		}
 		written = append(written, rel)

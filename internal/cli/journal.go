@@ -64,7 +64,7 @@ func journalDir() (string, error) {
 		return "", err
 	}
 	jd := filepath.Join(dir, "journal")
-	if err := os.MkdirAll(jd, 0o755); err != nil {
+	if err := os.MkdirAll(jd, 0o750); err != nil {
 		return "", fmt.Errorf("creating journal dir: %w", err)
 	}
 	return jd, nil
@@ -81,11 +81,11 @@ func runJournalAdd(cmd *cobra.Command, args []string) error {
 
 	// Create with a date header the first time; append thereafter.
 	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
-		if werr := os.WriteFile(path, []byte("# Journal — "+date+"\n"), 0o644); werr != nil {
+		if werr := os.WriteFile(path, []byte("# Journal — "+date+"\n"), 0o600); werr != nil {
 			return werr
 		}
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G302,G304 -- path is within workspace journal dir
 	if err != nil {
 		return err
 	}
@@ -133,13 +133,13 @@ func runJournalReport(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(&b, "# %s — deployment report\n\n_Generated %s — seeded from decisions.md + the journal; the doc-specialist persona refines this._\n",
 		resolvedWorkspaceName(), time.Now().UTC().Format("2006-01-02 15:04 UTC"))
 
-	if dec, derr := os.ReadFile(filepath.Join(dir, "decisions.md")); derr == nil {
+	if dec, derr := os.ReadFile(filepath.Join(dir, "decisions.md")); derr == nil { // #nosec G304 -- path is workspace decisions.md
 		fmt.Fprintf(&b, "\n---\n\n## Decisions\n\n%s\n", strings.TrimSpace(string(dec)))
 	}
 
 	fmt.Fprintf(&b, "\n---\n\n## Timeline\n")
 	for _, e := range entries {
-		body, rerr := os.ReadFile(filepath.Join(jd, e.name))
+		body, rerr := os.ReadFile(filepath.Join(jd, e.name)) // #nosec G304 -- path is within workspace journal dir
 		if rerr != nil {
 			continue
 		}
@@ -147,7 +147,7 @@ func runJournalReport(cmd *cobra.Command, _ []string) error {
 	}
 
 	reportPath := filepath.Join(dir, "report.md")
-	if err := os.WriteFile(reportPath, []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile(reportPath, []byte(b.String()), 0o600); err != nil {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "✓ Wrote %s (%d journal entries)\n",
@@ -181,7 +181,7 @@ func journalEntries(jd string) ([]journalEntry, error) {
 // firstLine returns the first non-empty, de-marked line of a file (a quick
 // summary for `journal list`). Empty string on any read error.
 func firstLine(path string) string {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is within workspace journal dir
 	if err != nil {
 		return ""
 	}

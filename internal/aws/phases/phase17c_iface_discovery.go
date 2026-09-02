@@ -246,21 +246,3 @@ func ifaceMappingResolved(st *state.State, hasInternal bool) bool {
 	}
 	return true
 }
-
-// shouldSkipIfaceDiscovery is the pure skip decision: skip only when the mapping
-// is already resolved AND a TMM pod is Running (so the ENIs are already claimed).
-func shouldSkipIfaceDiscovery(resolved, tmmRunning bool) bool { return resolved && tmmRunning }
-
-// tmmPodRunning reports whether at least one f5-tmm pod is in the Running phase.
-func tmmPodRunning(ctx context.Context, k8s kubernetes.Interface, namespace string) (bool, error) {
-	pods, err := k8s.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=f5-tmm"})
-	if err != nil {
-		return false, err
-	}
-	for i := range pods.Items {
-		if pods.Items[i].Status.Phase == corev1.PodRunning {
-			return true, nil
-		}
-	}
-	return false, nil
-}

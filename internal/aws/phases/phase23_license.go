@@ -78,7 +78,7 @@ func Phase23License(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 
 	// Read and trim the JWT file.
 	jwtPath := resolveConfigPath(cl.SourcePath, cl.Bnk.JWT)
-	jwtRaw, err := os.ReadFile(jwtPath)
+	jwtRaw, err := os.ReadFile(jwtPath) // #nosec G304 -- path is operator-supplied via cluster.yaml bnk.jwt
 	if err != nil {
 		return fmt.Errorf("phase23: reading JWT file %s: %w", jwtPath, err)
 	}
