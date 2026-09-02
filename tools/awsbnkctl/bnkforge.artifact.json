@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "name": "awsbnkctl-tools-runner",
+  "version": "1.1.0",
+  "kind": "container_image",
+  "description": "F5 awsbnkctl tools runner — provisions an AWS EKS cluster and deploys BNK with secondary ENIs from a single self-contained image. Procedural steps invoke the artifact's own image via argv only.",
+  "container_image": {
+    "registry_host": "ghcr.io",
+    "repository": "jlcode-tech/awsbnkctl-tools-runner",
+    "tag": "1.1.0"
+  },
+  "lifecycle": {
+    "supports_apply": true,
+    "supports_destroy": true
+  },
+  "credentials": {
+    "cloud": "aws"
+  },
+  "state": {
+    "mount_path": "/state",
+    "home_env": {
+      "AWSBNKCTL_HOME": "/state"
+    }
+  },
+  "execution": {
+    "engine": "container",
+    "limits": {
+      "cpus": "2",
+      "memory": "2g"
+    }
+  },
+  "steps": {
+    "init": [
+      {
+        "name": "validate",
+        "args": [
+          "awsbnkctl",
+          "validate",
+          "cluster.yaml"
+        ],
+        "timeout_seconds": 300,
+        "run_once": true
+      }
+    ],
+    "apply": [
+      {
+        "name": "up",
+        "args": [
+          "awsbnkctl",
+          "up",
+          "-f",
+          "cluster.yaml",
+          "--auto"
+        ],
+        "timeout_seconds": 3600,
+        "retry": {
+          "max_attempts": 2,
+          "backoff_seconds": 180
+        }
+      }
+    ],
+    "destroy": [
+      {
+        "name": "down",
+        "args": [
+          "awsbnkctl",
+          "down",
+          "-f",
+          "cluster.yaml",
+          "--yes"
+        ],
+        "timeout_seconds": 3600
+      }
+    ]
+  },
+  "inputs": {
+    "required": [
+      {
+        "name": "region",
+        "type": "string",
+        "source": "user",
+        "default": "ap-southeast-2",
+        "description": "AWS region for the EKS cluster and VPC infrastructure."
+      },
+      {
+        "name": "cluster_name",
+        "type": "string",
+        "source": "user",
+        "description": "Unique name for the EKS cluster and associated AWS resources."
+      }
+    ],
+    "optional": [
+      {
+        "name": "instance_type",
+        "type": "string",
+        "source": "user",
+        "default": "m5.xlarge",
+        "description": "EC2 instance type for TMM worker nodes."
+      },
+      {
+        "name": "node_count",
+        "type": "number",
+        "source": "user",
+        "default": 2,
+        "description": "Desired count of TMM worker nodes."
+      }
+    ]
+  },
+  "references": []
+}
