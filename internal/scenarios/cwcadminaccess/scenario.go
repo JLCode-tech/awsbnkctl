@@ -42,12 +42,18 @@ func realVerifyDeps() VerifyDeps {
 			if sctx.Clientset == nil {
 				return true, true, true, "dry-run verification pass"
 			}
-			_, errCerts := sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "cwc-license-client-certs", metav1.GetOptions{})
+			_, errCerts := sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "cwc-license-certs", metav1.GetOptions{})
+			if errCerts != nil {
+				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "cwc-license-client-certs", metav1.GetOptions{})
+			}
+			if errCerts != nil {
+				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "bnk-forge-cwc-client-tls", metav1.GetOptions{})
+			}
 			_, errToken := sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "cwc-auth-token", metav1.GetOptions{})
 
 			certsPresent := errCerts == nil
 			tokenPresent := errToken == nil
-			detail := fmt.Sprintf("cwc-license-client-certs=%v, cwc-auth-token=%v", certsPresent, tokenPresent)
+			detail := fmt.Sprintf("cwc-license-certs=%v, cwc-auth-token=%v", certsPresent, tokenPresent)
 			return certsPresent && tokenPresent, true, true, detail
 		},
 	}
