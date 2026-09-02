@@ -49,6 +49,12 @@ func realVerifyDeps() VerifyDeps {
 			if errCerts != nil {
 				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "bnk-forge-cwc-client-tls", metav1.GetOptions{})
 			}
+			if errCerts != nil {
+				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "certificatechain", metav1.GetOptions{})
+			}
+			if errCerts != nil {
+				_, errCerts = sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "certificate", metav1.GetOptions{})
+			}
 			_, errToken := sctx.Clientset.CoreV1().Secrets(cwcNamespace).Get(ctx, "cwc-auth-token", metav1.GetOptions{})
 
 			certsPresent := errCerts == nil
@@ -117,29 +123,36 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 	ns := s.Namespace(ctx)
 	if ctx.Clientset != nil {
 		// Replicate secrets from f5-cne-core if present
-		replicateSecret(ctx.Ctx, ctx, "cwc-license-client-certs", cwcNamespace, ns)
+		if !replicateSecret(ctx.Ctx, ctx, "cwc-license-client-certs", cwcNamespace, ns) {
+			replicateSecretAs(ctx.Ctx, ctx, "certificatechain", cwcNamespace, "cwc-license-client-certs", ns)
+		}
 		replicateSecret(ctx.Ctx, ctx, "cwc-auth-token", cwcNamespace, ns)
 	}
 	return scenarios.ApplyManifests(ctx, scnName)
 }
 
-func replicateSecret(ctx context.Context, sctx *scenarios.Context, name, srcNS, dstNS string) {
+func replicateSecret(ctx context.Context, sctx *scenarios.Context, name, srcNS, dstNS string) bool {
+	return replicateSecretAs(ctx, sctx, name, srcNS, name, dstNS)
+}
+
+func replicateSecretAs(ctx context.Context, sctx *scenarios.Context, srcName, srcNS, dstName, dstNS string) bool {
 	if sctx.Clientset == nil {
-		return
+		return false
 	}
-	src, err := sctx.Clientset.CoreV1().Secrets(srcNS).Get(ctx, name, metav1.GetOptions{})
+	src, err := sctx.Clientset.CoreV1().Secrets(srcNS).Get(ctx, srcName, metav1.GetOptions{})
 	if err != nil {
-		return
+		return false
 	}
 	dst := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      dstName,
 			Namespace: dstNS,
 		},
 		Type: src.Type,
 		Data: src.Data,
 	}
 	_, _ = sctx.Clientset.CoreV1().Secrets(dstNS).Create(ctx, dst, metav1.CreateOptions{})
+	return true
 }
 
 func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
