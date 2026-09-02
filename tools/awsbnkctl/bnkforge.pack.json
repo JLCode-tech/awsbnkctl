@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "module": {
+    "name": "awsbnkctl",
+    "path": "tools/awsbnkctl",
+    "version": "1.1.0",
+    "category": "bnk",
+    "description": "awsbnkctl — deploy F5 BIG-IP Next for Kubernetes on AWS EKS with secondary ENI dataplane. Runs inside the digest-pinned awsbnkctl-tools-runner container image; no host tooling required.",
+    "provider": "aws"
+  },
+  "deployment_pack": {
+    "engine": "container",
+    "runner_profile": "container-default",
+    "working_directory": ".",
+    "lifecycle": {
+      "supports_init": true,
+      "supports_plan": true,
+      "supports_apply": true,
+      "supports_destroy": true,
+      "supports_refresh": false,
+      "supports_drift": false
+    },
+    "entrypoints": {}
+  },
+  "dependencies": {
+    "required": [],
+    "optional": []
+  },
+  "inputs": {
+    "required": [
+      {
+        "name": "region",
+        "type": "string",
+        "source": "user",
+        "default": "ap-southeast-2",
+        "description": "AWS region for the EKS cluster and VPC infrastructure (e.g. ap-southeast-2)."
+      },
+      {
+        "name": "cluster_name",
+        "type": "string",
+        "source": "user",
+        "description": "Unique name for the EKS cluster and associated AWS resources."
+      }
+    ],
+    "optional": [
+      {
+        "name": "instance_type",
+        "type": "string",
+        "source": "user",
+        "default": "m5.xlarge",
+        "description": "EC2 instance type for TMM worker nodes."
+      },
+      {
+        "name": "node_count",
+        "type": "number",
+        "source": "user",
+        "default": 2,
+        "description": "Desired count of TMM worker nodes."
+      }
+    ]
+  },
+  "outputs": {
+    "key_outputs": []
+  }
+}
