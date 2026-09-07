@@ -845,9 +845,14 @@ func applyDefaults(c *Cluster) {
 		// Version intentionally left empty by default (newest AMI).
 	}
 
-	// ai.sagemaker defaults.
-	if c.AI != nil && c.AI.SageMaker != nil {
-		applySageMakerDefaults(c.AI.SageMaker)
+	// ai.sagemaker and ai.synthetic defaults.
+	if c.AI != nil {
+		if c.AI.SageMaker != nil {
+			applySageMakerDefaults(c.AI.SageMaker)
+		}
+		if c.AI.Synthetic != nil {
+			applySyntheticDefaults(c.AI.Synthetic)
+		}
 	}
 
 	// BNK patterns: auto-derive TMM SelfIPs as <subnet>.240 when not explicitly
@@ -957,6 +962,11 @@ func validate(c *Cluster) error {
 	}
 	if c.AI != nil && c.AI.SageMaker != nil && c.AI.SageMaker.Enabled {
 		if err := validateSageMaker(c.AI.SageMaker); err != nil {
+			return err
+		}
+	}
+	if c.AI != nil && c.AI.Synthetic != nil && c.AI.Synthetic.Enabled {
+		if err := validateSynthetic(c.AI.Synthetic); err != nil {
 			return err
 		}
 	}

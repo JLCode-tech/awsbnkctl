@@ -78,6 +78,33 @@ func (s *objectGraphServer) handler(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(list)
 
 	// BenchmarkTarget
+	case r.Method == http.MethodPost && r.URL.Path == forge.BenchmarkDiscoverTargetsEndpoint:
+		raw, _ := io.ReadAll(r.Body)
+		s.capturedPosts[r.URL.Path] = raw
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"cluster_id":       2,
+			"cluster_name":     "bnk-singapore",
+			"discovered_count": 1,
+			"discovered_services": []map[string]any{
+				{
+					"service_name": "vllm",
+					"namespace":    "awsbnkctl-scn-aiinference",
+					"base_url":     "http://vllm.awsbnkctl-scn-aiinference:80",
+					"port":         80,
+					"confidence":   "high",
+				},
+			},
+			"created_targets": []map[string]any{
+				{
+					"id":           2,
+					"name":         "vllm-awsbnkctl-scn-aiinference",
+					"llm_base_url": "http://vllm.awsbnkctl-scn-aiinference:80",
+					"status":       "created",
+				},
+			},
+		})
+
 	case r.Method == http.MethodPost && r.URL.Path == forge.BenchmarkTargetEndpoint:
 		raw, _ := io.ReadAll(r.Body)
 		s.capturedPosts[r.URL.Path] = raw
@@ -575,5 +602,72 @@ func TestPushRawAiperfResult_MissingRawJSON(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected error for empty RawJSON")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DiscoverTargets & ListBenchmarkTargets tests
+// ---------------------------------------------------------------------------
+
+func TestDiscoverTargets_Success(t *testing.T) {
+	srv := newObjectGraphServer(0)
+	ts := httptest.NewServer(http.HandlerFunc(srv.handler))
+	defer ts.Close()
+
+	origDo := *forge.BenchmarkHTTPDoFn
+	*forge.BenchmarkHTTPDoFn = ts.Client().Do
+	defer func() { *forge.BenchmarkHTTPDoFn = origDo }()
+
+	resp, err := forge.DiscoverTargets(context.Background(), forge.DiscoverTargetsOptions{
+		RestURL:    ts.URL,
+		ClusterID:  2,
+		AutoCreate: true,
+	})
+	if err != nil {
+		t.Fatalf("DiscoverTargets: %v", err)
+	}
+	if resp.ClusterID != 2 {
+		t.Errorf("ClusterID = %d, want 2", resp.ClusterID)
+	}
+	if resp.DiscoveredCount != 1 {
+		t.Errorf("DiscoveredCount = %d, want 1", resp.DiscoveredCount)
+	}
+	if len(resp.CreatedTargets) != 1 || resp.CreatedTargets[0].Name != "vllm-awsbnkctl-scn-aiinference" {
+		t.Errorf("CreatedTargets = %+v", resp.CreatedTargets)
+	}
+}
+
+func TestListBenchmarkTargets_Success(t *testing.T) {
+	srv := newObjectGraphServer(0)
+	srv.existingTargets = []map[string]any{
+		{
+			"id":            2,
+			"name":          "vllm-awsbnkctl-scn-aiinference",
+			"cluster_id":    2,
+			"llm_base_url":  "http://vllm.awsbnkctl-scn-aiinference:80",
+			"llm_model":     "meta-llama/Llama-3.1-8B-Instruct",
+			"llm_namespace": "awsbnkctl-scn-aiinference",
+			"proxy_count":   1,
+		},
+	}
+	ts := httptest.NewServer(http.HandlerFunc(srv.handler))
+	defer ts.Close()
+
+	origDo := *forge.BenchmarkHTTPDoFn
+	*forge.BenchmarkHTTPDoFn = ts.Client().Do
+	defer func() { *forge.BenchmarkHTTPDoFn = origDo }()
+
+	targets, err := forge.ListBenchmarkTargets(context.Background(), forge.ListBenchmarkTargetsOptions{
+		RestURL:   ts.URL,
+		ClusterID: 2,
+	})
+	if err != nil {
+		t.Fatalf("ListBenchmarkTargets: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("got %d targets, want 1", len(targets))
+	}
+	if targets[0].ID != 2 || targets[0].Name != "vllm-awsbnkctl-scn-aiinference" {
+		t.Errorf("targets[0] = %+v", targets[0])
 	}
 }
