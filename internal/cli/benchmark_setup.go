@@ -13,7 +13,10 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
 )
 
-var flagBenchSetupPreflight bool
+var (
+	flagBenchSetupPreflight bool
+	flagBenchSetupDaemon    bool
+)
 
 var benchmarkSetupCmd = &cobra.Command{
 	Use:   "setup",
@@ -34,6 +37,8 @@ After setup, run benchmarks with:
 func init() {
 	benchmarkSetupCmd.Flags().BoolVar(&flagBenchSetupPreflight, "preflight", true,
 		"run preflight probe against the served model endpoint to verify end-to-end data path")
+	benchmarkSetupCmd.Flags().BoolVar(&flagBenchSetupDaemon, "daemon", false,
+		"start the persistent benchmark agent daemon immediately after setup")
 }
 
 // ensureAiperfFn is the injectable seam for EnsureAiperf.
@@ -163,5 +168,10 @@ func runBenchmarkSetup(cmd *cobra.Command, _ []string) error {
 	_ = tw.Flush()
 
 	fmt.Printf("\n✓ Benchmark environment is configured and ready.\n")
+
+	if flagBenchSetupDaemon {
+		fmt.Fprintf(os.Stderr, "\n→ Starting Forge benchmark agent daemon (--daemon)...\n")
+		return runBenchmarkDaemon(cmd, nil)
+	}
 	return nil
 }

@@ -120,11 +120,6 @@ type BenchmarkPushOptions struct {
 	ProxyDeploymentID int
 }
 
-// benchmarkHTTPDoFn is the injectable HTTP transport seam used by
-// PushBenchmarkResult. Default: http.DefaultClient.Do.
-// Tests replace it via the BenchmarkHTTPDoFn export in benchmark_export_test.go.
-var benchmarkHTTPDoFn func(*http.Request) (*http.Response, error) = http.DefaultClient.Do
-
 // MapAiperfResultToPayload converts an AiperfResult + options into the
 // BenchmarkResultPayload that forge's POST /api/benchmarks/results expects.
 //
@@ -284,7 +279,7 @@ func PushBenchmarkResult(ctx context.Context, result *jumphost.AiperfResult, opt
 	base := strings.TrimRight(opts.RestURL, "/")
 
 	// Login to obtain a bearer token using the injectable transport.
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return BenchmarkPushResponse{}, fmt.Errorf("forge benchmark push: login: %w", err)
 	}
@@ -292,7 +287,7 @@ func PushBenchmarkResult(ctx context.Context, result *jumphost.AiperfResult, opt
 	payload := MapAiperfResultToPayload(result, opts)
 
 	var resp BenchmarkPushResponse
-	if err := bmkRestPost(ctx, base+BenchmarkPushEndpoint, token, payload, &resp); err != nil {
+	if err := restPost(ctx, base+BenchmarkPushEndpoint, token, payload, &resp); err != nil {
 		return BenchmarkPushResponse{}, fmt.Errorf("forge benchmark push: %w", err)
 	}
 	return resp, nil

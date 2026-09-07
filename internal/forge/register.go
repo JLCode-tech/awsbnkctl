@@ -29,6 +29,18 @@ type RegisterRequest struct {
 	// explicitly skip sending an AWS profile.
 	AWSProfile string
 
+	// Environment is the forge project environment (e.g. "dev", "staging", "prod").
+	// Empty defaults to "dev".
+	Environment string
+
+	// ProjectType is the forge project type (e.g. "cloud-aws").
+	// Empty defaults to "cloud-aws".
+	ProjectType string
+
+	// CloudProvider is the cloud provider label (e.g. "aws").
+	// Empty defaults to "aws".
+	CloudProvider string
+
 	// CredentialTemplateID is the forge credential template ID to attach to
 	// the newly-created project. When 0, no credential is attached and forge
 	// falls back to its default (typically the operator must wire it manually).
@@ -97,13 +109,26 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 	}
 
 	// 1) create project
+	env := req.Environment
+	if env == "" {
+		env = "dev"
+	}
+	projType := req.ProjectType
+	if projType == "" {
+		projType = "cloud-aws"
+	}
+	cloudProv := req.CloudProvider
+	if cloudProv == "" {
+		cloudProv = "aws"
+	}
+
 	proj, err := c.CreateProject(ctx, CreateProjectRequest{
 		Name:                 req.ProjectName,
-		ProjectType:          "cloud-aws",
-		CloudProvider:        "aws",
+		ProjectType:          projType,
+		CloudProvider:        cloudProv,
 		Region:               req.Region,
 		AWSProfile:           sendableAWSProfile(req.AWSProfile),
-		Environment:          "dev",
+		Environment:          env,
 		Description:          fmt.Sprintf("Created by awsbnkctl for workspace %q", req.WorkspaceName),
 		CredentialTemplateID: req.CredentialTemplateID,
 	})
@@ -115,7 +140,7 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 	cluster, err := c.CreateCluster(ctx, CreateClusterRequest{
 		ProjectID:     proj.Project.ID,
 		Name:          req.ClusterName,
-		CloudProvider: "aws",
+		CloudProvider: cloudProv,
 		Region:        req.Region,
 	}, req.Kubeconfig)
 	if err != nil {
@@ -233,9 +258,9 @@ func Status(ctx context.Context, c *Client, workspaceDir string) (StatusResult, 
 	return out, nil
 }
 
-// is404 is a heuristic for the not-found case — MCP tool errors are
+// Is404 is a heuristic for the not-found case — MCP tool errors are
 // flattened to strings, so we sniff for the conventional markers.
-func is404(err error) bool {
+func Is404(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -244,4 +269,8 @@ func is404(err error) bool {
 		strings.Contains(s, "not found") ||
 		strings.Contains(s, "http 404") ||
 		strings.Contains(s, "\"status_code\": 404")
+}
+
+func is404(err error) bool {
+	return Is404(err)
 }
