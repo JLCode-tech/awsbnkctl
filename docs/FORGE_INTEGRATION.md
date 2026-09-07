@@ -79,3 +79,14 @@ It is unsafe to store passwords in `cluster.yaml`. You can override forge settin
 
 - **Manage Infrastructure:** Forge does not spin up or tear down EKS clusters. That is `awsbnkctl`'s job.
 - **Act as Source of Truth:** `awsbnkctl doctor` and `awsbnkctl status` rely on AWS, not forge.
+
+---
+
+## 7. Benchmarks & Bidirectional Agent Daemon
+
+`awsbnkctl` integrates with Forge's performance benchmarking subsystem to execute LLM inference benchmark suites against proxy endpoints inside VPCs:
+
+- **CLI-Driven Runs (`awsbnkctl benchmark run`)**: Scans registered Forge clusters to discover target and proxy deployment IDs, runs aiperf suites, and pushes JSON metrics to Forge.
+- **Forge-Driven Runs via Daemon (`awsbnkctl benchmark daemon`)**: Establishes a persistent reverse WebSocket tunnel to Forge (`/ws/benchmarks/agents/{id}`) with 15s heartbeats. Operators can click **Run Benchmark** directly in the Forge UI, and Forge dispatches the test down the WebSocket to the agent.
+- **Auto-Drain on Reconnection**: If an agent disconnects and runs are triggered from Forge, Forge queues them in `pending`. When `awsbnkctl benchmark daemon` is restarted, it automatically claims and drains the pending backlog sequentially.
+
