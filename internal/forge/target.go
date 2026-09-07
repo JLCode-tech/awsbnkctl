@@ -24,6 +24,9 @@ import (
 // BenchmarkTargetEndpoint is the forge REST path for benchmark targets.
 const BenchmarkTargetEndpoint = "/api/benchmarks/targets"
 
+// BenchmarkDiscoverTargetsEndpoint is the forge REST path for cluster target discovery.
+const BenchmarkDiscoverTargetsEndpoint = "/api/benchmarks/discover-targets"
+
 // BenchmarkTargetOptions carries all data for registering a benchmark target.
 type BenchmarkTargetOptions struct {
 	// RestURL is the forge REST base URL (e.g. "http://localhost:8000").
@@ -49,17 +52,145 @@ type BenchmarkTargetOptions struct {
 	Tags map[string]string
 }
 
-// BenchmarkTargetResponse is the subset of forge's BenchmarkTarget fields
-// that callers need.
+// BenchmarkTargetResponse is the representation of forge's BenchmarkTarget fields.
 type BenchmarkTargetResponse struct {
-	ID        int    `json:"id"`
-	Name      string `json:"name"`
-	ClusterID int    `json:"cluster_id"`
+	ID             int            `json:"id"`
+	Name           string         `json:"name"`
+	ClusterID      int            `json:"cluster_id"`
+	LLMBaseURL     string         `json:"llm_base_url,omitempty"`
+	LLMModel       string         `json:"llm_model,omitempty"`
+	LLMNamespace   string         `json:"llm_namespace,omitempty"`
+	LLMEndpoint    string         `json:"llm_endpoint,omitempty"`
+	ProxyNamespace string         `json:"proxy_namespace,omitempty"`
+	Status         string         `json:"status,omitempty"`
+	ProxyCount     int            `json:"proxy_count,omitempty"`
+	Tags           map[string]any `json:"tags,omitempty"`
+}
+
+// DiscoverTargetsOptions carries parameters for POST /api/benchmarks/discover-targets.
+type DiscoverTargetsOptions struct {
+	// RestURL is the forge REST base URL (e.g. "http://localhost:8000").
+	RestURL string
+	// Creds are the forge REST login credentials.
+	Creds RestCreds
+	// ClusterID is the forge cluster ID to scan.
+	ClusterID int
+	// AutoCreate automatically creates BenchmarkTarget records for discovered services.
+	AutoCreate bool
+	// SelectedServices is an optional list of service base_urls to restrict target creation to.
+	SelectedServices []string
+}
+
+// DiscoveredServiceItem describes an LLM service discovered during a cluster scan.
+type DiscoveredServiceItem struct {
+	ServiceName string `json:"service_name"`
+	Namespace   string `json:"namespace"`
+	BaseURL     string `json:"base_url"`
+	Port        int    `json:"port"`
+	Confidence  string `json:"confidence"`
+	Reason      string `json:"reason"`
+	ModelHint   string `json:"model_hint,omitempty"`
+	GPUCount    int    `json:"gpu_count"`
+	Image       string `json:"image,omitempty"`
+}
+
+// CreatedTargetItem describes a BenchmarkTarget auto-created by forge discovery.
+type CreatedTargetItem struct {
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	LLMBaseURL string `json:"llm_base_url"`
+	Status     string `json:"status"`
+}
+
+// TargetProxyDiscoveryResult describes proxy discovery outcome for an auto-created target.
+type TargetProxyDiscoveryResult struct {
+	TargetID          int    `json:"target_id"`
+	TargetName        string `json:"target_name"`
+	DiscoveredProxies int    `json:"discovered_proxies"`
+	TotalScanned      int    `json:"total_scanned"`
+	Error             string `json:"error,omitempty"`
+}
+
+// DiscoverTargetsResponse is returned by POST /api/benchmarks/discover-targets.
+type DiscoverTargetsResponse struct {
+	ClusterID          int                          `json:"cluster_id"`
+	ClusterName        string                       `json:"cluster_name"`
+	DiscoveredServices []DiscoveredServiceItem      `json:"discovered_services"`
+	DiscoveredCount    int                          `json:"discovered_count"`
+	CreatedTargets     []CreatedTargetItem          `json:"created_targets"`
+	ProxyResults       []TargetProxyDiscoveryResult `json:"proxy_results"`
+}
+
+// ListBenchmarkTargetsOptions carries parameters for GET /api/benchmarks/targets.
+type ListBenchmarkTargetsOptions struct {
+	// RestURL is the forge REST base URL.
+	RestURL string
+	// Creds are the forge REST login credentials.
+	Creds RestCreds
+	// ClusterID optionally filters targets by forge cluster ID.
+	ClusterID int
 }
 
 // ErrTargetNoClusterID is returned by RegisterBenchmarkTarget when ClusterID
 // is zero.  Callers should treat this as a soft skip, not a hard failure.
 var ErrTargetNoClusterID = errors.New("forge.RegisterBenchmarkTarget: ClusterID is required (workspace may not have a forge link)")
+
+// DiscoverTargets calls POST /api/benchmarks/discover-targets to scan the cluster
+// for LLM inference services, auto-create BenchmarkTargets, and run proxy discovery.
+func DiscoverTargets(ctx context.Context, opts DiscoverTargetsOptions) (DiscoverTargetsResponse, error) {
+	if opts.RestURL == "" {
+		return DiscoverTargetsResponse{}, fmt.Errorf("forge.DiscoverTargets: RestURL is required")
+	}
+	if opts.ClusterID == 0 {
+		return DiscoverTargetsResponse{}, fmt.Errorf("forge.DiscoverTargets: ClusterID is required")
+	}
+
+	base := strings.TrimRight(opts.RestURL, "/")
+
+	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	if err != nil {
+		return DiscoverTargetsResponse{}, fmt.Errorf("forge discover targets: login: %w", err)
+	}
+
+	body := map[string]any{
+		"cluster_id":  opts.ClusterID,
+		"auto_create": opts.AutoCreate,
+	}
+	if len(opts.SelectedServices) > 0 {
+		body["selected_services"] = opts.SelectedServices
+	}
+
+	var resp DiscoverTargetsResponse
+	if err := bmkRestPost(ctx, base+BenchmarkDiscoverTargetsEndpoint, token, body, &resp); err != nil {
+		return DiscoverTargetsResponse{}, fmt.Errorf("forge discover targets: %w", err)
+	}
+	return resp, nil
+}
+
+// ListBenchmarkTargets calls GET /api/benchmarks/targets and optionally filters by cluster_id.
+func ListBenchmarkTargets(ctx context.Context, opts ListBenchmarkTargetsOptions) ([]BenchmarkTargetResponse, error) {
+	if opts.RestURL == "" {
+		return nil, fmt.Errorf("forge.ListBenchmarkTargets: RestURL is required")
+	}
+
+	base := strings.TrimRight(opts.RestURL, "/")
+
+	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	if err != nil {
+		return nil, fmt.Errorf("forge list benchmark targets: login: %w", err)
+	}
+
+	url := base + BenchmarkTargetEndpoint
+	if opts.ClusterID > 0 {
+		url = fmt.Sprintf("%s?cluster_id=%d", url, opts.ClusterID)
+	}
+
+	var resp benchmarkTargetListResponse
+	if err := bmkRestGet(ctx, url, token, &resp); err != nil {
+		return nil, fmt.Errorf("forge list benchmark targets: %w", err)
+	}
+	return resp.Targets, nil
+}
 
 // RegisterBenchmarkTarget creates or reuses a forge BenchmarkTarget record.
 //

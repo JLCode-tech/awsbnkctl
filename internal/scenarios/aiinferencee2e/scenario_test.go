@@ -431,3 +431,104 @@ func TestVerifyOrder_SSEFails_HTTP200OK(t *testing.T) {
 		t.Errorf("SSE assertion = ok, want failed (no SSE framing)")
 	}
 }
+
+func TestManifestsRendered_Synthetic(t *testing.T) {
+	dir := t.TempDir()
+	cl := makeCluster()
+
+	sctx := &scenarios.Context{
+		Ctx:          context.Background(),
+		Cluster:      cl,
+		Out:          io.Discard,
+		WorkspaceDir: dir,
+		Options: map[string]string{
+			"synthetic": "true",
+		},
+	}
+
+	s := scenarios.Find("ai-inference-e2e")
+	if s == nil {
+		t.Fatal("scenario not registered")
+	}
+
+	paths, err := s.Manifests(sctx)
+	if err != nil {
+		t.Fatalf("Manifests: %v", err)
+	}
+	if len(paths) != 5 {
+		t.Errorf("expected 5 manifest paths, got %d: %v", len(paths), paths)
+	}
+
+	for _, p := range paths {
+		if p == "" {
+			t.Error("empty path in manifest list")
+			continue
+		}
+		rawContent, readErr := readFileHelper(p)
+		if readErr != nil {
+			t.Fatalf("reading %s: %v", p, readErr)
+		}
+		content := string(rawContent)
+		// No leftover template directives.
+		if strings.Contains(content, "{{") || strings.Contains(content, "}}") {
+			t.Errorf("manifest %s still contains template directives:\n%s", p, content)
+		}
+		// vLLM manifest must use synthetic simulation and omit nvidia.com/gpu.
+		if strings.HasSuffix(p, "03-vllm.yaml") {
+			if strings.Contains(content, "nvidia.com/gpu") {
+				t.Errorf("03-vllm.yaml should not contain nvidia.com/gpu in synthetic mode:\n%s", content)
+			}
+			if strings.Contains(content, "awsbnkctl.io/gpu") {
+				t.Errorf("03-vllm.yaml should not contain awsbnkctl.io/gpu in synthetic mode:\n%s", content)
+			}
+			if !strings.Contains(content, "python:3.11-slim") {
+				t.Errorf("03-vllm.yaml missing python:3.11-slim image:\n%s", content)
+			}
+			if !strings.Contains(content, "llama3") {
+				t.Errorf("03-vllm.yaml missing llama3 model:\n%s", content)
+			}
+		}
+	}
+}
+
+func TestVerify_Synthetic(t *testing.T) {
+	dir := t.TempDir()
+	cl := makeCluster()
+
+	deps := aiinferencee2e.VerifyDeps{
+		WaitDeploymentAvailableFn: func(_ context.Context, _ *scenarios.Context, _, _ string, timeout time.Duration) error {
+			if timeout > 5*time.Minute {
+				t.Errorf("synthetic mode should have shorter deployment timeout, got %v", timeout)
+			}
+			return nil
+		},
+		WaitConditionFn: func(_ context.Context, _ *scenarios.Context, _ schema.GroupVersionResource, _, _, _ string, _ time.Duration) error {
+			return nil
+		},
+		WaitHTTPRouteConditionFn: func(_ context.Context, _ *scenarios.Context, _, _, _ string, _ time.Duration) error {
+			return nil
+		},
+		RunVLLMSSEProbeFn: func(_ context.Context, _ *scenarios.Context, _ string) (bool, bool, string) {
+			return true, true, "HTTP 200 — SSE ok"
+		},
+	}
+
+	s := aiinferencee2e.NewScenarioForTest(deps)
+	sctx := &scenarios.Context{
+		Ctx:          context.Background(),
+		Cluster:      cl,
+		Out:          io.Discard,
+		WorkspaceDir: dir,
+		Options: map[string]string{
+			"synthetic": "true",
+		},
+	}
+
+	result := s.Verify(sctx)
+	if result.Status != "ok" {
+		t.Errorf("status = %q, want ok", result.Status)
+	}
+	if !strings.Contains(result.Details, "synthetic GPU") {
+		t.Errorf("details should mention synthetic GPU, got %q", result.Details)
+	}
+}

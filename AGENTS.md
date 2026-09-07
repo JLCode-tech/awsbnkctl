@@ -32,11 +32,12 @@
 |---|---|
 | **Lifecycle** | `init`, `validate`, `up`, `down`, `status`, `doctor` |
 | **Data Plane Scenarios** | `scenarios {list, run, clean}` |
+| **AI & Benchmarking** | `benchmark {setup, run, list, status}` |
 | **Walkthrough & Demos** | `demo {list, run, clean}`, `topology` |
 | **Kubernetes Passthrough** | `k {get, apply, describe, delete, logs, exec, port-forward}` |
 | **Agentic Workflow** | `agent {init, claude, gemini, chatgpt, aider}`, `journal {add, list, report}` |
 | **Registry & Manifests** | `manifest probe [version]` |
-| **Fleet & Forge** | `forge {register, status, unregister}` |
+| **Fleet & Forge** | `forge {register, status, unregister, benchmark}` |
 | **Maintenance** | `self update`, `version` |
 
 ---

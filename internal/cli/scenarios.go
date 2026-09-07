@@ -133,6 +133,9 @@ func runAllScenarios(cmd *cobra.Command, cl *intent.Cluster, st *state.State) er
 	if flagScenarioVIP != "" {
 		opts["vip"] = flagScenarioVIP
 	}
+	if flagScenarioSynthetic {
+		opts["synthetic"] = "true"
+	}
 
 	sctx, err := scenarios.NewContext(
 		cmd.Context(),
@@ -172,10 +175,11 @@ func runAllScenarios(cmd *cobra.Command, cl *intent.Cluster, st *state.State) er
 }
 
 var (
-	flagScenarioConfig string
-	flagScenarioVIP    string
-	flagScenarioDryRun bool
-	flagScenarioAll    bool
+	flagScenarioConfig    string
+	flagScenarioVIP       string
+	flagScenarioDryRun    bool
+	flagScenarioAll       bool
+	flagScenarioSynthetic bool
 )
 
 var scenariosCmd = &cobra.Command{
@@ -237,6 +241,7 @@ func init() {
 	scenariosRunCmd.Flags().StringVar(&flagScenarioVIP, "vip", "", "Gateway VIP to use (default: derived from cluster.yaml)")
 	scenariosRunCmd.Flags().BoolVar(&flagScenarioDryRun, "dry-run", false, "render manifests only; do not apply or verify")
 	scenariosRunCmd.Flags().BoolVar(&flagScenarioAll, "all", false, "run every registered scenario in topo-sorted order")
+	scenariosRunCmd.Flags().BoolVar(&flagScenarioSynthetic, "synthetic", false, "force synthetic GPU simulation (llm-d-inference-sim) without GPU nodes")
 	_ = scenariosRunCmd.MarkFlagRequired("config")
 
 	scenariosCleanCmd.Flags().StringVarP(&flagScenarioConfig, "config", "f", "", "path to cluster.yaml (required)")
@@ -281,6 +286,9 @@ func runScenariosRunCmd(cmd *cobra.Command, args []string) error {
 	opts := make(map[string]string)
 	if flagScenarioVIP != "" {
 		opts["vip"] = flagScenarioVIP
+	}
+	if flagScenarioSynthetic {
+		opts["synthetic"] = "true"
 	}
 
 	sctx, err := scenarios.NewContext(

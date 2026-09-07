@@ -46,6 +46,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
 )
@@ -138,6 +139,13 @@ type manifestVars struct {
 	GatewayClassName string
 	VIP              string
 	ExternalCIDR     string
+	Synthetic        bool
+	Image            string
+	Model            string
+	ServedModelName  string
+	Replicas         int
+	TTFTBaseMs       int
+	ITLMs            int
 }
 
 func (s *scenario) Manifests(ctx *scenarios.Context) ([]string, error) {
@@ -179,19 +187,24 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 	if err := ensureNamespace(ctx, ns); err != nil {
 		return fmt.Errorf("ensuring namespace %s: %w", ns, err)
 	}
-	// Create the hf-token Secret from HF_TOKEN before applying the vLLM Deployment.
-	// This is skipped gracefully when HF_TOKEN is unset (offline / public-model path).
-	createFn := s.createHFTokenSecretFn
-	if createFn == nil {
-		createFn = createHFTokenSecret
-	}
-	token := os.Getenv("HF_TOKEN")
-	if token != "" {
-		if err := createFn(ctx, ns, token); err != nil {
-			return fmt.Errorf("creating hf-token Secret: %w", err)
-		}
+
+	if isSynthetic(ctx) {
+		fmt.Fprintf(ctx.Out, "[ai-inference-e2e] running in synthetic GPU mode (llm-d-inference-sim) — skipping hf-token Secret creation\n")
 	} else {
-		fmt.Fprintf(ctx.Out, "[ai-inference-e2e] HF_TOKEN not set — skipping hf-token Secret creation (gated models will fail to pull)\n")
+		// Create the hf-token Secret from HF_TOKEN before applying the vLLM Deployment.
+		// This is skipped gracefully when HF_TOKEN is unset (offline / public-model path).
+		createFn := s.createHFTokenSecretFn
+		if createFn == nil {
+			createFn = createHFTokenSecret
+		}
+		token := os.Getenv("HF_TOKEN")
+		if token != "" {
+			if err := createFn(ctx, ns, token); err != nil {
+				return fmt.Errorf("creating hf-token Secret: %w", err)
+			}
+		} else {
+			fmt.Fprintf(ctx.Out, "[ai-inference-e2e] HF_TOKEN not set — skipping hf-token Secret creation (gated models will fail to pull)\n")
+		}
 	}
 	return scenarios.ApplyManifests(ctx, scnName)
 }
@@ -255,13 +268,22 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		d = &real
 	}
 	ns := namespace(ctx)
+	synthetic := isSynthetic(ctx)
+	details := "Green: full data-plane — vLLM must be running on a GPU node and reachable through the BNK VIP."
+	if synthetic {
+		details = "Green: full data-plane (synthetic GPU) — llm-d-inference-sim running on CPU node and reachable through the BNK VIP."
+	}
 	res := scenarios.Result{
-		Details: "Green: full data-plane — vLLM must be running on a GPU node and reachable through the BNK VIP.",
+		Details: details,
 	}
 
 	// 1. vLLM Deployment Available (GPU model load can take several minutes;
-	//    allow 20 min to absorb a liveness restart during cold model load).
-	err := d.WaitDeploymentAvailableFn(ctx.Ctx, ctx, ns, "vllm", 20*time.Minute)
+	//    synthetic starts in seconds).
+	deployTimeout := 20 * time.Minute
+	if synthetic {
+		deployTimeout = 2 * time.Minute
+	}
+	err := d.WaitDeploymentAvailableFn(ctx.Ctx, ctx, ns, "vllm", deployTimeout)
 	res.Assertions = append(res.Assertions, scenarios.Assertion{
 		Description: "vLLM Deployment Available",
 		OK:          err == nil,
@@ -353,6 +375,34 @@ func withLastOctet(ip, octet string) string {
 	return strings.Join(parts, ".")
 }
 
+// isSynthetic reports whether the scenario should run in synthetic GPU mode
+// using llm-d-inference-sim rather than real GPU-backed vLLM.
+func isSynthetic(ctx *scenarios.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	if v, ok := ctx.Options["synthetic"]; ok {
+		return strings.EqualFold(v, "true") || v == "1"
+	}
+	if ctx.Cluster != nil && ctx.Cluster.SyntheticAIEnabled() {
+		return true
+	}
+	// Fallback to synthetic if cluster intent has node groups but none are GPU
+	if ctx.Cluster != nil && ctx.Cluster.ClusterSpec != nil && len(ctx.Cluster.ClusterSpec.NodeGroups) > 0 {
+		hasGPU := false
+		for _, ng := range ctx.Cluster.ClusterSpec.NodeGroups {
+			if ng.IsGPU() {
+				hasGPU = true
+				break
+			}
+		}
+		if !hasGPU {
+			return true
+		}
+	}
+	return false
+}
+
 func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	var v manifestVars
 	v.Namespace = namespace(ctx)
@@ -376,6 +426,40 @@ func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	}
 	// Use .108 to avoid colliding with other scenarios' pools.
 	v.VIP = withLastOctet(vip, strconv.Itoa(108))
+
+	synthetic := isSynthetic(ctx)
+	v.Synthetic = synthetic
+	if synthetic {
+		v.Image = intent.DefaultSyntheticImage
+		v.Model = "meta-llama/Meta-Llama-3-8B-Instruct"
+		v.ServedModelName = "llama3"
+		v.Replicas = 1
+		v.TTFTBaseMs = 100
+		v.ITLMs = 15
+
+		if ctx.Cluster != nil && ctx.Cluster.AI != nil && ctx.Cluster.AI.Synthetic != nil {
+			s := ctx.Cluster.AI.Synthetic
+			if s.Image != "" {
+				v.Image = s.Image
+			}
+			if s.Model != "" {
+				v.Model = s.Model
+			}
+			if s.ServedModelName != "" {
+				v.ServedModelName = s.ServedModelName
+			}
+			if s.Replicas > 0 {
+				v.Replicas = s.Replicas
+			}
+			if s.TTFTBaseMs > 0 {
+				v.TTFTBaseMs = s.TTFTBaseMs
+			}
+			if s.ITLMs > 0 {
+				v.ITLMs = s.ITLMs
+			}
+		}
+	}
+
 	return v, nil
 }
 
