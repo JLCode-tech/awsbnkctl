@@ -111,14 +111,14 @@ func DiscoverProxies(ctx context.Context, opts ProxyDiscoverOptions) (ProxyDisco
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return ProxyDiscoveryResult{}, fmt.Errorf("forge discover proxies: login: %w", err)
 	}
 
 	url := fmt.Sprintf("%s%s/%d/discover-proxies", base, BenchmarkProxyEndpoint, opts.TargetID)
 	var result ProxyDiscoveryResult
-	if err := bmkRestPost(ctx, url, token, map[string]any{}, &result); err != nil {
+	if err := restPost(ctx, url, token, map[string]any{}, &result); err != nil {
 		return ProxyDiscoveryResult{}, fmt.Errorf("forge discover proxies: %w", err)
 	}
 	return result, nil
@@ -138,14 +138,14 @@ func ListProxyDeployments(ctx context.Context, opts ProxyDiscoverOptions) ([]Pro
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return nil, fmt.Errorf("forge list proxy deployments: login: %w", err)
 	}
 
 	url := fmt.Sprintf("%s%s/%d/proxies", base, BenchmarkProxyEndpoint, opts.TargetID)
 	var list []ProxyDeployment
-	if err := bmkRestGet(ctx, url, token, &list); err != nil {
+	if err := restGet(ctx, url, token, &list); err != nil {
 		return nil, fmt.Errorf("forge list proxy deployments: %w", err)
 	}
 	return list, nil

@@ -21,6 +21,9 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// DefaultSSHUser is the default Linux username on Amazon Linux 2 / AL2023 jumphost instances.
+const DefaultSSHUser = "ec2-user"
+
 // ProbeOptions configures a jumphost curl probe run.
 type ProbeOptions struct {
 	// Region is the AWS region (e.g. "ap-southeast-2").
@@ -36,7 +39,7 @@ type ProbeOptions struct {
 	Iterations int
 	// Timeout is the per-curl timeout. Default 10s.
 	Timeout time.Duration
-	// User is the SSH user on the jumphost. Default "ec2-user".
+	// User is the SSH user on the jumphost. Default DefaultSSHUser ("ec2-user").
 	User string
 	// Hostname sets the HTTP Host header so requests match hostname-scoped
 	// HTTPRoutes. Empty means no Host header (matches no-hostname routes).

@@ -120,7 +120,7 @@ func (w *BenchmarkAgentWorker) Run(ctx context.Context) error {
 	base := strings.TrimRight(w.opts.RestURL, "/")
 
 	// 1. Authenticate to Forge
-	token, err := bmkRestLogin(ctx, base, w.opts.Creds.restUsername(), w.opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, w.opts.Creds.restUsername(), w.opts.Creds.restPassword())
 	if err != nil {
 		return fmt.Errorf("forge agent login: %w", err)
 	}
