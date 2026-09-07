@@ -54,6 +54,23 @@ func (c RestCreds) restPassword() string {
 	return "changeme"
 }
 
+// benchmarkHTTPDoFn is the single injectable HTTP transport seam used by all
+// forge REST operations (lifecycle, agents, targets, proxies, configs, results).
+// Default: http.DefaultClient.Do. Tests replace it via the BenchmarkHTTPDoFn
+// export in benchmark_export_test.go.
+var benchmarkHTTPDoFn func(*http.Request) (*http.Response, error) = http.DefaultClient.Do
+
+// isConflictHTTP returns true if err represents an HTTP 409 Conflict
+// or HTTP 400 Bad Request with "already exists" in the response body.
+func isConflictHTTP(err error) bool {
+	var herr *restHTTPErr
+	if !errors.As(err, &herr) {
+		return false
+	}
+	return herr.StatusCode == http.StatusConflict ||
+		(herr.StatusCode == http.StatusBadRequest && strings.Contains(herr.Body, "already exists"))
+}
+
 // RegisterREST mirrors Register's shape but uses forge's REST API instead of
 // MCP. Used as a fallback when the MCP catalog does not expose create_project
 // or create_cluster (catalog-gap detection in Phase09).
@@ -130,10 +147,10 @@ func UnregisterREST(ctx context.Context, restURL string, link *Link, creds RestC
 		return fmt.Errorf("forge REST login: %w", err)
 	}
 
-	if err := restDeleteCluster(ctx, base, token, link.ProjectID, link.ClusterID); err != nil && !is404(err) {
+	if err := restDeleteCluster(ctx, base, token, link.ProjectID, link.ClusterID); err != nil && !Is404(err) {
 		return fmt.Errorf("forge REST delete cluster: %w", err)
 	}
-	if err := restDeleteProject(ctx, base, token, link.ProjectID); err != nil && !is404(err) {
+	if err := restDeleteProject(ctx, base, token, link.ProjectID); err != nil && !Is404(err) {
 		return fmt.Errorf("forge REST delete project: %w", err)
 	}
 	return nil
@@ -162,7 +179,7 @@ func UnregisterRESTByName(ctx context.Context, restURL, clusterName string, cred
 	cluster, err := restFindClusterByName(ctx, base, token, proj.ID, clusterName)
 	switch {
 	case err == nil:
-		if derr := restDeleteCluster(ctx, base, token, proj.ID, cluster.ID); derr != nil && !is404(derr) {
+		if derr := restDeleteCluster(ctx, base, token, proj.ID, cluster.ID); derr != nil && !Is404(derr) {
 			return fmt.Errorf("forge REST delete cluster: %w", derr)
 		}
 	case errors.Is(err, os.ErrNotExist):
@@ -171,7 +188,7 @@ func UnregisterRESTByName(ctx context.Context, restURL, clusterName string, cred
 		return err
 	}
 
-	if err := restDeleteProject(ctx, base, token, proj.ID); err != nil && !is404(err) {
+	if err := restDeleteProject(ctx, base, token, proj.ID); err != nil && !Is404(err) {
 		return fmt.Errorf("forge REST delete project: %w", err)
 	}
 	return nil
@@ -222,12 +239,25 @@ type restProject struct {
 }
 
 func restCreateProject(ctx context.Context, base, token string, req RegisterRequest) (restProject, error) {
+	env := req.Environment
+	if env == "" {
+		env = "dev"
+	}
+	projType := req.ProjectType
+	if projType == "" {
+		projType = "cloud-aws"
+	}
+	cloudProv := req.CloudProvider
+	if cloudProv == "" {
+		cloudProv = "aws"
+	}
+
 	body := map[string]any{
 		"name":           req.ProjectName,
-		"project_type":   "cloud-aws",
-		"cloud_provider": "aws",
+		"project_type":   projType,
+		"cloud_provider": cloudProv,
 		"region":         req.Region,
-		"environment":    "dev",
+		"environment":    env,
 		"description":    fmt.Sprintf("Created by awsbnkctl for workspace %q", req.WorkspaceName),
 	}
 	if p := sendableAWSProfile(req.AWSProfile); p != "" {
@@ -252,12 +282,11 @@ func restCreateProject(ctx context.Context, base, token string, req RegisterRequ
 		// project record was preserved per the soft-delete default). Fall back
 		// to GET-list-and-reuse so the kubeconfig still gets re-uploaded
 		// against this project on the subsequent cluster POST.
-		var herr *restHTTPErr
-		if errors.As(err, &herr) && herr.StatusCode == http.StatusConflict {
-			fmt.Fprintf(os.Stderr, "[forge] project %q already exists (409) — reusing existing record\n", req.ProjectName)
+		if isConflictHTTP(err) {
+			fmt.Fprintf(os.Stderr, "[forge] project %q already exists (conflict) — reusing existing record\n", req.ProjectName)
 			existing, lookupErr := restFindProjectByName(ctx, base, token, req.ProjectName)
 			if lookupErr != nil {
-				return restProject{}, fmt.Errorf("forge REST: 409 on create + lookup failed: %w (original: %v)", lookupErr, err)
+				return restProject{}, fmt.Errorf("forge REST: conflict on create + lookup failed: %w (original: %v)", lookupErr, err)
 			}
 			fmt.Fprintf(os.Stderr, "[forge] reusing project id=%d name=%q\n", existing.ID, existing.Name)
 			return existing, nil
@@ -307,9 +336,13 @@ func restCreateCluster(ctx context.Context, base, token string, projectID int, r
 	// so the MCP path (which sends raw bytes per the existing client)
 	// is unaffected.
 	encodedKubeconfig := base64.StdEncoding.EncodeToString(req.Kubeconfig)
+	cloudProv := req.CloudProvider
+	if cloudProv == "" {
+		cloudProv = "aws"
+	}
 	body := map[string]any{
 		"name":           req.ClusterName,
-		"cloud_provider": "aws",
+		"cloud_provider": cloudProv,
 		"region":         req.Region,
 		"kubeconfig":     encodedKubeconfig,
 	}
@@ -328,16 +361,15 @@ func restCreateCluster(ctx context.Context, base, token string, projectID int, r
 		// 409 = the project already contains a cluster with this name. Find
 		// it and PUT the fresh kubeconfig so the forge k8s UI doesn't 500 on
 		// a stale/missing kubeconfig (user-reported failure mode 2026-05-22).
-		var herr *restHTTPErr
-		if errors.As(err, &herr) && herr.StatusCode == http.StatusConflict {
-			fmt.Fprintf(os.Stderr, "[forge] cluster %q already exists in project %d (409) — refreshing kubeconfig\n",
+		if isConflictHTTP(err) {
+			fmt.Fprintf(os.Stderr, "[forge] cluster %q already exists in project %d (conflict) — refreshing kubeconfig\n",
 				req.ClusterName, projectID)
 			existing, lookupErr := restFindClusterByName(ctx, base, token, projectID, req.ClusterName)
 			if lookupErr != nil {
-				return restCluster{}, fmt.Errorf("forge REST: 409 on cluster create + lookup failed: %w (original: %v)", lookupErr, err)
+				return restCluster{}, fmt.Errorf("forge REST: conflict on cluster create + lookup failed: %w (original: %v)", lookupErr, err)
 			}
 			if updateErr := restUpdateClusterKubeconfig(ctx, base, token, existing.ID, encodedKubeconfig); updateErr != nil {
-				return restCluster{}, fmt.Errorf("forge REST: 409 on cluster create + kubeconfig refresh failed: %w", updateErr)
+				return restCluster{}, fmt.Errorf("forge REST: conflict on cluster create + kubeconfig refresh failed: %w", updateErr)
 			}
 			fmt.Fprintf(os.Stderr, "[forge] cluster id=%d kubeconfig refreshed\n", existing.ID)
 			return existing, nil
@@ -394,37 +426,48 @@ func restDeleteProject(ctx context.Context, base, token string, projectID int) e
 }
 
 // restPost sends a POST request with JSON body and decodes the JSON response
-// into out. On HTTP status >= 400 returns *restHTTPErr (typed so callers can
-// switch on status code, e.g. 409 → upsert fallback).
+// into out. On HTTP status >= 400 returns *restHTTPErr. Uses the unified
+// benchmarkHTTPDoFn transport seam.
 func restPost(ctx context.Context, url, token string, body, out any) error {
-	return restRequest(ctx, http.MethodPost, url, token, body, out)
+	req, err := newRESTRequest(ctx, http.MethodPost, url, token, body)
+	if err != nil {
+		return err
+	}
+	return doRESTRequest(req, url, out)
 }
 
-// restPut mirrors restPost but uses HTTP PUT — used by the cluster-409 upsert
-// path to PUT a fresh kubeconfig onto an existing cluster record.
+// restPut mirrors restPost but uses HTTP PUT.
 func restPut(ctx context.Context, url, token string, body, out any) error {
-	return restRequest(ctx, http.MethodPut, url, token, body, out)
+	req, err := newRESTRequest(ctx, http.MethodPut, url, token, body)
+	if err != nil {
+		return err
+	}
+	return doRESTRequest(req, url, out)
 }
 
 // restGet sends a GET request and decodes the JSON response into out.
-// Status >= 400 returns *restHTTPErr.
 func restGet(ctx context.Context, url, token string, out any) error {
-	return restRequest(ctx, http.MethodGet, url, token, nil, out)
+	req, err := newRESTRequest(ctx, http.MethodGet, url, token, nil)
+	if err != nil {
+		return err
+	}
+	return doRESTRequest(req, url, out)
 }
 
-// restRequest is the shared transport for restPost / restPut / restGet.
-func restRequest(ctx context.Context, method, url, token string, body, out any) error {
+// newRESTRequest builds an *http.Request with JSON body (when body != nil) and
+// Authorization header.
+func newRESTRequest(ctx context.Context, method, url, token string, body any) (*http.Request, error) {
 	var reader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("marshal body: %w", err)
+			return nil, fmt.Errorf("marshal request body: %w", err)
 		}
 		reader = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -432,9 +475,15 @@ func restRequest(ctx context.Context, method, url, token string, body, out any) 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	return req, nil
+}
+
+// doRESTRequest executes req via benchmarkHTTPDoFn, checks for HTTP errors, and
+// decodes the JSON response into out (when out != nil and body is non-empty).
+func doRESTRequest(req *http.Request, url string, out any) error {
+	resp, err := benchmarkHTTPDoFn(req)
 	if err != nil {
-		return fmt.Errorf("http %s %s: %w", method, url, err)
+		return fmt.Errorf("http %s %s: %w", req.Method, url, err)
 	}
 	defer resp.Body.Close()
 	respBytes, _ := io.ReadAll(resp.Body)
@@ -449,28 +498,13 @@ func restRequest(ctx context.Context, method, url, token string, body, out any) 
 	return nil
 }
 
-// restDelete sends a DELETE request and tolerates 404.
+// restDelete sends a DELETE request and returns *restHTTPErr on status >= 400.
 func restDelete(ctx context.Context, url, token string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	req, err := newRESTRequest(ctx, http.MethodDelete, url, token, nil)
 	if err != nil {
 		return err
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("http DELETE %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("http 404 from %s", url)
-	}
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("http %d from %s: %s", resp.StatusCode, url, truncateREST(string(b), 400))
-	}
-	return nil
+	return doRESTRequest(req, url, nil)
 }
 
 func truncateREST(s string, n int) string {

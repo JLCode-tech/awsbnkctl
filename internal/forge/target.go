@@ -17,7 +17,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 )
 
@@ -147,7 +146,7 @@ func DiscoverTargets(ctx context.Context, opts DiscoverTargetsOptions) (Discover
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return DiscoverTargetsResponse{}, fmt.Errorf("forge discover targets: login: %w", err)
 	}
@@ -161,7 +160,7 @@ func DiscoverTargets(ctx context.Context, opts DiscoverTargetsOptions) (Discover
 	}
 
 	var resp DiscoverTargetsResponse
-	if err := bmkRestPost(ctx, base+BenchmarkDiscoverTargetsEndpoint, token, body, &resp); err != nil {
+	if err := restPost(ctx, base+BenchmarkDiscoverTargetsEndpoint, token, body, &resp); err != nil {
 		return DiscoverTargetsResponse{}, fmt.Errorf("forge discover targets: %w", err)
 	}
 	return resp, nil
@@ -175,7 +174,7 @@ func ListBenchmarkTargets(ctx context.Context, opts ListBenchmarkTargetsOptions)
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return nil, fmt.Errorf("forge list benchmark targets: login: %w", err)
 	}
@@ -186,7 +185,7 @@ func ListBenchmarkTargets(ctx context.Context, opts ListBenchmarkTargetsOptions)
 	}
 
 	var resp benchmarkTargetListResponse
-	if err := bmkRestGet(ctx, url, token, &resp); err != nil {
+	if err := restGet(ctx, url, token, &resp); err != nil {
 		return nil, fmt.Errorf("forge list benchmark targets: %w", err)
 	}
 	return resp.Targets, nil
@@ -210,7 +209,7 @@ func RegisterBenchmarkTarget(ctx context.Context, opts BenchmarkTargetOptions) (
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return BenchmarkTargetResponse{}, fmt.Errorf("forge benchmark target: login: %w", err)
 	}
@@ -239,19 +238,13 @@ func RegisterBenchmarkTarget(ctx context.Context, opts BenchmarkTargetOptions) (
 	}
 
 	var created BenchmarkTargetResponse
-	postErr := bmkRestPost(ctx, base+BenchmarkTargetEndpoint, token, body, &created)
+	postErr := restPost(ctx, base+BenchmarkTargetEndpoint, token, body, &created)
 	if postErr == nil {
 		return created, nil
 	}
 
 	// 409 or 400-with-"already exists": fall back to list-and-match.
-	var herr *restHTTPErr
-	if !errors.As(postErr, &herr) {
-		return BenchmarkTargetResponse{}, fmt.Errorf("forge benchmark target: create: %w", postErr)
-	}
-	isConflict := herr.StatusCode == http.StatusConflict ||
-		(herr.StatusCode == http.StatusBadRequest && strings.Contains(herr.Body, "already exists"))
-	if !isConflict {
+	if !isConflictHTTP(postErr) {
 		return BenchmarkTargetResponse{}, fmt.Errorf("forge benchmark target: create: %w", postErr)
 	}
 
@@ -279,7 +272,7 @@ type benchmarkTargetListResponse struct {
 // list-response wrapper.)
 func benchmarkTargetFindByName(ctx context.Context, base, token, name string) (BenchmarkTargetResponse, error) {
 	var resp benchmarkTargetListResponse
-	if err := bmkRestGet(ctx, base+BenchmarkTargetEndpoint, token, &resp); err != nil {
+	if err := restGet(ctx, base+BenchmarkTargetEndpoint, token, &resp); err != nil {
 		return BenchmarkTargetResponse{}, fmt.Errorf("list benchmark targets: %w", err)
 	}
 	for _, r := range resp.Targets {

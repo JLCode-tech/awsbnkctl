@@ -51,7 +51,7 @@ type ProxyDeploymentResponse struct {
 // forge server-side change does not silently orphan records.
 func ListTargetsByClusterID(ctx context.Context, restURL string, creds RestCreds, clusterID int) ([]BenchmarkTargetResponse, error) {
 	base := strings.TrimRight(restURL, "/")
-	token, err := bmkRestLogin(ctx, base, creds.restUsername(), creds.restPassword())
+	token, err := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if err != nil {
 		return nil, fmt.Errorf("forge.ListTargetsByClusterID: login: %w", err)
 	}
@@ -60,7 +60,7 @@ func ListTargetsByClusterID(ctx context.Context, restURL string, creds RestCreds
 	// Try the plain-array shape first — this matches what forge currently returns
 	// and what benchmarkTargetFindByName (target.go) uses.
 	var list []BenchmarkTargetResponse
-	if err := bmkRestGet(ctx, url, token, &list); err != nil {
+	if err := restGet(ctx, url, token, &list); err != nil {
 		return nil, fmt.Errorf("forge.ListTargetsByClusterID: %w", err)
 	}
 
@@ -72,7 +72,7 @@ func ListTargetsByClusterID(ctx context.Context, restURL string, creds RestCreds
 			Targets []BenchmarkTargetResponse `json:"targets"`
 		}
 		// Ignore error — if this also fails we just return the empty slice below.
-		_ = bmkRestGet(ctx, url, token, &wrapped)
+		_ = restGet(ctx, url, token, &wrapped)
 		if len(wrapped.Targets) > 0 {
 			list = wrapped.Targets
 		}
@@ -93,14 +93,14 @@ func ListTargetsByClusterID(ctx context.Context, restURL string, creds RestCreds
 // Forge returns a bare array for this endpoint.
 func ListProxiesForTarget(ctx context.Context, restURL string, creds RestCreds, targetID int) ([]ProxyDeploymentResponse, error) {
 	base := strings.TrimRight(restURL, "/")
-	token, err := bmkRestLogin(ctx, base, creds.restUsername(), creds.restPassword())
+	token, err := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if err != nil {
 		return nil, fmt.Errorf("forge.ListProxiesForTarget: login: %w", err)
 	}
 	url := fmt.Sprintf("%s%s/%d/proxies", base, BenchmarkTargetEndpoint, targetID)
 	// forge returns a bare array for this endpoint.
 	var list []ProxyDeploymentResponse
-	if err := bmkRestGet(ctx, url, token, &list); err != nil {
+	if err := restGet(ctx, url, token, &list); err != nil {
 		return nil, fmt.Errorf("forge.ListProxiesForTarget: %w", err)
 	}
 	return list, nil
@@ -109,12 +109,12 @@ func ListProxiesForTarget(ctx context.Context, restURL string, creds RestCreds, 
 // DeleteProxyDeployment deletes one proxy deployment record. 404 → nil.
 func DeleteProxyDeployment(ctx context.Context, restURL string, creds RestCreds, targetID, proxyID int) error {
 	base := strings.TrimRight(restURL, "/")
-	token, err := bmkRestLogin(ctx, base, creds.restUsername(), creds.restPassword())
+	token, err := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if err != nil {
 		return fmt.Errorf("forge.DeleteProxyDeployment: login: %w", err)
 	}
 	url := fmt.Sprintf("%s%s/%d/proxies/%d", base, BenchmarkTargetEndpoint, targetID, proxyID)
-	if err := bmkRestDelete(ctx, url, token); err != nil && !is404(err) {
+	if err := restDelete(ctx, url, token); err != nil && !is404(err) {
 		return fmt.Errorf("forge.DeleteProxyDeployment: %w", err)
 	}
 	return nil
@@ -123,12 +123,12 @@ func DeleteProxyDeployment(ctx context.Context, restURL string, creds RestCreds,
 // DeleteBenchmarkTarget deletes a BenchmarkTarget by ID. 404 → nil.
 func DeleteBenchmarkTarget(ctx context.Context, restURL string, creds RestCreds, targetID int) error {
 	base := strings.TrimRight(restURL, "/")
-	token, err := bmkRestLogin(ctx, base, creds.restUsername(), creds.restPassword())
+	token, err := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if err != nil {
 		return fmt.Errorf("forge.DeleteBenchmarkTarget: login: %w", err)
 	}
 	url := fmt.Sprintf("%s%s/%d", base, BenchmarkTargetEndpoint, targetID)
-	if err := bmkRestDelete(ctx, url, token); err != nil && !is404(err) {
+	if err := restDelete(ctx, url, token); err != nil && !is404(err) {
 		return fmt.Errorf("forge.DeleteBenchmarkTarget: %w", err)
 	}
 	return nil
@@ -137,12 +137,12 @@ func DeleteBenchmarkTarget(ctx context.Context, restURL string, creds RestCreds,
 // DeleteBenchmarkAgent deletes a BenchmarkAgent by ID. 404 → nil.
 func DeleteBenchmarkAgent(ctx context.Context, restURL string, creds RestCreds, agentID int) error {
 	base := strings.TrimRight(restURL, "/")
-	token, err := bmkRestLogin(ctx, base, creds.restUsername(), creds.restPassword())
+	token, err := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if err != nil {
 		return fmt.Errorf("forge.DeleteBenchmarkAgent: login: %w", err)
 	}
 	url := fmt.Sprintf("%s%s/%d", base, BenchmarkAgentEndpoint, agentID)
-	if err := bmkRestDelete(ctx, url, token); err != nil && !is404(err) {
+	if err := restDelete(ctx, url, token); err != nil && !is404(err) {
 		return fmt.Errorf("forge.DeleteBenchmarkAgent: %w", err)
 	}
 	return nil
@@ -151,12 +151,12 @@ func DeleteBenchmarkAgent(ctx context.Context, restURL string, creds RestCreds, 
 // DeleteBenchmarkConfig deletes a BenchmarkConfig by ID. 404 → nil.
 func DeleteBenchmarkConfig(ctx context.Context, restURL string, creds RestCreds, configID int) error {
 	base := strings.TrimRight(restURL, "/")
-	token, err := bmkRestLogin(ctx, base, creds.restUsername(), creds.restPassword())
+	token, err := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if err != nil {
 		return fmt.Errorf("forge.DeleteBenchmarkConfig: login: %w", err)
 	}
 	url := fmt.Sprintf("%s%s/%d", base, BenchmarkConfigEndpoint, configID)
-	if err := bmkRestDelete(ctx, url, token); err != nil && !is404(err) {
+	if err := restDelete(ctx, url, token); err != nil && !is404(err) {
 		return fmt.Errorf("forge.DeleteBenchmarkConfig: %w", err)
 	}
 	return nil
@@ -168,12 +168,12 @@ func DeleteBenchmarkConfig(ctx context.Context, restURL string, creds RestCreds,
 // continues — the credential may have already been reassigned to another project.
 func DeleteSSHCredential(ctx context.Context, restURL string, creds RestCreds, credID int) error {
 	base := strings.TrimRight(restURL, "/")
-	token, err := bmkRestLogin(ctx, base, creds.restUsername(), creds.restPassword())
+	token, err := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if err != nil {
 		return fmt.Errorf("forge.DeleteSSHCredential: login: %w", err)
 	}
 	url := fmt.Sprintf("%s%s/%d", base, SSHCredentialEndpoint, credID)
-	dErr := bmkRestDelete(ctx, url, token)
+	dErr := restDelete(ctx, url, token)
 	if dErr == nil || is404(dErr) {
 		return nil
 	}
@@ -221,7 +221,7 @@ func DeleteClusterBenchmarkArtifacts(ctx context.Context, restURL string, creds 
 	exactName := fmt.Sprintf("awsbnkctl-jumphost-%s", jumphostInstanceID)
 
 	base := strings.TrimRight(restURL, "/")
-	token, loginErr := bmkRestLogin(ctx, base, creds.restUsername(), creds.restPassword())
+	token, loginErr := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if loginErr != nil {
 		errs = append(errs, fmt.Sprintf("login for agent/ssh-credential: %v", loginErr))
 		return fmt.Errorf("forge benchmark cleanup: %s", strings.Join(errs, "; "))
@@ -231,7 +231,7 @@ func DeleteClusterBenchmarkArtifacts(ctx context.Context, restURL string, creds 
 	agent, agentErr := benchmarkAgentFindByName(ctx, base, token, exactName)
 	if agentErr == nil {
 		url := fmt.Sprintf("%s%s/%d", base, BenchmarkAgentEndpoint, agent.ID)
-		if dErr := bmkRestDelete(ctx, url, token); dErr != nil && !is404(dErr) {
+		if dErr := restDelete(ctx, url, token); dErr != nil && !is404(dErr) {
 			errs = append(errs, fmt.Sprintf("delete agent %d (%s): %v", agent.ID, exactName, dErr))
 		}
 	} else if !strings.Contains(agentErr.Error(), "not found") {
@@ -243,7 +243,7 @@ func DeleteClusterBenchmarkArtifacts(ctx context.Context, restURL string, creds 
 	sshCred, sshErr := sshCredFindByName(ctx, base, token, exactName)
 	if sshErr == nil {
 		url := fmt.Sprintf("%s%s/%d", base, SSHCredentialEndpoint, sshCred.ID)
-		if dErr := bmkRestDelete(ctx, url, token); dErr != nil && !is404(dErr) {
+		if dErr := restDelete(ctx, url, token); dErr != nil && !is404(dErr) {
 			// 409 = FK conflict from project referencing this credential: soft warning.
 			errs = append(errs, fmt.Sprintf("delete ssh-credential %d (%s): %v", sshCred.ID, exactName, dErr))
 		}
@@ -286,7 +286,7 @@ func DeleteAllClusterBenchmarkArtifacts(ctx context.Context, restURL string, cre
 
 	// ── Agents + ssh-credentials + configs: fresh login for direct token use ──
 	base := strings.TrimRight(restURL, "/")
-	token, loginErr := bmkRestLogin(ctx, base, creds.restUsername(), creds.restPassword())
+	token, loginErr := restLogin(ctx, base, creds.restUsername(), creds.restPassword())
 	if loginErr != nil {
 		errs = append(errs, fmt.Sprintf("login for agents/ssh-credentials/configs: %v", loginErr))
 		return fmt.Errorf("forge benchmark full cleanup: %s", strings.Join(errs, "; "))
@@ -294,7 +294,7 @@ func DeleteAllClusterBenchmarkArtifacts(ctx context.Context, restURL string, cre
 
 	// ── Step 3: agents created by awsbnkctl (name prefix "awsbnkctl-") ────────
 	var agents []BenchmarkAgentResponse
-	if gErr := bmkRestGet(ctx, base+BenchmarkAgentEndpoint, token, &agents); gErr != nil {
+	if gErr := restGet(ctx, base+BenchmarkAgentEndpoint, token, &agents); gErr != nil {
 		errs = append(errs, fmt.Sprintf("list agents: %v", gErr))
 	} else {
 		for _, a := range agents {
@@ -302,7 +302,7 @@ func DeleteAllClusterBenchmarkArtifacts(ctx context.Context, restURL string, cre
 				continue
 			}
 			url := fmt.Sprintf("%s%s/%d", base, BenchmarkAgentEndpoint, a.ID)
-			if dErr := bmkRestDelete(ctx, url, token); dErr != nil && !is404(dErr) {
+			if dErr := restDelete(ctx, url, token); dErr != nil && !is404(dErr) {
 				errs = append(errs, fmt.Sprintf("delete agent %d (%s): %v", a.ID, a.Name, dErr))
 			}
 		}
@@ -310,7 +310,7 @@ func DeleteAllClusterBenchmarkArtifacts(ctx context.Context, restURL string, cre
 
 	// ── Step 4: SSH credentials created by awsbnkctl (name prefix "awsbnkctl-") ─
 	var sshCreds []AccessMethodResponse
-	if gErr := bmkRestGet(ctx, base+SSHCredentialEndpoint, token, &sshCreds); gErr != nil {
+	if gErr := restGet(ctx, base+SSHCredentialEndpoint, token, &sshCreds); gErr != nil {
 		errs = append(errs, fmt.Sprintf("list ssh-credentials: %v", gErr))
 	} else {
 		for _, sc := range sshCreds {
@@ -318,7 +318,7 @@ func DeleteAllClusterBenchmarkArtifacts(ctx context.Context, restURL string, cre
 				continue
 			}
 			url := fmt.Sprintf("%s%s/%d", base, SSHCredentialEndpoint, sc.ID)
-			if dErr := bmkRestDelete(ctx, url, token); dErr != nil && !is404(dErr) {
+			if dErr := restDelete(ctx, url, token); dErr != nil && !is404(dErr) {
 				// 409 = FK conflict; treat as soft warning (collected, not fatal).
 				errs = append(errs, fmt.Sprintf("delete ssh-credential %d (%s): %v", sc.ID, sc.Name, dErr))
 			}
@@ -327,7 +327,7 @@ func DeleteAllClusterBenchmarkArtifacts(ctx context.Context, restURL string, cre
 
 	// ── Step 5: configs created by awsbnkctl (name prefix "awsbnkctl-") ───────
 	var configs []BenchmarkConfigResponse
-	if gErr := bmkRestGet(ctx, base+BenchmarkConfigEndpoint, token, &configs); gErr != nil {
+	if gErr := restGet(ctx, base+BenchmarkConfigEndpoint, token, &configs); gErr != nil {
 		errs = append(errs, fmt.Sprintf("list configs: %v", gErr))
 	} else {
 		for _, c := range configs {
@@ -335,7 +335,7 @@ func DeleteAllClusterBenchmarkArtifacts(ctx context.Context, restURL string, cre
 				continue
 			}
 			url := fmt.Sprintf("%s%s/%d", base, BenchmarkConfigEndpoint, c.ID)
-			if dErr := bmkRestDelete(ctx, url, token); dErr != nil && !is404(dErr) {
+			if dErr := restDelete(ctx, url, token); dErr != nil && !is404(dErr) {
 				errs = append(errs, fmt.Sprintf("delete config %d (%s): %v", c.ID, c.Name, dErr))
 			}
 		}
@@ -380,15 +380,4 @@ func deleteTargetsAndProxies(ctx context.Context, restURL string, creds RestCred
 		return fmt.Errorf("forge benchmark cleanup: %s", strings.Join(errs, "; "))
 	}
 	return nil
-}
-
-// bmkRestDelete sends a DELETE request using the injectable benchmarkHTTPDoFn
-// transport, mirroring bmkRestPost/bmkRestGet. Returns *restHTTPErr on HTTP
-// errors including 404 so callers can inspect the status code.
-func bmkRestDelete(ctx context.Context, url, token string) error {
-	req, err := newBmkRequest(ctx, "DELETE", url, token, nil)
-	if err != nil {
-		return err
-	}
-	return doBmkRequest(req, url, nil)
 }

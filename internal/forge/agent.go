@@ -12,9 +12,7 @@ package forge
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 )
 
@@ -62,7 +60,7 @@ func RegisterBenchmarkAgent(ctx context.Context, opts BenchmarkAgentOptions) (Be
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return BenchmarkAgentResponse{}, fmt.Errorf("forge benchmark agent: login: %w", err)
 	}
@@ -85,19 +83,13 @@ func RegisterBenchmarkAgent(ctx context.Context, opts BenchmarkAgentOptions) (Be
 	}
 
 	var created BenchmarkAgentResponse
-	postErr := bmkRestPost(ctx, base+BenchmarkAgentEndpoint, token, body, &created)
+	postErr := restPost(ctx, base+BenchmarkAgentEndpoint, token, body, &created)
 	if postErr == nil {
 		return created, nil
 	}
 
 	// 409 or 400-with-"already exists": fall back to list-and-match.
-	var herr *restHTTPErr
-	if !errors.As(postErr, &herr) {
-		return BenchmarkAgentResponse{}, fmt.Errorf("forge benchmark agent: create: %w", postErr)
-	}
-	isConflict := herr.StatusCode == http.StatusConflict ||
-		(herr.StatusCode == http.StatusBadRequest && strings.Contains(herr.Body, "already exists"))
-	if !isConflict {
+	if !isConflictHTTP(postErr) {
 		return BenchmarkAgentResponse{}, fmt.Errorf("forge benchmark agent: create: %w", postErr)
 	}
 
@@ -112,7 +104,7 @@ func RegisterBenchmarkAgent(ctx context.Context, opts BenchmarkAgentOptions) (Be
 // whose name matches exactly.
 func benchmarkAgentFindByName(ctx context.Context, base, token, name string) (BenchmarkAgentResponse, error) {
 	var list []BenchmarkAgentResponse
-	if err := bmkRestGet(ctx, base+BenchmarkAgentEndpoint, token, &list); err != nil {
+	if err := restGet(ctx, base+BenchmarkAgentEndpoint, token, &list); err != nil {
 		return BenchmarkAgentResponse{}, fmt.Errorf("list benchmark agents: %w", err)
 	}
 	for _, r := range list {
