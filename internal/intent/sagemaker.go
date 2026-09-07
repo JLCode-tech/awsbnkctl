@@ -40,6 +40,9 @@ var smInstanceGPUCount = map[string]int{
 	"ml.g6.48xlarge": 8,
 }
 
+// DefaultSyntheticImage is the default container image used for simulated vLLM inference.
+const DefaultSyntheticImage = "python:3.11-slim"
+
 // AISpec is the top-level opt-in AI inference block in cluster.yaml.
 // When absent (nil) or Enabled=false, all AI-related phases are skipped;
 // existing cluster.yaml files that omit this block are completely unaffected.
@@ -52,8 +55,32 @@ var smInstanceGPUCount = map[string]int{
 //	    model: meta-llama/Meta-Llama-3-8B-Instruct
 //	    instanceType: ml.g5.2xlarge
 //	    scaleToZero: false
+//	  synthetic:
+//	    enabled: true
+//	    servedModelName: llama3
 type AISpec struct {
 	SageMaker *SageMakerSpec `yaml:"sagemaker,omitempty"`
+	Synthetic *SyntheticSpec `yaml:"synthetic,omitempty"`
+}
+
+// SyntheticSpec configures the lightweight synthetic/simulated vLLM endpoint
+// using llm-d-inference-sim. Runs on standard CPU nodes without requiring
+// physical GPUs, HuggingFace tokens, or model weight downloads.
+type SyntheticSpec struct {
+	// Enabled is the master switch for synthetic inference simulation.
+	Enabled bool `yaml:"enabled"`
+	// Image is the container image to run (default: ghcr.io/llm-d/llm-d-inference-sim:latest).
+	Image string `yaml:"image,omitempty"`
+	// Model is the model name/ID to report (default: "meta-llama/Meta-Llama-3-8B-Instruct").
+	Model string `yaml:"model,omitempty"`
+	// ServedModelName is the alias exposed via /v1/models (default: "llama3").
+	ServedModelName string `yaml:"servedModelName,omitempty"`
+	// Replicas is the number of simulator pods (default: 1).
+	Replicas int `yaml:"replicas,omitempty"`
+	// TTFTBaseMs is the base Time to First Token latency in ms (default: 100).
+	TTFTBaseMs int `yaml:"ttftBaseMs,omitempty"`
+	// ITLMs is the Inter-Token Latency per token in ms (default: 15).
+	ITLMs int `yaml:"itlMs,omitempty"`
 }
 
 // SageMakerSpec configures the disposable SageMaker LMI endpoint.
@@ -171,5 +198,49 @@ func validateSageMaker(s *SageMakerSpec) error {
 func applySageMakerDefaults(s *SageMakerSpec) {
 	if s.InstanceType == "" {
 		s.InstanceType = "ml.g5.2xlarge"
+	}
+}
+
+// SyntheticAIEnabled reports whether synthetic AI inference simulation is enabled.
+func (c *Cluster) SyntheticAIEnabled() bool {
+	return c.AI != nil && c.AI.Synthetic != nil && c.AI.Synthetic.Enabled
+}
+
+// validateSynthetic checks the ai.synthetic block constraints.
+func validateSynthetic(s *SyntheticSpec) error {
+	if !s.Enabled {
+		return nil
+	}
+	if s.Replicas < 0 {
+		return fmt.Errorf("ai.synthetic.replicas must be >= 0, got %d", s.Replicas)
+	}
+	if s.TTFTBaseMs < 0 {
+		return fmt.Errorf("ai.synthetic.ttftBaseMs must be >= 0, got %d", s.TTFTBaseMs)
+	}
+	if s.ITLMs < 0 {
+		return fmt.Errorf("ai.synthetic.itlMs must be >= 0, got %d", s.ITLMs)
+	}
+	return nil
+}
+
+// applySyntheticDefaults fills zero-value synthetic inference fields.
+func applySyntheticDefaults(s *SyntheticSpec) {
+	if s.Image == "" {
+		s.Image = DefaultSyntheticImage
+	}
+	if s.Model == "" {
+		s.Model = "meta-llama/Meta-Llama-3-8B-Instruct"
+	}
+	if s.ServedModelName == "" {
+		s.ServedModelName = "llama3"
+	}
+	if s.Replicas <= 0 {
+		s.Replicas = 1
+	}
+	if s.TTFTBaseMs <= 0 {
+		s.TTFTBaseMs = 100
+	}
+	if s.ITLMs <= 0 {
+		s.ITLMs = 15
 	}
 }

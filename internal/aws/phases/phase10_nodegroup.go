@@ -132,8 +132,11 @@ func Phase10NodeGroup(ctx context.Context, cl *intent.Cluster, st *state.State, 
 	// Largest non-GPU nodegroup disk size for the BNK launch template root volume.
 	var maxDiskSize int32
 	for _, ng := range cl.ClusterSpec.NodeGroups {
-		if !ng.IsGPU() && int32(ng.DiskSize) > maxDiskSize { // #nosec G115 -- DiskSize is a small validated GB count, cannot overflow int32
-			maxDiskSize = int32(ng.DiskSize) // #nosec G115
+		if !ng.IsGPU() {
+			sz := int32(ng.DiskSize) // #nosec G115 -- DiskSize is a small validated GB count, cannot overflow int32
+			if sz > maxDiskSize {
+				maxDiskSize = sz
+			}
 		}
 	}
 	if maxDiskSize == 0 {
@@ -161,8 +164,11 @@ func Phase10NodeGroup(ctx context.Context, cl *intent.Cluster, st *state.State, 
 	if cl.HasGPUNodeGroup() {
 		var maxGPUDiskSize int32
 		for _, ng := range cl.ClusterSpec.NodeGroups {
-			if ng.IsGPU() && int32(ng.DiskSize) > maxGPUDiskSize { // #nosec G115 -- DiskSize is a small validated GB count, cannot overflow int32
-				maxGPUDiskSize = int32(ng.DiskSize) // #nosec G115 -- DiskSize is a small validated GB count, cannot overflow int32
+			if ng.IsGPU() {
+				sz := int32(ng.DiskSize) // #nosec G115 -- DiskSize is a small validated GB count, cannot overflow int32
+				if sz > maxGPUDiskSize {
+					maxGPUDiskSize = sz
+				}
 			}
 		}
 		gpuLTID, err = ensureGPULaunchTemplate(ctx, clients.EC2, name, gpuLTName, maxGPUDiskSize, cl.Tags, cl.Metadata.Labels)

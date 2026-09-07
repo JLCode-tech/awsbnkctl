@@ -133,7 +133,8 @@ func runJournalReport(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(&b, "# %s — deployment report\n\n_Generated %s — seeded from decisions.md + the journal; the doc-specialist persona refines this._\n",
 		resolvedWorkspaceName(), time.Now().UTC().Format("2006-01-02 15:04 UTC"))
 
-	if dec, derr := os.ReadFile(filepath.Join(dir, "decisions.md")); derr == nil { // #nosec G304 -- path is workspace decisions.md
+	// #nosec G304 -- path is workspace decisions.md
+	if dec, derr := os.ReadFile(filepath.Clean(filepath.Join(dir, "decisions.md"))); derr == nil {
 		fmt.Fprintf(&b, "\n---\n\n## Decisions\n\n%s\n", strings.TrimSpace(string(dec)))
 	}
 

@@ -443,3 +443,75 @@ ai:
 		t.Errorf("MaxModelLen = %d, want 8192", sm.MaxModelLen)
 	}
 }
+
+// TestSynthetic_EnabledAndDefaults verifies that ai.synthetic round-trips and gets defaults.
+func TestSynthetic_EnabledAndDefaults(t *testing.T) {
+	yaml := minimalYAML + `
+ai:
+  synthetic:
+    enabled: true
+`
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", yaml)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !c.SyntheticAIEnabled() {
+		t.Error("SyntheticAIEnabled() = false, want true")
+	}
+	synth := c.AI.Synthetic
+	if synth.Image != DefaultSyntheticImage {
+		t.Errorf("Image = %q, want %q", synth.Image, DefaultSyntheticImage)
+	}
+	if synth.ServedModelName != "llama3" {
+		t.Errorf("ServedModelName = %q, want llama3", synth.ServedModelName)
+	}
+	if synth.Replicas != 1 {
+		t.Errorf("Replicas = %d, want 1", synth.Replicas)
+	}
+	if synth.TTFTBaseMs != 100 {
+		t.Errorf("TTFTBaseMs = %d, want 100", synth.TTFTBaseMs)
+	}
+	if synth.ITLMs != 15 {
+		t.Errorf("ITLMs = %d, want 15", synth.ITLMs)
+	}
+}
+
+// TestSynthetic_CustomFields verifies overriding synthetic properties.
+func TestSynthetic_CustomFields(t *testing.T) {
+	yaml := minimalYAML + `
+ai:
+  synthetic:
+    enabled: true
+    image: custom-sim:v1
+    servedModelName: custom-llama
+    replicas: 3
+    ttftBaseMs: 50
+    itlMs: 20
+`
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", yaml)
+
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	synth := c.AI.Synthetic
+	if synth.Image != "custom-sim:v1" {
+		t.Errorf("Image = %q, want custom-sim:v1", synth.Image)
+	}
+	if synth.ServedModelName != "custom-llama" {
+		t.Errorf("ServedModelName = %q, want custom-llama", synth.ServedModelName)
+	}
+	if synth.Replicas != 3 {
+		t.Errorf("Replicas = %d, want 3", synth.Replicas)
+	}
+	if synth.TTFTBaseMs != 50 {
+		t.Errorf("TTFTBaseMs = %d, want 50", synth.TTFTBaseMs)
+	}
+	if synth.ITLMs != 20 {
+		t.Errorf("ITLMs = %d, want 20", synth.ITLMs)
+	}
+}

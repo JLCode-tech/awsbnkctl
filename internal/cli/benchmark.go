@@ -30,12 +30,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
@@ -46,6 +49,12 @@ var discoverProxiesFn = forge.DiscoverProxies
 
 // listProxyDeploymentsFn is the injectable seam for forge.ListProxyDeployments.
 var listProxyDeploymentsFn = forge.ListProxyDeployments
+
+// discoverTargetsFn is the injectable seam for forge.DiscoverTargets.
+var discoverTargetsFn = forge.DiscoverTargets
+
+// listBenchmarkTargetsFn is the injectable seam for forge.ListBenchmarkTargets.
+var listBenchmarkTargetsFn = forge.ListBenchmarkTargets
 
 var (
 	flagBenchRegion               string
@@ -80,11 +89,47 @@ var (
 	flagBenchUpstreamPort         string // --upstream-port: Service port (for NLB opt-in tag)
 	flagBenchUpstreamNamespace    string // --upstream-namespace: Service namespace (for NLB opt-in tag)
 	flagBenchResetCache           bool   // --reset-cache: cold-redeploy SageMaker endpoint between scenarios
+	flagBenchSynthetic            bool   // --synthetic: benchmark simulated vLLM endpoint (llm-d-inference-sim)
 )
+
+var benchmarkCmd = &cobra.Command{
+	Use:   "benchmark",
+	Short: "Run AI performance benchmarks and manage forge benchmark targets",
+	Long: `The benchmark command suite provisions, pre-stages, drives, and tracks
+AI inference performance benchmarks against F5 BIG-IP Next for Kubernetes (BNK)
+and alternative proxy front-ends, recording all telemetry into bnk-forge.
+
+Lifecycle & Subcommands:
+  awsbnkctl benchmark setup     Pre-stage the jumphost with aiperf and register agent/target in forge
+  awsbnkctl benchmark run       Drive a single run, preset, scenario sweep, or proxy shootout
+  awsbnkctl benchmark list      List available native forge scenarios and smoke presets
+  awsbnkctl benchmark status    Inspect benchmark readiness, tool versions, and forge link
+
+Running 'awsbnkctl benchmark [flags]' directly executes the default run workflow.`,
+	RunE: runForgeBenchmark,
+}
+
+var benchmarkRunCmd = &cobra.Command{
+	Use:   "run",
+	Short: "Drive an aiperf benchmark run, preset, scenario sweep, or proxy shootout",
+	Long: `run executes aiperf from the jumphost into the Gateway VIP or front-end proxy,
+pushing structured telemetry (TTFT, ITL, token throughput) into forge.
+
+Examples:
+  # Single run against auto-resolved cluster state
+  awsbnkctl benchmark run -f cluster.yaml --model meta-llama/Llama-3.1-8B-Instruct
+
+  # Native Forge Scenario (e.g. prefix-cache or mooncake trace)
+  awsbnkctl benchmark run -f cluster.yaml --scenario baseline,mooncake
+
+  # Multi-proxy shootout across BNK, Envoy, HAProxy
+  awsbnkctl benchmark run -f cluster.yaml --proxies envoy,f5-bnk,haproxy --scenario baseline`,
+	RunE: runForgeBenchmark,
+}
 
 var forgeBenchmarkCmd = &cobra.Command{
 	Use:   "benchmark",
-	Short: "Run an aiperf benchmark from the jumphost and push results to forge",
+	Short: "Run an aiperf benchmark from the jumphost and push results to forge (alias for `benchmark run`)",
 	Long: `forgeBenchmark runs aiperf against the BNK Gateway VIP from the
 jumphost (the only host with in-network access to the external VLAN), then
 pushes the structured result to forge's benchmark ingestion endpoint
@@ -105,17 +150,15 @@ Available presets: latency, throughput, long-context, streaming`,
 	RunE: runForgeBenchmark,
 }
 
-func init() {
-	f := forgeBenchmarkCmd.Flags()
-
+func bindBenchmarkFlags(f *pflag.FlagSet) {
 	// EICE / jumphost identity
-	f.StringVar(&flagBenchRegion, "region", "", "AWS region (e.g. ap-southeast-2) [required]")
-	f.StringVar(&flagBenchInstanceID, "instance-id", "", "jumphost EC2 instance ID [required]")
-	f.StringVar(&flagBenchSourceIP, "source-ip", "", "jumphost BNK external ENI IP (used as --interface so traffic enters the data path)")
-	f.StringVar(&flagBenchVIP, "vip", "", "BNK Gateway VIP to benchmark (e.g. 10.0.10.100) [required]")
+	f.StringVar(&flagBenchRegion, "region", "", "AWS region (e.g. ap-southeast-2)")
+	f.StringVar(&flagBenchInstanceID, "instance-id", "", "jumphost EC2 instance ID (auto-resolved from state.env when -f or -w is passed)")
+	f.StringVar(&flagBenchSourceIP, "source-ip", "", "jumphost BNK external ENI IP (auto-resolved from state.env)")
+	f.StringVar(&flagBenchVIP, "vip", "", "BNK Gateway VIP to benchmark (auto-resolved from cluster.yaml or state.env)")
 
 	// Benchmark config
-	f.StringVar(&flagBenchModel, "model", "", "LLM model name (e.g. meta-llama/Llama-3.1-8B-Instruct) [required]")
+	f.StringVar(&flagBenchModel, "model", "", "LLM model name (auto-resolved from cluster.yaml ai block if present)")
 	f.StringVar(&flagBenchEndpoint, "endpoint", "/v1/chat/completions", "API endpoint path")
 	f.IntVar(&flagBenchConcurrency, "concurrency", 1, "number of concurrent users")
 	f.IntVar(&flagBenchNumRequests, "num-requests", 10, "total number of requests")
@@ -160,13 +203,14 @@ When set, per-explicit flags (--concurrency/--num-requests/--isl/--osl/--stream)
 	f.StringVar(&flagBenchForgeURL, "forge-rest-url", "http://localhost:8000", "forge REST base URL")
 	f.StringVar(&flagBenchForgeUser, "forge-user", "", "forge username (default: admin)")
 	f.StringVar(&flagBenchForgePass, "forge-pass", "", "forge password (default: changeme)")
+	f.StringVar(&flagBenchForgePass, "forge-password", "", "forge password (default: changeme)")
 
 	// Access-method registration
 	f.BoolVar(&flagBenchRegisterAccessMethod, "register-access-method", true,
 		"register the jumphost as a forge SSH access-method record before running (best-effort, non-fatal)")
 
 	// Object-graph linkage
-	f.StringVar(&flagBenchWorkspace, "workspace", "",
+	f.StringVarP(&flagBenchWorkspace, "workspace", "w", "",
 		"workspace name (e.g. ai-rig) used to read forge_link.json for cluster_id when registering a BenchmarkTarget (best-effort, non-fatal when absent)")
 
 	// Proxy shootout (WS-D1)
@@ -183,8 +227,7 @@ pod IP instead of the BNK VIP. Distinct from any VIP nodeport in --proxies.
 AWS SG ingress rule for this path is out of scope (WS-E).`)
 	f.StringVarP(&flagBenchConfig, "config", "f", "",
 		`path to cluster.yaml (intent file); used to resolve the kubeconfig for
-cluster lookups. Accepted but no longer required for --proxies (proxy
-endpoints are now read from forge's external_url field).`)
+cluster lookups and auto-resolve jumphost/VIP/model/forge state.`)
 
 	// NLB opt-in tags (Slice 4): forwarded to the forge BenchmarkTarget when
 	// a non-BNK proxy is included in --proxies (triggers data-path NLB exposure).
@@ -204,7 +247,20 @@ Adds ~5-15 min per scenario boundary (full SageMaker instance restart).
 Has no effect when --scenario has only one key.
 Caution: a redeploy failure mid-flight may leave the endpoint deleted or in Failed state, requiring a re-up to recover.`)
 
-	// Wire under `awsbnkctl forge`
+	// Synthetic inference simulation (llm-d-inference-sim)
+	f.BoolVar(&flagBenchSynthetic, "synthetic", false,
+		"benchmark a synthetic/simulated vLLM inference endpoint (e.g. llm-d-inference-sim on CPU) without requiring GPU hardware")
+}
+
+func init() {
+	bindBenchmarkFlags(benchmarkCmd.PersistentFlags())
+	bindBenchmarkFlags(forgeBenchmarkCmd.Flags())
+
+	// Subcommands under top-level `benchmark`
+	benchmarkCmd.AddCommand(benchmarkRunCmd, benchmarkSetupCmd, benchmarkListCmd, benchmarkStatusCmd)
+	rootCmd.AddCommand(benchmarkCmd)
+
+	// Wire under `awsbnkctl forge` for backward-compatibility
 	forgeCmd.AddCommand(forgeBenchmarkCmd)
 }
 
@@ -312,20 +368,155 @@ func hasNonBNKProxy(csv string) bool {
 // front-end via an internal AWS NLB (Slice-3 contract). upstream_namespace is
 // included only when upstreamNamespace is non-empty.
 func nlbOptInTags(proxiesCSV, upstreamService, upstreamPort, upstreamNamespace string) map[string]string {
-	if !hasNonBNKProxy(proxiesCSV) {
-		return nil
+	var tags map[string]string
+	if hasNonBNKProxy(proxiesCSV) {
+		tags = map[string]string{
+			"proxy_expose":     "internal-nlb",
+			"upstream_service": upstreamService,
+			"upstream_port":    upstreamPort,
+		}
+		// Only emit upstream_namespace when set, so unset-flag behavior keeps the
+		// map byte-identical to the prior three-key contract.
+		if upstreamNamespace != "" {
+			tags["upstream_namespace"] = upstreamNamespace
+		}
 	}
-	tags := map[string]string{
-		"proxy_expose":     "internal-nlb",
-		"upstream_service": upstreamService,
-		"upstream_port":    upstreamPort,
-	}
-	// Only emit upstream_namespace when set, so unset-flag behavior keeps the
-	// map byte-identical to the prior three-key contract.
-	if upstreamNamespace != "" {
-		tags["upstream_namespace"] = upstreamNamespace
+	if flagBenchSynthetic {
+		if tags == nil {
+			tags = make(map[string]string)
+		}
+		tags["synthetic"] = "true"
+		tags["simulator"] = "llm-d-inference-sim"
 	}
 	return tags
+}
+
+// resolveBenchmarkContext auto-populates missing benchmark flags from cluster.yaml,
+// active workspace state.env, and forge_link.json. Explicit CLI flags always take precedence.
+func resolveBenchmarkContext(cmd *cobra.Command) error {
+	wsName := flagBenchWorkspace
+	if wsName == "" {
+		wsName = flagWorkspace
+	}
+
+	var cl *intent.Cluster
+	var stateDir string
+
+	if flagBenchConfig != "" {
+		loaded, err := intent.Load(flagBenchConfig)
+		if err != nil {
+			return fmt.Errorf("loading cluster intent %q: %w", flagBenchConfig, err)
+		}
+		cl = loaded
+		stateDir = cl.StateDir()
+		if wsName == "" {
+			wsName = cl.Metadata.Name
+		}
+	} else if wsName != "" {
+		stateDir = fmt.Sprintf(".awsbnkctl/%s", wsName)
+		cfgPath := filepath.Join(stateDir, "cluster.yaml")
+		if _, err := os.Stat(cfgPath); err == nil {
+			if loaded, err := intent.Load(cfgPath); err == nil {
+				cl = loaded
+			}
+		}
+	}
+
+	if flagBenchWorkspace == "" && wsName != "" {
+		flagBenchWorkspace = wsName
+	}
+
+	// Derive defaults from cluster intent if available
+	if cl != nil {
+		if flagBenchRegion == "" && cl.Metadata.Region != "" {
+			flagBenchRegion = cl.Metadata.Region
+		}
+		if flagBenchVIP == "" {
+			if v, err := cl.DefaultVIP(); err == nil && v != "" {
+				flagBenchVIP = v
+			}
+		}
+		if cl.SyntheticAIEnabled() {
+			flagBenchSynthetic = true
+		}
+		if flagBenchModel == "" {
+			if cl.AI != nil && cl.AI.SageMaker != nil && cl.AI.SageMaker.Model != "" {
+				flagBenchModel = cl.AI.SageMaker.Model
+			} else if cl.AI != nil && cl.AI.Synthetic != nil && cl.AI.Synthetic.ServedModelName != "" {
+				flagBenchModel = cl.AI.Synthetic.ServedModelName
+			} else if flagBenchSynthetic {
+				flagBenchModel = "llama3"
+			}
+		}
+		if cl.Forge != nil {
+			if (flagBenchForgeURL == "http://localhost:8000" || flagBenchForgeURL == "") && cl.Forge.ResolveURL() != "" {
+				flagBenchForgeURL = cl.Forge.ResolveURL()
+			}
+			if flagBenchForgeUser == "" && cl.Forge.ResolveUsername() != "" {
+				flagBenchForgeUser = cl.Forge.ResolveUsername()
+			}
+			if flagBenchForgePass == "" {
+				pass, _ := cl.Forge.ResolvePassword()
+				if pass != "" {
+					flagBenchForgePass = pass
+				}
+			}
+		}
+	}
+
+	// Derive state from state.env if available
+	if stateDir != "" {
+		if st, err := state.Load(stateDir); err == nil && st != nil {
+			if flagBenchInstanceID == "" && st.Get("JUMPHOST_INSTANCE_ID") != "" {
+				flagBenchInstanceID = st.Get("JUMPHOST_INSTANCE_ID")
+			}
+			if flagBenchSourceIP == "" && st.Get("JUMPHOST_BNK_EXT_ENI_IP") != "" {
+				flagBenchSourceIP = st.Get("JUMPHOST_BNK_EXT_ENI_IP")
+			}
+			if flagBenchRegion == "" {
+				if r := st.Get("REGION"); r != "" {
+					flagBenchRegion = r
+				} else if r := st.Get("AWS_REGION"); r != "" {
+					flagBenchRegion = r
+				}
+			}
+			if flagBenchVIP == "" {
+				if v := st.Get("DEMO_VIP_HTTPROUTE"); v != "" {
+					flagBenchVIP = v
+				} else if v := st.Get("TMM_EXT_SELFIP"); v != "" {
+					flagBenchVIP = v
+				}
+			}
+		}
+
+		// Derive forge settings from forge_link.json if available
+		if link, err := forge.ReadLink(stateDir); err == nil && link != nil {
+			if (flagBenchForgeURL == "http://localhost:8000" || flagBenchForgeURL == "") && link.ForgeURL != "" {
+				flagBenchForgeURL = link.ForgeURL
+			}
+		}
+	}
+
+	if flagBenchModel == "" && flagBenchSynthetic {
+		flagBenchModel = "llama3"
+	}
+
+	return nil
+}
+
+func effectiveForgeCreds() forge.RestCreds {
+	u := flagBenchForgeUser
+	if u == "" {
+		u = os.Getenv("AWSBNKCTL_FORGE_USERNAME")
+	}
+	p := flagBenchForgePass
+	if p == "" {
+		p = os.Getenv("AWSBNKCTL_FORGE_PASSWORD")
+	}
+	return forge.RestCreds{
+		Username: u,
+		Password: p,
+	}
 }
 
 // resolveForgeGraph registers the agent + target (best-effort, non-fatal) and
@@ -357,8 +548,16 @@ func resolveForgeGraph(ctx context.Context, creds forge.RestCreds, agentName str
 
 	// ── Step B: Resolve cluster_id from forge_link.json ──────────────────────
 	clusterID := 0
-	if flagBenchWorkspace != "" {
-		wsDir := fmt.Sprintf(".awsbnkctl/%s", flagBenchWorkspace)
+	wsDir := ""
+	if flagBenchConfig != "" {
+		if cl, err := intent.Load(flagBenchConfig); err == nil {
+			wsDir = cl.StateDir()
+		}
+	}
+	if wsDir == "" && flagBenchWorkspace != "" {
+		wsDir = fmt.Sprintf(".awsbnkctl/%s", flagBenchWorkspace)
+	}
+	if wsDir != "" {
 		if link, lerr := forge.ReadLink(wsDir); lerr == nil && link != nil {
 			clusterID = link.ClusterID
 			fmt.Fprintf(os.Stderr, "✓ resolved cluster_id=%d from workspace %q forge link\n", clusterID, flagBenchWorkspace)
@@ -367,45 +566,141 @@ func resolveForgeGraph(ctx context.Context, creds forge.RestCreds, agentName str
 		}
 	}
 
-	// ── Step C: Register BenchmarkTarget ─────────────────────────────────────
-	targetName := fmt.Sprintf("awsbnkctl-%s-%s", flagBenchWorkspace, flagBenchModel)
-	if flagBenchWorkspace == "" {
-		targetName = fmt.Sprintf("awsbnkctl-%s-%s", flagBenchInstanceID, flagBenchModel)
-	}
-	targetResp, targetErr := registerBenchmarkTargetFn(ctx, forge.BenchmarkTargetOptions{
-		RestURL:    flagBenchForgeURL,
-		Creds:      creds,
-		Name:       targetName,
-		ClusterID:  clusterID,
-		LLMBaseURL: llmBaseURL(flagBenchVIP),
-		LLMModel:   flagBenchModel,
-		Tags:       nlbOptInTags(flagBenchProxies, flagBenchUpstreamService, flagBenchUpstreamPort, flagBenchUpstreamNamespace),
-	})
-	if targetErr != nil {
-		if errors.Is(targetErr, forge.ErrTargetNoClusterID) {
-			fmt.Fprintln(os.Stderr, "⚠ skipping forge target registration: no cluster_id (pass --workspace to enable)")
+	// ── Step C: Discover Targets & Proxies via Cluster Scan Subsystem ────────
+	if clusterID > 0 {
+		fmt.Fprintf(os.Stderr, "→ Scanning cluster (id=%d) for LLM targets & proxies in forge...\n", clusterID)
+		discResp, discErr := discoverTargetsFn(ctx, forge.DiscoverTargetsOptions{
+			RestURL:    flagBenchForgeURL,
+			Creds:      creds,
+			ClusterID:  clusterID,
+			AutoCreate: true,
+		})
+		if discErr != nil {
+			fmt.Fprintf(os.Stderr, "⚠ forge target discovery scan failed (non-fatal, falling back): %v\n", discErr)
 		} else {
-			fmt.Fprintf(os.Stderr, "⚠ forge target registration failed (non-fatal): %v\n", targetErr)
+			fmt.Fprintf(os.Stderr, "✓ cluster scan complete: %d LLM service(s) discovered, %d target(s) created/linked\n",
+				discResp.DiscoveredCount, len(discResp.CreatedTargets))
 		}
-	} else {
-		g.targetID = targetResp.ID
-		fmt.Fprintf(os.Stderr, "✓ forge target registered: id=%d name=%s\n", targetResp.ID, targetResp.Name)
+
+		targets, listErr := listBenchmarkTargetsFn(ctx, forge.ListBenchmarkTargetsOptions{
+			RestURL:   flagBenchForgeURL,
+			Creds:     creds,
+			ClusterID: clusterID,
+		})
+		if listErr == nil && len(targets) > 0 {
+			var matched *forge.BenchmarkTargetResponse
+			for i := range targets {
+				t := &targets[i]
+				if flagBenchModel != "" && (strings.EqualFold(t.LLMModel, flagBenchModel) || strings.Contains(strings.ToLower(t.Name), strings.ToLower(flagBenchModel))) {
+					matched = t
+					break
+				}
+				if strings.Contains(t.Name, "aiinference") || strings.Contains(t.LLMNamespace, "aiinference") {
+					matched = t
+					break
+				}
+			}
+			if matched == nil {
+				matched = &targets[0]
+			}
+
+			g.targetID = matched.ID
+			fmt.Fprintf(os.Stderr, "✓ forge target resolved: id=%d name=%s (model=%s url=%s)\n",
+				matched.ID, matched.Name, matched.LLMModel, matched.LLMBaseURL)
+
+			// Step D: Discover and resolve ProxyDeployments
+			discOpts := forge.ProxyDiscoverOptions{
+				RestURL:  flagBenchForgeURL,
+				Creds:    creds,
+				TargetID: g.targetID,
+			}
+			if _, pDiscErr := discoverProxiesFn(ctx, discOpts); pDiscErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠ forge proxy discovery failed (non-fatal): %v\n", pDiscErr)
+			}
+			if proxies, perr := listProxyDeploymentsFn(ctx, discOpts); perr == nil && len(proxies) > 0 {
+				pt := flagBenchProxy
+				if pt == "" {
+					pt = "f5-bnk"
+				}
+				if dep := forge.FindProxyDeployment(proxies, pt); dep != nil {
+					g.proxyDeploymentID = dep.ID
+					fmt.Fprintf(os.Stderr, "✓ forge proxy deployment resolved: id=%d type=%s status=%s external_url=%s\n",
+						dep.ID, dep.ProxyType, dep.Status, dep.ExternalURL)
+					if flagBenchVIP == "" && dep.ExternalURL != "" {
+						flagBenchVIP = strings.TrimPrefix(strings.TrimPrefix(dep.ExternalURL, "http://"), "https://")
+						if idx := strings.Index(flagBenchVIP, ":"); idx != -1 {
+							flagBenchVIP = flagBenchVIP[:idx]
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// ── Step E: Fallback to Manual Target Registration ───────────────────────
+	if g.targetID == 0 {
+		targetName := fmt.Sprintf("awsbnkctl-%s-%s", flagBenchWorkspace, flagBenchModel)
+		if flagBenchWorkspace == "" {
+			targetName = fmt.Sprintf("awsbnkctl-%s-%s", flagBenchInstanceID, flagBenchModel)
+		}
+		targetResp, targetErr := registerBenchmarkTargetFn(ctx, forge.BenchmarkTargetOptions{
+			RestURL:    flagBenchForgeURL,
+			Creds:      creds,
+			Name:       targetName,
+			ClusterID:  clusterID,
+			LLMBaseURL: llmBaseURL(flagBenchVIP),
+			LLMModel:   flagBenchModel,
+			Tags:       nlbOptInTags(flagBenchProxies, flagBenchUpstreamService, flagBenchUpstreamPort, flagBenchUpstreamNamespace),
+		})
+		if targetErr != nil {
+			if errors.Is(targetErr, forge.ErrTargetNoClusterID) {
+				fmt.Fprintln(os.Stderr, "⚠ skipping forge target registration: no cluster_id (pass --workspace to enable)")
+			} else {
+				fmt.Fprintf(os.Stderr, "⚠ forge target registration failed (non-fatal): %v\n", targetErr)
+			}
+		} else {
+			g.targetID = targetResp.ID
+			fmt.Fprintf(os.Stderr, "✓ forge target registered: id=%d name=%s\n", targetResp.ID, targetResp.Name)
+
+			discOpts := forge.ProxyDiscoverOptions{
+				RestURL:  flagBenchForgeURL,
+				Creds:    creds,
+				TargetID: g.targetID,
+			}
+			if _, pDiscErr := discoverProxiesFn(ctx, discOpts); pDiscErr == nil {
+				if proxies, perr := listProxyDeploymentsFn(ctx, discOpts); perr == nil && len(proxies) > 0 {
+					pt := flagBenchProxy
+					if pt == "" {
+						pt = "f5-bnk"
+					}
+					if dep := forge.FindProxyDeployment(proxies, pt); dep != nil {
+						g.proxyDeploymentID = dep.ID
+						fmt.Fprintf(os.Stderr, "✓ forge proxy deployment resolved: id=%d type=%s status=%s\n", dep.ID, dep.ProxyType, dep.Status)
+					}
+				}
+			}
+		}
 	}
 
 	return g
 }
 
 func runForgeBenchmark(cmd *cobra.Command, _ []string) error {
+	// Auto-resolve cluster and jumphost state from cluster.yaml or active workspace if needed
+	if err := resolveBenchmarkContext(cmd); err != nil {
+		return err
+	}
+
 	// Validate required flags.
 	switch {
 	case flagBenchRegion == "":
-		return fmt.Errorf("--region is required")
+		return fmt.Errorf("--region is required (or specify -f cluster.yaml / -w workspace)")
 	case flagBenchInstanceID == "":
-		return fmt.Errorf("--instance-id is required")
+		return fmt.Errorf("--instance-id is required (or specify -f cluster.yaml / -w workspace with testing.jumphost enabled)")
 	case flagBenchVIP == "":
-		return fmt.Errorf("--vip is required")
+		return fmt.Errorf("--vip is required (or specify -f cluster.yaml / -w workspace)")
 	case flagBenchModel == "":
-		return fmt.Errorf("--model is required")
+		return fmt.Errorf("--model is required (or specify in cluster.yaml ai block)")
 	}
 
 	// --scenario and --scenarios are mutually exclusive.
@@ -445,10 +740,7 @@ func runForgeBenchmark(cmd *cobra.Command, _ []string) error {
 		User:       "ec2-user",
 	}
 
-	forgeCreds := forge.RestCreds{
-		Username: flagBenchForgeUser,
-		Password: flagBenchForgePass,
-	}
+	forgeCreds := effectiveForgeCreds()
 
 	// Step 0: wire --reset-cache if requested.
 	// When set: load cluster intent, validate SageMaker is enabled, build an AWS
