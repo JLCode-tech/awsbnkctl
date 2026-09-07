@@ -84,9 +84,99 @@ It is unsafe to store passwords in `cluster.yaml`. You can override forge settin
 
 ## 7. Benchmarks & Bidirectional Agent Daemon
 
-`awsbnkctl` integrates with Forge's performance benchmarking subsystem to execute LLM inference benchmark suites against proxy endpoints inside VPCs:
+`awsbnkctl` integrates with Forge's performance benchmarking subsystem to execute LLM inference benchmark suites (`aiperf`) against proxy endpoints (F5 BNK, Envoy, HAProxy, NGINX) inside AWS VPCs.
 
-- **CLI-Driven Runs (`awsbnkctl benchmark run`)**: Scans registered Forge clusters to discover target and proxy deployment IDs, runs aiperf suites, and pushes JSON metrics to Forge.
-- **Forge-Driven Runs via Daemon (`awsbnkctl benchmark daemon`)**: Establishes a persistent reverse WebSocket tunnel to Forge (`/ws/benchmarks/agents/{id}`) with 15s heartbeats. Operators can click **Run Benchmark** directly in the Forge UI, and Forge dispatches the test down the WebSocket to the agent.
-- **Auto-Drain on Reconnection**: If an agent disconnects and runs are triggered from Forge, Forge queues them in `pending`. When `awsbnkctl benchmark daemon` is restarted, it automatically claims and drains the pending backlog sequentially.
+### Architecture Overview
+
+When Forge is running locally (e.g. `http://localhost:8000`), the cloud jumphost in AWS cannot directly reach `localhost`. To bridge this securely without exposing public ingress, **`awsbnkctl benchmark daemon` runs locally on the operator's workstation / laptop**.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                   OPERATOR WORKSTATION                   │
+│                                                          │
+│  [Forge Web UI :3000] ──► [Forge Backend :8000]          │
+│                                  │                       │
+│                              WebSocket                   │
+│                                  │                       │
+│                       [awsbnkctl daemon]                 │
+└──────────────────────────────────┼───────────────────────┘
+                                   │
+                       AWS EICE Ephemeral SSH Tunnel
+                           (via AWS IAM & API)
+                                   │
+┌──────────────────────────────────▼───────────────────────┐
+│                    AWS CLOUD VPC DATA PLANE              │
+│                                                          │
+│  [EC2 Jumphost]                                          │
+│   • Source IP: 10.10.10.140 (BNK External ENI)           │
+│   • Runs aiperf profile against VIP                      │
+│   • Injects Host: awsbnkctl-aiinference.local            │
+│                 │                                        │
+│                 ▼                                        │
+│  [F5 BNK Gateway VIP: 10.10.10.108:80]                   │
+│   • HTTPRoute scn-aiinference-route                      │
+│                 │                                        │
+│                 ▼                                        │
+│  [vLLM Inference Pods (EKS / SageMaker)]                 │
+└──────────────────────────────────────────────────────────┘
+```
+
+1. **Local WebSocket Channel**: `awsbnkctl benchmark daemon` connects to `ws://localhost:8000/ws/benchmarks/agents/{id}` and sends 15-second heartbeats.
+2. **AWS EICE Tunneling**: When a benchmark run is dispatched, `awsbnkctl` opens an ephemeral SSH session over the AWS EC2 Instance Connect Endpoint (EICE).
+3. **In-VPC Execution**: The jumphost executes `aiperf`, generating real traffic from its secondary ENI directly to the BNK Gateway VIP.
+4. **Automatic HTTPRoute Resolution**: The daemon automatically injects required Gateway API Host headers (e.g., `awsbnkctl-aiinference.local`) to ensure traffic matches Kubernetes HTTPRoutes.
+5. **Real-Time Telemetry**: Results are captured and returned to Forge over the WebSocket, updating the Forge Web UI with live latency and throughput charts.
+
+---
+
+### Step-by-Step Operator Guide
+
+#### Step 1: Pre-Stage Jumphost & Register with Forge
+```bash
+AWS_PROFILE=<your-profile> awsbnkctl benchmark setup \
+  -f clusters/cluster.yaml \
+  --forge-user mcp \
+  --forge-pass <mcp-token> \
+  --vip 10.10.10.108
+```
+*This verifies `aiperf >= 0.10.0` on the jumphost and registers the jumphost agent and LLM target in Forge.*
+
+#### Step 2: Start the Agent Daemon on your Workstation
+```bash
+AWS_PROFILE=<your-profile> awsbnkctl benchmark daemon \
+  -f clusters/cluster.yaml \
+  --forge-user mcp \
+  --forge-pass <mcp-token>
+```
+*Leave this running in a terminal tab. You will see heartbeat acknowledgments every 15 seconds.*
+
+#### Step 3: Trigger Benchmarks from Forge Web UI
+1. Open the Forge Web UI (`http://localhost:3000`).
+2. Navigate to **Benchmarks** → **Run Benchmark** (or **Scenarios**).
+3. Select:
+   - **Scenario**: e.g., `Mixed Workload`, `Baseline`, `High Concurrency`, `Sustained Load`.
+   - **Agent**: Select the registered jumphost agent (e.g. `awsbnkctl-jumphost-i-...`).
+   - **Target**: Select the discovered vLLM target.
+   - **Proxy**: Select `f5-bnk` (or proxy shootout).
+4. Click **Run Benchmark**.
+
+Forge will stream each scenario phase to your local daemon, which drives the cloud jumphost and returns metrics to Forge in real time.
+
+#### Step 4: (Alternative) Drive Runs Directly via CLI
+You can also trigger sweeps and presets directly without the UI:
+```bash
+# Single benchmark run
+AWS_PROFILE=<your-profile> awsbnkctl benchmark run \
+  -f clusters/cluster.yaml \
+  --vip 10.10.10.108 \
+  --num-requests 100 \
+  --concurrency 10 \
+  --model meta-llama/Llama-3-8B-Instruct \
+  --host-header awsbnkctl-aiinference.local
+
+# Run preset scenario sweep (latency, throughput, streaming)
+AWS_PROFILE=<your-profile> awsbnkctl benchmark run \
+  -f clusters/cluster.yaml \
+  --scenarios latency,throughput
+```
 
