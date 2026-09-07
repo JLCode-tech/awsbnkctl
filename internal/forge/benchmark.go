@@ -1,12 +1,8 @@
 package forge
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -119,11 +115,6 @@ type BenchmarkPushOptions struct {
 	// ProxyDeploymentID links the result to a forge ProxyDeployment record (0 = unset, omitted).
 	ProxyDeploymentID int
 }
-
-// benchmarkHTTPDoFn is the injectable HTTP transport seam used by
-// PushBenchmarkResult. Default: http.DefaultClient.Do.
-// Tests replace it via the BenchmarkHTTPDoFn export in benchmark_export_test.go.
-var benchmarkHTTPDoFn func(*http.Request) (*http.Response, error) = http.DefaultClient.Do
 
 // MapAiperfResultToPayload converts an AiperfResult + options into the
 // BenchmarkResultPayload that forge's POST /api/benchmarks/results expects.
@@ -284,7 +275,7 @@ func PushBenchmarkResult(ctx context.Context, result *jumphost.AiperfResult, opt
 	base := strings.TrimRight(opts.RestURL, "/")
 
 	// Login to obtain a bearer token using the injectable transport.
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return BenchmarkPushResponse{}, fmt.Errorf("forge benchmark push: login: %w", err)
 	}
@@ -292,7 +283,7 @@ func PushBenchmarkResult(ctx context.Context, result *jumphost.AiperfResult, opt
 	payload := MapAiperfResultToPayload(result, opts)
 
 	var resp BenchmarkPushResponse
-	if err := bmkRestPost(ctx, base+BenchmarkPushEndpoint, token, payload, &resp); err != nil {
+	if err := restPost(ctx, base+BenchmarkPushEndpoint, token, payload, &resp); err != nil {
 		return BenchmarkPushResponse{}, fmt.Errorf("forge benchmark push: %w", err)
 	}
 	return resp, nil
@@ -357,7 +348,7 @@ func PushRawAiperfResult(ctx context.Context, opts RawAiperfPushOptions) (RawAip
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return RawAiperfPushResponse{}, fmt.Errorf("forge raw aiperf push: login: %w", err)
 	}
@@ -407,7 +398,7 @@ func PushRawAiperfResult(ctx context.Context, opts RawAiperfPushOptions) (RawAip
 	req.URL.RawQuery = q.Encode()
 
 	var resp RawAiperfPushResponse
-	if err := doBmkRequest(req, rawURL, &resp); err != nil {
+	if err := doRESTRequest(req, rawURL, &resp); err != nil {
 		return RawAiperfPushResponse{}, fmt.Errorf("forge raw aiperf push: %w", err)
 	}
 	return resp, nil
@@ -455,7 +446,7 @@ func RegisterBenchmarkConfig(ctx context.Context, opts BenchmarkConfigOptions) (
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return BenchmarkConfigResponse{}, fmt.Errorf("forge benchmark config: login: %w", err)
 	}
@@ -470,20 +461,14 @@ func RegisterBenchmarkConfig(ctx context.Context, opts BenchmarkConfigOptions) (
 	}
 
 	var resp BenchmarkConfigResponse
-	postErr := bmkRestPost(ctx, base+BenchmarkConfigEndpoint, token, body, &resp)
+	postErr := restPost(ctx, base+BenchmarkConfigEndpoint, token, body, &resp)
 	if postErr == nil {
 		return resp, nil
 	}
 
 	// 409 or 400-with-"already exists": name conflict — fall back to list-and-match
 	// (mirrors the accessmethod.go and rest.go upsert pattern).
-	var herr *restHTTPErr
-	if !errors.As(postErr, &herr) {
-		return BenchmarkConfigResponse{}, fmt.Errorf("forge benchmark config: %w", postErr)
-	}
-	isConflict := herr.StatusCode == http.StatusConflict ||
-		(herr.StatusCode == http.StatusBadRequest && strings.Contains(herr.Body, "already exists"))
-	if !isConflict {
+	if !isConflictHTTP(postErr) {
 		return BenchmarkConfigResponse{}, fmt.Errorf("forge benchmark config: %w", postErr)
 	}
 
@@ -498,7 +483,7 @@ func RegisterBenchmarkConfig(ctx context.Context, opts BenchmarkConfigOptions) (
 // whose name matches exactly.
 func benchmarkConfigFindByName(ctx context.Context, base, token, name string) (BenchmarkConfigResponse, error) {
 	var list []BenchmarkConfigResponse
-	if err := bmkRestGet(ctx, base+BenchmarkConfigEndpoint, token, &list); err != nil {
+	if err := restGet(ctx, base+BenchmarkConfigEndpoint, token, &list); err != nil {
 		return BenchmarkConfigResponse{}, fmt.Errorf("list benchmark configs: %w", err)
 	}
 	for _, r := range list {
@@ -507,94 +492,4 @@ func benchmarkConfigFindByName(ctx context.Context, base, token, name string) (B
 		}
 	}
 	return BenchmarkConfigResponse{}, fmt.Errorf("benchmark config %q not found in forge", name)
-}
-
-// bmkRestLogin logs in over REST using the injectable benchmarkHTTPDoFn.
-func bmkRestLogin(ctx context.Context, base, username, password string) (string, error) {
-	body := map[string]string{"username": username, "password": password}
-	var resp struct {
-		Token string `json:"token"`
-	}
-	if err := bmkRestPost(ctx, base+"/api/auth/login", "", body, &resp); err != nil {
-		return "", err
-	}
-	if resp.Token == "" {
-		return "", fmt.Errorf("forge REST login: empty token in response")
-	}
-	return resp.Token, nil
-}
-
-// bmkRestPost POSTs JSON body to url with an optional bearer token and
-// decodes the response into out. Uses benchmarkHTTPDoFn so tests can inject
-// a mock transport without touching http.DefaultClient.
-func bmkRestPost(ctx context.Context, url, token string, body, out any) error {
-	req, err := newBmkRequest(ctx, http.MethodPost, url, token, body)
-	if err != nil {
-		return err
-	}
-	return doBmkRequest(req, url, out)
-}
-
-// bmkRestGet GETs url with an optional bearer token and decodes the JSON
-// response into out. Uses the same benchmarkHTTPDoFn seam as bmkRestPost.
-func bmkRestGet(ctx context.Context, url, token string, out any) error {
-	req, err := newBmkRequest(ctx, http.MethodGet, url, token, nil)
-	if err != nil {
-		return err
-	}
-	return doBmkRequest(req, url, out)
-}
-
-// bmkRestPut PUTs JSON body to url with an optional bearer token and decodes
-// the response into out. Uses the same benchmarkHTTPDoFn seam.
-func bmkRestPut(ctx context.Context, url, token string, body, out any) error {
-	req, err := newBmkRequest(ctx, http.MethodPut, url, token, body)
-	if err != nil {
-		return err
-	}
-	return doBmkRequest(req, url, out)
-}
-
-// newBmkRequest builds an *http.Request with JSON body (when body != nil) and
-// Authorization header. Shared by bmkRestPost / bmkRestGet / bmkRestPut.
-func newBmkRequest(ctx context.Context, method, url, token string, body any) (*http.Request, error) {
-	var reader io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("marshal request body: %w", err)
-		}
-		reader = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, url, reader)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	return req, nil
-}
-
-// doBmkRequest executes req via benchmarkHTTPDoFn, checks for HTTP errors, and
-// decodes the JSON response into out (when out != nil and body is non-empty).
-func doBmkRequest(req *http.Request, url string, out any) error {
-	resp, err := benchmarkHTTPDoFn(req)
-	if err != nil {
-		return fmt.Errorf("http %s %s: %w", req.Method, url, err)
-	}
-	defer resp.Body.Close()
-	respBytes, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return &restHTTPErr{StatusCode: resp.StatusCode, URL: url, Body: truncateREST(string(respBytes), 400)}
-	}
-	if out != nil && len(respBytes) > 0 {
-		if err := json.Unmarshal(respBytes, out); err != nil {
-			return fmt.Errorf("decode response from %s: %w", url, err)
-		}
-	}
-	return nil
 }

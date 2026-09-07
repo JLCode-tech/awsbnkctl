@@ -19,9 +19,7 @@ package forge
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 )
 
@@ -42,6 +40,14 @@ type AccessMethodOptions struct {
 	// forge will not be able to reach it (EICE-only access), but the field is
 	// required by the schema.
 	Host string
+	// Port is the SSH port. Defaults to 22 if zero.
+	Port int
+	// Username is the SSH user. Defaults to "ec2-user" if empty.
+	Username string
+	// AuthType is the authentication type (e.g. "key", "password"). Defaults to "key" if empty.
+	AuthType string
+	// Description overrides the default auto-generated description if non-empty.
+	Description string
 	// Region is the AWS region — included in the description for
 	// self-documentation.
 	Region string
@@ -82,32 +88,48 @@ func RegisterJumphostAccessMethod(ctx context.Context, opts AccessMethodOptions)
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := bmkRestLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
 	if err != nil {
 		return AccessMethodResponse{}, fmt.Errorf("forge access-method: login: %w", err)
 	}
 
-	desc := fmt.Sprintf(
-		"awsbnkctl-managed jumphost. Access is via AWS EC2 Instance Connect Endpoint (EICE) "+
-			"with a 60-second ephemeral key — no static private key exists. "+
-			"Region: %s  InstanceID: %s. "+
-			"Forge cannot SSH to this host directly; record is informational.",
-		opts.Region, opts.InstanceID,
-	)
+	port := opts.Port
+	if port == 0 {
+		port = 22
+	}
+	user := opts.Username
+	if user == "" {
+		user = "ec2-user"
+	}
+	authType := opts.AuthType
+	if authType == "" {
+		authType = "key"
+	}
+
+	desc := opts.Description
+	if desc == "" {
+		desc = fmt.Sprintf(
+			"awsbnkctl-managed jumphost. Access is via AWS EC2 Instance Connect Endpoint (EICE) "+
+				"with a 60-second ephemeral key — no static private key exists. "+
+				"Region: %s  InstanceID: %s. "+
+				"Forge cannot SSH to this host directly; record is informational.",
+			opts.Region, opts.InstanceID,
+		)
+	}
 
 	body := map[string]any{
 		"name":        opts.Name,
 		"description": desc,
 		"host":        opts.Host,
-		"port":        22,
-		"username":    "ec2-user",
-		"auth_type":   "key",
+		"port":        port,
+		"username":    user,
+		"auth_type":   authType,
 		// private_key intentionally omitted (null): EICE uses ephemeral keys.
 		// The forge schema accepts private_key=null for auth_type="key".
 	}
 
 	var created AccessMethodResponse
-	err = bmkRestPost(ctx, base+SSHCredentialEndpoint, token, body, &created)
+	err = restPost(ctx, base+SSHCredentialEndpoint, token, body, &created)
 	if err == nil {
 		return created, nil
 	}
@@ -115,28 +137,25 @@ func RegisterJumphostAccessMethod(ctx context.Context, opts AccessMethodOptions)
 	// 409 or 400-with-"already exists" body = name conflict — fall back to
 	// list-and-update (mirror rest.go pattern; some forge versions return 400
 	// instead of 409 on duplicate name).
-	var herr *restHTTPErr
-	if !errors.As(err, &herr) {
-		return AccessMethodResponse{}, fmt.Errorf("forge access-method: create: %w", err)
-	}
-	isConflict := herr.StatusCode == http.StatusConflict ||
-		(herr.StatusCode == http.StatusBadRequest && strings.Contains(herr.Body, "already exists"))
-	if !isConflict {
+	if !isConflictHTTP(err) {
 		return AccessMethodResponse{}, fmt.Errorf("forge access-method: create: %w", err)
 	}
 
 	existing, lookupErr := sshCredFindByName(ctx, base, token, opts.Name)
 	if lookupErr != nil {
-		return AccessMethodResponse{}, fmt.Errorf("forge access-method: 409 + list failed: %w (original: %v)", lookupErr, err)
+		return AccessMethodResponse{}, fmt.Errorf("forge access-method: conflict + list failed: %w (original: %v)", lookupErr, err)
 	}
 
 	updateBody := map[string]any{
 		"description": desc,
 		"host":        opts.Host,
+		"port":        port,
+		"username":    user,
+		"auth_type":   authType,
 	}
 	updateURL := fmt.Sprintf("%s%s/%d", base, SSHCredentialEndpoint, existing.ID)
 	var updated AccessMethodResponse
-	if putErr := bmkRestPut(ctx, updateURL, token, updateBody, &updated); putErr != nil {
+	if putErr := restPut(ctx, updateURL, token, updateBody, &updated); putErr != nil {
 		return AccessMethodResponse{}, fmt.Errorf("forge access-method: PUT update: %w", putErr)
 	}
 	if updated.ID == 0 {
@@ -149,7 +168,7 @@ func RegisterJumphostAccessMethod(ctx context.Context, opts AccessMethodOptions)
 // name matches exactly.
 func sshCredFindByName(ctx context.Context, base, token, name string) (AccessMethodResponse, error) {
 	var list []AccessMethodResponse
-	if err := bmkRestGet(ctx, base+SSHCredentialEndpoint, token, &list); err != nil {
+	if err := restGet(ctx, base+SSHCredentialEndpoint, token, &list); err != nil {
 		return AccessMethodResponse{}, fmt.Errorf("list ssh-credentials: %w", err)
 	}
 	for _, r := range list {
@@ -159,6 +178,3 @@ func sshCredFindByName(ctx context.Context, base, token, name string) (AccessMet
 	}
 	return AccessMethodResponse{}, fmt.Errorf("ssh-credential %q not found in forge", name)
 }
-
-// bmkRestGet and bmkRestPut are defined in benchmark.go — same file, same
-// package — and share the benchmarkHTTPDoFn seam.

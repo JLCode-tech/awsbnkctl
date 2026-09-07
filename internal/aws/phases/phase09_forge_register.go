@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
@@ -32,22 +31,10 @@ func Phase09ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		return nil
 	}
 
-	forgeURL := cl.Forge.ResolveURL()
-	mcpURL := cl.Forge.MCPURL
-	if mcpURL == "" {
-		mcpURL = forge.DefaultMCPURL
-	}
-
-	// Resolve REST credentials and warn when the built-in default is in use.
-	forgeUsername := cl.Forge.ResolveUsername()
-	forgePassword, usingDefaultPwd := cl.Forge.ResolvePassword()
-	if usingDefaultPwd {
-		fmt.Fprintln(os.Stderr, "[forge] using default password; set AWSBNKCTL_FORGE_PASSWORD or forge.password for your deployment")
-	}
-	restCreds := forge.RestCreds{Username: forgeUsername, Password: forgePassword}
+	cfg := resolveForgeConfig(cl, nil)
 
 	if dryRun {
-		fmt.Fprintf(os.Stderr, "[phase 09] dry-run: would register with forge at %s\n", mcpURL)
+		fmt.Fprintf(os.Stderr, "[phase 09] dry-run: would register with forge at %s\n", cfg.mcpURL)
 		st.Set("FORGE_PROJECT_ID", "dry-run-project")
 		st.Set("FORGE_CLUSTER_ID", "dry-run-cluster")
 		st.Set("FORGE_LINK_PATH", filepath.Join(cl.StateDir(), forge.LinkFileName))
@@ -100,6 +87,9 @@ func Phase09ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		WorkspaceDir:         workspaceDir,
 		ClusterName:          clusterName,
 		Region:               region,
+		Environment:          cfg.env,
+		ProjectType:          cfg.projType,
+		CloudProvider:        "aws",
 		Kubeconfig:           kubeconfig,
 		PostRegisterScan:     false, // scan is out of scope for slice 4
 		CredentialTemplateID: credTplID,
@@ -107,7 +97,7 @@ func Phase09ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 
 	// Ensure forge client is available.
 	if clients.ForgeClient == nil {
-		clients.AttachForgeClient(true, mcpURL)
+		clients.AttachForgeClient(true, cfg.mcpURL)
 	}
 
 	// 4 attempts with 1s/3s/9s backoff between them (attempt 1, sleep 1s,
@@ -116,7 +106,7 @@ func Phase09ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	var lastErr error
 	for i := 0; i < 4; i++ {
 		var res forge.RegisterResult
-		res, lastErr = tryForgeRegister(ctx, clients.ForgeClient, forgeURL, req, restCreds)
+		res, lastErr = tryForgeRegister(ctx, clients.ForgeClient, cfg.restURL, req, cfg.restCreds)
 		if lastErr == nil {
 			fmt.Fprintf(os.Stderr, "[phase 09] registered with forge — project=%d cluster=%d\n",
 				res.Link.ProjectID, res.Link.ClusterID)
@@ -182,40 +172,7 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 	// back to cached link fields / defaults. This handles the case where the
 	// operator removed the forge: block from cluster.yaml between up and down
 	// — cl.Forge is nil but a forge-link.json still exists with the original URLs.
-	// Hoisted above the link handling so the link-less discovery fallback can
-	// reuse the same resolution.
-	forgeURL := intent.DefaultForgeRESTURL
-	mcpURL := forge.DefaultMCPURL
-	var restCreds forge.RestCreds
-	if cl.Forge != nil {
-		forgeURL = cl.Forge.ResolveURL()
-		if cl.Forge.MCPURL != "" {
-			mcpURL = cl.Forge.MCPURL
-		}
-		forgeUsername := cl.Forge.ResolveUsername()
-		forgePassword, usingDefaultPwd := cl.Forge.ResolvePassword()
-		if usingDefaultPwd {
-			fmt.Fprintln(os.Stderr, "[forge] using default password; set AWSBNKCTL_FORGE_PASSWORD or forge.password for your deployment")
-		}
-		restCreds = forge.RestCreds{Username: forgeUsername, Password: forgePassword}
-	} else {
-		// cl.Forge is nil — use URLs cached in the link file if available.
-		if link != nil && link.ForgeURL != "" {
-			forgeURL = link.ForgeURL
-		}
-		if link != nil && link.ForgeMCPURL != "" {
-			mcpURL = link.ForgeMCPURL
-		}
-		// Credentials: resolve from env only (no ForgeSpec to read yaml from).
-		forgePassword, usingDefaultPwd := (*intent.ForgeSpec)(nil).ResolvePassword()
-		if usingDefaultPwd {
-			fmt.Fprintln(os.Stderr, "[forge] using default password; set AWSBNKCTL_FORGE_PASSWORD or forge.password for your deployment")
-		}
-		restCreds = forge.RestCreds{
-			Username: (*intent.ForgeSpec)(nil).ResolveUsername(),
-			Password: forgePassword,
-		}
-	}
+	cfg := resolveForgeConfig(cl, link)
 
 	if link == nil {
 		// No local link (e.g. the workspace state dir was lost). Only attempt
@@ -226,7 +183,7 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 			fmt.Fprintln(os.Stderr, "[phase 09 down] forge: no link, nothing to unregister")
 			return nil
 		}
-		discErr := forge.UnregisterRESTByName(ctx, forgeURL, cl.Metadata.Name, restCreds)
+		discErr := forge.UnregisterRESTByName(ctx, cfg.restURL, cl.Metadata.Name, cfg.restCreds)
 		if discErr == nil {
 			fmt.Fprintln(os.Stderr, "[phase 09 down] forge: unregistered via REST by-name discovery (no local link)")
 			st.Set("FORGE_STATUS", "")
@@ -245,7 +202,7 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 	}
 
 	if clients.ForgeClient == nil {
-		clients.AttachForgeClient(true, mcpURL)
+		clients.AttachForgeClient(true, cfg.mcpURL)
 	}
 
 	// Try MCP unregister first. purge=true: the project was created by
@@ -263,8 +220,8 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 	// MCP failed — fall back to REST only for catalog-gap errors (mirrors up path).
 	// For non-catalog-gap errors (auth, connectivity), skip REST and soft-fail.
 	if forge.IsMCPCatalogGapErr(mcpErr) {
-		restErr := forge.UnregisterREST(ctx, forgeURL, link, restCreds)
-		if restErr == nil || is404ByString(restErr) {
+		restErr := forge.UnregisterREST(ctx, cfg.restURL, link, cfg.restCreds)
+		if restErr == nil || forge.Is404(restErr) {
 			// REST succeeded (or 404 — already gone forge-side).
 			if rerr := forge.RemoveLink(workspaceDir); rerr != nil {
 				fmt.Fprintf(os.Stderr, "[phase 09 down] warning: could not remove forge-link.json: %v\n", rerr)
@@ -311,28 +268,7 @@ func Phase09bBenchmarkDown(ctx context.Context, cl *intent.Cluster, st *state.St
 		return nil
 	}
 
-	// Resolve forge REST URL and credentials.
-	forgeURL := intent.DefaultForgeRESTURL
-	var restCreds forge.RestCreds
-	if cl.Forge != nil {
-		forgeURL = cl.Forge.ResolveURL()
-		forgeUsername := cl.Forge.ResolveUsername()
-		forgePassword, usingDefaultPwd := cl.Forge.ResolvePassword()
-		if usingDefaultPwd {
-			fmt.Fprintln(os.Stderr, "[forge] using default password; set AWSBNKCTL_FORGE_PASSWORD or forge.password for your deployment")
-		}
-		restCreds = forge.RestCreds{Username: forgeUsername, Password: forgePassword}
-	} else {
-		// No forge block in cluster.yaml — try env-only credentials.
-		forgePassword, usingDefaultPwd := (*intent.ForgeSpec)(nil).ResolvePassword()
-		if usingDefaultPwd {
-			fmt.Fprintln(os.Stderr, "[forge] using default password; set AWSBNKCTL_FORGE_PASSWORD or forge.password for your deployment")
-		}
-		restCreds = forge.RestCreds{
-			Username: (*intent.ForgeSpec)(nil).ResolveUsername(),
-			Password: forgePassword,
-		}
-	}
+	cfg := resolveForgeConfig(cl, nil)
 
 	// Resolve the jumphost instance ID — used to build the exact record name
 	// "awsbnkctl-jumphost-<instanceID>" for agent and SSH-credential deletion.
@@ -344,7 +280,7 @@ func Phase09bBenchmarkDown(ctx context.Context, cl *intent.Cluster, st *state.St
 	}
 
 	fmt.Fprintf(os.Stderr, "[phase 09b] forge benchmark cleanup: deleting artifacts for cluster_id=%d\n", clusterID)
-	if err := forge.DeleteClusterBenchmarkArtifacts(ctx, forgeURL, restCreds, clusterID, jumphostInstanceID); err != nil {
+	if err := forge.DeleteClusterBenchmarkArtifacts(ctx, cfg.restURL, cfg.restCreds, clusterID, jumphostInstanceID); err != nil {
 		// Soft-fail: log but do not block down.
 		fmt.Fprintf(os.Stderr, "[phase 09b] warning: forge benchmark cleanup partial failure (%v) — continue teardown\n", err)
 	} else {
@@ -385,14 +321,57 @@ func setForgeState(st *state.State, link *forge.Link, workspaceDir string) {
 	st.Set("FORGE_STATUS", status)
 }
 
-// is404ByString checks whether an error message indicates a 404 response,
-// used to tolerate "already gone" during forge unregister via REST.
-func is404ByString(err error) bool {
-	if err == nil {
-		return false
+type resolvedForgeConfig struct {
+	restURL   string
+	mcpURL    string
+	restCreds forge.RestCreds
+	env       string
+	projType  string
+}
+
+func resolveForgeConfig(cl *intent.Cluster, link *forge.Link) resolvedForgeConfig {
+	forgeURL := intent.DefaultForgeRESTURL
+	mcpURL := forge.DefaultMCPURL
+	var forgeUsername string
+	var forgePassword string
+	var usingDefaultPwd bool
+	var env string = "dev"
+	var projType string = "cloud-aws"
+
+	if cl.Forge != nil {
+		forgeURL = cl.Forge.ResolveURL()
+		if cl.Forge.MCPURL != "" {
+			mcpURL = cl.Forge.MCPURL
+		}
+		forgeUsername = cl.Forge.ResolveUsername()
+		forgePassword, usingDefaultPwd = cl.Forge.ResolvePassword()
+		env = cl.Forge.ResolveEnvironment()
+		projType = cl.Forge.ResolveProjectType()
+	} else {
+		if link != nil && link.ForgeURL != "" {
+			forgeURL = link.ForgeURL
+		}
+		if link != nil && link.ForgeMCPURL != "" {
+			mcpURL = link.ForgeMCPURL
+		}
+		forgeUsername = (*intent.ForgeSpec)(nil).ResolveUsername()
+		forgePassword, usingDefaultPwd = (*intent.ForgeSpec)(nil).ResolvePassword()
+		env = (*intent.ForgeSpec)(nil).ResolveEnvironment()
+		projType = (*intent.ForgeSpec)(nil).ResolveProjectType()
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "404") ||
-		strings.Contains(msg, "not found") ||
-		strings.Contains(msg, "not_found")
+
+	if usingDefaultPwd {
+		fmt.Fprintln(os.Stderr, "[forge] using default password; set AWSBNKCTL_FORGE_PASSWORD or forge.password for your deployment")
+	}
+
+	return resolvedForgeConfig{
+		restURL: forgeURL,
+		mcpURL:  mcpURL,
+		restCreds: forge.RestCreds{
+			Username: forgeUsername,
+			Password: forgePassword,
+		},
+		env:      env,
+		projType: projType,
+	}
 }

@@ -81,7 +81,7 @@ func runBenchmarkStatus(cmd *cobra.Command, _ []string) error {
 			InstanceID: flagBenchInstanceID,
 			SourceIP:   flagBenchSourceIP,
 			VIP:        flagBenchVIP,
-			User:       "ec2-user",
+			User:       jumphost.DefaultSSHUser,
 		}
 		parentCtx := cmd.Context()
 		if parentCtx == nil {

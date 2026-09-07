@@ -311,6 +311,12 @@ type ForgeSpec struct {
 	// If 0/unset, no credential is attached (operator must wire manually).
 	// Forge's default "1 AWS Production" template is typically the right value.
 	CredentialTemplateID int `yaml:"credentialTemplateId,omitempty"`
+	// Environment is the forge project environment (e.g. "dev", "staging", "prod").
+	// Default "dev".
+	Environment string `yaml:"environment,omitempty"`
+	// ProjectType is the forge project type (e.g. "cloud-aws").
+	// Default "cloud-aws".
+	ProjectType string `yaml:"projectType,omitempty"`
 }
 
 // DefaultForgeRESTURL is the fallback REST base when forge.url is not set.
@@ -353,6 +359,30 @@ func (f *ForgeSpec) ResolvePassword() (password string, usingDefault bool) {
 		return f.Password, false
 	}
 	return "changeme", true
+}
+
+// ResolveEnvironment returns the forge project environment, in priority order:
+//  1. AWSBNKCTL_FORGE_ENVIRONMENT environment variable
+//  2. f.Environment (cluster.yaml forge.environment)
+//  3. "dev"
+func (f *ForgeSpec) ResolveEnvironment() string {
+	if v := os.Getenv("AWSBNKCTL_FORGE_ENVIRONMENT"); v != "" {
+		return v
+	}
+	if f != nil && f.Environment != "" {
+		return f.Environment
+	}
+	return "dev"
+}
+
+// ResolveProjectType returns the forge project type, in priority order:
+//  1. f.ProjectType (cluster.yaml forge.projectType)
+//  2. "cloud-aws"
+func (f *ForgeSpec) ResolveProjectType() string {
+	if f != nil && f.ProjectType != "" {
+		return f.ProjectType
+	}
+	return "cloud-aws"
 }
 
 // AddonsSpec holds optional add-on configuration for slice 6+.
