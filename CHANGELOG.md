@@ -4,6 +4,19 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [1.3.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.2.0...v1.3.0) (2026-09-07)
+
+
+### Features
+
+* **benchmark:** bidirectional websocket agent daemon and execution engine ([4ee3062](https://github.com/JLCode-tech/awsbnkctl/commit/4ee306242ee3dbdd3e9ae712fd33b03ca512047f))
+* **benchmark:** integrate jumphost benchmarking with forge and cluster scan discovery ([424106c](https://github.com/JLCode-tech/awsbnkctl/commit/424106cae37abbd34ded6648aa434188cb1c81ea))
+
+
+### Bug Fixes
+
+* **deps:** bump golang.org/x/crypto to v0.56.0 ([3326e4e](https://github.com/JLCode-tech/awsbnkctl/commit/3326e4e756034e63c5e4a6cd3a8cbc763292570c))
+
 ## [1.2.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.1.0...v1.2.0) (2026-09-02)
 
 
