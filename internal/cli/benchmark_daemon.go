@@ -122,13 +122,29 @@ func executeDispatchedRun(ctx context.Context, runID int, config map[string]any)
 		targetVIP = flagBenchVIP
 	}
 
-	fmt.Fprintf(os.Stderr, "[Run #%d] Executing benchmark: model=%s vip=%s concurrency=%d requests=%d streaming=%v\n",
-		runID, cfg.Model, targetVIP, cfg.Concurrency, cfg.NumRequests, cfg.Streaming)
+	// Auto-default HostHeader for BNK Gateway API HTTPRoute compatibility
+	if cfg.HostHeader == "" {
+		if flagBenchHostHeader != "" {
+			cfg.HostHeader = flagBenchHostHeader
+		} else {
+			cfg.HostHeader = "awsbnkctl-aiinference.local"
+		}
+	}
+
+	// Auto-resolve model name if placeholder or empty
+	if (cfg.Model == "" || cfg.Model == "auto-discovered/vllm") && flagBenchModel != "" {
+		cfg.Model = flagBenchModel
+	}
+
+	fmt.Fprintf(os.Stderr, "[Run #%d] Executing benchmark: model=%s vip=%s host=%s concurrency=%d requests=%d streaming=%v\n",
+		runID, cfg.Model, targetVIP, cfg.HostHeader, cfg.Concurrency, cfg.NumRequests, cfg.Streaming)
 
 	probOpts := jumphost.ProbeOptions{
 		Region:     flagBenchRegion,
 		InstanceID: flagBenchInstanceID,
+		SourceIP:   flagBenchSourceIP,
 		VIP:        targetVIP,
+		Hostname:   cfg.HostHeader,
 	}
 
 	runOpts := jumphost.AiperfRunOptions{
