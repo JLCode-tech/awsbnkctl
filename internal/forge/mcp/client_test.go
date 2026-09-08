@@ -156,6 +156,34 @@ func TestCallTool_ToolIsErrorFlag(t *testing.T) {
 	}
 }
 
+func TestCallTool_FastMCPJSONError(t *testing.T) {
+	// FastMCP returns JSON payloads with ok: false when tool errors occur,
+	// without setting isError: true on the MCP tool result envelope.
+	f := &fakeMCPServer{
+		t: t,
+		toolResult: ToolCallResult{
+			IsError: false,
+			Content: []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}{
+				{Type: "text", Text: `{"ok":false,"error":{"code":"CONFIRMATION_REQUIRED","message":"'delete_project' is a destructive operation and was called without confirmation."}}`},
+			},
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(f.handler))
+	defer srv.Close()
+
+	c := New(srv.URL+"/mcp/", 5*time.Second)
+	_, err := c.CallTool(context.Background(), "delete_project", nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "destructive operation and was called without confirmation") {
+		t.Errorf("err = %v, want it to surface FastMCP error message", err)
+	}
+}
+
 func TestCallTool_EmptyToolName(t *testing.T) {
 	c := New("http://unused/mcp/", time.Second)
 	if _, err := c.CallTool(context.Background(), "", nil); err == nil {
