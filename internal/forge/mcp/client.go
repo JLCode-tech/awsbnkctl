@@ -134,6 +134,33 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 	if out.IsError {
 		return out, fmt.Errorf("mcp tool %s reported isError=true: %s", name, out.Text())
 	}
+	// FastMCP returns errors inside the JSON response payload (e.g. {"ok":false,"error":{...}})
+	// without setting isError=true on the MCP tool result envelope.
+	if txt := out.Text(); txt != "" {
+		var fastMCPResp struct {
+			OK    *bool `json:"ok"`
+			Error *struct {
+				Message string `json:"message"`
+				Detail  string `json:"detail"`
+				Code    string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(txt), &fastMCPResp); err == nil {
+			if fastMCPResp.OK != nil && !*fastMCPResp.OK {
+				errMsg := "unknown forge error"
+				if fastMCPResp.Error != nil {
+					if fastMCPResp.Error.Message != "" {
+						errMsg = fastMCPResp.Error.Message
+					} else if fastMCPResp.Error.Detail != "" {
+						errMsg = fastMCPResp.Error.Detail
+					} else if fastMCPResp.Error.Code != "" {
+						errMsg = fastMCPResp.Error.Code
+					}
+				}
+				return out, fmt.Errorf("mcp tool %s returned error: %s", name, errMsg)
+			}
+		}
+	}
 	return out, nil
 }
 

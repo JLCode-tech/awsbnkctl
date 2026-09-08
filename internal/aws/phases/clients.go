@@ -365,7 +365,10 @@ func isNotFoundCode(code string) bool {
 		"InvalidInstanceID.NotFound",
 		"InvalidGroup.NotFound",
 		"InvalidInstanceConnectEndpoint.NotFound",
-		"InvalidInstanceConnectEndpointId.NotFound":
+		"InvalidInstanceConnectEndpointId.NotFound",
+		"InvalidLaunchTemplateId.NotFound",
+		"InvalidLaunchTemplateName.NotFoundException",
+		"InvalidKeyPair.NotFound":
 		return true
 	}
 	return false

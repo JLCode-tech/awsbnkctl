@@ -179,9 +179,13 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 }
 
 // DeleteProject removes a project. force bypasses the active/only-project
-// safety check on forge's side.
+// safety check on forge's side. confirm confirms the destructive operation.
 func (c *Client) DeleteProject(ctx context.Context, projectID int, force bool) error {
-	args := map[string]any{"project_id": projectID, "force": force}
+	args := map[string]any{
+		"project_id": projectID,
+		"force":      force,
+		"confirm":    true,
+	}
 	_, err := c.mcp.CallTool(ctx, "delete_project", args)
 	return err
 }
@@ -321,7 +325,10 @@ func (c *Client) ScanCluster(ctx context.Context, clusterID int) (string, error)
 // DeleteCluster removes the cluster registration from forge (does not
 // touch the underlying EKS cluster — that's awsbnkctl's job via `down`).
 func (c *Client) DeleteCluster(ctx context.Context, clusterID int) error {
-	args := map[string]any{"cluster_id": clusterID}
+	args := map[string]any{
+		"cluster_id": clusterID,
+		"confirm":    true,
+	}
 	_, err := c.mcp.CallTool(ctx, "delete_cluster", args)
 	return err
 }

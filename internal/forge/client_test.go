@@ -1,7 +1,11 @@
 package forge
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -132,5 +136,110 @@ func TestCreateClusterResponse_ZeroIDGuardedAfterParsing(t *testing.T) {
 	}
 	if r.Cluster.ID != 0 {
 		t.Errorf("Cluster.ID = %d, want 0 (so caller zero-ID guard fires)", r.Cluster.ID)
+	}
+}
+
+func TestDeleteProject_PassesConfirm(t *testing.T) {
+	var receivedArgs map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			ID     int64           `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		_ = json.Unmarshal(body, &req)
+		if req.Method == "initialize" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"protocolVersion": "2024-11-05"}})
+			return
+		}
+		if req.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		if req.Method == "tools/call" {
+			var p struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			receivedArgs = p.Arguments
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"content": []map[string]any{
+						{"type": "text", "text": `{"ok":true,"message":"project deleted"}`},
+					},
+				},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/mcp/")
+	err := c.DeleteProject(context.Background(), 42, true)
+	if err != nil {
+		t.Fatalf("DeleteProject unexpected error: %v", err)
+	}
+	if receivedArgs["confirm"] != true {
+		t.Errorf("expected confirm=true in args, got %v", receivedArgs["confirm"])
+	}
+	if receivedArgs["force"] != true {
+		t.Errorf("expected force=true in args, got %v", receivedArgs["force"])
+	}
+	if receivedArgs["project_id"] != float64(42) && receivedArgs["project_id"] != 42 {
+		t.Errorf("expected project_id=42, got %v", receivedArgs["project_id"])
+	}
+}
+
+func TestDeleteCluster_PassesConfirm(t *testing.T) {
+	var receivedArgs map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			ID     int64           `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		_ = json.Unmarshal(body, &req)
+		if req.Method == "initialize" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"protocolVersion": "2024-11-05"}})
+			return
+		}
+		if req.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		if req.Method == "tools/call" {
+			var p struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			receivedArgs = p.Arguments
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"content": []map[string]any{
+						{"type": "text", "text": `{"ok":true,"message":"cluster deleted"}`},
+					},
+				},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/mcp/")
+	err := c.DeleteCluster(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("DeleteCluster unexpected error: %v", err)
+	}
+	if receivedArgs["confirm"] != true {
+		t.Errorf("expected confirm=true in args, got %v", receivedArgs["confirm"])
+	}
+	if receivedArgs["cluster_id"] != float64(7) && receivedArgs["cluster_id"] != 7 {
+		t.Errorf("expected cluster_id=7, got %v", receivedArgs["cluster_id"])
 	}
 }
