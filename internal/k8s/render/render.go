@@ -449,20 +449,23 @@ type F5SPKVlanVars struct {
 	TmmIntSelfIP       string // e.g. 10.0.20.240
 	TmmSelfIPPrefixLen int    // typically 24
 	HasInternal        bool   // render the int-vlan CR (dual-interface only)
+	EnableBGP          bool   // render allowed_services for BGP (tcp:179) and BFD (udp:3784)
 }
 
 // RenderF5SPKVlan renders the F5SPKVlan CR template for a BNK pattern. Caller
 // supplies the SelfIP values from cl.Network.DataPath.SelfIPs (auto-derived by
 // intent.applyDefaults when not explicitly set). hasInternal controls whether
 // the int-vlan CR is emitted (dual-interface only); selfInt is ignored when
-// false.
-func RenderF5SPKVlan(tmpl []byte, selfExt, selfInt string, prefixLen int, hasInternal bool) ([]byte, error) {
+// false. enableBGP controls whether allowed_services (tcp:179, udp:3784) is
+// configured on ext-vlan for dynamic routing.
+func RenderF5SPKVlan(tmpl []byte, selfExt, selfInt string, prefixLen int, hasInternal, enableBGP bool) ([]byte, error) {
 	vars := F5SPKVlanVars{
 		InstanceNS:         cneInstanceNamespace,
 		TmmExtSelfIP:       selfExt,
 		TmmIntSelfIP:       selfInt,
 		TmmSelfIPPrefixLen: prefixLen,
 		HasInternal:        hasInternal,
+		EnableBGP:          enableBGP,
 	}
 	return Render(tmpl, vars)
 }

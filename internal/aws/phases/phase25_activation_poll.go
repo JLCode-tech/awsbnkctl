@@ -79,6 +79,9 @@ func Phase25ActivationPoll(ctx context.Context, cl *intent.Cluster, st *state.St
 			}
 		}
 
+		// Sync TMM readiness gates if all containers are ready.
+		syncTmmReadinessGates(ctx, clients)
+
 		// Read CNEInstance status.state and derive functional readiness.
 		// H1: we deliberately do NOT use the rollup `Available` condition (or
 		// status.state == "Ready"/"Running" as the sole gate). Sydney aws-syd-test

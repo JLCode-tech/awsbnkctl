@@ -123,15 +123,20 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	if err != nil {
 		return fmt.Errorf("phase23b: reading f5spkvlan template: %w", err)
 	}
-	spkRendered, err := render.RenderF5SPKVlan(spkTmpl, selfIPs.External, selfIPs.Internal, selfIPs.PrefixLen, hasInternal)
+	enableBGP := cl.IsBGPEnabled()
+	spkRendered, err := render.RenderF5SPKVlan(spkTmpl, selfIPs.External, selfIPs.Internal, selfIPs.PrefixLen, hasInternal, enableBGP)
 	if err != nil {
 		return fmt.Errorf("phase23b: rendering f5spkvlan: %w", err)
 	}
+	bgpMsg := ""
+	if enableBGP {
+		bgpMsg = " (bgp allowed_services: tcp:179, udp:3784)"
+	}
 	if hasInternal {
-		fmt.Fprintf(os.Stderr, "[phase 23b] applying F5SPKVlan ext-vlan (selfip=%s) + int-vlan (selfip=%s)\n",
-			selfIPs.External, selfIPs.Internal)
+		fmt.Fprintf(os.Stderr, "[phase 23b] applying F5SPKVlan ext-vlan (selfip=%s)%s + int-vlan (selfip=%s)\n",
+			selfIPs.External, bgpMsg, selfIPs.Internal)
 	} else {
-		fmt.Fprintf(os.Stderr, "[phase 23b] applying F5SPKVlan ext-vlan (selfip=%s)\n", selfIPs.External)
+		fmt.Fprintf(os.Stderr, "[phase 23b] applying F5SPKVlan ext-vlan (selfip=%s)%s\n", selfIPs.External, bgpMsg)
 	}
 	if err := applyRawYAML(ctx, clients, spkRendered); err != nil {
 		return fmt.Errorf("phase23b: applying F5SPKVlan: %w", err)
