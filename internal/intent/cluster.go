@@ -67,6 +67,12 @@ type BnkSpec struct {
 	TmmHugepages string `yaml:"tmmHugepages,omitempty"`
 	// PalCpuSet is the PAL CPU set string. Default "0-3".
 	PalCpuSet string `yaml:"palCpuSet,omitempty"`
+	// BGP enables BGP / dynamic routing on the TMM external VLAN.
+	// When true, Phase 23b configures allowed_services (tcp:179, udp:3784)
+	// on ext-vlan F5SPKVlan so TMM forwards control-plane packets to ZebOS.
+	BGP bool `yaml:"bgp,omitempty"`
+	// DynamicRouting is an alias for BGP.
+	DynamicRouting bool `yaml:"dynamicRouting,omitempty"`
 }
 
 // DataPathSpec describes the TMM data-plane subnets required by every BNK
@@ -317,6 +323,11 @@ type ForgeSpec struct {
 	// ProjectType is the forge project type (e.g. "cloud-aws").
 	// Default "cloud-aws".
 	ProjectType string `yaml:"projectType,omitempty"`
+	// ProjectName is the name of the forge project to register the cluster into.
+	// Defaults to "awsbnkctl-" + workspace (e.g. "awsbnkctl-bnk-singapore").
+	// When multiple clusters share the same project, set this to the shared
+	// project name.
+	ProjectName string `yaml:"projectName,omitempty"`
 }
 
 // DefaultForgeRESTURL is the fallback REST base when forge.url is not set.
@@ -383,6 +394,20 @@ func (f *ForgeSpec) ResolveProjectType() string {
 		return f.ProjectType
 	}
 	return "cloud-aws"
+}
+
+// ResolveProjectName returns the forge project name to use, in priority order:
+//  1. AWSBNKCTL_FORGE_PROJECT environment variable
+//  2. f.ProjectName (cluster.yaml forge.projectName)
+//  3. "awsbnkctl-" + workspaceName (default)
+func (f *ForgeSpec) ResolveProjectName(workspaceName string) string {
+	if v := os.Getenv("AWSBNKCTL_FORGE_PROJECT"); v != "" {
+		return v
+	}
+	if f != nil && f.ProjectName != "" {
+		return f.ProjectName
+	}
+	return "awsbnkctl-" + workspaceName
 }
 
 // AddonsSpec holds optional add-on configuration for slice 6+.
@@ -622,6 +647,15 @@ func (c *Cluster) DataplaneBinding() string {
 	default:
 		return ""
 	}
+}
+
+// IsBGPEnabled reports whether BGP / dynamic routing is enabled for TMM.
+// When enabled, Phase 23b renders allowed_services on ext-vlan (TCP:179, UDP:3784).
+func (c *Cluster) IsBGPEnabled() bool {
+	if c == nil || c.Bnk == nil {
+		return false
+	}
+	return c.Bnk.BGP || c.Bnk.DynamicRouting
 }
 
 // StateDir returns the path to the IDs-cache directory for this cluster

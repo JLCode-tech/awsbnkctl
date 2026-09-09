@@ -35,7 +35,7 @@ func TestRenderF5SPKVlan_SingleInterface_OmitsIntVlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read template: %v", err)
 	}
-	out, err := RenderF5SPKVlan(tmpl, "10.0.10.240", "", 24, false)
+	out, err := RenderF5SPKVlan(tmpl, "10.0.10.240", "", 24, false, false)
 	if err != nil {
 		t.Fatalf("RenderF5SPKVlan: %v", err)
 	}
@@ -46,6 +46,39 @@ func TestRenderF5SPKVlan_SingleInterface_OmitsIntVlan(t *testing.T) {
 	// "int-vlan" appears in the header comment; assert the CR body is gone.
 	if strings.Contains(s, "name: int-vlan") || strings.Contains(s, "internal: true") {
 		t.Errorf("single-interface F5SPKVlan must omit the int-vlan CR:\n%s", s)
+	}
+	if strings.Contains(s, "allowed_services") {
+		t.Errorf("BGP disabled must omit allowed_services:\n%s", s)
+	}
+}
+
+func TestRenderF5SPKVlan_BGPAllowedServices(t *testing.T) {
+	tmpl, err := manifests.FS.ReadFile("host-device/f5spkvlan.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+
+	// Test BGP enabled
+	outBGP, err := RenderF5SPKVlan(tmpl, "10.0.10.240", "10.0.20.240", 24, true, true)
+	if err != nil {
+		t.Fatalf("RenderF5SPKVlan (bgp=true): %v", err)
+	}
+	sBGP := string(outBGP)
+	if !strings.Contains(sBGP, "allowed_services:") {
+		t.Errorf("BGP enabled must include allowed_services:\n%s", sBGP)
+	}
+	if !strings.Contains(sBGP, "port: \"179\"") || !strings.Contains(sBGP, "port: \"3784\"") {
+		t.Errorf("BGP enabled must include TCP 179 and UDP 3784:\n%s", sBGP)
+	}
+
+	// Test BGP disabled
+	outNoBGP, err := RenderF5SPKVlan(tmpl, "10.0.10.240", "10.0.20.240", 24, true, false)
+	if err != nil {
+		t.Fatalf("RenderF5SPKVlan (bgp=false): %v", err)
+	}
+	sNoBGP := string(outNoBGP)
+	if strings.Contains(sNoBGP, "allowed_services:") {
+		t.Errorf("BGP disabled must omit allowed_services:\n%s", sNoBGP)
 	}
 }
 
