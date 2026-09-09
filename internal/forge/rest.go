@@ -102,15 +102,17 @@ func RegisterREST(ctx context.Context, restURL string, req RegisterRequest, cred
 		return RegisterResult{}, fmt.Errorf("forge REST login: %w", err)
 	}
 
-	proj, err := restCreateProject(ctx, base, token, req)
+	proj, reused, err := restCreateProject(ctx, base, token, req)
 	if err != nil {
 		return RegisterResult{}, fmt.Errorf("forge REST create project: %w", err)
 	}
 
 	cluster, err := restCreateCluster(ctx, base, token, proj.ID, req)
 	if err != nil {
-		// Best-effort rollback.
-		_ = restDeleteProject(ctx, base, token, proj.ID)
+		// Best-effort rollback if this was a freshly created project.
+		if !reused {
+			_ = restDeleteProject(ctx, base, token, proj.ID)
+		}
 		return RegisterResult{}, fmt.Errorf("forge REST create cluster: %w", err)
 	}
 
@@ -238,7 +240,7 @@ type restProject struct {
 	Name string `json:"name"`
 }
 
-func restCreateProject(ctx context.Context, base, token string, req RegisterRequest) (restProject, error) {
+func restCreateProject(ctx context.Context, base, token string, req RegisterRequest) (restProject, bool, error) {
 	env := req.Environment
 	if env == "" {
 		env = "dev"
@@ -286,23 +288,23 @@ func restCreateProject(ctx context.Context, base, token string, req RegisterRequ
 			fmt.Fprintf(os.Stderr, "[forge] project %q already exists (conflict) — reusing existing record\n", req.ProjectName)
 			existing, lookupErr := restFindProjectByName(ctx, base, token, req.ProjectName)
 			if lookupErr != nil {
-				return restProject{}, fmt.Errorf("forge REST: conflict on create + lookup failed: %w (original: %v)", lookupErr, err)
+				return restProject{}, false, fmt.Errorf("forge REST: conflict on create + lookup failed: %w (original: %v)", lookupErr, err)
 			}
 			fmt.Fprintf(os.Stderr, "[forge] reusing project id=%d name=%q\n", existing.ID, existing.Name)
-			return existing, nil
+			return existing, true, nil
 		}
-		return restProject{}, err
+		return restProject{}, false, err
 	}
 	if resp.Project.ID != 0 {
-		return resp.Project, nil
+		return resp.Project, false, nil
 	}
 	if resp.ID != 0 {
-		return restProject{ID: resp.ID, Name: resp.Name}, nil
+		return restProject{ID: resp.ID, Name: resp.Name}, false, nil
 	}
 	if resp.ProjectID != 0 {
-		return restProject{ID: resp.ProjectID, Name: resp.Name}, nil
+		return restProject{ID: resp.ProjectID, Name: resp.Name}, false, nil
 	}
-	return restProject{}, fmt.Errorf("forge REST create project: no project ID in response (tried wrapped, flat-id, project_id shapes)")
+	return restProject{}, false, fmt.Errorf("forge REST create project: no project ID in response (tried wrapped, flat-id, project_id shapes)")
 }
 
 // restFindProjectByName GETs /api/projects and returns the project whose name

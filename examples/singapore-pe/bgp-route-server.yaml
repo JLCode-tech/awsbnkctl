@@ -1,0 +1,35 @@
+apiVersion: k8s.f5net.com/v1alpha1
+kind: RoutingTemplate
+metadata:
+  name: bnk-pe-bgp-template-v2
+  namespace: f5-cne-system
+spec:
+  body: |-
+    router bgp 65000
+     bgp router-id 10.10.10.240
+     timers bgp 5 15
+     neighbor 10.10.10.31 remote-as 65001
+     neighbor 10.10.10.31 timers 5 15
+     neighbor 10.10.10.31 ebgp-multihop 10
+     address-family ipv4 unicast
+      redistribute kernel
+      redistribute connected
+      neighbor 10.10.10.31 activate
+     exit-address-family
+    !
+---
+apiVersion: k8s.f5net.com/v1alpha1
+kind: GlobalRoutingConfig
+metadata:
+  name: bnk-pe-bgp-config-v2
+  namespace: f5-cne-system
+spec:
+  bgp:
+    startASN: 65000
+    routerIdSubnet: 10.10.10.240
+    routerIdPrefix: 24
+    neighbors:
+      - ip: 10.10.10.31
+        remoteAs: 65001
+  templateRef:
+    name: bnk-pe-bgp-template-v2

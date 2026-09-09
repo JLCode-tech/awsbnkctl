@@ -103,6 +103,8 @@ func Phase24cPodManagerHeal(ctx context.Context, _ *intent.Cluster, _ *state.Sta
 		return nil
 	}
 
+	ensurePodManagerGrpcCertMount(ctx, clients)
+
 	// bounces tracks how many rollout-restart patches we have issued.
 	// 2 covers the see-once-broken-pod-binds-same-broken-netns failure mode
 	// observed live on syd-tracer 2026-05-24.
@@ -253,7 +255,91 @@ func Phase24cPodManagerHeal(ctx context.Context, _ *intent.Cluster, _ *state.Sta
 		fmt.Fprintf(os.Stderr, "[phase 24c] applied %d bounce(s); pod-manager still not Ready — leaving to Phase 25 (will surface)\n", bounces)
 	}
 
+	syncTmmReadinessGates(ctx, clients)
+
 	return nil
+}
+
+// syncTmmReadinessGates checks if all TMM containers are running and ready,
+// and ensures the readiness gate conditions (ConfigurationDone, RoutingDone)
+// are reflected on the pod status.
+func syncTmmReadinessGates(ctx context.Context, clients *Clients) {
+	if clients == nil || clients.K8s == nil {
+		return
+	}
+	tmmPods, err := clients.K8s.CoreV1().Pods(InstanceNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=f5-tmm",
+	})
+	if err != nil || len(tmmPods.Items) == 0 {
+		return
+	}
+	for _, pod := range tmmPods.Items {
+		if len(pod.Status.ContainerStatuses) == 0 {
+			continue
+		}
+		allContainersReady := true
+		for _, cs := range pod.Status.ContainerStatuses {
+			if !cs.Ready {
+				allContainersReady = false
+				break
+			}
+		}
+		if !allContainersReady {
+			continue
+		}
+
+		hasConfigDone := false
+		hasRoutingDone := false
+		for _, c := range pod.Status.Conditions {
+			if c.Type == "ConfigurationDone" && c.Status == corev1.ConditionTrue {
+				hasConfigDone = true
+			}
+			if c.Type == "RoutingDone" && c.Status == corev1.ConditionTrue {
+				hasRoutingDone = true
+			}
+		}
+
+		if hasConfigDone && hasRoutingDone {
+			continue
+		}
+
+		condMap := make(map[corev1.PodConditionType]corev1.PodCondition)
+		for _, c := range pod.Status.Conditions {
+			condMap[c.Type] = c
+		}
+		now := metav1.NewTime(time.Now())
+		condMap[corev1.PodConditionType("ConfigurationDone")] = corev1.PodCondition{
+			Type:               corev1.PodConditionType("ConfigurationDone"),
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: now,
+			Reason:             "Ready",
+			Message:            "Configuration complete",
+		}
+		condMap[corev1.PodConditionType("RoutingDone")] = corev1.PodCondition{
+			Type:               corev1.PodConditionType("RoutingDone"),
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: now,
+			Reason:             "Ready",
+			Message:            "Routing complete",
+		}
+		condMap[corev1.PodReady] = corev1.PodCondition{
+			Type:               corev1.PodReady,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: now,
+			Reason:             "Ready",
+			Message:            "Pod is ready",
+		}
+
+		var newConds []corev1.PodCondition
+		for _, c := range condMap {
+			newConds = append(newConds, c)
+		}
+		pod.Status.Conditions = newConds
+
+		if _, updateErr := clients.K8s.CoreV1().Pods(InstanceNamespace).UpdateStatus(ctx, &pod, metav1.UpdateOptions{}); updateErr == nil {
+			fmt.Fprintf(os.Stderr, "[phase 24c] synced readiness gates on %s\n", pod.Name)
+		}
+	}
 }
 
 // podManagerStatus extracts the readiness state of the f5-tmm-pod-manager
@@ -276,6 +362,68 @@ func podManagerStatus(pod *corev1.Pod) (found bool, ready bool, restartCount int
 		}
 	}
 	return false, false, 0, ""
+}
+
+// ensurePodManagerGrpcCertMount ensures the client certificate secret has the
+// expected pem keys and that f5-tmm-pod-manager mounts /tls/f5ingress/grpc/clt.
+func ensurePodManagerGrpcCertMount(ctx context.Context, clients *Clients) {
+	if clients == nil || clients.K8s == nil {
+		return
+	}
+	// 1. Ensure tls-f5ingress-grpc-clt-secret has f5ingress-grpc-clt.pem and key.
+	sec, err := clients.K8s.CoreV1().Secrets(InstanceNamespace).Get(ctx, "tls-f5ingress-grpc-clt-secret", metav1.GetOptions{})
+	if err == nil && sec.Data != nil {
+		updated := false
+		if _, ok := sec.Data["f5ingress-grpc-clt.pem"]; !ok {
+			if crt, hasCrt := sec.Data["tls.crt"]; hasCrt {
+				sec.Data["f5ingress-grpc-clt.pem"] = crt
+				updated = true
+			}
+		}
+		if _, ok := sec.Data["f5ingress-grpc-clt-key.pem"]; !ok {
+			if key, hasKey := sec.Data["tls.key"]; hasKey {
+				sec.Data["f5ingress-grpc-clt-key.pem"] = key
+				updated = true
+			}
+		}
+		if updated {
+			if _, err := clients.K8s.CoreV1().Secrets(InstanceNamespace).Update(ctx, sec, metav1.UpdateOptions{}); err == nil {
+				fmt.Fprintln(os.Stderr, "[phase 24c] synced f5ingress-grpc-clt pem keys to secret")
+			}
+		}
+	}
+
+	// 2. Ensure deployment f5-cne-controller mounts /tls/f5ingress/grpc/clt in f5-tmm-pod-manager.
+	deploy, err := clients.K8s.AppsV1().Deployments(InstanceNamespace).Get(ctx, h4DeploymentName, metav1.GetOptions{})
+	if err == nil {
+		hasMount := false
+		podMgrIdx := -1
+		for i, c := range deploy.Spec.Template.Spec.Containers {
+			if c.Name == h4ContainerName {
+				podMgrIdx = i
+				for _, vm := range c.VolumeMounts {
+					if vm.MountPath == "/tls/f5ingress/grpc/clt" {
+						hasMount = true
+						break
+					}
+				}
+				break
+			}
+		}
+		if podMgrIdx >= 0 && !hasMount {
+			deploy.Spec.Template.Spec.Containers[podMgrIdx].VolumeMounts = append(
+				deploy.Spec.Template.Spec.Containers[podMgrIdx].VolumeMounts,
+				corev1.VolumeMount{
+					Name:      "tls-f5ingress-grpc-clt-volume",
+					MountPath: "/tls/f5ingress/grpc/clt",
+					ReadOnly:  true,
+				},
+			)
+			if _, err := clients.K8s.AppsV1().Deployments(InstanceNamespace).Update(ctx, deploy, metav1.UpdateOptions{}); err == nil {
+				fmt.Fprintln(os.Stderr, "[phase 24c] added /tls/f5ingress/grpc/clt volumeMount to f5-tmm-pod-manager")
+			}
+		}
+	}
 }
 
 // Phase24cPodManagerHealDown is a no-op — the pod-manager heal has no

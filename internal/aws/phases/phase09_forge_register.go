@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
@@ -79,12 +80,15 @@ func Phase09ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	}
 
 	credTplID := 0
+	projectName := ""
 	if cl.Forge != nil {
 		credTplID = cl.Forge.CredentialTemplateID
+		projectName = cl.Forge.ResolveProjectName(clusterName)
 	}
 	req := forge.RegisterRequest{
 		WorkspaceName:        clusterName,
 		WorkspaceDir:         workspaceDir,
+		ProjectName:          projectName,
 		ClusterName:          clusterName,
 		Region:               region,
 		Environment:          cfg.env,
@@ -205,9 +209,13 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 		clients.AttachForgeClient(true, cfg.mcpURL)
 	}
 
-	// Try MCP unregister first. purge=true: the project was created by
-	// registration and named for the cluster — nothing should remain after down.
-	mcpErr := forge.Unregister(ctx, clients.ForgeClient, workspaceDir, true)
+	// Try MCP unregister first. Purge the project if it was auto-created for this
+	// cluster. If an explicit shared project was configured, preserve the project.
+	purge := true
+	if cl.Forge != nil && cl.Forge.ProjectName != "" && cl.Forge.ProjectName != ("awsbnkctl-"+cl.Metadata.Name) {
+		purge = false
+	}
+	mcpErr := forge.Unregister(ctx, clients.ForgeClient, workspaceDir, purge)
 	if mcpErr == nil {
 		fmt.Fprintln(os.Stderr, "[phase 09 down] forge: unregistered via MCP")
 		st.Set("FORGE_STATUS", "")
@@ -289,18 +297,26 @@ func Phase09bBenchmarkDown(ctx context.Context, cl *intent.Cluster, st *state.St
 	return nil
 }
 
+func isProjectConflictErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "already exists") || strings.Contains(s, "conflict")
+}
+
 // tryForgeRegister attempts MCP-first registration with REST fallback on
-// catalog-gap errors. Returns the RegisterResult on success.
+// catalog-gap errors or project conflict / reuse. Returns the RegisterResult on success.
 func tryForgeRegister(ctx context.Context, c *forge.Client, restURL string, req forge.RegisterRequest, creds forge.RestCreds) (forge.RegisterResult, error) {
 	res, err := forge.Register(ctx, c, req)
 	if err == nil {
 		return res, nil
 	}
-	if !forge.IsMCPCatalogGapErr(err) {
+	if !forge.IsMCPCatalogGapErr(err) && !isProjectConflictErr(err) {
 		return forge.RegisterResult{}, err
 	}
-	// MCP catalog gap — fall back to REST.
-	fmt.Fprintf(os.Stderr, "[phase 09] MCP catalog gap detected (%v) — falling back to REST\n", err)
+	// MCP catalog gap or project conflict — fall back to REST.
+	fmt.Fprintf(os.Stderr, "[phase 09] MCP registration returned (%v) — falling back to REST for project reuse/catalog gap\n", err)
 	res, err = forge.RegisterREST(ctx, restURL, req, creds)
 	if err != nil {
 		return forge.RegisterResult{}, err
