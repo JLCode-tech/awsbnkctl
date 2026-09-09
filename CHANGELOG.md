@@ -4,6 +4,13 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [1.3.1](https://github.com/JLCode-tech/awsbnkctl/compare/v1.3.0...v1.3.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **forge:** pass confirmation flag on delete tools and handle fastmcp json errors ([146d8f5](https://github.com/JLCode-tech/awsbnkctl/commit/146d8f507f419e5e3ffc2934e11f559dc2977b5c))
+
 ## [1.3.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.2.0...v1.3.0) (2026-09-07)
 
 
