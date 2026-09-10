@@ -20,8 +20,8 @@ func TestGRPCRoute_Registration(t *testing.T) {
 	if s.Name() != "grpc-loadbalance" {
 		t.Errorf("Name = %q, want grpc-loadbalance", s.Name())
 	}
-	if s.Rating() != scenarios.Green {
-		t.Errorf("Rating = %q, want green", s.Rating())
+	if s.Rating() != scenarios.Amber {
+		t.Errorf("Rating = %q, want amber (control plane only — no data-path probe)", s.Rating())
 	}
 }
 

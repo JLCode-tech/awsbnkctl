@@ -85,5 +85,7 @@ on the worker-node→TMM return path.
 > For transparent egress that does work on AWS, use the `external-only` pattern:
 > [`examples/egress-demo/`](../egress-demo/) is validated end to end.
 
-It also hardcodes `nodeInterfaceName: ens5`, correct for AL2023 on Nitro
-instances but not for every node type.
+It also pinned `nodeInterfaceName: ens5` (now commented out): the BNK 2.3
+`F5SPKEgress` reference says the field is populated automatically by the CSRC
+DaemonSet and should not be set by hand, and `ens5` is only right for AL2023 on
+Nitro instances anyway.

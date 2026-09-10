@@ -171,3 +171,20 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// TestBuildSourceIPResponderCmd pins the reflector's shape: same transient
+// unit name as the marker responder (so StopHTTPResponder works), the port
+// threaded through to python and the self-check, and a single-quoted script.
+func TestBuildSourceIPResponderCmd(t *testing.T) {
+	cmd := jumphost.BuildSourceIPResponderCmd(8081)
+	for _, want := range []string{
+		"--unit=awsbnkctl-extpool-8081",
+		"srcip-8081.py 8081",
+		"http://127.0.0.1:8081/",
+		"client_address[0]",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command missing %q:\n%s", want, cmd)
+		}
+	}
+}

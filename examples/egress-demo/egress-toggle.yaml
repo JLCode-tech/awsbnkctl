@@ -11,8 +11,11 @@
 #   OFF -> egress source IP = the pod's node public IP  (uncontrolled)
 #
 # tmmInterfaceName is the client-side F5SPKVlan name (external-only => ext-vlan).
-# nodeInterfaceName is the node's data-plane NIC; LIVE-CONFIRM on first apply
-# (do not blindly copy — it is topology-specific).
+# nodeInterfaceName: the BNK 2.3 F5SPKEgress reference says this is "populated
+# automatically and should not be manually configured" — the CSRC DaemonSet
+# discovers the node NIC. It is left unset here for that reason. The demo was
+# first validated with it pinned to ens5 (AL2023 on Nitro), so if the VXLAN end
+# on the worker never comes up, uncomment the line below as the fallback.
 apiVersion: k8s.f5net.com/v3
 kind: F5SPKEgress
 metadata:
@@ -28,7 +31,7 @@ spec:
     vxlan:
       create: true
       tmmInterfaceName: ext-vlan
-      nodeInterfaceName: ens5
+      # nodeInterfaceName: ens5   # fallback only — see header comment
       ipv4Subnet: "192.168.0.0"
       ipv4PrefixLen: 16
       ipv6Subnet: "fd50::"

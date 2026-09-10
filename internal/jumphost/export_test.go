@@ -37,3 +37,6 @@ var SSHRunViaEICEStdinFn = &sshRunViaEICEStdinFn
 // RunStagingCommands and CopyFileViaEICE. Tests replace it to assert
 // re-push-per-step behaviour without network.
 var PushSSHPublicKeyFn = &pushSSHPublicKeyFn
+
+// BuildSourceIPResponderCmd exposes buildSourceIPResponderCmd for unit tests.
+var BuildSourceIPResponderCmd = buildSourceIPResponderCmd

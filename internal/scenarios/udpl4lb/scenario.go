@@ -49,12 +49,16 @@ type scenario struct {
 
 func (s *scenario) Name() string             { return scnName }
 func (s *scenario) Title() string            { return scnTitle }
-func (s *scenario) Rating() scenarios.Rating { return scenarios.Green }
+func (s *scenario) Rating() scenarios.Rating { return scenarios.Amber }
 func (s *scenario) Dependencies() []string   { return []string{} }
 func (s *scenario) Description() string {
 	return strings.TrimSpace(`
-Exercises L4Route's UDP load-balancing behavior with a 2-replica socat UDP echo backend.
-Validates UDP listener provisioning and L4Route UDP packet delivery path.
+Exercises L4Route's UDP load-balancing configuration with a 2-replica socat UDP echo backend.
+
+Amber: control plane only. Verify asserts the backend is Available, the Gateway is
+Programmed and the L4Route Accepted; no datagram is sent through the VIP. Promoting
+to Green needs a UDP client on the jumphost (socat/nc) driving VIP:5353 and checking
+the echo — see docs/SCENARIOS.md.
 `)
 }
 

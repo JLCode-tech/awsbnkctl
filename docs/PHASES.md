@@ -19,7 +19,7 @@
 - **`subnets`** (`Phase03Subnets`): Creates the public and private subnets across the configured AZs, plus the TMM data-path subnets — `subnet-bnk-ext` for every BNK pattern and `subnet-bnk-int` only for `dual-interface`.
 - **`igw`** (`Phase04IGW`): Attaches an Internet Gateway to the VPC.
 - **`nat`** (`Phase05NAT`): Allocates Elastic IPs and creates NAT Gateways for private subnet egress.
-- **`route-tables`** (`Phase06RouteTables`): Configures routing tables for public (IGW) and private (NAT) subnets.
+- **`route-tables`** (`Phase06RouteTables`): Configures routing tables for public (IGW) and private (NAT) subnets, and associates the BNK data-path subnets (`subnet-bnk-ext`, `subnet-bnk-int`) with the private table so TMM SelfIPs can egress through NAT and Route Server propagations apply to them.
 - **`iam`** (`Phase07IAM`): Creates the EKS cluster IAM role, the node group IAM role, and the BNK data-plane security group `SG_BNK_DATA`. With `bnk.bgp: true` it also admits TCP 179 (BGP) and UDP 3784 (BFD) from the external data-path subnet, so a Route Server endpoint there can peer with TMM.
 
 ## STAGE 2 — EKS control plane

@@ -56,7 +56,7 @@ type scenario struct {
 
 func (s *scenario) Name() string             { return scnName }
 func (s *scenario) Title() string            { return scnTitle }
-func (s *scenario) Rating() scenarios.Rating { return scenarios.Green }
+func (s *scenario) Rating() scenarios.Rating { return scenarios.Amber }
 func (s *scenario) Dependencies() []string   { return []string{} }
 func (s *scenario) Description() string {
 	return strings.TrimSpace(`
@@ -64,6 +64,11 @@ Load-balances gRPC to a kong/grpcbin backend and exercises BNK's GRPCRoute CRD a
 Two data paths are deployed:
   1. GRPCRoute (Gateway API L7) HTTP listener on port 50051 (control-plane reconciliation).
   2. L4Route (TCP) on port 50052 — raw L4 path providing pure TCP transport for gRPC binary streams.
+
+Amber: control plane only. Verify asserts the grpcbin backend is Available, both
+Gateways are Programmed and both routes Accepted; no gRPC call is made through the
+VIP. Promoting to Green needs grpcurl on the jumphost against VIP:50052 (and :50051)
+asserting status OK — see docs/SCENARIOS.md.
 `)
 }
 
