@@ -258,6 +258,8 @@ spec:
         - name: PYTHONUNBUFFERED
           value: "1"
         - name: AWS_REGION
+          # rebuild.sh substitutes metadata.region from cluster.yaml here; edit
+          # by hand if you apply this file directly outside ap-southeast-2.
           value: ap-southeast-2
         - name: LOG_GROUP
           value: /aws/bedrock/modelinvocations

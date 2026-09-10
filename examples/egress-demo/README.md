@@ -6,7 +6,7 @@
 > [!WARNING]
 > This requires an **external-only** or **sriov-external** pattern. It does NOT work on `dual-interface` host-device setups due to VXLAN limitations.
 >
-> **Why `external-only`?** Transparent egress via the pseudo-CNI VXLAN overlay works on the **external-only** and **sriov-external** patterns, where TMM does NOT consume the node's internal NIC (it reaches pods over the CNI). It does **NOT** work on `dual-interface`/host-device on AWS VPC CNI: in that layout the node-side VXLAN VTEP does not converge to a usable capture path and traffic redirection can interfere with ingress handling. Use `examples/external-only/cluster.yaml` (or `cluster.yaml` here) for this demo.
+> **Why `external-only`?** Transparent egress via the pseudo-CNI VXLAN overlay works on the **external-only** and **sriov-external** patterns, where TMM does NOT consume the node's internal NIC (it reaches pods over the CNI). It does **NOT** work on `dual-interface`/host-device on AWS VPC CNI: in that layout the node-side VXLAN VTEP does not converge to a usable capture path and traffic redirection can interfere with ingress handling. Use `cluster.yaml` here (or `examples/full-cluster/cluster.yaml` after its documented external-only swap) for this demo.
 
 ## What's Included
 - `cluster.yaml`: External-only BNK cluster configuration.

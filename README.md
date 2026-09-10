@@ -455,11 +455,9 @@ awsbnkctl/
 ├── pkg/bnk/               # Exported BNK runtime helpers (pool-member resync)
 ├── docs/                  # Architecture, phases, scenarios, Forge integration, release guides
 ├── examples/              # Ready-to-deploy cluster topologies and reference blueprints
-│   ├── full-cluster/      # Complete dual-interface reference stack (demo + BIG-IP VE as commented blocks)
-│   ├── external-only/     # Single-arm ingress blueprint (one-line swap to sriov-external)
+│   ├── full-cluster/      # Reference intent: dual-interface as checked in, documented swap to external-only / sriov-external
 │   ├── egress-demo/       # Transparent egress + egress firewall ACL blueprint
-│   ├── ai-rig/            # BNK fronting GPU inference, optional SageMaker endpoint
-│   ├── demo-ai/           # full-cluster + ai-rig composed: all protocol demos plus managed inference
+│   ├── demo-ai/           # The AI example: full-cluster + GPU node group + SageMaker (leaner ai-rig shape inside)
 │   ├── agentcore-demo/    # One MCP tool pod behind a BNK Gateway; AgentCore runtime → BNK → tool governance
 │   └── local-zone/        # Reference telco/edge CRs (SCTP, Diameter, HTTP/2, SNAT pool); no cluster.yaml
 ├── scripts/               # e2e and gate scripts (pre-commit, govulncheck, integration)

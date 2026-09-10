@@ -122,26 +122,27 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 ## 6. Where each scenario runs
 
 Every deployable example under `examples/` enables the jumphost, so all 15
-scenarios are runnable on all six. What differs is whether the data-path step
+scenarios are runnable on all four (and on the single-interface swaps that
+`full-cluster` documents). What differs is whether the data-path step
 is real, and what else has to be true.
 
 | Scenario | Needs jumphost | Needs GPU node group | Other prerequisites | Runs on |
 | --- | :---: | :---: | --- | --- |
-| `http-routing-e2e` | Yes | – | Owns VIP `.100`. On `agentcore-demo` the demo Gateway already holds `.100`, so pass `--vip 10.0.10.150` (or run before applying `gateway-deployment.yaml`) | all six |
-| `http-traffic-split` | Yes | – | – | all six |
-| `external-resource-pool` | Yes | – | Uses the jumphost as the "external" backend | all six |
-| `proxy-protocol-l4` | Yes | – | – | all six |
-| `tcp-l4-loadbalance` | Yes | – | – | all six |
-| `udp-l4-loadbalance` | – | – | Control plane only (Gateway Programmed, L4Route Accepted); no traffic probe | all six |
-| `grpc-loadbalance` | – | – | Control plane only (Gateways Programmed, GRPCRoute + L4Route Accepted); no traffic probe | all six |
-| `multi-vip` | Yes | – | Pool `.115`–`.117` | all six |
-| `cluster-wide-watch` | – | – | Control plane only; no traffic probe | all six |
-| `cwc-admin-access` | – | – | Control plane only | all six |
-| `ai-token-counting` | – | – | Amber: control plane only unless a vLLM-compatible backend is pointed at | all six; data path on `ai-rig`, `demo-ai` |
-| `ai-semantic-cache` | (probe) | – | Amber: control plane only unless a ModelCache backend is supplied | all six |
-| `ai-inference-e2e` | Yes | **Yes** | `HF_TOKEN` for the gated model; `--synthetic` runs a GPU-free simulator anywhere | `ai-rig`, `demo-ai` (real); others with `--synthetic` |
-| `egress-snat` | – | – | Amber: control plane only. Tunnel VLAN follows the pattern (`ext-vlan` / `int-vlan`). Data path proven on `external-only` only | all six; natural home `egress-demo` |
-| `core-file-collection` | – | – | Patches the CNEInstance `f5-cne-system/<cluster>-bnk`; FLO rolls TMM to add the crash mounts, so run it **last** | all six |
+| `http-routing-e2e` | Yes | – | Owns VIP `.100`. On `agentcore-demo` the demo Gateway already holds `.100`, so pass `--vip 10.0.10.150` (or run before applying `gateway-deployment.yaml`) | all four |
+| `http-traffic-split` | Yes | – | – | all four |
+| `external-resource-pool` | Yes | – | Uses the jumphost as the "external" backend | all four |
+| `proxy-protocol-l4` | Yes | – | – | all four |
+| `tcp-l4-loadbalance` | Yes | – | – | all four |
+| `udp-l4-loadbalance` | – | – | Control plane only (Gateway Programmed, L4Route Accepted); no traffic probe | all four |
+| `grpc-loadbalance` | – | – | Control plane only (Gateways Programmed, GRPCRoute + L4Route Accepted); no traffic probe | all four |
+| `multi-vip` | Yes | – | Pool `.115`–`.117` | all four |
+| `cluster-wide-watch` | – | – | Control plane only; no traffic probe | all four |
+| `cwc-admin-access` | – | – | Control plane only | all four |
+| `ai-token-counting` | – | – | Amber: control plane only unless a vLLM-compatible backend is pointed at | all four; data path on `demo-ai` |
+| `ai-semantic-cache` | (probe) | – | Amber: control plane only unless a ModelCache backend is supplied | all four |
+| `ai-inference-e2e` | Yes | **Yes** | `HF_TOKEN` for the gated model; `--synthetic` runs a GPU-free simulator anywhere | `demo-ai` (real); others with `--synthetic` |
+| `egress-snat` | – | – | Amber: control plane only. Tunnel VLAN follows the pattern (`ext-vlan` / `int-vlan`). Data path proven on `external-only` only | all four; real data path on `egress-demo` or `full-cluster` after its external-only swap |
+| `core-file-collection` | – | – | Patches the CNEInstance `f5-cne-system/<cluster>-bnk`; FLO rolls TMM to add the crash mounts, so run it **last** | all four |
 
 Demo use-cases (`awsbnkctl demo run …`) are separate from scenarios: they need
 `demo.enabled: true` (or `up --demo`) and the jumphost. `demo-ai` ships with

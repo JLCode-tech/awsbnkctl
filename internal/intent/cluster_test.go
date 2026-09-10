@@ -2158,9 +2158,9 @@ func TestValidateKubernetesVersion_WarnsAboveTestedMinor(t *testing.T) {
 func TestExampleConfigs_MeetVersionFloor(t *testing.T) {
 	paths := []string{
 		"../../examples/full-cluster/cluster.yaml",
-		"../../examples/external-only/cluster.yaml",
+		"testdata/external-only/cluster.yaml",
 		"../../examples/egress-demo/cluster.yaml",
-		"../../examples/ai-rig/cluster.yaml",
+		"testdata/ai-rig/cluster.yaml",
 		"../../examples/demo-ai/cluster.yaml",
 		"testdata/sriov-external/cluster.yaml",
 	}

@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > **Cost Warning:** This is a chargeable footprint (~$12–13/hr). The SageMaker `ml.g6.12xlarge` endpoint accounts for ~$7–8/hr. Remember to tear down after use!
 
-The `demo-ai` topology extends the standard full cluster demo by adding an **AI inference rig**. It provides:
+The `demo-ai` topology extends the standard full cluster demo by adding an **AI inference rig**. It is the one AI example: the former `ai-rig` (Llama-3-8B on `ml.g5.xlarge`, no protocol demos) lives on here as a commented alternative in `cluster.yaml` — swap the SageMaker model lines and set `demo.enabled: false` to get that leaner, ~$6/hr rig. It provides:
 1. **GPU Node Group:** `g5.xlarge` for in-cluster vLLM.
 2. **SageMaker LMI Endpoint:** Disposable managed endpoint (defaults to Qwen2.5-32B-Instruct) created on `up` and destroyed on `down`.
 
@@ -79,6 +79,7 @@ on-demand rates while up, excluding data transfer and EBS:
 | Component | Qty | Approx. $/hr |
 | --- | --- | --- |
 | SageMaker `ml.g6.12xlarge` endpoint | 1 | 7.50 |
+| (alternative) SageMaker `ml.g5.xlarge` endpoint, Llama-3-8B | 1 | 1.50 |
 | `m6i.4xlarge` BNK worker | 3 | 2.80 |
 | `g5.xlarge` GPU inference node | 1 | 1.30 |
 | `c6i.4xlarge` load-generator jumphost | 1 | 0.90 |

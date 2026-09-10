@@ -214,10 +214,10 @@ ai:
 // (tested separately in TestSageMaker_AIRigExampleEnabled).
 func TestSageMaker_ExistingExamplesUnaffected(t *testing.T) {
 	examples := []string{
-		"../../examples/external-only/cluster.yaml",
+		"testdata/external-only/cluster.yaml",
 		"../../examples/full-cluster/cluster.yaml",
 		// sriov-external is no longer a published example; it survives as the
-		// CI fixture for the pattern (examples/external-only documents the swap).
+		// CI fixture for the pattern (examples/full-cluster documents the swap).
 		"testdata/sriov-external/cluster.yaml",
 	}
 	for _, path := range examples {
@@ -235,10 +235,10 @@ func TestSageMaker_ExistingExamplesUnaffected(t *testing.T) {
 	}
 }
 
-// TestSageMaker_AIRigExampleEnabled verifies that examples/ai-rig/cluster.yaml
+// TestSageMaker_AIRigExampleEnabled verifies that testdata/ai-rig/cluster.yaml
 // loads cleanly and has SageMaker explicitly enabled with the expected fields.
 func TestSageMaker_AIRigExampleEnabled(t *testing.T) {
-	c, err := Load("../../examples/ai-rig/cluster.yaml")
+	c, err := Load("testdata/ai-rig/cluster.yaml")
 	if err != nil {
 		t.Fatalf("Load(ai-rig/cluster.yaml): %v", err)
 	}

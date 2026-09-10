@@ -1,3 +1,12 @@
+# CI FIXTURE — not a published example. Do not copy this to start a cluster.
+#
+# Folded into examples/full-cluster/cluster.yaml on 2026-09-10: the published
+# reference intent documents the external-only swap in place (pattern line +
+# drop the dataPath.internal block). This file keeps the single-interface
+# host-device shape under `validate` and `up`/`down --dry-run` in CI and in
+# internal/intent/{gpu,sagemaker,cluster}_test.go. Keep it in sync with the
+# swap documented in examples/full-cluster/cluster.yaml.
+#
 # cluster.yaml — external-only (single-interface) BNK-on-EKS deployment.
 #
 # Pattern A: TMM gets ONE data-plane interface (the external/ingress ENI) and
@@ -19,9 +28,9 @@
 #     the CNEInstance lists a single networkAttachment.
 #
 # Quick start:
-#   awsbnkctl validate examples/external-only/cluster.yaml
-#   awsbnkctl up --config examples/external-only/cluster.yaml --dry-run
-#   awsbnkctl up --config examples/external-only/cluster.yaml
+#   awsbnkctl validate internal/intent/testdata/external-only/cluster.yaml
+#   awsbnkctl up --config internal/intent/testdata/external-only/cluster.yaml --dry-run
+#   awsbnkctl up --config internal/intent/testdata/external-only/cluster.yaml
 
 apiVersion: awsbnkctl/v1
 kind: Cluster
