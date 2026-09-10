@@ -9,8 +9,11 @@ import (
 	"text/template"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 // HTTPRouteGVR is the GroupVersionResource for Gateway API HTTPRoute objects.
@@ -244,4 +247,33 @@ func WithLastOctet(ip, octet string) string {
 	}
 	parts[3] = octet
 	return strings.Join(parts, ".")
+}
+
+// ExecInPod runs command inside the named container of a pod over the exec
+// subresource and returns combined stdout (stderr is appended on failure).
+// Scenarios use it to drive traffic FROM a pod — the egress direction, which
+// no jumphost probe can exercise. Needs both Clientset and RESTConfig on the
+// Context.
+func ExecInPod(ctx *Context, ns, pod, container string, command ...string) (string, error) {
+	if ctx.Clientset == nil || ctx.RESTConfig == nil {
+		return "", fmt.Errorf("exec in %s/%s: no Kubernetes client (Clientset/RESTConfig nil)", ns, pod)
+	}
+	req := ctx.Clientset.CoreV1().RESTClient().Post().
+		Resource("pods").Name(pod).Namespace(ns).SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: container,
+			Command:   command,
+			Stdout:    true,
+			Stderr:    true,
+		}, scheme.ParameterCodec)
+	exec, err := remotecommand.NewSPDYExecutor(ctx.RESTConfig, "POST", req.URL())
+	if err != nil {
+		return "", fmt.Errorf("exec in %s/%s: SPDY executor: %w", ns, pod, err)
+	}
+	var stdout, stderr bytes.Buffer
+	err = exec.StreamWithContext(ctx.Ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr})
+	if err != nil {
+		return stdout.String(), fmt.Errorf("exec in %s/%s (%v): %w; stderr: %s", ns, pod, command, err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
 }

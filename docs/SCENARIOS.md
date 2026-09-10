@@ -37,6 +37,7 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 - **Objective**: Validates gRPC stream handling and balancing across microservices.
 - **Traffic Path**: (intended) client $\to$ TMM VIP (`L4Route` TCP data plane; `GRPCRoute` on the control plane) $\to$ `kong/grpcbin` backend pods.
 - **Assertions**: Control plane only — `grpcbin` Deployment Available, both Gateways Programmed, `GRPCRoute` and `L4Route` Accepted. No traffic is sent; no jumphost needed.
+- **Rating**: Amber. Green needs `grpcurl` on the jumphost driving VIP:50052 (and :50051) and asserting status `OK`.
 
 ---
 
@@ -51,6 +52,7 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 - **Objective**: Validates stateless UDP datagram routing and load distribution.
 - **Traffic Path**: (intended) UDP client $\to$ TMM L4 VIP:5353 $\to$ UDP echo servers.
 - **Assertions**: Control plane only — `udp-echo` Deployment Available, Gateway Programmed, `L4Route` Accepted. No datagrams are sent; no jumphost needed.
+- **Rating**: Amber. Green needs a UDP client on the jumphost (socat / nc) driving VIP:5353 and checking the echo.
 
 ### `proxy-protocol-l4`
 - **Objective**: Validates Proxy Protocol (v1 and v2) header processing.
@@ -69,7 +71,7 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 ### `cluster-wide-watch` (CWC)
 - **Objective**: Validates `ClusterWideWatch` CR for multi-tenant cross-namespace routing without full cluster admin permissions.
 - **Traffic Path**: (intended) tenant client $\to$ TMM VIP $\to$ backend in a namespace created after BNK was installed.
-- **Assertions**: Control plane only — the new namespace's Deployment becomes Available, its Gateway is Programmed and its HTTPRoute Accepted, proving the single controller reconciles namespaces it did not exist for. No traffic probe.
+- **Assertions**: the new namespace's Deployment becomes Available, its Gateway is Programmed and its HTTPRoute Accepted, then the jumphost curls the VIP with `Host: cwatch.awsbnkctl.local` and every probe must return HTTP 200 — proving the single controller reconciles, and carries traffic for, a namespace it was not installed for.
 
 ### `cwc-admin-access`
 - **Objective**: Validates RBAC isolation and mTLS certificate verification within CWC.
@@ -109,8 +111,8 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 ### `egress-snat`
 - **Objective**: Validates outbound Source NAT (SNAT) and egress firewall inspection.
 - **Traffic Path**: In-cluster workload pod $\to$ VXLAN pseudo-CNI overlay $\to$ TMM (`ext-vlan` on single-interface patterns, `int-vlan` on dual-interface — chosen from the cluster.yaml pattern, override with `tmm-int-vlan`) $\to$ AUTOMAP SNAT $\to$ External destination. The data path is validated only on `external-only` (see `examples/egress-demo`); on dual-interface the VXLAN shape is known to disturb ingress on AWS, so run it last or skip it there.
-- **Assertions**: Control plane only — the egress client pod becomes Ready and the `F5SPKEgress` CR (VXLAN pseudo-CNI overlay, AUTOMAP SNAT) is accepted. The source-IP proof at an external destination is recorded as informational, not gating.
-- **Rating**: Amber. Promoting to Green requires a live cycle that asserts the external destination sees the TMM self-IP as source.
+- **Assertions**: the egress client pod becomes Ready and the `F5SPKEgress` CR (VXLAN pseudo-CNI overlay, AUTOMAP SNAT) is accepted; then, when the cluster has a jumphost, the scenario starts a source-IP reflector on the jumphost's data-path ENI (port 8081), curls it **from the captured pod**, and asserts the reflector saw TMM's external SelfIP (`TMM_EXT_SELFIP`) as the source — the proof that pod egress went pod → VXLAN → TMM → SNAT. Without a jumphost that step is recorded as skipped.
+- **Rating**: Amber until the data-path step has passed on a live cluster; the code for the proof is in place.
 
 ### `core-file-collection`
 - **Objective**: Validates BNK's core-dump collection infrastructure: enabling `spec.coreCollection.enabled` on the `CNEInstance` makes FLO reconcile a `CoreMond` CR and DaemonSet and mount host crash directories into the TMM pods.
@@ -128,20 +130,20 @@ is real, and what else has to be true.
 
 | Scenario | Needs jumphost | Needs GPU node group | Other prerequisites | Runs on |
 | --- | :---: | :---: | --- | --- |
-| `http-routing-e2e` | Yes | – | Owns VIP `.100`. On `agentcore-demo` the demo Gateway already holds `.100`, so pass `--vip 10.0.10.150` (or run before applying `gateway-deployment.yaml`) | all four |
+| `http-routing-e2e` | Yes | – | Owns VIP `.100` (the cluster default) | all four |
 | `http-traffic-split` | Yes | – | – | all four |
 | `external-resource-pool` | Yes | – | Uses the jumphost as the "external" backend | all four |
 | `proxy-protocol-l4` | Yes | – | – | all four |
 | `tcp-l4-loadbalance` | Yes | – | – | all four |
-| `udp-l4-loadbalance` | – | – | Control plane only (Gateway Programmed, L4Route Accepted); no traffic probe | all four |
-| `grpc-loadbalance` | – | – | Control plane only (Gateways Programmed, GRPCRoute + L4Route Accepted); no traffic probe | all four |
+| `udp-l4-loadbalance` | – | – | Amber: control plane only (Gateway Programmed, L4Route Accepted); no traffic probe | all four |
+| `grpc-loadbalance` | – | – | Amber: control plane only (Gateways Programmed, GRPCRoute + L4Route Accepted); no traffic probe | all four |
 | `multi-vip` | Yes | – | Pool `.115`–`.117` | all four |
-| `cluster-wide-watch` | – | – | Control plane only; no traffic probe | all four |
+| `cluster-wide-watch` | Yes | – | Jumphost curl through the new namespace's Gateway | all four |
 | `cwc-admin-access` | – | – | Control plane only | all four |
 | `ai-token-counting` | – | – | Amber: control plane only unless a vLLM-compatible backend is pointed at | all four; data path on `demo-ai` |
 | `ai-semantic-cache` | (probe) | – | Amber: control plane only unless a ModelCache backend is supplied | all four |
 | `ai-inference-e2e` | Yes | **Yes** | `HF_TOKEN` for the gated model; `--synthetic` runs a GPU-free simulator anywhere | `demo-ai` (real); others with `--synthetic` |
-| `egress-snat` | – | – | Amber: control plane only. Tunnel VLAN follows the pattern (`ext-vlan` / `int-vlan`). Data path proven on `external-only` only | all four; real data path on `egress-demo` or `full-cluster` after its external-only swap |
+| `egress-snat` | (proof) | – | Tunnel VLAN follows the pattern (`ext-vlan` / `int-vlan`). With a jumphost the source-IP proof runs and gates; data path expected to pass on `external-only` | all four; real data path on `egress-demo` or `full-cluster` after its external-only swap |
 | `core-file-collection` | – | – | Patches the CNEInstance `f5-cne-system/<cluster>-bnk`; FLO rolls TMM to add the crash mounts, so run it **last** | all four |
 
 Demo use-cases (`awsbnkctl demo run …`) are separate from scenarios: they need
@@ -165,7 +167,7 @@ only inputs are `network.dataPath.external.cidr` and the per-scenario octet.
 
 | Last octet | Owner | Kind |
 | --- | --- | --- |
-| `.100` | `http-routing-e2e` (cluster default) — also the `agentcore-demo` Gateway | scenario / example |
+| `.100` | `http-routing-e2e` (cluster default) | scenario |
 | `.101` | `http-traffic-split` | scenario |
 | `.102` | `external-resource-pool` | scenario |
 | `.103` | `proxy-protocol-l4` | scenario |
@@ -181,6 +183,7 @@ only inputs are `network.dataPath.external.cidr` and the per-scenario octet.
 | `.113` | `ingress-migration` | demo |
 | `.115`–`.117` | `multi-vip` (VIP A `.115`, VIP B `.116`, pool end `.117`) | scenario |
 | `.120` | `bigip-cis` (BIG-IP VE virtual server, `bigipVE.vip`) | demo |
+| `.150` | `agentcore-demo` Gateway (`gateway-deployment.yaml`) | example |
 | `.130` | `demo-ai` proxy shootout | example |
 | `.200`–`.202` | `local-zone` reference manifests | example |
 | `.240` | TMM external SelfIP (`<subnet>.240`, Phase 17) | infrastructure |

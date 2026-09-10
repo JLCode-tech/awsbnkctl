@@ -19,7 +19,7 @@
 # The RoutingTemplate is a native ZebOS stanza; the GlobalRoutingConfig binds
 # it to the routing container. Both live in the CNEInstance namespace.
 # `redistribute kernel` + `redistribute connected` is what announces the
-# Gateway VIP (10.0.10.100) and the SelfIP subnet to the Route Server, which
+# Gateway VIP (10.0.10.150 in this example) and the SelfIP subnet to the Route Server, which
 # then propagates them into the route tables you enabled propagation on.
 apiVersion: k8s.f5net.com/v1alpha1
 kind: RoutingTemplate

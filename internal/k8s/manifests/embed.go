@@ -4,7 +4,7 @@
 //
 // Layout:
 //
-//	cert-manager/          — cert-manager v1.16.1 static install YAML (upstream verbatim)
+//	cert-manager/          — cert-manager v1.21.1 static install YAML (upstream verbatim; version = intent.EmbeddedCertManagerVersion)
 //	multus/                — Multus CNI v4.2.4 daemonset YAML (upstream verbatim, slice 7+)
 //	shared/                — BNK cert chain template (applied to every cluster/pattern)
 //	host-device/           — variant manifests for host-device pattern (slice 6+ content)

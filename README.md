@@ -1,6 +1,6 @@
 # awsbnkctl
 
-![BNK](https://img.shields.io/badge/BNK-2.3.0-0a3a5c)
+![BNK](https://img.shields.io/badge/BNK-2.3.3-0a3a5c)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-1.34--1.35-326ce5?logo=kubernetes&logoColor=white)
 ![AWS EKS](https://img.shields.io/badge/AWS-EKS-ff9900?logo=amazon-aws&logoColor=white)
 [![CI](https://github.com/JLCode-tech/awsbnkctl/actions/workflows/ci.yml/badge.svg)](https://github.com/JLCode-tech/awsbnkctl/actions/workflows/ci.yml)
@@ -62,13 +62,28 @@ No Terraform. No host `kubectl`. **One binary, one intent file.**
 
 | Component | Pinned Version / Range | Notes |
 |---|---|---|
-| **BNK** | `2.3.0` | Primary supported release (`2.3.x` via `manifestVersion` override) |
-| **CNE Release Manifest** | `2.3.0-3.2598.3-0.0.170` (default) | Pulled from `repo.f5.com`; override per cluster with `bnk.manifestVersion` (e.g. `2.3.2-3.2598.3-0.0.392`) |
-| **Kubernetes (EKS)** | `1.34` – `1.35` (Default: `1.34`) | `validate` rejects < 1.34; 1.36+ warns (BNK CRDs fail to apply) |
+| **BNK** | `2.3.3` (default) | Newest 2.3.x release manifest; every 2.3.x build (2.3.0–2.3.3) is supported via `bnk.manifestVersion`, and the paired FLO chart follows automatically |
+| **CNE Release Manifest** | `2.3.3-3.2598.3-0.0.509` (default) | Pulled from `repo.f5.com`; override per cluster with `bnk.manifestVersion` (e.g. `2.3.2-3.2598.3-0.0.392`) |
+| **Kubernetes (EKS)** | `1.34` – `1.35` (Default: `1.35`) | `validate` rejects < 1.34; 1.36+ warns (BNK CRDs fail to apply) |
 | **AWS SDK for Go** | `v2` (`github.com/aws/aws-sdk-go-v2 v1.42.0`) | Direct AWS API communication, no Terraform |
-| **cert-manager** | `v1.16.1` | Embedded upstream YAML applied via `client-go` (no Helm); override with `bnk.certManagerVersion` |
-| **FLO Helm Chart** | `v2.21.13-0.0.28` (default) | Override with `addons.flo.version` |
+| **cert-manager** | `v1.21.1` | Embedded upstream YAML applied via `client-go` (no Helm); override with `bnk.certManagerVersion` |
+| **FLO Helm Chart** | follows `bnk.manifestVersion` (`v2.21.13-0.0.64` for the 2.3.3 default) | Paired per release in `manifest.KnownReleases`; override with `addons.flo.version` |
 | **Go** | `1.26` | `go.mod` toolchain floor |
+
+### Dates to check before you deploy
+
+Four of the pins above expire on a calendar, not on a code change. Check them
+before standing up a new cluster:
+
+| Check | Current value | Expires / changes | Then |
+|---|---|---|---|
+| EKS standard support for the Kubernetes floor | `1.34` | **2026-12-02** | raise `intent.MinKubernetesVersion` and re-run CI |
+| cert-manager support window | `v1.21.1` (K8s 1.33–1.36) | at the cert-manager **1.23** release | embed the newest supported minor (`intent.EmbeddedCertManagerVersion`) |
+| Newest BNK 2.3.x release manifest | `2.3.3-3.2598.3-0.0.509` | whenever F5 publishes a build — `awsbnkctl manifest probe` lists the tags | add a row to `manifest.KnownReleases` with its FLO chart |
+| BNK CRDs vs Kubernetes 1.36+ | `format: int32` + `maximum: 4294967295` still in the 2.3.3 CRD charts | fixed in a future BNK manifest | drop the 1.36+ warning (`intent.maxTestedKubernetesMinor`) |
+
+`go run ./scripts/govulncheck` (CI warns only) is the fifth: four transitive advisories
+with no upstream fix as of 2026-09.
 
 ---
 
@@ -264,9 +279,9 @@ Environment variables recognised by the binary:
 | **`external-resource-pool`** | Hybrid Routing | Routing traffic to non-Kubernetes external endpoints | EICE Jumphost curl |
 | **`proxy-protocol-l4`** | L4 Protocol | Proxy Protocol v1/v2 client IP preservation | EICE raw socket / curl |
 | **`tcp-l4-loadbalance`** | L4 Protocol | L4Route TCP weighted load balancing (70/30) | Multi-request TCP probe |
-| **`udp-l4-loadbalance`** | L4 Protocol | L4Route UDP datagram routing and load balancing | Control-plane conditions (no traffic probe) |
-| **`grpc-loadbalance`** | L7 Protocol | gRPC stream routing over GRPCRoute & L4Route | Control-plane conditions (no traffic probe) |
-| **`cluster-wide-watch`** | Multi-Tenancy | Cross-namespace HTTP routing via CWC | Control-plane conditions (no traffic probe) |
+| **`udp-l4-loadbalance`** | L4 Protocol | L4Route UDP datagram routing and load balancing | Amber: control-plane conditions only |
+| **`grpc-loadbalance`** | L7 Protocol | gRPC stream routing over GRPCRoute & L4Route | Amber: control-plane conditions only |
+| **`cluster-wide-watch`** | Multi-Tenancy | Cross-namespace HTTP routing via CWC | EICE Jumphost curl |
 | **`cwc-admin-access`** | Security | ClusterWideWatch RBAC isolation & cert validation | RBAC assertion & mTLS probe |
 | **`ai-token-counting`** | AI Gateway | Token usage measurement and rate limiting | AI Gateway HTTP POST |
 | **`ai-semantic-cache`** | AI Gateway | Semantic prompt cache hit/miss verification | AI Gateway HTTP POST |

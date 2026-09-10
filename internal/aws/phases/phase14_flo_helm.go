@@ -157,7 +157,7 @@ func Phase14FLOHelm(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 		return nil
 	}
 
-	floVersion := floSpec.FLOVersion()
+	floVersion := cl.FLOVersion()
 	caIssuer := name + "-ca-cluster-issuer"
 
 	// Dry-run: allowed without bnk: block (FLO helm install plan only).

@@ -40,10 +40,18 @@ reach.
 Three ways a caller can reach that same MCP tool. They differ by **who is
 calling** and **how much of the stack is allowed to police them**.
 
+> [!NOTE]
+> Two things in this document are called a "Gateway". The **BNK `Gateway`** is
+> the Kubernetes Gateway API resource in `gateway-deployment.yaml`; it is
+> deployed and carries every path below. The **AgentCore Gateway** is an Amazon
+> Bedrock AgentCore service that fronts MCP tools with Cedar authorization; it
+> is *not* deployed in this account, which is the only reason Path 2 is marked
+> not deployed. Nothing on the BNK side is missing.
+
 | Path | Who calls | Governed by | Status |
 | --- | --- | --- | --- |
 | **Trusted agent path** | Our own AgentCore runtime | F5 BNK only | ✅ runs today |
-| **Double-checked path** | Our own agent, via AgentCore Gateway | AgentCore Gateway **and** F5 BNK | ⚠️ not built — see below |
+| **Double-checked path** | Our own agent, via an **Amazon Bedrock AgentCore Gateway** (the AWS service — not the BNK `Gateway` resource that IS deployed) | AgentCore Gateway **and** F5 BNK | ⚠️ not deployed in this account — see below |
 | **Stranger path** | Anything else — another cloud, a script, a compromised workload | F5 BNK only | ✅ runs today |
 
 **Trusted agent path.** The agent runs in Bedrock AgentCore with VPC-mode ENIs in
@@ -125,7 +133,7 @@ twice, and the tool hop between them is the only leg BNK is in.
     │          ▼                               │                  │
        ╔══════════════════════════════════════╗│  ◄── THE ONLY CHECKPOINT
     │  ║          F5 BNK  (TMM)               ║│                  │
-       ║  VIP 10.0.10.100  :80  :443          ║│
+       ║  VIP 10.0.10.150  :80  :443          ║│
     │  ║ ┌──────────────────────────────────┐ ║│                  │
        ║ │ HTTPRoute + URLRewrite      [on] │ ║│
     │  ║ │ rate limit 10/60s/caller    [on] │ ║│                  │
@@ -146,7 +154,7 @@ twice, and the tool hop between them is the only leg BNK is in.
     outbound call. BNK is what governs that hop.
 ```
 
-#### Path 2 — Double-checked path  ⚠️ not built
+#### Path 2 — Double-checked path  ⚠️ not deployed (needs an AgentCore Gateway in the account)
 
 The same agent, but the tool call is routed through an AgentCore Gateway first,
 so two independent policy engines see it. The value here is **separation of
@@ -182,9 +190,11 @@ open the tool, and vice versa.
     │           └───────────────────┘                        │
     └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
 
-    Blocked on: no AgentCore Gateway is deployed in this project
-    (`agentcore status` lists no gateways), and reaching a private VIP from a
-    Gateway needs VPC-Lattice egress. See "7. Future capabilities" below.
+    Blocked on: no Amazon Bedrock AgentCore Gateway exists in this account
+    (`agentcore status` lists no gateways). The BNK Gateway it would forward to
+    is already deployed; what is missing is the AWS-side service plus the
+    VPC-Lattice egress it needs to reach a private VIP. See "7. Future
+    capabilities" below.
 ```
 
 #### Path 3 — Stranger path  ✅ runs today
@@ -300,7 +310,7 @@ We have created the declarative intent file at [`examples/agentcore-demo/cluster
 *   **Region:** `ap-southeast-2`
 *   **Integration:** Local Forge `http://localhost:8000`
 *   **BGP:** `bnk.bgp: true` — opens TCP 179 / UDP 3784 from the external subnet on the data-plane SG and the external `F5SPKVlan` so TMM can peer with an AWS Route Server endpoint. Optional; the VIP is reachable in-VPC without it. Peer and routing CRs: [`bgp-route-server.yaml`](bgp-route-server.yaml) + [`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md)
-*   **Scenarios:** all 15 `awsbnkctl scenarios` run here. The demo Gateway below pins VIP `10.0.10.100`, which is also `http-routing-e2e`'s default, so run that one with `--vip 10.0.10.150`. `ai-inference-e2e` needs `--synthetic` (no GPU node group). Run `core-file-collection` last. Mapping and VIP plan: [`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
+*   **Scenarios:** all 15 `awsbnkctl scenarios` run here with no VIP override: the demo Gateway pins `10.0.10.150`, a slot outside the scenario range (`.100`–`.117`) in the VIP plan. `ai-inference-e2e` needs `--synthetic` (no GPU node group). Run `core-file-collection` last. Mapping and VIP plan: [`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
 
 ### F5 credentials (you must supply these)
 
@@ -613,7 +623,7 @@ kubectl get f5-big-cne-irules,bnknetpolicies,bnksecpolicies -n default
 kubectl get pods -n llm-egress
 ```
 
-Expect the Gateway `PROGRAMMED=True` with address `10.0.10.100`, the iRule
+Expect the Gateway `PROGRAMMED=True` with address `10.0.10.150`, the iRule
 `READY=True` ("CR config sent to all grpc endpoints"), two BNKNetPolicies
 (`-http`, `-http443`), and `loki` + `bnkgov-collector` pods Running.
 
@@ -671,7 +681,7 @@ Copy `external-agent.py` to that host and run it, or drive it over SSM:
 INSTANCE=<jumphost-instance-id>
 aws ssm send-command --region ap-southeast-2 --instance-ids "$INSTANCE" \
   --document-name AWS-RunShellScript \
-  --parameters 'commands=["for i in $(seq 1 20); do curl -s -o /dev/null -w \"%{http_code} \" -X POST http://10.0.10.100/v1/mcp/forecast -H \"Host: bnk-ingress.bnk-demo.internal\" -H \"Content-Type: application/json\" -H \"Accept: application/json\" -H \"Authorization: Bearer demo-external-token-4b9e2d\" -d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"tools/call\\\",\\\"params\\\":{\\\"name\\\":\\\"forecast\\\",\\\"arguments\\\":{\\\"symbol\\\":\\\"NVDA\\\",\\\"days\\\":30}}}\"; done"]' \
+  --parameters 'commands=["for i in $(seq 1 20); do curl -s -o /dev/null -w \"%{http_code} \" -X POST http://10.0.10.150/v1/mcp/forecast -H \"Host: bnk-ingress.bnk-demo.internal\" -H \"Content-Type: application/json\" -H \"Accept: application/json\" -H \"Authorization: Bearer demo-external-token-4b9e2d\" -d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":1,\\\"method\\\":\\\"tools/call\\\",\\\"params\\\":{\\\"name\\\":\\\"forecast\\\",\\\"arguments\\\":{\\\"symbol\\\":\\\"NVDA\\\",\\\"days\\\":30}}}\"; done"]' \
   --query 'Command.CommandId' --output text
 # then: aws ssm get-command-invocation --region ap-southeast-2 \
 #         --command-id <id> --instance-id "$INSTANCE" --query StandardOutputContent --output text
@@ -733,7 +743,7 @@ Discovery stays exempt; this returns `200` however many times you run it:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' \
-  http://10.0.10.100/.well-known/agent-card.json \
+  http://10.0.10.150/.well-known/agent-card.json \
   -H 'Host: bnk-ingress.bnk-demo.internal'
 ```
 

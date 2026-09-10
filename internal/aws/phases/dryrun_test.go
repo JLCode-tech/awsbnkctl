@@ -145,7 +145,7 @@ func TestDryRun_AllPhasesEndToEnd(t *testing.T) {
 	cl.Bnk = &intent.BnkSpec{
 		FARArchive:         farPath,
 		JWT:                jwtPath,
-		CertManagerVersion: "1.16.1",
+		CertManagerVersion: intent.EmbeddedCertManagerVersion,
 	}
 	if err := Phase12K8sFoundation(ctx, cl, st, clients, true); err != nil {
 		t.Fatalf("Phase12K8sFoundation dry-run: %v", err)
@@ -831,7 +831,7 @@ func TestDryRun_NilClients_AllPhasesEndToEnd(t *testing.T) {
 	cl.Bnk = &intent.BnkSpec{
 		FARArchive:         farPath,
 		JWT:                jwtPath,
-		CertManagerVersion: "1.16.1",
+		CertManagerVersion: intent.EmbeddedCertManagerVersion,
 	}
 	if err := Phase12K8sFoundation(ctx, cl, st, clients, true); err != nil {
 		t.Fatalf("Phase12K8sFoundation dry-run: %v", err)

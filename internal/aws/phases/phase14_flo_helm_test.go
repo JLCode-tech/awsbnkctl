@@ -103,7 +103,7 @@ func clusterWithBnk(t *testing.T) (*intent.Cluster, string, string) {
 	cl.Bnk = &intent.BnkSpec{
 		FARArchive:         farPath,
 		JWT:                jwtPath,
-		CertManagerVersion: "1.16.1",
+		CertManagerVersion: intent.EmbeddedCertManagerVersion,
 	}
 	return cl, farPath, jwtPath
 }

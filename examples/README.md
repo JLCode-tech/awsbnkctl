@@ -106,8 +106,8 @@ each and what else applies. Full prerequisites and the VIP allocation are in
   demo-ai          yes                real GPU + HF_TOKEN  control plane only      demo: on — diameter, http2,    no bigipVE: block, so no bigip-cis;
                                                                                    ingress-migration              ai-token-counting / ai-semantic-cache
                                                                                                                   can point at the vLLM leg
-  agentcore-demo   yes                --synthetic only     control plane only      up --demo                      demo Gateway holds .100: run
-                                                                                                                  http-routing-e2e with --vip 10.0.10.150
+  agentcore-demo   yes                --synthetic only     control plane only      up --demo                      demo Gateway on .150, clear of the
+                                                                                                                  scenario VIP range
   local-zone       n/a                n/a                  n/a                     n/a                            manifests only
 ```
 
@@ -149,9 +149,9 @@ Every `cluster.yaml` here follows the same rules:
   from the external subnet on the data-plane security group and the external
   `F5SPKVlan`, and nothing else — no peer exists until you build a Route Server
   and apply the example's `bgp-route-server.yaml`. Harmless when you don't.
-- **`cluster.kubernetesVersion` is 1.34 or newer.** 1.34 is both the mandated
-  floor and the default when the key is omitted; `validate` rejects anything
-  lower before making an AWS call. BNK 2.3 installs cleanly up to 1.35 — 1.36+
+- **`cluster.kubernetesVersion` is 1.34 or newer.** 1.34 is the mandated floor and
+  1.35 is the default when the key is omitted (the minor F5 lists for BNK 2.3.x);
+  `validate` rejects anything lower before making an AWS call. BNK 2.3 installs cleanly up to 1.35 — 1.36+
   gets a warning, because the apiserver there rejects two core BNK CRDs. See
   [the version policy](../docs/ARCHITECTURE.md#kubernetes-version-policy).
 

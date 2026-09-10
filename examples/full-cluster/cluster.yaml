@@ -145,17 +145,21 @@ cluster:
 # jwt: path to F5's subscription JWT (from the F5 portal / entitlement email).
 #      Type in k8s: Opaque secret named 'bnk-license-jwt', key 'license.jwt'.
 #
-# certManagerVersion: pinned to match the embedded upstream YAML (1.16.1).
+# certManagerVersion: pinned to match the embedded upstream YAML (1.21.1).
 #                     Omit to use the default. Mismatch is a hard error.
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE: path to your F5 FAR pull credentials JSON
   jwt: ./license.jwt                  # REPLACE: path to your F5 subscription JWT
+  # manifestVersion: which BNK 2.3.x release manifest FLO installs. Omit for the
+  # newest (2.3.3-3.2598.3-0.0.509); any 2.3.x build works and brings its own FLO
+  # chart along (see docs/ARCHITECTURE.md, "BNK release policy").
+  # manifestVersion: "2.3.2-3.2598.3-0.0.392"
   # bgp: open TCP 179 (BGP) + UDP 3784 (BFD) from the external subnet on the
   # data-plane security group and the external F5SPKVlan, so TMM can peer with
   # an AWS Route Server endpoint there. Harmless with no peer. The peer and the
   # routing CRs are yours to add: see bgp-route-server.yaml in this directory.
   bgp: true
-  # certManagerVersion: "1.16.1"     # optional; defaults to 1.16.1 (the embedded version)
+  # certManagerVersion: "1.21.1"     # optional; defaults to 1.21.1 (the embedded version)
 
 # addons: optional add-on configuration.
 # When omitted, FLO is installed at the pinned default version.

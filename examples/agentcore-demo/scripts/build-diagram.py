@@ -109,7 +109,7 @@ def build():
     arrow(302, py + 74, 240, py + 80, "4. narrate", AWS, above=False)
     frame(520, py + 40, 210, 104, F5, "#fff", None, 2)
     text(625, py + 64, "F5 BNK  (TMM)", 12.5, INK, "600", "middle")
-    text(625, py + 84, "VIP 10.0.10.100", 10.5, MUTED, anchor="middle", mono=True)
+    text(625, py + 84, "VIP 10.0.10.150", 10.5, MUTED, anchor="middle", mono=True)
     text(625, py + 102, "authz · rate · firewall · log", 10, MUTED, anchor="middle", mono=True)
     text(625, py + 126, "ONLY CHECKPOINT", 9.5, F5, "700", "middle")
     arrow(238, py + 100, 520, py + 100, "2. tools/call", LINE, above=False)
@@ -381,7 +381,7 @@ def build_network():
     frame(LEFT, B_Y, 1199, B_H, F5, TINT, None, 1.8)
     sublabel(RIGHT - 8, B_Y - 10, "subnet-bnk-ext", "10.0.10.0/24", "az 2a", anchor="end")
     text(LEFT + 4, B_Y - 10, "BNK's external side", 11, F5, "700")
-    box(330, B_Y + 16, 260, 76, "VIP  10.0.10.100", ":80  ·  :443 TLS", F5, "#fff", lw=2.6)
+    box(330, B_Y + 16, 260, 76, "VIP  10.0.10.150", ":80  ·  :443 TLS", F5, "#fff", lw=2.6)
     box(650, B_Y + 16, 260, 76, "TMM  ens8", "10.0.10.209", F5)
     box(970, B_Y + 16, 280, 76, "jumphost  ens6", "10.0.10.29 · bnk-data SG", LINE, dash="4 3")
     text(620, B_Y + 110, "the VIP is a secondary IP on the TMM ENI — plain VPC routing reaches it",
@@ -435,7 +435,7 @@ def build_network():
     # ── Band E: in-VPC services ──────────────────────────────────────────────
     frame(LEFT, E_Y, 1199, E_H, LINE, "#fff")
     text(320, E_Y + 26, "Route 53 private zone", 11, INK, "700")
-    text(320, E_Y + 44, "bnk-demo.internal → 10.0.10.100", 10, MUTED, mono=True)
+    text(320, E_Y + 44, "bnk-demo.internal → 10.0.10.150", 10, MUTED, mono=True)
     text(320, E_Y + 66, "resolves inside the VPC only", 9.5, MUTED)
     text(660, E_Y + 26, "NAT gateway", 11, INK, "700")
     text(660, E_Y + 44, "nat-041ed9c3206186bac", 10, MUTED, mono=True)

@@ -51,10 +51,10 @@ All tools across the `*bnkctl` ecosystem share common core tenets:
 | `ai-semantic-cache` | AI Gateway semantic caching | Yes | - | Yes | Yes | AI Gateway HTTP POST |
 | `ai-inference-e2e` | vLLM Llama-3-8B on the GPU node group, streamed (SSE) through the BNK VIP | - | - | - | Yes | EICE Jumphost curl (SSE) |
 | `multi-vip` | Multiple Gateway VIPs on same TMM | Yes | - | Yes | Yes | EICE Jumphost curl |
-| `egress-snat` | Egress gateway SNAT & firewalling | - | - | Yes | Yes | EICE Jumphost curl |
-| `grpc-loadbalance` | gRPC over L4Route & GRPCRoute | Yes | - | Yes | Yes | Control-plane conditions (Gateway Programmed, routes Accepted) |
+| `egress-snat` | Egress gateway SNAT & firewalling | - | - | Yes | Yes | Pod curl to a jumphost reflector (source-IP proof) |
+| `grpc-loadbalance` | gRPC over L4Route & GRPCRoute | Yes | - | Yes | Yes | Amber: control-plane conditions only |
 | `tcp-l4-loadbalance` | L4Route TCP weighted load balancing (70/30) | Yes | - | Yes | Yes | Multi-request TCP probe |
-| `udp-l4-loadbalance` | L4Route UDP packet routing | Yes | - | Yes | Yes | Control-plane conditions (Gateway Programmed, L4Route Accepted) |
-| `cluster-wide-watch` | Cross-namespace HTTP routing with CWC | Yes | - | Yes | Yes | Control-plane conditions in a post-install namespace |
+| `udp-l4-loadbalance` | L4Route UDP packet routing | Yes | - | Yes | Yes | Amber: control-plane conditions only |
+| `cluster-wide-watch` | Cross-namespace HTTP routing with CWC | Yes | - | Yes | Yes | EICE Jumphost curl through a post-install namespace |
 | `cwc-admin-access` | ClusterWideWatch RBAC & admin isolation | Yes | - | Yes | Yes | RBAC assertion & curl |
 | `core-file-collection` | Core-dump collection: `CNEInstance.spec.coreCollection.enabled` reconciles the CoreMond DaemonSet and TMM crash mounts | Yes | - | Yes | Yes | CoreMond CR / DaemonSet and TMM volume inspect |

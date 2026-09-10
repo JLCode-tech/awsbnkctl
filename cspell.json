@@ -63,6 +63,7 @@
     "behaviour",
     "BIGIP",
     "bnk",
+    "BNKSecPolicy",
     "bnkconst",
     "bnkctl",
     "bnkforge",
@@ -686,6 +687,9 @@
     "routingtemplate",
     "ZebOS",
     "vlan",
+    "BNKNetPolicy",
+    "cwatch",
+    "socat",
     "zerolog"
   ],
   "ignorePaths": [

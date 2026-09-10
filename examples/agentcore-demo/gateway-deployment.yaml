@@ -66,7 +66,7 @@ spec:
   # awsbnkctl provisions during `up`. Verify from a client with:
   #   kubectl get secret mcp-tls -n default -o jsonpath='{.data.ca\.crt}' \
   #     | base64 -d > /tmp/bnk-ca.crt
-  #   curl --cacert /tmp/bnk-ca.crt --resolve bnk-ingress.bnk-demo.internal:443:10.0.10.100 \
+  #   curl --cacert /tmp/bnk-ca.crt --resolve bnk-ingress.bnk-demo.internal:443:10.0.10.150 \
   #     https://bnk-ingress.bnk-demo.internal/v1/mcp/forecast
   #
   # GOTCHA: do NOT convert a listener's protocol in place on the same port.
@@ -94,7 +94,7 @@ spec:
       - kind: HTTPRoute
   addresses:
   - type: IPAddress
-    value: 10.0.10.100
+    value: 10.0.10.150
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
