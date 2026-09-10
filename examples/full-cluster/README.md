@@ -1,166 +1,97 @@
-# Full Cluster BNK-on-EKS Topology
+# full-cluster — the reference BNK-on-EKS cluster
 
-This directory contains the complete `cluster.yaml` reference intent file for a **full BNK-on-EKS deployment**. As checked in it uses the `host-device` (dual-interface) pattern; the same file documents the swap to the single-interface patterns, `external-only` and `sriov-external`, so it is the one intent to copy for any BNK topology.
+| | |
+| --- | --- |
+| Cluster name | `full-cluster` (state in `.awsbnkctl/full-cluster/`) |
+| Region / pattern | `ap-southeast-2` / `dual-interface` |
+| Footprint | 3 × m6i.4xlarge, EKS, 1 NAT gateway, t3.small jumphost |
+| Cost | about **US$3/hour** |
 
-It is also the **demo cluster**: uncomment the `demo:` block in `cluster.yaml` (or
-pass `--demo`) and the same infrastructure gains the curated protocol
-walkthroughs. See [Demo mode](#demo-mode) below.
+Start here. This `cluster.yaml` builds the complete stack: VPC and subnets, the
+two TMM data-path subnets, EKS with a three-node group sized for BNK, the BNK
+2.3 control plane and TMM on dedicated ENIs, and a jumphost that can send test
+traffic into the external data path. Every other example is this file plus a few
+toggles.
 
-## Architecture
+## Run it
 
-This topology provisions the entire infrastructure stack from the ground up:
-- **VPC & Subnets:** Creates a full VPC with public subnets (routing to an IGW) and private subnets (routing to a NAT Gateway).
-- **Data-Path Subnets:** Provisions dedicated `external` (ingress) and `internal` (backend) VLANs for the TMM data plane.
-- **EKS Control Plane & Nodes:** Provisions an EKS cluster with a 3-node managed node group (`m6i.4xlarge`), appropriately sized for the BNK control plane and dSSM quorum.
-- **F5 BNK Integration:** Wires up the secondary ENIs, node labels, IRSA roles, and the `host-device` dual-interface data path.
-- **Test Jumphost:** (Optional) Deploys a multi-ENI jumphost instance within the VPC to generate test traffic directly into the BNK external data path.
+```bash
+cp -r examples/full-cluster my-cluster && cd my-cluster
+# edit cluster.yaml: metadata.name, region/azs if needed, bnk.farArchive, bnk.jwt
 
-## Single-interface variants (`external-only`, `sriov-external`)
-
-The checked-in file is dual-interface. For a single external (ingress) ENI with
-TMM reaching pods over the CNI, make two edits in `cluster.yaml`:
-
-```yaml
-pattern: external-only     # was: host-device
-# and delete the `internal:` block under network.dataPath — validate rejects it
+awsbnkctl validate cluster.yaml
+AWSBNKCTL_SKIP_AUTH=1 awsbnkctl up -f cluster.yaml --dry-run
+awsbnkctl up -f cluster.yaml                                  # ~25 min
+awsbnkctl scenarios run http-routing-e2e -f cluster.yaml     # traffic through the VIP
+awsbnkctl down -f cluster.yaml --yes
 ```
 
-Everything else stays: node sizing, the dSSM quorum, the jumphost, cost. You
-save an ENI, not money. Transparent egress (see
-[`examples/egress-demo`](../egress-demo/)) needs this pattern.
+## Toggles in this file
 
-For the **experimental** SR-IOV / DPDK variant, apply the same two edits and set
-`pattern: sriov-external`. The two single-interface patterns are identical in
-topology and cost; what differs is how TMM drives the NIC:
+| Toggle | Default | Turn it on by |
+| --- | --- | --- |
+| Single-interface pattern | off (dual-interface) | `pattern: external-only` **and** delete the `internal:` block under `network.dataPath`. Same cost, one ENI fewer. Needed for transparent egress ([`egress-demo`](../egress-demo/)) |
+| SR-IOV / DPDK data plane | off | the two edits above, then `pattern: sriov-external`. **Experimental**; use a fresh cluster |
+| Demo mode | off | uncomment `demo:` (or `up --demo`). Enables `awsbnkctl demo run` for the Diameter, HTTP/2 and ingress-migration demos |
+| BIG-IP VE appliance | off | uncomment `bigipVE:` with demo mode on. Adds a chargeable c5n.2xlarge for the `bigip-cis` demo; password via `AWSBNKCTL_BIGIP_PASSWORD` |
+| BNK release | 2.3.3 | `bnk.manifestVersion` (a 2.3.2 pin is shown commented) |
+| BGP ports | on | `bnk.bgp`; see below |
+
+### The single-interface patterns
+
+`external-only` gives TMM one ENI and reaches pods over the CNI. `sriov-external`
+is the same topology with TMM driving the NIC over DPDK instead of the kernel:
 
 | | `external-only` | `sriov-external` |
 | --- | --- | --- |
-| Data-plane driver | Kernel socket | DPDK over `vfio-pci` (No-IOMMU) |
-| Node preparation | None | `vfio-node-prep` DaemonSet rebinds the external ENA (Phase 20b) |
-| Device exposure | Standard ENI | `sriov-network-device-plugin` advertises `intel.com/ens8` |
-| NAD | `external` | `external-sriov` (type `passthru`, **not** `sriov-cni`) |
-| CNEInstance | Sets `TMM_GENERIC_SOCKET_DRIVER` | Drops it; plugin injects `/dev/vfio` + `PCIDEVICE_INTEL_COM_ENS8` |
+| Data-plane driver | kernel socket | DPDK over `vfio-pci` |
+| Node preparation | none | a DaemonSet rebinds the external ENA (phase 20b) |
+| Network attachment | `external` | `external-sriov` (type `passthru`) |
 
-`sriov-external` runs on stock AL2023 (no custom AMI) and has been validated end
-to end live (HTTP 200 through TMM-on-vfio), but the DaemonSet rebinds the node
-NIC, so prefer a dedicated cluster over converting an existing one. CI keeps both
-single-interface shapes under `validate` and `up --dry-run` as fixtures in
+Both are validated end to end; both stay under CI as fixtures in
 `internal/intent/testdata/`.
-
-
-## Usage
-
-This configuration is intended to be copied and customized for your specific environments.
-
-1. Copy the reference config:
-   ```bash
-   cp cluster.yaml my-cluster.yaml
-   # Update bnk.farArchive and bnk.jwt to point to your real credentials.
-   ```
-
-2. Dry-Run / Validate:
-   ```bash
-   awsbnkctl validate my-cluster.yaml
-   AWSBNKCTL_SKIP_AUTH=1 awsbnkctl up --config my-cluster.yaml --dry-run
-   ```
-
-3. Provision the full cluster:
-   ```bash
-   awsbnkctl up --config my-cluster.yaml
-   ```
-
-4. Teardown:
-   ```bash
-   awsbnkctl down --config my-cluster.yaml --yes
-   ```
 
 ## Demo mode
 
-Uncomment the `demo:` block in `cluster.yaml`, or pass `--demo` on the CLI. Demo
-mode requires `testing.jumphost.enabled: true`, because every use-case drives
-traffic from inside the BNK external subnet.
-
-With it on, `up` writes `DEMO_MODE` / `DEMO_STAGED_AT` / `DEMO_EXPIRY` to
-`state.env`, tags every resource `awsbnkctl:demo=true`, pre-stages the test
-clients on the jumphost, and `down` cleans the use-cases before the
-infrastructure underneath them.
+With `demo:` on, `up` tags every resource `awsbnkctl:demo=true`, pre-stages the
+test clients on the jumphost, and `down` cleans the demos before the
+infrastructure. `demo.ttl` (default 24h) is only a countdown shown by `status`;
+nothing deletes the cluster when it expires.
 
 ```bash
 awsbnkctl demo list
-awsbnkctl demo run http2 --config my-cluster.yaml
-awsbnkctl demo run --all --config my-cluster.yaml
+awsbnkctl demo run http2 -f cluster.yaml
+awsbnkctl demo run --all -f cluster.yaml
 ```
 
-> [!NOTE]
-> `demo.ttl` (default `24h`) only records an expiry — `DEMO_EXPIRY` in `state.env`
-> plus an `awsbnkctl:demo-expiry` tag, which `awsbnkctl status` shows as a
-> countdown. No reaper acts on it. Nothing deletes the cluster when it expires.
-
-### Migration scenarios
-
-Two of the use-cases carry the "migrate to BNK" story:
-
-- **`ingress-migration`** installs `ingress-nginx`, HAProxy, and a BNK Gateway API
-  route in front of a shared backend, so you can compare the traffic paths live
-  before cutover.
-  ```bash
-  awsbnkctl demo run ingress-migration --config my-cluster.yaml
-  ```
-- **`bigip-cis`** demonstrates the traditional external F5 BIG-IP VE model that
-  BNK replaces. It needs the `bigipVE:` block in `cluster.yaml` uncommented.
-  > [!WARNING]
-  > Enabling `bigipVE` provisions a chargeable `c5n.2xlarge` BIG-IP VE appliance
-  > with PAYG licensing. Supply its password via
-  > `export AWSBNKCTL_BIGIP_PASSWORD='<pass>'` before running — it is never stored
-  > in `cluster.yaml`.
-
-## BGP peering with AWS Route Server
-
-`cluster.yaml` sets `bnk.bgp: true`, so `up` opens TCP 179 (BGP) and UDP 3784
-(BFD) from the external subnet (`10.0.10.0/24`) on the data-plane security group
-and on the external `F5SPKVlan`. That makes TMM's external SelfIP
-(`10.0.10.240`) reachable as a BGP peer. Nothing peers until you create a Route
-Server endpoint in that subnet and apply [`bgp-route-server.yaml`](bgp-route-server.yaml),
-replacing its `10.0.10.31` placeholder with the endpoint's address. The full
-procedure, verification and teardown order are in
-[`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md); state for this
-cluster lives in `.awsbnkctl/full-cluster/`. BGP is optional here: the Gateway VIP
-(`10.0.10.100`) is reachable inside the VPC without it, because the
-cne-controller assigns it as a secondary IP on TMM's external ENI.
-
-> [!NOTE]
-> A Route Server endpoint bills about $0.75/hour and blocks deletion of the
-> external subnet. Remove it before `awsbnkctl down`.
+`ingress-migration` runs ingress-nginx, HAProxy and a BNK Gateway side by side
+in front of one backend. `bigip-cis` shows the external BIG-IP VE model BNK
+replaces and needs the `bigipVE:` block.
 
 ## Scenarios
 
-All 15 scenarios run here; `ai-inference-e2e` needs `--synthetic` (no GPU node group). Uncomment `demo:` for the demo use-cases and `bigipVE:` for `bigip-cis`. Run `core-file-collection` last. `egress-snat` is control-plane only on the checked-in dual-interface pattern, so run it last too; after the external-only swap it gets a real data path.
-
-```bash
-awsbnkctl scenarios list
-awsbnkctl scenarios run http-routing-e2e -f examples/full-cluster/cluster.yaml
-awsbnkctl scenarios run --all -f examples/full-cluster/cluster.yaml
-```
-
-Which scenario needs what, and the VIP each one owns, is in
+All 15 run here. `ai-inference-e2e` needs `--synthetic` (no GPU node group).
+Run `core-file-collection` last: it patches the CNEInstance and TMM restarts.
+`egress-snat` is control-plane only on dual-interface; switch to
+`external-only` for the real data path. Prerequisites and VIPs:
 [`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
 
+## BGP
 
-## Cost & teardown
+`bnk.bgp: true` opens TCP 179 and UDP 3784 from the external subnet on the
+data-plane security group and the external VLAN. To actually peer, build a
+Route Server endpoint in that subnet and apply
+[`bgp-route-server.yaml`](bgp-route-server.yaml) with the endpoint's address in
+place of `10.0.10.31`. Procedure, verification and the teardown order (the
+endpoint bills ~US$0.75/hour and blocks subnet deletion) are in
+[`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md).
 
-Billable while up: 3x `m6i.4xlarge` workers, the EKS control plane, one NAT
-gateway, and (if `testing.jumphost.enabled`) a `t3.small` jumphost — roughly
-**$3/hour** at `ap-southeast-2` on-demand rates, excluding data transfer and EBS.
-Nothing in this topology scales to zero, so an idle cluster costs the same as a
-busy one. Demo mode adds nothing; enabling `bigipVE` adds a `c5n.2xlarge` plus
-PAYG BIG-IP licensing.
-
-Destroy everything when you are done:
+## Teardown
 
 ```bash
-awsbnkctl down --config my-cluster.yaml --yes
+awsbnkctl down -f cluster.yaml --yes
 ```
 
-`down` works in reverse phase order and is safe to re-run. It discovers
-resources by the `awsbnkctl:cluster=<name>` tag, so it still cleans up if the
-local state directory is lost.
+`down` runs the phases in reverse, is safe to re-run, and finds resources by the
+`awsbnkctl:cluster=<name>` tag even if `.awsbnkctl/` is gone. Remove any Route
+Server endpoint first.
