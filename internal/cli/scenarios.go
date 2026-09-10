@@ -112,7 +112,21 @@ func topoSort(all []scenarios.Scenario) ([]scenarios.Scenario, error) {
 		return nil, fmt.Errorf("scenarios run --all: dep cycle among %v", unresolved)
 	}
 
-	return sorted, nil
+	// Belt-and-braces guard: ensure core-file-collection is sorted last.
+	var finalSorted []scenarios.Scenario
+	var coreFileScn scenarios.Scenario
+	for _, s := range sorted {
+		if s.Name() == "core-file-collection" {
+			coreFileScn = s
+		} else {
+			finalSorted = append(finalSorted, s)
+		}
+	}
+	if coreFileScn != nil {
+		finalSorted = append(finalSorted, coreFileScn)
+	}
+
+	return finalSorted, nil
 }
 
 // runAllScenarios runs every registered scenario in topo-sorted dependency order.

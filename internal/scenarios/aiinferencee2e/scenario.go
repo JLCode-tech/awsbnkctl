@@ -274,7 +274,8 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		details = "Green: full data-plane (synthetic GPU) — llm-d-inference-sim running on CPU node and reachable through the BNK VIP."
 	}
 	res := scenarios.Result{
-		Details: details,
+		DataPath: true,
+		Details:  details,
 	}
 
 	// 1. vLLM Deployment Available (GPU model load can take several minutes;

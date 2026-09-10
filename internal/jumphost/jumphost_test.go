@@ -188,3 +188,39 @@ func TestBuildSourceIPResponderCmd(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateProbeOptions(t *testing.T) {
+	// Valid options
+	okOpts := jumphost.ProbeOptions{
+		SourceIP: "10.50.10.200",
+		VIP:      "10.50.10.100",
+	}
+	if err := jumphost.ValidateProbeOptions(okOpts); err != nil {
+		t.Errorf("expected valid options to pass, got %v", err)
+	}
+
+	// Source == VIP collision
+	collisionOpts := jumphost.ProbeOptions{
+		SourceIP: "10.50.10.100",
+		VIP:      "10.50.10.100",
+	}
+	if err := jumphost.ValidateProbeOptions(collisionOpts); err == nil {
+		t.Errorf("expected source == VIP to fail validation")
+	}
+
+	// Source in Gateway VIP range (.100-.119)
+	for i := 100; i <= 119; i++ {
+		rangeOpts := jumphost.ProbeOptions{
+			SourceIP: strings.Replace(okOpts.SourceIP, "200", strings.TrimSpace(string(rune('0'+i))), 1),
+			VIP:      "10.50.10.50",
+		}
+		_ = rangeOpts
+	}
+	vipRangeOpts := jumphost.ProbeOptions{
+		SourceIP: "10.50.10.105",
+		VIP:      "10.50.10.50",
+	}
+	if err := jumphost.ValidateProbeOptions(vipRangeOpts); err == nil {
+		t.Errorf("expected source in VIP range to fail validation")
+	}
+}

@@ -41,6 +41,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
 	"github.com/JLCode-tech/awsbnkctl/pkg/bnk"
@@ -223,7 +224,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		d = &real
 	}
 	ns := namespace(ctx)
-	res := scenarios.Result{}
+	res := scenarios.Result{DataPath: true}
 
 	// --- Step 0: Start the off-cluster HTTP responder FIRST ---
 	// The EndpointSlice endpoint must be live before TMM health-checks it,
@@ -384,6 +385,15 @@ func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	}
 	if v.BackendIP == "" {
 		return v, fmt.Errorf("JUMPHOST_BNK_EXT_ENI_IP empty in state.env — run `awsbnkctl up` with testing.jumphost.enabled=true (the jumphost is this scenario's external Pool backend)")
+	}
+	if v.BackendIP == v.VIP {
+		return v, fmt.Errorf("backend IP (%s) cannot equal Gateway VIP (%s)", v.BackendIP, v.VIP)
+	}
+	parts := strings.Split(v.BackendIP, ".")
+	if len(parts) == 4 {
+		if octet, err := strconv.Atoi(parts[3]); err == nil && intent.IsReservedGatewayVIPOffset(octet) {
+			return v, fmt.Errorf("backend IP (%s) collides with Gateway VIP range (.100-.119)", v.BackendIP)
+		}
 	}
 	return v, nil
 }

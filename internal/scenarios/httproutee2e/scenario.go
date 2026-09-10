@@ -192,7 +192,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		d = &real
 	}
 	ns := namespace(ctx)
-	res := scenarios.Result{}
+	res := scenarios.Result{DataPath: true}
 
 	// --- Step 1: Control-plane assertions ---
 	// Order is load-bearing: control-plane must be settled before ResyncHTTPRoutes.

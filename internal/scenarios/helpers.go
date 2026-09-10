@@ -179,7 +179,11 @@ func BuildProbeParams(ctx *Context) (vip string, iterations int, timeout time.Du
 func FinalizeResult(res Result) Result {
 	if res.AllPassed() {
 		res.Status = "ok"
-		res.Summary = "control-plane reconciled + end-to-end curls via Gateway returned HTTP 200"
+		if res.DataPath {
+			res.Summary = "control-plane reconciled + end-to-end data-plane traffic verified"
+		} else {
+			res.Summary = "control-plane reconciled + assertions passed"
+		}
 	} else {
 		res.Status = "failed"
 		var failed []string

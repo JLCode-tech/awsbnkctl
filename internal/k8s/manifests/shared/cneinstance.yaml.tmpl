@@ -44,11 +44,13 @@ spec:
   pseudoCNI:
     enabled: true
   coreCollection:
-    enabled: false
+    enabled: true
   intelligentLB:
     enabled: true
   tmmReplicas: 1
   advanced:
+    coremon:
+      hostPath: true
     # envDiscovery disabled on EKS: F5 checks expect DPU/SR-IOV (OVN annotations,
     # VF interfaces, sriovdp-config CM, SRIOV CNI). None apply on AWS host-device.
     # With enabled=true + stopOnFail=false the per-node EnvDiscoveryFailed conditions

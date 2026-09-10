@@ -54,6 +54,7 @@ type Result struct {
 	Status     string      `json:"status"` // ok | failed | skipped | dry-run
 	Summary    string      `json:"summary"`
 	Details    string      `json:"details,omitempty"`
+	DataPath   bool        `json:"data_path,omitempty"`
 	Assertions []Assertion `json:"assertions,omitempty"`
 	Manifest   string      `json:"manifest_path,omitempty"`
 	EnvDiagram string      `json:"env_diagram,omitempty"`

@@ -307,6 +307,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 				Got:         probeErr.Error(),
 			})
 		} else {
+			res.DataPath = true
 			dpAssertions := d.DataPathVerifyFn(ctx.Ctx, ctx, vip)
 			res.Assertions = append(res.Assertions, dpAssertions...)
 		}

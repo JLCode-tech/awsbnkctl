@@ -299,6 +299,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 	if skipped {
 		res.Details = "Amber: control-plane only on this run — data-plane SNAT source-IP proof needs the jumphost (testing.jumphost.enabled=true)."
 	} else {
+		res.DataPath = true
 		res.Details = "Control plane + data path: the reflector on the jumphost data-path ENI reports the source the pod's egress arrived from."
 	}
 
