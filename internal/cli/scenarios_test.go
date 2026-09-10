@@ -74,3 +74,20 @@ func TestTopoSort_SingleScenario(t *testing.T) {
 		t.Errorf("sorted = %v, want [only]", sorted)
 	}
 }
+
+func TestTopoSort_CoreFileCollectionSortedLast(t *testing.T) {
+	core := &fakeScenarioCLI{name: "core-file-collection"}
+	a := &fakeScenarioCLI{name: "http-routing-e2e"}
+	b := &fakeScenarioCLI{name: "cluster-wide-watch"}
+	// Put core-file-collection first in input slice
+	sorted, err := topoSort([]scenarios.Scenario{core, a, b})
+	if err != nil {
+		t.Fatalf("topoSort: %v", err)
+	}
+	if len(sorted) != 3 {
+		t.Fatalf("sorted len = %d, want 3", len(sorted))
+	}
+	if sorted[2].Name() != "core-file-collection" {
+		t.Errorf("last scenario = %s, want core-file-collection", sorted[2].Name())
+	}
+}

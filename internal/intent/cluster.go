@@ -696,6 +696,15 @@ func (c *Cluster) StateDir() string {
 	return ".awsbnkctl/" + c.Metadata.Name
 }
 
+// DefaultVIPHostOffset is the host octet for the default Gateway VIP (.100).
+const DefaultVIPHostOffset = 100
+
+// DefaultJumphostExtHostOffset is the host octet for the jumphost secondary ENI (.200).
+const DefaultJumphostExtHostOffset = 200
+
+// DefaultTMMSelfIPHostOffset is the host octet for the TMM external SelfIP (.240).
+const DefaultTMMSelfIPHostOffset = 240
+
 // DefaultVIP returns the default Gateway VIP for this cluster.
 // Convention: <dataPath.external.cidr network>.100 — e.g. 10.0.10.0/24 → 10.0.10.100.
 // Returns an error when network.dataPath.external.cidr is not set.
@@ -715,6 +724,32 @@ func (c *Cluster) DefaultVIP() (string, error) {
 	}
 	parts[3] = "100"
 	return strings.Join(parts, "."), nil
+}
+
+// DefaultJumphostExtIP returns the default jumphost external ENI IP for this cluster.
+// Convention: <dataPath.external.cidr network>.200 — e.g. 10.0.10.0/24 → 10.0.10.200.
+// Returns an error when network.dataPath.external.cidr is not set.
+func (c *Cluster) DefaultJumphostExtIP() (string, error) {
+	if c.Network.DataPath == nil || c.Network.DataPath.External.CIDR == "" {
+		return "", errors.New("network.dataPath.external.cidr not set")
+	}
+	cidr := c.Network.DataPath.External.CIDR
+	slash := strings.IndexByte(cidr, '/')
+	if slash <= 0 {
+		return "", fmt.Errorf("malformed dataPath.external.cidr %q", cidr)
+	}
+	network := cidr[:slash]
+	parts := strings.Split(network, ".")
+	if len(parts) != 4 {
+		return "", fmt.Errorf("non-IPv4 dataPath.external.cidr %q", cidr)
+	}
+	parts[3] = "200"
+	return strings.Join(parts, "."), nil
+}
+
+// IsReservedGatewayVIPOffset returns true if the host offset falls in the BNK Gateway VIP plan (.100 to .119).
+func IsReservedGatewayVIPOffset(offset int) bool {
+	return offset >= 100 && offset <= 119
 }
 
 // Load reads and validates a cluster.yaml file at path.

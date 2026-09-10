@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,6 +128,9 @@ func prepareEICEKey(ctx context.Context, region, instanceID string) (keyPath, pu
 // the operator workflow already used for jumphost probing. Requires the `aws` CLI and
 // `ssh` to be on PATH.
 func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error) {
+	if err := validateProbeOptions(opts); err != nil {
+		return nil, err
+	}
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
 	}
@@ -307,6 +311,9 @@ func SSHCurlBodyViaEICE(ctx context.Context, region, instanceID, keyPath, source
 // The Host header is set from opts.Hostname (empty = no header).
 // Returns per-iteration results including the response body.
 func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResult, error) {
+	if err := validateProbeOptions(opts); err != nil {
+		return nil, err
+	}
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
 	}
@@ -511,6 +518,22 @@ func StartSourceIPResponder(ctx context.Context, opts ProbeOptions, port int) er
 	}
 	if strings.TrimSpace(out) != "200" {
 		return fmt.Errorf("source-IP responder on :%d did not return 200 (remote stdout: %q)", port, out)
+	}
+	return nil
+}
+
+// validateProbeOptions guards against source IP == VIP and source IP in VIP range.
+func validateProbeOptions(opts ProbeOptions) error {
+	if opts.SourceIP != "" && opts.VIP != "" && opts.SourceIP == opts.VIP {
+		return fmt.Errorf("probe source IP (%s) cannot equal target VIP (%s)", opts.SourceIP, opts.VIP)
+	}
+	if opts.SourceIP != "" {
+		parts := strings.Split(opts.SourceIP, ".")
+		if len(parts) == 4 {
+			if octet, err := strconv.Atoi(parts[3]); err == nil && octet >= 100 && octet <= 119 {
+				return fmt.Errorf("probe source IP (%s) collides with Gateway VIP range (.100-.119)", opts.SourceIP)
+			}
+		}
 	}
 	return nil
 }

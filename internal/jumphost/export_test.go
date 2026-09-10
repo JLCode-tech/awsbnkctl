@@ -40,3 +40,6 @@ var PushSSHPublicKeyFn = &pushSSHPublicKeyFn
 
 // BuildSourceIPResponderCmd exposes buildSourceIPResponderCmd for unit tests.
 var BuildSourceIPResponderCmd = buildSourceIPResponderCmd
+
+// ValidateProbeOptions exposes validateProbeOptions for unit tests.
+var ValidateProbeOptions = validateProbeOptions

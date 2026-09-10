@@ -2239,3 +2239,35 @@ cluster:
 		t.Errorf("DefaultKubernetesVersion %q is above the highest tested minor 1.%d", DefaultKubernetesVersion, maxTestedKubernetesMinor)
 	}
 }
+
+func TestDefaultJumphostExtIP(t *testing.T) {
+	c := &Cluster{
+		Network: Network{
+			DataPath: &DataPathSpec{
+				External: SubnetSpec{
+					CIDR: "10.50.10.0/24",
+				},
+			},
+		},
+	}
+	ip, err := c.DefaultJumphostExtIP()
+	if err != nil {
+		t.Fatalf("DefaultJumphostExtIP error: %v", err)
+	}
+	if ip != "10.50.10.200" {
+		t.Errorf("got %q, want 10.50.10.200", ip)
+	}
+}
+
+func TestIsReservedGatewayVIPOffset(t *testing.T) {
+	for i := 100; i <= 119; i++ {
+		if !IsReservedGatewayVIPOffset(i) {
+			t.Errorf("expected offset %d to be reserved", i)
+		}
+	}
+	for _, i := range []int{1, 50, 99, 120, 200, 240} {
+		if IsReservedGatewayVIPOffset(i) {
+			t.Errorf("expected offset %d to not be in Gateway VIP plan", i)
+		}
+	}
+}

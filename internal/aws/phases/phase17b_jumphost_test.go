@@ -2,6 +2,7 @@ package phases
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -379,5 +380,23 @@ func TestPhase17bJumphostDown_TagDiscoveryFallback(t *testing.T) {
 	// State cleared.
 	if got := st.Get("JUMPHOST_INSTANCE_ID"); got != "" {
 		t.Errorf("JUMPHOST_INSTANCE_ID = %q after down, want empty", got)
+	}
+}
+
+func TestValidateJumphostExtIP(t *testing.T) {
+	// Valid IPs
+	if err := validateJumphostExtIP("10.50.10.200"); err != nil {
+		t.Errorf("expected 10.50.10.200 to be valid, got %v", err)
+	}
+	if err := validateJumphostExtIP("10.50.10.50"); err != nil {
+		t.Errorf("expected 10.50.10.50 to be valid, got %v", err)
+	}
+
+	// Colliding IPs with Gateway VIP plan (.100 to .119)
+	for i := 100; i <= 119; i++ {
+		ip := fmt.Sprintf("10.50.10.%d", i)
+		if err := validateJumphostExtIP(ip); err == nil {
+			t.Errorf("expected %s to fail validation (VIP collision)", ip)
+		}
 	}
 }

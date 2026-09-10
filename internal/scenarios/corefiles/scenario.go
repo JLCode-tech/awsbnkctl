@@ -97,9 +97,17 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 	if ctx.Dynamic == nil {
 		return nil
 	}
-	patch := []byte(`{"spec":{"coreCollection":{"enabled":true},"advanced":{"coremon":{"hostPath":true}}}}`)
 	ns, name := cneInstanceRef(ctx)
-	_, err := ctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Patch(
+	obj, err := ctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx.Ctx, name, metav1.GetOptions{})
+	if err == nil {
+		enabled, found, _ := unstructured.NestedBool(obj.Object, "spec", "coreCollection", "enabled")
+		if found && enabled {
+			// Already enabled at rollout — no patch needed, no DaemonSet restart.
+			return nil
+		}
+	}
+	patch := []byte(`{"spec":{"coreCollection":{"enabled":true},"advanced":{"coremon":{"hostPath":true}}}}`)
+	_, err = ctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Patch(
 		ctx.Ctx, name, types.MergePatchType, patch, metav1.PatchOptions{},
 	)
 	if err != nil {

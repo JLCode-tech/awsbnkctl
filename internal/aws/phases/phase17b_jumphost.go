@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -183,7 +184,13 @@ func Phase17bJumphost(ctx context.Context, cl *intent.Cluster, st *state.State, 
 	st.Set("JUMPHOST_INSTANCE_TYPE", instanceType)
 
 	// Step 6: secondary ENI in BNK_EXT.
-	extENIID, extENIIP, err := ensureJumphostSecondaryENI(ctx, clients.EC2, name, bnkExtSubnet, sgBNKData, instanceID, cl.Tags, cl.Metadata.Labels, st)
+	var expectedExtIP string
+	if cl != nil {
+		if ip, err := cl.DefaultJumphostExtIP(); err == nil {
+			expectedExtIP = ip
+		}
+	}
+	extENIID, extENIIP, err := ensureJumphostSecondaryENI(ctx, clients.EC2, name, bnkExtSubnet, sgBNKData, instanceID, expectedExtIP, cl.Tags, cl.Metadata.Labels, st)
 	if err != nil {
 		return fmt.Errorf("phase17b: secondary ENI: %w", err)
 	}
@@ -590,7 +597,7 @@ func ensureJumphostInstance(ctx context.Context, ec2c EC2API, clusterName, subne
 // attaches it to the jumphost instance at device-index=1.
 // Returns (eniID, eniPrivateIP, error).
 func ensureJumphostSecondaryENI(ctx context.Context, ec2c EC2API, clusterName, subnetID, sgID,
-	instanceID string, extraTags, labels map[string]string, st *state.State) (string, string, error) {
+	instanceID string, expectedIP string, extraTags, labels map[string]string, st *state.State) (string, string, error) {
 
 	// Check state first.
 	if eniID := st.Get("JUMPHOST_BNK_EXT_ENI_ID"); eniID != "" {
@@ -598,14 +605,20 @@ func ensureJumphostSecondaryENI(ctx context.Context, ec2c EC2API, clusterName, s
 		if eniIP == "" {
 			eniIP = getENIPrivateIP(ctx, ec2c, eniID)
 		}
-		fmt.Fprintf(os.Stderr, "[phase 17b] BNK_EXT ENI found in state: %s\n", eniID)
+		if err := validateJumphostExtIP(eniIP); err != nil {
+			return "", "", fmt.Errorf("reused BNK_EXT ENI from state %s: %w", eniID, err)
+		}
+		fmt.Fprintf(os.Stderr, "[phase 17b] BNK_EXT ENI found in state: %s (ip=%s)\n", eniID, eniIP)
 		return eniID, eniIP, nil
 	}
 
 	// Tag-discovery fallback.
 	if eniID := lookupENIByTag(ctx, ec2c, clusterName, tags.CompJumphostENIExt); eniID != "" {
 		eniIP := getENIPrivateIP(ctx, ec2c, eniID)
-		fmt.Fprintf(os.Stderr, "[phase 17b] BNK_EXT ENI found via tags: %s\n", eniID)
+		if err := validateJumphostExtIP(eniIP); err != nil {
+			return "", "", fmt.Errorf("reused BNK_EXT ENI from tags %s: %w", eniID, err)
+		}
+		fmt.Fprintf(os.Stderr, "[phase 17b] BNK_EXT ENI found via tags: %s (ip=%s)\n", eniID, eniIP)
 		return eniID, eniIP, nil
 	}
 
@@ -617,14 +630,19 @@ func ensureJumphostSecondaryENI(ctx context.Context, ec2c EC2API, clusterName, s
 		labels,
 	)
 
-	out, err := ec2c.CreateNetworkInterface(ctx, &ec2.CreateNetworkInterfaceInput{
+	input := &ec2.CreateNetworkInterfaceInput{
 		SubnetId:    ptr(subnetID),
 		Groups:      []string{sgID},
 		Description: ptr(eniName),
 		TagSpecifications: []ec2types.TagSpecification{
 			tagSpecification(ec2types.ResourceTypeNetworkInterface, eniTags),
 		},
-	})
+	}
+	if expectedIP != "" {
+		input.PrivateIpAddress = ptr(expectedIP)
+	}
+
+	out, err := ec2c.CreateNetworkInterface(ctx, input)
 	if err != nil {
 		return "", "", fmt.Errorf("ec2:CreateNetworkInterface jumphost BNK_EXT: %w", err)
 	}
@@ -632,6 +650,10 @@ func ensureJumphostSecondaryENI(ctx context.Context, ec2c EC2API, clusterName, s
 	eniIP := ""
 	if out.NetworkInterface.PrivateIpAddress != nil {
 		eniIP = *out.NetworkInterface.PrivateIpAddress
+	}
+
+	if err := validateJumphostExtIP(eniIP); err != nil {
+		return "", "", fmt.Errorf("created BNK_EXT ENI %s: %w", eniID, err)
 	}
 
 	// Disable source/dest check so the jumphost can route traffic.
@@ -649,6 +671,25 @@ func ensureJumphostSecondaryENI(ctx context.Context, ec2c EC2API, clusterName, s
 
 	fmt.Fprintf(os.Stderr, "[phase 17b] created+attached BNK_EXT ENI %s (ip=%s)\n", eniID, eniIP)
 	return eniID, eniIP, nil
+}
+
+func validateJumphostExtIP(ipStr string) error {
+	if ipStr == "" {
+		return nil
+	}
+	parsed := net.ParseIP(ipStr)
+	if parsed == nil {
+		return fmt.Errorf("invalid IP %q", ipStr)
+	}
+	v4 := parsed.To4()
+	if v4 == nil {
+		return fmt.Errorf("non-IPv4 address %q", ipStr)
+	}
+	offset := int(v4[3])
+	if intent.IsReservedGatewayVIPOffset(offset) {
+		return fmt.Errorf("jumphost IP %s collides with Gateway VIP plan (.%d is reserved for VIPs)", ipStr, offset)
+	}
+	return nil
 }
 
 // jumphostUserData returns the cloud-init shell script that activates the
