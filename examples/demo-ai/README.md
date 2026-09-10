@@ -1,100 +1,73 @@
-# Demo AI — BNK Protocol Demo + SageMaker AI Rig
+# demo-ai — protocol demos plus AI inference
 
-> [!IMPORTANT]
-> **Cost Warning:** This is a chargeable footprint (~$12–13/hr). The SageMaker `ml.g6.12xlarge` endpoint accounts for ~$7–8/hr. Remember to tear down after use!
+| | |
+| --- | --- |
+| Cluster name | `bnk-demo-ai` (state in `.awsbnkctl/bnk-demo-ai/`) |
+| Region / pattern | `ap-southeast-2` / `dual-interface`, demo mode on |
+| Footprint | 3 × m6i.4xlarge + 1 × g5.xlarge GPU node, EKS, NAT, c6i.4xlarge jumphost, SageMaker `ml.g6.12xlarge` endpoint |
+| Cost | about **US$12/hour**; the SageMaker endpoint is US$7.50 of it |
 
-The `demo-ai` topology extends the standard full cluster demo by adding an **AI inference rig**. It is the one AI example: the former `ai-rig` (Llama-3-8B on `ml.g5.xlarge`, no protocol demos) lives on here as a commented alternative in `cluster.yaml` — swap the SageMaker model lines and set `demo.enabled: false` to get that leaner, ~$6/hr rig. It provides:
-1. **GPU Node Group:** `g5.xlarge` for in-cluster vLLM.
-2. **SageMaker LMI Endpoint:** Disposable managed endpoint (defaults to Qwen2.5-32B-Instruct) created on `up` and destroyed on `down`.
+`full-cluster` with three additions: a GPU node group that runs vLLM in the
+cluster, the AWS Load Balancer Controller, and a disposable SageMaker endpoint
+(Qwen2.5-32B by default) that `up` creates and `down` deletes. Demo mode is on,
+so the protocol demos run here too.
+
+**The lean rig.** For inference benchmarking without the protocol demos, set
+`demo.enabled: false` and switch the SageMaker block to the commented
+Llama-3-8B / `ml.g5.xlarge` alternative in `cluster.yaml`. That is about
+US$6/hour and is what the former `ai-rig` example was.
 
 ## Prerequisites
 
-- **AWS Account:** Credentials configured.
-- **F5 Supply-Chain Files:** `./cne_pull_64.json` and `./license.jwt`.
-- **Hugging Face Token:** Saved in a gitignored `.hf_token` file.
-- **BNK Forge:** A reachable bnk-forge instance with password provided via `AWSBNKCTL_FORGE_PASSWORD`.
-- **Quotas:** Standard demo quotas + 1-node `g5.xlarge` and SageMaker endpoint capacity.
+- F5 credentials next to `cluster.yaml` (`cne_pull_64.json`, `license.jwt`).
+- A Hugging Face token in `.hf_token` for the gated models.
+- A reachable BNK Forge instance if you want benchmarks; its password via
+  `AWSBNKCTL_FORGE_PASSWORD`.
+- Quota for one `g5.xlarge` and one SageMaker `ml.g6.12xlarge` (or `ml.g5.xlarge`) endpoint.
 
-## Quick Start
-
-### 1. Provision
-```bash
-# Validate (includes GPU-fit preflight for SageMaker)
-awsbnkctl validate examples/demo-ai/cluster.yaml
-
-# Provision (pass HF token and forge password inline)
-HF_TOKEN=$(cat .hf_token) AWSBNKCTL_FORGE_PASSWORD=admin123 \
-  awsbnkctl up --config examples/demo-ai/cluster.yaml
-```
-> [!NOTE]
-> The SageMaker endpoint is created asynchronously. Ensure it reaches `InService` before benchmarking using `aws sagemaker describe-endpoint`.
-
-### 2. Run Protocol Demos
-```bash
-awsbnkctl demo run --all --config examples/demo-ai/cluster.yaml
-```
-
-### 3. Teardown
-```bash
-awsbnkctl down --config examples/demo-ai/cluster.yaml --yes
-```
-
-## BGP peering with AWS Route Server
-
-`cluster.yaml` sets `bnk.bgp: true`, so `up` opens TCP 179 (BGP) and UDP 3784
-(BFD) from the external subnet (`10.0.10.0/24`) on the data-plane security group
-and on the external `F5SPKVlan`. That makes TMM's external SelfIP
-(`10.0.10.240`) reachable as a BGP peer. Nothing peers until you create a Route
-Server endpoint in that subnet and apply [`bgp-route-server.yaml`](bgp-route-server.yaml),
-replacing its `10.0.10.31` placeholder with the endpoint's address. The full
-procedure, verification and teardown order are in
-[`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md); state for this
-cluster lives in `.awsbnkctl/bnk-demo-ai/`. BGP is optional here: the Gateway VIP
-(`10.0.10.100`) is reachable inside the VPC without it, because the
-cne-controller assigns it as a secondary IP on TMM's external ENI.
-
-> [!NOTE]
-> A Route Server endpoint bills about $0.75/hour and blocks deletion of the
-> external subnet. Remove it before `awsbnkctl down`.
-
-## Scenarios
-
-All 15 scenarios run here with `ai-inference-e2e` on the real GPU node group (`HF_TOKEN`). Demo mode is on, so `diameter`, `http2` and `ingress-migration` run too; `bigip-cis` does not (no `bigipVE:` block). Run `core-file-collection` last, and treat `egress-snat` the same way on this dual-interface cluster.
+## Run it
 
 ```bash
-awsbnkctl scenarios list
-awsbnkctl scenarios run http-routing-e2e -f examples/demo-ai/cluster.yaml
-awsbnkctl scenarios run --all -f examples/demo-ai/cluster.yaml
+awsbnkctl validate examples/demo-ai/cluster.yaml          # includes the GPU-fit check for SageMaker
+HF_TOKEN=$(cat .hf_token) AWSBNKCTL_FORGE_PASSWORD=<pw> \
+  awsbnkctl up -f examples/demo-ai/cluster.yaml
+
+aws sagemaker describe-endpoint --endpoint-name bnk-demo-ai-lmi --query EndpointStatus   # wait for InService
+awsbnkctl demo run --all -f examples/demo-ai/cluster.yaml
+awsbnkctl scenarios run ai-inference-e2e -f examples/demo-ai/cluster.yaml
 ```
 
-Which scenario needs what, and the VIP each one owns, is in
-[`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
+## Scenarios and demos
 
+All 15 scenarios run here, and `ai-inference-e2e` runs on the real GPU node
+(export `HF_TOKEN`). `ai-token-counting` and `ai-semantic-cache` can point at
+the vLLM backend for their data-path step. Demo mode gives you `diameter`,
+`http2` and `ingress-migration`; `bigip-cis` needs the `bigipVE:` block, which
+only `full-cluster` carries. Run `core-file-collection` last.
+Details: [`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
 
-## Cost & teardown
+## Proxy shootout
 
-The most expensive topology in `examples/`. Approximate `ap-southeast-2`
-on-demand rates while up, excluding data transfer and EBS:
+`shootout/bringup.sh` builds a three-way comparison of BNK, HAProxy and Envoy AI
+Gateway in front of the SageMaker endpoint (via a shared SigV4 hop) and prints
+the Forge benchmark commands to run. It reads the cluster name, region and its
+`.130` VIP from `cluster.yaml`. Run `shootout/teardown.sh` before `awsbnkctl
+down`, otherwise the LoadBalancer Services leak NLBs.
 
-| Component | Qty | Approx. $/hr |
-| --- | --- | --- |
-| SageMaker `ml.g6.12xlarge` endpoint | 1 | 7.50 |
-| (alternative) SageMaker `ml.g5.xlarge` endpoint, Llama-3-8B | 1 | 1.50 |
-| `m6i.4xlarge` BNK worker | 3 | 2.80 |
-| `g5.xlarge` GPU inference node | 1 | 1.30 |
-| `c6i.4xlarge` load-generator jumphost | 1 | 0.90 |
-| EKS control plane | 1 | 0.10 |
-| NAT gateway | 1 | 0.06 |
+## BGP
 
-`down` deletes the SageMaker Endpoint, EndpointConfig and Model in reverse order,
-then the GPU node group, so no AI infrastructure bills between sessions. The
-endpoint alone is over half the hourly cost — confirm it is gone:
+`bnk.bgp: true` opens the BGP/BFD ports; to peer, follow
+[`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md) and apply
+[`bgp-route-server.yaml`](bgp-route-server.yaml). Remove the Route Server
+endpoint before `down`.
+
+## Teardown
 
 ```bash
-aws sagemaker list-endpoints --region ap-southeast-2
+awsbnkctl down -f examples/demo-ai/cluster.yaml --yes
+aws sagemaker list-endpoints --region ap-southeast-2       # must be empty
 ```
 
-## Proxy Shootout (Advanced)
-A manual shootout comparing BNK vs HAProxy vs Envoy AI Gateway. All proxies forward to a shared SigV4 hop that rewrites the path and signs requests before sending to SageMaker. 
-> [!TIP]
-> Teardown LoadBalancer Services **before** running `awsbnkctl down` to prevent AWS NLB leaks.
+`down` deletes the SageMaker endpoint, its config and model, then the GPU node
+group, so nothing bills between sessions. The endpoint is over half the hourly
+cost; confirm it is gone.

@@ -189,3 +189,19 @@ only inputs are `network.dataPath.external.cidr` and the per-scenario octet.
 | `.240` | TMM external SelfIP (`<subnet>.240`, Phase 17) | infrastructure |
 
 `cwc-admin-access`, `core-file-collection` and `egress-snat` allocate no VIP.
+
+### Per example
+
+Every deployable example enables the jumphost, so all 15 scenarios run on all of
+them. What differs is where the data-path steps are real.
+
+| Example | `ai-inference-e2e` | `egress-snat` data path | Demo use-cases | Notes |
+| --- | --- | --- | --- | --- |
+| `full-cluster` | `--synthetic` only | control plane only; real after the external-only swap | uncomment `demo:` (and `bigipVE:` for `bigip-cis`) | the reference target for the suite |
+| `egress-demo` | `--synthetic` only | **real** (`ext-vlan`) | `up --demo` | the scenario and the demo each create their own `F5SPKEgress`; run one at a time |
+| `demo-ai` | **real** GPU node, `HF_TOKEN` | control plane only | on: `diameter`, `http2`, `ingress-migration` | `ai-token-counting` / `ai-semantic-cache` can point at the vLLM leg |
+| `agentcore-demo` | `--synthetic` only | control plane only | `up --demo` | demo Gateway on `.150`, clear of the scenario range |
+
+Run `core-file-collection` last: it patches the CNEInstance and FLO restarts
+TMM. On dual-interface clusters run `egress-snat` last too; the VXLAN shape it
+applies there is known to disturb ingress on AWS.
