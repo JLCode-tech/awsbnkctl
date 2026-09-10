@@ -3,7 +3,8 @@
 Each directory is a self-contained topology: a `cluster.yaml` intent file that
 `awsbnkctl up` can provision, plus a README explaining what it demonstrates and
 what it costs. Copy one, point the two F5 credential paths at your own files, and
-run it. (`local-zone` is the exception — reference manifests, no `cluster.yaml`.)
+run it. (`local-zone` and `singapore-pe` are the exceptions — reference manifests,
+no `cluster.yaml` of their own.)
 
 | Example | Pattern | Approx. $/hr | What it demonstrates |
 | --- | --- | --- | --- |
@@ -12,10 +13,11 @@ run it. (`local-zone` is the exception — reference manifests, no `cluster.yaml
 | [`egress-demo`](egress-demo/) | `external-only` | ~3 | Transparent egress and an egress firewall ACL, flipped on and off by applying one CR |
 | [`ai-rig`](ai-rig/) | `external-only` | ~6 | BNK fronting GPU inference, with an optional disposable SageMaker endpoint |
 | [`demo-ai`](demo-ai/) | `dual-interface` (`host-device`) | ~12 | `full-cluster` and `ai-rig` composed into one cluster: all protocol demos plus managed inference |
-| [`agentcore-demo`](agentcore-demo/) | `external-only` | ~4 | Integrated AI Agent infrastructure: provisions MCP tools, LLM orchestrators, and AI APIs safely behind BNK |
+| [`agentcore-demo`](agentcore-demo/) | `external-only` | ~4 | One MCP tool pod behind a BNK Gateway: an Amazon Bedrock AgentCore runtime calls the tool through BNK, demonstrating AgentCore runtime → BNK → tool governance |
 | [`local-zone`](local-zone/) | n/a — no `cluster.yaml` | n/a | Reference telco/edge custom resources (SCTP, Diameter, HTTP/2, SNAT pool) to apply to an existing cluster |
+| [`singapore-pe`](singapore-pe/) | n/a — manifest only | n/a | BGP `RoutingTemplate` + `GlobalRoutingConfig` for peering TMM with an AWS Route Server; apply to a cluster provisioned with `bnk.bgp: true` |
 
-Six directories, not one per permutation. Where two topologies differed by a
+Eight directories, not one per permutation. Where two topologies differed by a
 single field, they are one file with the alternative documented in place —
 `full-cluster` carries demo mode and the BIG-IP appliance as commented blocks,
 and `external-only` carries the SR-IOV pattern as a one-line swap. That keeps
@@ -56,7 +58,7 @@ Every `cluster.yaml` here follows the same rules:
   under `.awsbnkctl/`. Pick something unique in your account so tag-based
   discovery on `down` never collides with another cluster.
 - **`metadata.region` is always explicit** — `awsbnkctl` never guesses a region.
-- **`cluster.kubernetesVersion` is 1.32 or newer.** 1.32 is both the mandated
+- **`cluster.kubernetesVersion` is 1.34 or newer.** 1.34 is both the mandated
   floor and the default when the key is omitted; `validate` rejects anything
   lower before making an AWS call. BNK 2.3 installs cleanly up to 1.35 — 1.36+
   gets a warning, because the apiserver there rejects two core BNK CRDs. See

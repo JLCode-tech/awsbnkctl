@@ -2,13 +2,21 @@
 
 `awsbnkctl up` executes 39 deterministic phases in order via the AWS SDK and Kubernetes API. These phases are divided into four logical stages. Each phase is idempotent and records its outcome in the local `state.env`.
 
-The `awsbnkctl down` command runs these phases in exact reverse order to cleanly destroy the environment.
+`awsbnkctl down` walks the same four stages in reverse, but its step list (`runPhasedDown` in `internal/cli/lifecycle.go`) is not a strict mirror of `up`:
+
+- Before any infrastructure step, every registered demo use-case's `Cleanup` hook runs while the kubeconfig is still valid.
+- Stage 4 starts with `otel-certs` (`Phase15OTELCertsDown`) and `lb-controller` (`Phase14bLBControllerDown`) — the LB controller must go before `flo-helm` and before `irsa-oidc` so its IAM role is gone before its OIDC provider — then continues in reverse: `activation-poll` (25), `pod-manager-heal` (24c), `dssm-overlay` (24b), `cwc-heal` (24), `spk-vlan-gateway-class` (23b), `license` (23), `cne-instance` (22), `irsa-sa` (21), `sriov-dataplane` (20b), `nads` (20), `cloud-network-mapping` (19), `flo-helm` (14), `k8s-foundation` (12).
+- Stage 3 runs `ebs-csi-hugepages` (11b), `nvidia-device-plugin` (11c) and `sagemaker-lmi` while the API server is still reachable, then `kubeconfig` (11), `irsa-oidc` (18), `demo-stage` (17d), `iface-discovery` (17c), `bigip-ve` (17e), `jumphost` (17b), `secondary-enis` (17), `tmm-node-label` (16), `node-group` (10).
+- Stage 2 adds a down-only step, `forge-benchmark-cleanup` (`Phase09bBenchmarkDown`), before `forge-register` (09), `vpc-cni-prefix` (08b) and `eks-cluster` (08).
+- Stage 1 runs `iam` (07), `route-tables` (06), `nat` (05), `igw` (04), `subnets` (03), `vpc` (02).
+
+`preflight` (00), `postflight` (13) and `bigip-onboard` (17f) have no down step — destroying the BIG-IP VE in `bigip-ve` removes everything onboarding created. `--keep-forge-link` skips the forge unregister and `--keep-irsa` preserves the OIDC provider.
 
 ## STAGE 1 — VPC · subnets · IGW · NAT · IAM
 
 - **`preflight`** (`Phase00Preflight`): Validates AWS credentials, EULA acceptance, region, and existing state before mutations begin.
 - **`vpc`** (`Phase02VPC`): Creates the AWS VPC with DNS hostnames and resolution enabled.
-- **`subnets`** (`Phase03Subnets`): Creates the management, public, internal, and external subnets across multiple AZs.
+- **`subnets`** (`Phase03Subnets`): Creates the public and private subnets across the configured AZs, plus the TMM data-path subnets — `subnet-bnk-ext` for every BNK pattern and `subnet-bnk-int` only for `dual-interface`.
 - **`igw`** (`Phase04IGW`): Attaches an Internet Gateway to the VPC.
 - **`nat`** (`Phase05NAT`): Allocates Elastic IPs and creates NAT Gateways for private subnet egress.
 - **`route-tables`** (`Phase06RouteTables`): Configures routing tables for public (IGW) and private (NAT) subnets.

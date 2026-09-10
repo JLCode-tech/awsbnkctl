@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) and AI coding agents
 
 ## What this binary is
 
-`awsbnkctl` is a single-binary Go CLI that drives a full F5 BIG-IP Next for Kubernetes (BNK) 2.3.2 deployment onto an AWS EKS cluster with secondary Elastic Network Interfaces (ENIs) dedicated to the Traffic Management Microkernel (TMM).
+`awsbnkctl` is a single-binary Go CLI that drives a full F5 BIG-IP Next for Kubernetes (BNK) 2.3 deployment onto an AWS EKS cluster with secondary Elastic Network Interfaces (ENIs) dedicated to the Traffic Management Microkernel (TMM). The default CNE release manifest is `2.3.0-3.2598.3-0.0.170` (BNK 2.3.0, `internal/manifest/manifest.go`); operators pin a different 2.3.x build per cluster via the `bnk.manifestVersion` field in `cluster.yaml`.
 
-It executes a deterministic 39-phase provisioning lifecycle implemented directly in Go using the AWS SDK (v2) and client-go — **no Terraform, no host `kubectl`, no host `helm`**.
+It executes a deterministic 39-phase provisioning lifecycle (two phases, `sagemaker-lmi` and `demo-stage`, are conditional) implemented directly in Go using the AWS SDK for Go v2 and client-go — **no Terraform, no host `kubectl`, no host `helm`**. cert-manager `v1.16.1` is applied from embedded upstream YAML via client-go; the EKS floor and default is Kubernetes `1.34` (`intent.MinKubernetesVersion`), 1.35 is the newest tested minor, 1.36+ warns.
 
 ## Key Commands & Development Workflows
 
@@ -23,7 +23,7 @@ gofmt -l internal cmd    # Must produce 0 output
 go vet ./internal/... ./cmd/...
 go tool staticcheck ./internal/... ./cmd/...
 gosec ./...              # Security analyzer (0 findings)
-go test -race ./internal/... ./cmd/...
+go test -race ./internal/... ./cmd/...   # -race needs cgo (CGO_ENABLED=1 + a C toolchain); fall back to plain `go test` where cgo is unavailable
 ```
 
 ### Dry-Run Testing Without AWS Credentials
@@ -37,25 +37,37 @@ AWSBNKCTL_SKIP_AUTH=1 ./bin/awsbnkctl down -f examples/full-cluster/cluster.yaml
 ```
 cmd/awsbnkctl/           # CLI entrypoint (main.go)
 internal/
-├── aws/                 # AWS SDK v2 client, IAM, VPC, EKS, EC2, ENIs
-│   └── phases/          # Exactly 39 ordered provisioning and teardown phases
-├── bnk/                 # BNK manifests, FAR client, CNE & FLO templates, licensing
-├── cli/                 # Cobra CLI commands (up, down, validate, doctor, scenarios, agent, journal)
-├── config/              # cluster.yaml schema, validation, default settings
-├── k8s/                 # Embedded client-go wrapper for K8s API (k subcommand)
-├── jumphost/            # EICE (EC2 Instance Connect Endpoint) tunnel & SSH curling
-├── scenarios/           # 15 automated validation scenarios (HTTP, L4, gRPC, AI, CWC)
-├── topology/            # ASCII data-plane visualizer
-└── version/             # Build version, commit, date, and pinned BNK version metadata
+├── aws/                 # aws-sdk-go-v2 wrappers: VPC, EKS, EC2, IAM, S3, STS, Service Quotas; tags/ and state/ subpackages
+│   └── phases/          # Exactly 39 ordered provisioning and teardown phases (phaseNN_*.go), orchestrated by internal/cli/lifecycle.go
+├── bnkconst/            # BNK-wide constants shared across packages
+├── cli/                 # Cobra command tree — every command lives here; Version/Commit/BuildDate vars in root.go are stamped via -ldflags
+├── config/              # Workspace paths ($AWSBNKCTL_HOME) and global config — NOT the cluster.yaml schema
+├── demo/                # Demo use-case registry + narration (diameter, http2, bigip-cis, ingress-migration)
+├── doctor/              # Prerequisite checks behind `awsbnkctl doctor`
+├── embedded/            # Agentic-mode scaffolding (AGENTS.md, personas/, journal/) shipped in the binary
+├── exec/                # Execution backends: local, docker, k8s, ssh:<target>
+├── forge/               # BNK Forge client (MCP preferred, REST fallback) — register/unregister/benchmark
+├── intent/              # cluster.yaml schema (v1), strict loader, validation, pinned defaults (K8s floor, FLO, cert-manager)
+├── jumphost/            # SSH-via-EICE probe utilities for the test jumphost
+├── k8s/                 # Embedded client-go wrapper (k verbs); manifests/ (cert-manager YAML) and render/ (F5SPKVlan etc.)
+├── manifest/            # F5 release-manifest (BOM) fetch/probe; DefaultManifestVersion lives here
+├── remote/              # Embedded SSH client and target plumbing
+├── scenarios/           # 15 end-to-end validation scenarios (HTTP, L4, gRPC, AI, CWC, core files)
+├── test/                # connectivity / dns / throughput probe runners behind `awsbnkctl test`
+├── topology/            # Data-path topology model + ASCII/mermaid renderers
+└── ui/                  # Terminal output primitives (spinners, progress bars, colour)
+pkg/bnk/                 # Exported BNK runtime helpers (TMM pool-member resync, watch)
 ```
+
+There is no `internal/bnk` and no `internal/version` package.
 
 ## Agentic Mode & Personas
 
 `awsbnkctl` includes built-in agent scaffolding and operational logging:
 - `awsbnkctl agent init` — Scaffolds `AGENTS.md`, `personas/`, and `journal/`.
-- `awsbnkctl agent <cli>` — Outputs optimized command invocations for Claude, Gemini, Aider, OpenAI, etc.
+- `awsbnkctl agent <cli>` — Prints the invocation to launch one of `claude`, `gemini`, `aider`, `openai`, `pi`, `opencode` against the workspace (no other names are accepted).
 - `awsbnkctl journal {add, list, report}` — Maintains an append-only markdown log of operational decisions and execution events.
-- `awsbnkctl mcp serve` — Serves an embedded Model Context Protocol (MCP) server for IDEs and desktop agents.
+- There is **no** `awsbnkctl mcp` command and no embedded MCP server. The binary is only an MCP *client* to BNK Forge (`internal/forge`, used by `forge register`, `up --register-with-forge`, and `benchmark`).
 
 ## Coding Standards & Rules
 1. **File and directory permissions**: Keep directory permissions `0o750` and file write permissions `0o600`.

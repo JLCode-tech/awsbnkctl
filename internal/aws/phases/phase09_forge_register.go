@@ -19,7 +19,7 @@ import (
 //
 // Registration is MCP-first with REST fallback on catalog-gap errors.
 // The entire attempt is wrapped in a 3-retry loop with exponential backoff.
-// On final failure the phase writes forge-link.json with Status="pending"
+// On final failure the phase writes forge_link.json with Status="pending"
 // and returns nil — AWS infra must not be blocked by forge availability.
 //
 // D-005: CheckAuthOrDie is called at entry even though forge calls do not
@@ -128,13 +128,13 @@ func Phase09ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	}
 
 	// All retries failed — write pending link so operator can retry manually.
-	fmt.Fprintf(os.Stderr, "[phase 09] forge handoff failed after 3 retries — wrote forge-link.json with status=pending; run 'awsbnkctl forge register' to retry\n")
+	fmt.Fprintf(os.Stderr, "[phase 09] forge handoff failed after 3 retries — wrote forge_link.json with status=pending; run 'awsbnkctl forge register' to retry\n")
 	pendingLink := &forge.Link{
 		Workspace: clusterName,
 		Status:    "pending",
 	}
 	if werr := forge.WriteLink(workspaceDir, pendingLink); werr != nil {
-		fmt.Fprintf(os.Stderr, "[phase 09] warning: could not write pending forge-link.json: %v\n", werr)
+		fmt.Fprintf(os.Stderr, "[phase 09] warning: could not write pending forge_link.json: %v\n", werr)
 	} else {
 		st.Set("FORGE_STATUS", "pending")
 		st.Set("FORGE_LINK_PATH", filepath.Join(workspaceDir, forge.LinkFileName))
@@ -150,7 +150,7 @@ func Phase09ForgeRegister(ctx context.Context, cl *intent.Cluster, st *state.Sta
 // Down purges both the cluster record AND the project — the project is
 // created by registration and named for the cluster ("awsbnkctl-<cluster>"),
 // so after down nothing should remain forge-side. When the local
-// forge-link.json is missing but forge is enabled in intent, the phase falls
+// forge_link.json is missing but forge is enabled in intent, the phase falls
 // back to REST by-name discovery (mirrors the AWS tag-discovery philosophy).
 //
 // D-005: CheckAuthOrDie is called at entry even though forge calls do not
@@ -175,7 +175,7 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 	// Resolve forge URLs and credentials: prefer cluster.yaml values, fall
 	// back to cached link fields / defaults. This handles the case where the
 	// operator removed the forge: block from cluster.yaml between up and down
-	// — cl.Forge is nil but a forge-link.json still exists with the original URLs.
+	// — cl.Forge is nil but a forge_link.json still exists with the original URLs.
 	cfg := resolveForgeConfig(cl, link)
 
 	if link == nil {
@@ -232,7 +232,7 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 		if restErr == nil || forge.Is404(restErr) {
 			// REST succeeded (or 404 — already gone forge-side).
 			if rerr := forge.RemoveLink(workspaceDir); rerr != nil {
-				fmt.Fprintf(os.Stderr, "[phase 09 down] warning: could not remove forge-link.json: %v\n", rerr)
+				fmt.Fprintf(os.Stderr, "[phase 09 down] warning: could not remove forge_link.json: %v\n", rerr)
 			}
 			fmt.Fprintln(os.Stderr, "[phase 09 down] forge: unregistered via REST fallback")
 			st.Set("FORGE_STATUS", "")

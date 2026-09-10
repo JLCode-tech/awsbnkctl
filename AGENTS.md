@@ -10,35 +10,42 @@
 
 ### Core Tenets
 1. **Single-Binary Delivery** — Zero required host binaries besides optional `aws` CLI for SSO and EICE jumphost tunnels.
-2. **Deterministic Phased State Machine** — Exactly 39 numbered phases executed sequentially with full idempotency and resume-safety.
-3. **AWS Tags as Source of Truth** — Cloud resources are tagged with `awsbnkctl.f5.com/*` tags, enabling reliable reconstruction of local workspace state.
+2. **Deterministic Phased State Machine** — Exactly 39 phase files / `stage()` calls (`internal/cli/lifecycle.go`) executed sequentially with full idempotency and resume-safety. Two phases are conditional: `sagemaker-lmi` (only with `ai.sagemaker.enabled`) and `demo-stage` (only in demo mode).
+3. **AWS Tags as Source of Truth** — Cloud resources are tagged with `awsbnkctl:cluster`, `awsbnkctl:component`, and `awsbnkctl:managed` (`internal/aws/tags`), enabling reliable reconstruction of local workspace state.
 4. **End-to-End Traffic Scenarios** — 15 built-in automated test scenarios validate data-plane VIPs and routing policies from inside the VPC.
 
 ---
 
 ## 2. Pinned Ecosystem Versions
 
-- **BNK**: `2.3.2`
-- **CNE Release Manifest**: `2.3.2-3.2598.3-0.0.392`
-- **Kubernetes (EKS)**: `1.32` to `1.35` (default `1.32`)
-- **cert-manager**: `v1.16.2`
-- **FLO Chart**: `v2.21+`
+- **BNK**: `2.3.0` (default); other `2.3.x` builds via the `bnk.manifestVersion` field in `cluster.yaml`
+- **CNE Release Manifest**: `2.3.0-3.2598.3-0.0.170` (`internal/manifest/manifest.go` `DefaultManifestVersion`); e.g. `2.3.2-3.2598.3-0.0.392` as an operator override
+- **Kubernetes (EKS)**: floor and default `1.34` (`intent.MinKubernetesVersion`); `1.35` is the newest tested minor, `1.36+` warns
+- **cert-manager**: `v1.16.1`, embedded upstream YAML in `internal/k8s/manifests/cert-manager/` applied via client-go (not Helm)
+- **FLO Chart**: `v2.21.13-0.0.28` (`intent.DefaultFLOVersion`)
+- **Go**: `1.26` (`go.mod`); **AWS SDK for Go v2**: `github.com/aws/aws-sdk-go-v2 v1.42.0`
 
 ---
 
 ## 3. CLI Command Taxonomy
 
+27 top-level commands (`awsbnkctl --help` is authoritative):
+
 | Category | Commands |
 |---|---|
-| **Lifecycle** | `init`, `validate`, `up`, `down`, `status`, `doctor` |
-| **Data Plane Scenarios** | `scenarios {list, run, clean}` |
-| **AI & Benchmarking** | `benchmark {setup, run, daemon, list, status}` |
-| **Walkthrough & Demos** | `demo {list, run, clean}`, `topology` |
-| **Kubernetes Passthrough** | `k {get, apply, describe, delete, logs, exec, port-forward}` |
-| **Agentic Workflow** | `agent {init, claude, gemini, chatgpt, aider}`, `journal {add, list, report}` |
-| **Registry & Manifests** | `manifest probe [version]` |
-| **Fleet & Forge** | `forge {register, status, unregister, benchmark}` |
-| **Maintenance** | `self update`, `version` |
+| **Lifecycle** | `init`, `validate <path>`, `up -f`, `down -f`, `status`, `doctor`, `topology -f`, `version` |
+| **Validation Tests** | `test [suite]` with `test {connectivity, dns, throughput, traffic, list}` and `test hosts {add, clear, list, remove}` |
+| **Data Plane Scenarios** | `scenarios {list, run, clean}` — 15 registered scenarios (the core-dump one is `core-file-collection`) |
+| **Walkthrough & Demos** | `demo {list, run, clean, preview}` — demos: `diameter`, `http2`, `bigip-cis`, `ingress-migration` |
+| **Kubernetes Passthrough** | `k {apply, delete, describe, exec, get, logs, port-forward}`; top-level aliases `get <resource>` and `logs <component>` (flo, cis, cert-manager, cneinstance) |
+| **BNK Runtime & Manifests** | `bnk resync`, `manifest probe` |
+| **AI & Benchmarking** | `benchmark {setup, run, daemon, list, status}` (bare `benchmark` = `benchmark run`) |
+| **Fleet & Forge** | `forge {register, status, unregister, cleanup, benchmark}`; `forge register` flags: `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
+| **Agentic Workflow** | `agent` (list CLIs), `agent init`, `agent <cli>` where cli is exactly one of `claude`, `gemini`, `aider`, `openai`, `pi`, `opencode`; `journal {add, list, report}` (no `--format` flag) |
+| **Workspaces & Targets** | `workspaces {current, delete, list, new, use}`, `targets {add, list, remove, show}` |
+| **Maintenance** | `install`, `self update`, `completion <shell>`, `help` |
+
+There is no `mcp` command: awsbnkctl is only an MCP *client* to BNK Forge (`internal/forge`).
 
 ---
 
