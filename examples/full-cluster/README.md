@@ -1,6 +1,6 @@
 # Full Cluster BNK-on-EKS Topology
 
-This directory contains the complete `cluster.yaml` reference intent file for a **full BNK-on-EKS deployment** utilizing the standard `host-device` pattern.
+This directory contains the complete `cluster.yaml` reference intent file for a **full BNK-on-EKS deployment**. As checked in it uses the `host-device` (dual-interface) pattern; the same file documents the swap to the single-interface patterns, `external-only` and `sriov-external`, so it is the one intent to copy for any BNK topology.
 
 It is also the **demo cluster**: uncomment the `demo:` block in `cluster.yaml` (or
 pass `--demo`) and the same infrastructure gains the curated protocol
@@ -14,6 +14,39 @@ This topology provisions the entire infrastructure stack from the ground up:
 - **EKS Control Plane & Nodes:** Provisions an EKS cluster with a 3-node managed node group (`m6i.4xlarge`), appropriately sized for the BNK control plane and dSSM quorum.
 - **F5 BNK Integration:** Wires up the secondary ENIs, node labels, IRSA roles, and the `host-device` dual-interface data path.
 - **Test Jumphost:** (Optional) Deploys a multi-ENI jumphost instance within the VPC to generate test traffic directly into the BNK external data path.
+
+## Single-interface variants (`external-only`, `sriov-external`)
+
+The checked-in file is dual-interface. For a single external (ingress) ENI with
+TMM reaching pods over the CNI, make two edits in `cluster.yaml`:
+
+```yaml
+pattern: external-only     # was: host-device
+# and delete the `internal:` block under network.dataPath — validate rejects it
+```
+
+Everything else stays: node sizing, the dSSM quorum, the jumphost, cost. You
+save an ENI, not money. Transparent egress (see
+[`examples/egress-demo`](../egress-demo/)) needs this pattern.
+
+For the **experimental** SR-IOV / DPDK variant, apply the same two edits and set
+`pattern: sriov-external`. The two single-interface patterns are identical in
+topology and cost; what differs is how TMM drives the NIC:
+
+| | `external-only` | `sriov-external` |
+| --- | --- | --- |
+| Data-plane driver | Kernel socket | DPDK over `vfio-pci` (No-IOMMU) |
+| Node preparation | None | `vfio-node-prep` DaemonSet rebinds the external ENA (Phase 20b) |
+| Device exposure | Standard ENI | `sriov-network-device-plugin` advertises `intel.com/ens8` |
+| NAD | `external` | `external-sriov` (type `passthru`, **not** `sriov-cni`) |
+| CNEInstance | Sets `TMM_GENERIC_SOCKET_DRIVER` | Drops it; plugin injects `/dev/vfio` + `PCIDEVICE_INTEL_COM_ENS8` |
+
+`sriov-external` runs on stock AL2023 (no custom AMI) and has been validated end
+to end live (HTTP 200 through TMM-on-vfio), but the DaemonSet rebinds the node
+NIC, so prefer a dedicated cluster over converting an existing one. CI keeps both
+single-interface shapes under `validate` and `up --dry-run` as fixtures in
+`internal/intent/testdata/`.
+
 
 ## Usage
 
@@ -80,6 +113,38 @@ Two of the use-cases carry the "migrate to BNK" story:
   > with PAYG licensing. Supply its password via
   > `export AWSBNKCTL_BIGIP_PASSWORD='<pass>'` before running — it is never stored
   > in `cluster.yaml`.
+
+## BGP peering with AWS Route Server
+
+`cluster.yaml` sets `bnk.bgp: true`, so `up` opens TCP 179 (BGP) and UDP 3784
+(BFD) from the external subnet (`10.0.10.0/24`) on the data-plane security group
+and on the external `F5SPKVlan`. That makes TMM's external SelfIP
+(`10.0.10.240`) reachable as a BGP peer. Nothing peers until you create a Route
+Server endpoint in that subnet and apply [`bgp-route-server.yaml`](bgp-route-server.yaml),
+replacing its `10.0.10.31` placeholder with the endpoint's address. The full
+procedure, verification and teardown order are in
+[`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md); state for this
+cluster lives in `.awsbnkctl/full-cluster/`. BGP is optional here: the Gateway VIP
+(`10.0.10.100`) is reachable inside the VPC without it, because the
+cne-controller assigns it as a secondary IP on TMM's external ENI.
+
+> [!NOTE]
+> A Route Server endpoint bills about $0.75/hour and blocks deletion of the
+> external subnet. Remove it before `awsbnkctl down`.
+
+## Scenarios
+
+All 15 scenarios run here; `ai-inference-e2e` needs `--synthetic` (no GPU node group). Uncomment `demo:` for the demo use-cases and `bigipVE:` for `bigip-cis`. Run `core-file-collection` last. `egress-snat` is control-plane only on the checked-in dual-interface pattern, so run it last too; after the external-only swap it gets a real data path.
+
+```bash
+awsbnkctl scenarios list
+awsbnkctl scenarios run http-routing-e2e -f examples/full-cluster/cluster.yaml
+awsbnkctl scenarios run --all -f examples/full-cluster/cluster.yaml
+```
+
+Which scenario needs what, and the VIP each one owns, is in
+[`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
+
 
 ## Cost & teardown
 

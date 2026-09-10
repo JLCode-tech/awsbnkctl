@@ -552,7 +552,7 @@ func TestGPUNodeGroup_MixedCluster_BNKdSSMStillEnforced(t *testing.T) {
 	}
 }
 
-// TestGPURig_ExampleLoads verifies that examples/ai-rig/cluster.yaml (Group 5)
+// TestGPURig_ExampleLoads verifies that testdata/ai-rig/cluster.yaml (Group 5)
 // loads cleanly and declares the expected GPU nodegroup shape.
 //
 // Note: the example was updated on 2026-06-12 after the live run found that
@@ -561,9 +561,9 @@ func TestGPUNodeGroup_MixedCluster_BNKdSSMStillEnforced(t *testing.T) {
 // availability. The AZ-sweep (task gpu-az-capacity-fallback) will automate
 // the per-AZ fallback so operators no longer need to manually re-pin.
 func TestGPURig_ExampleLoads(t *testing.T) {
-	c, err := Load("../../examples/ai-rig/cluster.yaml")
+	c, err := Load("testdata/ai-rig/cluster.yaml")
 	if err != nil {
-		t.Fatalf("Load examples/ai-rig/cluster.yaml: %v", err)
+		t.Fatalf("Load testdata/ai-rig/cluster.yaml: %v", err)
 	}
 	if c.ClusterSpec == nil || len(c.ClusterSpec.NodeGroups) != 2 {
 		t.Fatalf("expected 2 nodegroups, got %v", c.ClusterSpec)
@@ -647,10 +647,10 @@ func TestGPURig_Example2bRejected(t *testing.T) {
 // non-AI-rig cluster.yaml must still load cleanly.
 func TestAllExamplesContinueToLoad(t *testing.T) {
 	examples := []string{
-		"../../examples/external-only/cluster.yaml",
+		"testdata/external-only/cluster.yaml",
 		"../../examples/full-cluster/cluster.yaml",
 		// sriov-external is no longer a published example; it survives as the
-		// CI fixture for the pattern (examples/external-only documents the swap).
+		// CI fixture for the pattern (examples/full-cluster documents the swap).
 		"testdata/sriov-external/cluster.yaml",
 	}
 	for _, path := range examples {
@@ -696,9 +696,9 @@ func TestNodeGroupSpec_OnDemandFallback(t *testing.T) {
 // TestGPURig_ExampleLoads_OnDemandFallback verifies that the ai-rig example
 // (which does NOT set onDemandFallback) still loads cleanly and has the default false.
 func TestGPURig_ExampleLoads_OnDemandFallback(t *testing.T) {
-	c, err := Load("../../examples/ai-rig/cluster.yaml")
+	c, err := Load("testdata/ai-rig/cluster.yaml")
 	if err != nil {
-		t.Fatalf("Load examples/ai-rig/cluster.yaml: %v", err)
+		t.Fatalf("Load testdata/ai-rig/cluster.yaml: %v", err)
 	}
 	gpu := c.ClusterSpec.NodeGroups[1]
 	if gpu.OnDemandFallback {

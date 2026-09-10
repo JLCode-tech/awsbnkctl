@@ -6,7 +6,7 @@
 > [!WARNING]
 > This requires an **external-only** or **sriov-external** pattern. It does NOT work on `dual-interface` host-device setups due to VXLAN limitations.
 >
-> **Why `external-only`?** Transparent egress via the pseudo-CNI VXLAN overlay works on the **external-only** and **sriov-external** patterns, where TMM does NOT consume the node's internal NIC (it reaches pods over the CNI). It does **NOT** work on `dual-interface`/host-device on AWS VPC CNI: in that layout the node-side VXLAN VTEP does not converge to a usable capture path and traffic redirection can interfere with ingress handling. Use `examples/external-only/cluster.yaml` (or `cluster.yaml` here) for this demo.
+> **Why `external-only`?** Transparent egress via the pseudo-CNI VXLAN overlay works on the **external-only** and **sriov-external** patterns, where TMM does NOT consume the node's internal NIC (it reaches pods over the CNI). It does **NOT** work on `dual-interface`/host-device on AWS VPC CNI: in that layout the node-side VXLAN VTEP does not converge to a usable capture path and traffic redirection can interfere with ingress handling. Use `cluster.yaml` here (or `examples/full-cluster/cluster.yaml` after its documented external-only swap) for this demo.
 
 ## What's Included
 - `cluster.yaml`: External-only BNK cluster configuration.
@@ -66,6 +66,38 @@ kubectl delete pod -n f5-cne-system -l app=f5-tmm
 Then re-check the probe shows `1.1.1.1` BLOCKED. (The egress SNAT flip is unaffected by this.)
 
 ---
+
+## BGP peering with AWS Route Server
+
+`cluster.yaml` sets `bnk.bgp: true`, so `up` opens TCP 179 (BGP) and UDP 3784
+(BFD) from the external subnet (`10.0.10.0/24`) on the data-plane security group
+and on the external `F5SPKVlan`. That makes TMM's external SelfIP
+(`10.0.10.240`) reachable as a BGP peer. Nothing peers until you create a Route
+Server endpoint in that subnet and apply [`bgp-route-server.yaml`](bgp-route-server.yaml),
+replacing its `10.0.10.31` placeholder with the endpoint's address. The full
+procedure, verification and teardown order are in
+[`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md); state for this
+cluster lives in `.awsbnkctl/bnk-egress/`. BGP is optional here: the Gateway VIP
+(`10.0.10.100`) is reachable inside the VPC without it, because the
+cne-controller assigns it as a secondary IP on TMM's external ENI.
+
+> [!NOTE]
+> A Route Server endpoint bills about $0.75/hour and blocks deletion of the
+> external subnet. Remove it before `awsbnkctl down`.
+
+## Scenarios
+
+All 15 scenarios run here and `egress-snat` is the one this cluster exists for: same pattern, same `ext-vlan` tunnel. The scenario and this demo each create their own `F5SPKEgress` in `f5-cne-system` capturing different namespaces; run one at a time. `ai-inference-e2e` needs `--synthetic`. Run `core-file-collection` last.
+
+```bash
+awsbnkctl scenarios list
+awsbnkctl scenarios run http-routing-e2e -f examples/egress-demo/cluster.yaml
+awsbnkctl scenarios run --all -f examples/egress-demo/cluster.yaml
+```
+
+Which scenario needs what, and the VIP each one owns, is in
+[`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
+
 
 ## Cost & teardown
 

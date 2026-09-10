@@ -54,6 +54,10 @@ func Phase07IAM(ctx context.Context, cl *intent.Cluster, st *state.State, client
 		fmt.Fprintf(os.Stderr, "[phase 07] dry-run: would create node role %s\n", nodeRoleName)
 		fmt.Fprintf(os.Stderr, "[phase 07] dry-run: would create instance profile %s\n", profileName)
 		fmt.Fprintf(os.Stderr, "[phase 07] dry-run: would create security group %s (bnk-data-plane)\n", sgName)
+		if cl.IsBGPEnabled() {
+			fmt.Fprintf(os.Stderr, "[phase 07] dry-run: would allow bgp tcp/%d + bfd udp/%d into %s from %s\n",
+				bgpPort, bfdPort, sgName, bgpPeerCIDR(cl))
+		}
 		st.Set("EKS_CLUSTER_ROLE_ARN", "arn:aws:iam::dry-run:role/"+clusterRoleName)
 		st.Set("EKS_NODE_ROLE_ARN", "arn:aws:iam::dry-run:role/"+nodeRoleName)
 		st.Set("NODE_INSTANCE_PROFILE_NAME", profileName)
@@ -128,7 +132,73 @@ func Phase07IAM(ctx context.Context, cl *intent.Cluster, st *state.State, client
 	}
 	st.Set("SG_BNK_DATA", sgID)
 
+	// bnk.bgp: let a BGP peer in the external data-path subnet (an AWS Route
+	// Server endpoint, or any router there) reach TMM's external SelfIP. Runs on
+	// every up, not just SG creation, so flipping bnk.bgp on an existing cluster
+	// and re-running up adds the rules.
+	if cl.IsBGPEnabled() {
+		extCIDR := bgpPeerCIDR(cl)
+		if extCIDR == "" {
+			return fmt.Errorf("phase07: bnk.bgp is set but network.dataPath.external.cidr is empty")
+		}
+		if err := ensureBNKDataSGBGPIngress(ctx, clients.EC2, sgID, extCIDR); err != nil {
+			return fmt.Errorf("phase07: SG_BNK_DATA bgp ingress: %w", err)
+		}
+	}
+
 	return st.Save()
+}
+
+// BGP / BFD control-plane ports opened on SG_BNK_DATA when bnk.bgp is set.
+// They mirror the allowed_services Phase 23b renders on the external F5SPKVlan:
+// the VLAN rule lets TMM hand the packets to the routing container, this SG
+// rule lets them reach the ENI at all. Both are needed for a session to form.
+const (
+	bgpPort = int32(179)  // BGP (RFC 4271), TCP
+	bfdPort = int32(3784) // BFD single-hop control (RFC 5881), UDP
+)
+
+// bgpPeerCIDR returns the CIDR BGP peers are admitted from: the external
+// data-path subnet, where an AWS Route Server endpoint is expected to live.
+func bgpPeerCIDR(cl *intent.Cluster) string {
+	if cl == nil || cl.Network.DataPath == nil {
+		return ""
+	}
+	return cl.Network.DataPath.External.CIDR
+}
+
+// ensureBNKDataSGBGPIngress admits TCP 179 (BGP) and UDP 3784 (BFD) into
+// SG_BNK_DATA from peerCIDR. Idempotent: DuplicatePermission is tolerated. The
+// rules die with the SG on down, so there is no matching revoke.
+func ensureBNKDataSGBGPIngress(ctx context.Context, ec2c EC2API, sgID, peerCIDR string) error {
+	_, err := ec2c.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId: ptr(sgID),
+		IpPermissions: []ec2types.IpPermission{
+			{
+				IpProtocol: ptr("tcp"),
+				FromPort:   int32Ptr(bgpPort),
+				ToPort:     int32Ptr(bgpPort),
+				IpRanges: []ec2types.IpRange{
+					{CidrIp: ptr(peerCIDR), Description: ptr("bnk-bgp")},
+				},
+			},
+			{
+				IpProtocol: ptr("udp"),
+				FromPort:   int32Ptr(bfdPort),
+				ToPort:     int32Ptr(bfdPort),
+				IpRanges: []ec2types.IpRange{
+					{CidrIp: ptr(peerCIDR), Description: ptr("bnk-bfd")},
+				},
+			},
+		},
+	})
+	if err != nil && !isEC2DuplicatePermission(err) {
+		return fmt.Errorf("ec2:AuthorizeSecurityGroupIngress SG_BNK_DATA %s ← %s tcp/%d udp/%d: %w",
+			sgID, peerCIDR, bgpPort, bfdPort, err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 07] SG_BNK_DATA %s: bgp ingress tcp/%d + udp/%d from %s added (or already present)\n",
+		sgID, bgpPort, bfdPort, peerCIDR)
+	return nil
 }
 
 // Phase07IAMDown destroys IAM resources in reverse-create order.
@@ -224,7 +294,10 @@ func Phase07IAMDown(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 }
 
 // ensureBNKDataSG creates the SG_BNK_DATA security group (bnk-data-plane) in
-// the VPC with an intra-VPC ingress rule (allow all from VPC CIDR). Idempotent.
+// the VPC with a self-referencing ingress rule (allow all between members of
+// this SG). Cluster-SG ↔ SG_BNK_DATA rules are added in Phase 18, and the BGP
+// control-plane ports by ensureBNKDataSGBGPIngress when bnk.bgp is set.
+// Idempotent.
 func ensureBNKDataSG(ctx context.Context, ec2c EC2API, clusterName, vpcID string,
 	extraTags, labels map[string]string) (string, error) {
 
@@ -259,10 +332,10 @@ func ensureBNKDataSG(ctx context.Context, ec2c EC2API, clusterName, vpcID string
 	sgID := *out.GroupId
 	fmt.Fprintf(os.Stderr, "[phase 07] created SG_BNK_DATA %s (%s)\n", sgID, sgName)
 
-	// Add intra-VPC ingress: allow all traffic from VPC CIDR.
-	// This enables TMM secondary ENIs to communicate with the EKS control plane
-	// and other in-VPC resources. The cluster-SG ingress from SG_BNK_DATA is
-	// added in Phase 18 (depends on EKS cluster SG).
+	// Self-referencing ingress: allow all traffic between members of this SG
+	// (TMM data-plane ENIs, the jumphost data-path ENI). Nothing else in the VPC
+	// is admitted here; the cluster-SG ↔ SG_BNK_DATA pair is added in Phase 18
+	// (depends on the EKS cluster SG) and BGP peers by ensureBNKDataSGBGPIngress.
 	_, err = ec2c.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId: ptr(sgID),
 		IpPermissions: []ec2types.IpPermission{

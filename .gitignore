@@ -96,3 +96,8 @@ patch.diff
 .agentcore-network-env.json
 .govulncheck-ignore.sh
 
+
+# --- Product-engineering BGP reference (local-only) ---
+# Live Singapore Route Server peering intent + manifest; the public equivalent
+# is examples/*/bgp-route-server.yaml + docs/BGP-ROUTE-SERVER.md.
+examples/singapore-pe/

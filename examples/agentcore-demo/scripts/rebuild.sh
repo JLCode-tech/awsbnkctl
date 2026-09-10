@@ -33,8 +33,11 @@ set -uo pipefail
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
-CLUSTER="${CLUSTER:-bnk-agentcore-demo}"
-REGION="${REGION:-ap-southeast-2}"
+# Cluster name and region come from the intent file unless overridden.
+CFG="${CFG:-$DEMO_DIR/cluster.yaml}"
+CLUSTER="${CLUSTER:-$(awk '/^  name:/{print $2; exit}' "$CFG")}"
+REGION="${REGION:-$(awk '/^  region:/{print $2; exit}' "$CFG")}"
+: "${CLUSTER:?could not read metadata.name from $CFG}"; : "${REGION:?could not read metadata.region from $CFG}"
 CONFIG="examples/agentcore-demo/cluster.yaml"
 KC="$REPO_ROOT/.awsbnkctl/$CLUSTER/kubeconfig"
 
@@ -180,7 +183,8 @@ fi
 # public. Substitute into a temp file and apply that; never write it back.
 TMP=$(mktemp -t shipper.XXXXXX.yaml) || die "mktemp failed"
 trap 'rm -f "$TMP"' EXIT
-sed "s/<account-id>/$ACCT/g" "$DEMO_DIR/mcp-bedrock-token-shipper.yaml" > "$TMP"
+sed -e "s/<account-id>/$ACCT/g" -e "s/^\( *value: \)ap-southeast-2$/\1$REGION/" \
+    "$DEMO_DIR/mcp-bedrock-token-shipper.yaml" > "$TMP"
 grep -q "<account-id>" "$TMP" && die "account-id substitution failed"
 kubectl apply -f "$TMP" || die "token shipper apply failed"
 ok "shipper applied with account $ACCT (tracked file left with its placeholder)"

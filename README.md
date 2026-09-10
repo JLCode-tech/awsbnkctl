@@ -232,7 +232,7 @@ The top-level `pattern` field selects the TMM data-plane interface topology and 
 
 Every knob lives in `cluster.yaml` (schema: `internal/intent/cluster.go`). Two optional blocks worth knowing about:
 
-- **BGP peering** — `bnk.bgp: true` (alias `bnk.dynamicRouting: true`) opens TCP 179 / UDP 3784 on the external `F5SPKVlan` so TMM forwards BGP control-plane packets to the BNK routing stack. Use it to peer with an AWS Route Server or an upstream router; `examples/singapore-pe/bgp-route-server.yaml` shows the matching `RoutingTemplate` / `GlobalRoutingConfig` resources.
+- **BGP peering** — `bnk.bgp: true` (alias `bnk.dynamicRouting: true`) admits TCP 179 / UDP 3784 from the external data-path subnet into the data-plane security group (phase 07) and opens the same ports on the external `F5SPKVlan` (phase 23b), so TMM can peer with an AWS Route Server endpoint in that subnet. Every deployable example sets it. The peer itself and the `RoutingTemplate` / `GlobalRoutingConfig` CRs are yours to add: each example ships a `bgp-route-server.yaml`, and [`docs/BGP-ROUTE-SERVER.md`](docs/BGP-ROUTE-SERVER.md) is the end-to-end procedure.
 - **Shared Forge project** — `forge.projectName` registers the cluster into an existing BNK Forge project instead of the auto-created `awsbnkctl-<cluster>` one (env override `AWSBNKCTL_FORGE_PROJECT`). When a non-default name is set, `down` unregisters the cluster but does not purge the shared project.
 
 Environment variables recognised by the binary:
@@ -264,9 +264,9 @@ Environment variables recognised by the binary:
 | **`external-resource-pool`** | Hybrid Routing | Routing traffic to non-Kubernetes external endpoints | EICE Jumphost curl |
 | **`proxy-protocol-l4`** | L4 Protocol | Proxy Protocol v1/v2 client IP preservation | EICE raw socket / curl |
 | **`tcp-l4-loadbalance`** | L4 Protocol | L4Route TCP weighted load balancing (70/30) | Multi-request TCP probe |
-| **`udp-l4-loadbalance`** | L4 Protocol | L4Route UDP datagram routing and load balancing | UDP echo probe |
-| **`grpc-loadbalance`** | L7 Protocol | gRPC stream routing over GRPCRoute & L4Route | `grpcurl` VIP probe |
-| **`cluster-wide-watch`** | Multi-Tenancy | Cross-namespace HTTP routing via CWC | Multi-namespace curl |
+| **`udp-l4-loadbalance`** | L4 Protocol | L4Route UDP datagram routing and load balancing | Control-plane conditions (no traffic probe) |
+| **`grpc-loadbalance`** | L7 Protocol | gRPC stream routing over GRPCRoute & L4Route | Control-plane conditions (no traffic probe) |
+| **`cluster-wide-watch`** | Multi-Tenancy | Cross-namespace HTTP routing via CWC | Control-plane conditions (no traffic probe) |
 | **`cwc-admin-access`** | Security | ClusterWideWatch RBAC isolation & cert validation | RBAC assertion & mTLS probe |
 | **`ai-token-counting`** | AI Gateway | Token usage measurement and rate limiting | AI Gateway HTTP POST |
 | **`ai-semantic-cache`** | AI Gateway | Semantic prompt cache hit/miss verification | AI Gateway HTTP POST |
@@ -455,14 +455,11 @@ awsbnkctl/
 ├── pkg/bnk/               # Exported BNK runtime helpers (pool-member resync)
 ├── docs/                  # Architecture, phases, scenarios, Forge integration, release guides
 ├── examples/              # Ready-to-deploy cluster topologies and reference blueprints
-│   ├── full-cluster/      # Complete dual-interface reference stack (demo + BIG-IP VE as commented blocks)
-│   ├── external-only/     # Single-arm ingress blueprint (one-line swap to sriov-external)
+│   ├── full-cluster/      # Reference intent: dual-interface as checked in, documented swap to external-only / sriov-external
 │   ├── egress-demo/       # Transparent egress + egress firewall ACL blueprint
-│   ├── ai-rig/            # BNK fronting GPU inference, optional SageMaker endpoint
-│   ├── demo-ai/           # full-cluster + ai-rig composed: all protocol demos plus managed inference
+│   ├── demo-ai/           # The AI example: full-cluster + GPU node group + SageMaker (leaner ai-rig shape inside)
 │   ├── agentcore-demo/    # One MCP tool pod behind a BNK Gateway; AgentCore runtime → BNK → tool governance
-│   ├── local-zone/        # Reference telco/edge CRs (SCTP, Diameter, HTTP/2, SNAT pool); no cluster.yaml
-│   └── singapore-pe/      # BGP peering manifests (RoutingTemplate / GlobalRoutingConfig) for bnk.bgp
+│   └── local-zone/        # Reference telco/edge CRs (SCTP, Diameter, HTTP/2, SNAT pool); no cluster.yaml
 ├── scripts/               # e2e and gate scripts (pre-commit, govulncheck, integration)
 ├── tools/                 # BNK Forge runner packaging, docker helpers, ciwatch/sprintwatch
 └── Makefile               # Build, test, lint, and release recipes

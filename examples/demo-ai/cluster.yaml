@@ -1,12 +1,15 @@
-# cluster.yaml — combined BNK demo + SageMaker AI rig.
+# cluster.yaml — the AI example: BNK protocol demo + GPU node group + SageMaker.
 #
-# Composes two reviewed configs into one cluster:
-#   - examples/full-cluster/cluster.yaml — host-device demo (the protocol use-cases
-#                                    via `awsbnkctl demo run --all`) + jumphost.
-#   - examples/ai-rig/cluster.yaml — managed SageMaker LMI (vLLM) inference leg,
-#                                    a GPU nodegroup for the in-cluster
-#                                    ai-inference-e2e vLLM leg, and the AWS LB
-#                                    Controller addon.
+# Composes examples/full-cluster/cluster.yaml (host-device demo: the protocol
+# use-cases via `awsbnkctl demo run --all`, jumphost) with the AI rig: a managed
+# SageMaker LMI (vLLM) inference leg, a GPU nodegroup for the in-cluster
+# ai-inference-e2e vLLM leg, and the AWS LB Controller addon.
+#
+# This is also the home of the former examples/ai-rig (a leaner benchmark rig):
+# the `ai.sagemaker` block below carries its Llama-3-8B / ml.g5.xlarge shape as
+# a commented alternative, and `demo.enabled: false` turns the protocol demos
+# off if all you want is the inference rig. The rig shape stays under CI as
+# internal/intent/testdata/ai-rig/cluster.yaml.
 #
 # Result: one VPC, one `up`, that runs ALL the protocol demos AND stands up a
 # disposable SageMaker endpoint for the AI inference demo.
@@ -126,6 +129,16 @@ ai:
     tensorParallelSize: 4           # split 32B across all 4 GPUs (matches GPU count → passes GPU-fit preflight)
     maxModelLen: 8192               # cap the KV cache to fit the 32B weights in 96 GiB
     scaleToZero: false              # OPTION_SERVED_MODEL_NAME stays "llama3" (served name unchanged)
+    # --- Leaner rig (the former examples/ai-rig): Llama-3-8B on one A10G ---
+    # Same GPU as the in-cluster g5.xlarge leg (apples-to-apples), ~$1.50/hr
+    # instead of ~$7.50/hr. To use it, comment out the four Qwen lines above
+    # (model, instanceType, tensorParallelSize, maxModelLen) and uncomment:
+    #
+    # model: meta-llama/Meta-Llama-3-8B-Instruct
+    # instanceType: ml.g5.xlarge
+    #
+    # ml.g5.xlarge SageMaker capacity in ap-southeast-2 was exhausted twice on
+    # 2026-06-25, which is why Qwen on the g6 pool is the default here.
 
 # bnk: F5 supply-chain credentials, required by Phase 12. Relative paths are
 # resolved against the directory holding THIS file, not your shell's working
@@ -134,6 +147,11 @@ ai:
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
   jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
+  # bgp: open TCP 179 (BGP) + UDP 3784 (BFD) from the external subnet on the
+  # data-plane security group and the external F5SPKVlan, so TMM can peer with
+  # an AWS Route Server endpoint there. Harmless with no peer. The peer and the
+  # routing CRs are yours to add: see bgp-route-server.yaml in this directory.
+  bgp: true
 
 # testing.jumphost: required for demo mode AND the AI benchmark client.
 # Non-burstable on purpose, so the aiperf load generator never becomes the

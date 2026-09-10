@@ -100,8 +100,8 @@ func TestManifestsRendered(t *testing.T) {
 			for _, want := range []string{
 				"scn-mv-gateway-a",
 				"scn-mv-gateway-b",
-				"10.0.10.106", // VIP A last octet .106
-				"10.0.10.107", // VIP B last octet .107
+				"10.0.10.115", // VIP A last octet .115
+				"10.0.10.116", // VIP B last octet .116
 			} {
 				if !strings.Contains(content, want) {
 					t.Errorf("04-gateways.yaml missing %q:\n%s", want, content)
@@ -109,11 +109,11 @@ func TestManifestsRendered(t *testing.T) {
 			}
 		}
 
-		// The F5BnkGateway pool must be a RANGE covering both VIPs (.106–.110).
+		// The F5BnkGateway pool must be a RANGE covering both VIPs (.115–.117).
 		if strings.HasSuffix(p, "02-f5bnkgateway.yaml") {
 			for _, want := range []string{
-				"startAddress: 10.0.10.106",
-				"endAddress: 10.0.10.110",
+				"startAddress: 10.0.10.115",
+				"endAddress: 10.0.10.117",
 			} {
 				if !strings.Contains(content, want) {
 					t.Errorf("02-f5bnkgateway.yaml missing %q:\n%s", want, content)
@@ -202,8 +202,8 @@ func TestVerifyCallOrder(t *testing.T) {
 		"waitHTTPRouteCondition(scn-mv-route-a,Accepted)",
 		"waitHTTPRouteCondition(scn-mv-route-b,Accepted)",
 		"ResyncHTTPRoutes",
-		"RunBodyProbes(10.0.10.106,multivip-a.local)",
-		"RunBodyProbes(10.0.10.107,multivip-b.local)",
+		"RunBodyProbes(10.0.10.115,multivip-a.local)",
+		"RunBodyProbes(10.0.10.116,multivip-b.local)",
 	}
 
 	if len(calls) != len(want) {

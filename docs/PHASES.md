@@ -20,7 +20,7 @@
 - **`igw`** (`Phase04IGW`): Attaches an Internet Gateway to the VPC.
 - **`nat`** (`Phase05NAT`): Allocates Elastic IPs and creates NAT Gateways for private subnet egress.
 - **`route-tables`** (`Phase06RouteTables`): Configures routing tables for public (IGW) and private (NAT) subnets.
-- **`iam`** (`Phase07IAM`): Creates the EKS cluster IAM role and the node group IAM role.
+- **`iam`** (`Phase07IAM`): Creates the EKS cluster IAM role, the node group IAM role, and the BNK data-plane security group `SG_BNK_DATA`. With `bnk.bgp: true` it also admits TCP 179 (BGP) and UDP 3784 (BFD) from the external data-path subnet, so a Route Server endpoint there can peer with TMM.
 
 ## STAGE 2 — EKS control plane
 

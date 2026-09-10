@@ -399,7 +399,7 @@ jobs:
         run: |
           set -eo pipefail
           ./bin/awsbnkctl validate examples/full-cluster/cluster.yaml
-          ./bin/awsbnkctl validate examples/external-only/cluster.yaml
+          ./bin/awsbnkctl validate internal/intent/testdata/external-only/cluster.yaml
           # sriov-external is not a published example; it lives as a CI fixture.
           ./bin/awsbnkctl validate internal/intent/testdata/sriov-external/cluster.yaml
 
@@ -411,7 +411,7 @@ jobs:
           # dry-run path can stat them without committing real secrets.
           for example_dir in \
             examples/full-cluster \
-            examples/external-only \
+            internal/intent/testdata/external-only \
             internal/intent/testdata/sriov-external; do
             echo '{"auths":{}}' > "$example_dir/cne_pull_64.json"
             echo 'dummy-license-jwt' > "$example_dir/license.jwt"
@@ -443,7 +443,7 @@ jobs:
           AWSBNKCTL_SKIP_AUTH: "1"
         run: |
           set -eo pipefail
-          ./bin/awsbnkctl up -f examples/external-only/cluster.yaml --dry-run \
+          ./bin/awsbnkctl up -f internal/intent/testdata/external-only/cluster.yaml --dry-run \
             2>&1 | tee artifacts/up-dryrun-external-only.log
           grep -q 'postflight' artifacts/up-dryrun-external-only.log
           grep -q 'dry-run complete' artifacts/up-dryrun-external-only.log
@@ -453,7 +453,7 @@ jobs:
           AWSBNKCTL_SKIP_AUTH: "1"
         run: |
           set -eo pipefail
-          ./bin/awsbnkctl down -f examples/external-only/cluster.yaml --dry-run \
+          ./bin/awsbnkctl down -f internal/intent/testdata/external-only/cluster.yaml --dry-run \
             2>&1 | tee artifacts/down-dryrun-external-only.log
           grep -q 'dry-run complete' artifacts/down-dryrun-external-only.log
 

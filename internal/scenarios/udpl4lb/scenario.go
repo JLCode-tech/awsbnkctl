@@ -92,6 +92,9 @@ func (s *scenario) renderData(ctx *scenarios.Context) (templateData, error) {
 	if v := ctx.Options["vip"]; v != "" {
 		vip = v
 	}
+	// Pin this scenario's octet (see docs/SCENARIOS.md, "VIP plan") so it never
+	// shares a pool address with http-routing-e2e (.100) or any other scenario.
+	vip = scenarios.WithLastOctet(vip, "107")
 	return templateData{
 		Namespace:        ns,
 		GatewayClassName: gwClass,

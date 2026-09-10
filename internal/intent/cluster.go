@@ -68,8 +68,13 @@ type BnkSpec struct {
 	// PalCpuSet is the PAL CPU set string. Default "0-3".
 	PalCpuSet string `yaml:"palCpuSet,omitempty"`
 	// BGP enables BGP / dynamic routing on the TMM external VLAN.
-	// When true, Phase 23b configures allowed_services (tcp:179, udp:3784)
-	// on ext-vlan F5SPKVlan so TMM forwards control-plane packets to ZebOS.
+	// When true, Phase 07 admits tcp:179 (BGP) and udp:3784 (BFD) into
+	// SG_BNK_DATA from network.dataPath.external.cidr, and Phase 23b configures
+	// the matching allowed_services on the ext-vlan F5SPKVlan so TMM forwards
+	// the control-plane packets to the routing container (ZebOS). The peer
+	// itself (an AWS Route Server endpoint in the external subnet, or another
+	// router) and the RoutingTemplate / GlobalRoutingConfig CRs are supplied by
+	// the operator — see examples/*/bgp-route-server.yaml.
 	BGP bool `yaml:"bgp,omitempty"`
 	// DynamicRouting is an alias for BGP.
 	DynamicRouting bool `yaml:"dynamicRouting,omitempty"`

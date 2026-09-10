@@ -34,10 +34,29 @@ metadata:
   labels:
     purpose: bnk-full-cluster
 
-# pattern selects the data-path variant.
-# host-device: TMM runs directly on EC2 host NIC interfaces (no SR-IOV vfio).
-#              Requires network.dataPath for BNK ext/int subnet creation (phase 03).
-#              Activates phases 16 (TMM node label), 17 (secondary ENIs), 18 (IRSA).
+# pattern selects the data-path variant. This one file covers all three:
+#
+#   host-device (alias of dual-interface) — what is set below. TMM gets an
+#     external AND an internal ENI on EC2 host NICs; needs both dataPath blocks.
+#     Activates phases 16 (TMM node label), 17 (secondary ENIs), 18 (IRSA).
+#
+#   external-only — single external (ingress) ENI, TMM reaches pods over the
+#     CNI. To switch: set `pattern: external-only` and DELETE (or comment out)
+#     the `internal:` block under network.dataPath — validate rejects it for
+#     single-interface patterns. Nothing else changes: same node sizing, same
+#     cost, one ENI fewer (preflight floor 2 instead of 3). Phase 17 attaches
+#     only the external ENI, Phase 20 applies only the external NAD, Phase 23b
+#     applies only ext-vlan, the CNEInstance lists one networkAttachment.
+#     This is the pattern transparent egress (examples/egress-demo) needs.
+#
+#   sriov-external — EXPERIMENTAL. Same topology and cost as external-only,
+#     but TMM drives the ENA over DPDK/vfio-pci instead of the kernel socket:
+#     the vfio-node-prep DaemonSet (Phase 20b) rebinds the external ENA, the
+#     sriov-network-device-plugin exposes it as intel.com/ens8, the NAD becomes
+#     external-sriov (type passthru), and the CNEInstance drops
+#     TMM_GENERIC_SOCKET_DRIVER. Validated live (HTTP 200 through TMM-on-vfio);
+#     prefer a dedicated cluster. Apply the external-only swap above, then set
+#     `pattern: sriov-external`.
 pattern: host-device
 
 # demo marks this as a demo deployment. Equivalent to passing --demo on the CLI.
@@ -78,7 +97,8 @@ network:
       - cidr: 10.0.12.0/24
         az: ap-southeast-2b
 
-  # dataPath: BNK data-plane subnet definitions (host-device pattern only).
+  # dataPath: BNK data-plane subnet definitions (every BNK pattern; `internal:`
+  # is dual-interface only — remove it for external-only / sriov-external).
   # Phase 03 creates these subnets and writes BNK_EXT_SUBNET / BNK_INT_SUBNET to
   # state.env. Phase 17 attaches secondary ENIs from these subnets to the TMM node.
   # These subnets are dedicated to the TMM data path; they do not carry worker or
@@ -130,6 +150,11 @@ cluster:
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE: path to your F5 FAR pull credentials JSON
   jwt: ./license.jwt                  # REPLACE: path to your F5 subscription JWT
+  # bgp: open TCP 179 (BGP) + UDP 3784 (BFD) from the external subnet on the
+  # data-plane security group and the external F5SPKVlan, so TMM can peer with
+  # an AWS Route Server endpoint there. Harmless with no peer. The peer and the
+  # routing CRs are yours to add: see bgp-route-server.yaml in this directory.
+  bgp: true
   # certManagerVersion: "1.16.1"     # optional; defaults to 1.16.1 (the embedded version)
 
 # addons: optional add-on configuration.

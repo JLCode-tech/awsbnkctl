@@ -1,0 +1,58 @@
+# bgp-route-server.yaml — peer TMM with an AWS Route Server (BGP + BFD).
+#
+# Companion to cluster.yaml, which sets bnk.bgp: true. That flag opens TCP 179
+# and UDP 3784 on the data-plane security group (phase 07) and on the external
+# F5SPKVlan (phase 23b). It does NOT create the peer. Apply this file after
+# `awsbnkctl up` has finished and you have a Route Server endpoint in the
+# external data-path subnet — the procedure is in docs/BGP-ROUTE-SERVER.md and
+# summarised in README.md ("BGP peering with AWS Route Server").
+#
+# Addresses match this example's network.dataPath.external (10.0.10.0/24):
+#   10.0.10.240  TMM external SelfIP (auto-derived <subnet>.240) — the BGP
+#                router-id, and the --peer-address you give the Route Server.
+#   10.0.10.31   REPLACE with the Route Server endpoint's EniAddress. AWS
+#                allocates it; read it back with
+#                `aws ec2 describe-route-server-endpoints`.
+# ASNs: 65000 is TMM, 65001 is the Route Server (--amazon-side-asn 65001).
+# Change both sides together if these clash with something in your account.
+#
+# The RoutingTemplate is a native ZebOS stanza; the GlobalRoutingConfig binds
+# it to the routing container. Both live in the CNEInstance namespace.
+# `redistribute kernel` + `redistribute connected` is what announces the
+# Gateway VIP (10.0.10.100) and the SelfIP subnet to the Route Server, which
+# then propagates them into the route tables you enabled propagation on.
+apiVersion: k8s.f5net.com/v1alpha1
+kind: RoutingTemplate
+metadata:
+  name: full-cluster-bgp-template
+  namespace: f5-cne-system
+spec:
+  body: |-
+    router bgp 65000
+     bgp router-id 10.0.10.240
+     timers bgp 5 15
+     neighbor 10.0.10.31 remote-as 65001
+     neighbor 10.0.10.31 timers 5 15
+     neighbor 10.0.10.31 ebgp-multihop 10
+     address-family ipv4 unicast
+      redistribute kernel
+      redistribute connected
+      neighbor 10.0.10.31 activate
+     exit-address-family
+    !
+---
+apiVersion: k8s.f5net.com/v1alpha1
+kind: GlobalRoutingConfig
+metadata:
+  name: full-cluster-bgp-config
+  namespace: f5-cne-system
+spec:
+  bgp:
+    startASN: 65000
+    routerIdSubnet: 10.0.10.240
+    routerIdPrefix: 24
+    neighbors:
+      - ip: 10.0.10.31          # REPLACE: Route Server endpoint EniAddress
+        remoteAs: 65001
+  templateRef:
+    name: full-cluster-bgp-template

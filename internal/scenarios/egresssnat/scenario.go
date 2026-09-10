@@ -53,6 +53,11 @@ const (
 	// Confirmed live: f5-cne-system/int-vlan (selfip 10.0.20.240).
 	// LIVE-CONFIRM: verify tmmInterfaceName matches the live F5SPKVlan name.
 	defaultTmmIntVlan = "int-vlan"
+
+	// defaultTmmExtVlan is the client-side F5SPKVlan every pattern has. On
+	// external-only / sriov-external clusters it is the ONLY VLAN, so the
+	// egress tunnel must terminate here (examples/egress-demo/egress-toggle.yaml).
+	defaultTmmExtVlan = "ext-vlan"
 )
 
 // f5SPKEgressGVR is the GroupVersionResource for F5SPKEgress objects.
@@ -242,9 +247,18 @@ func egressNamespace(ctx *scenarios.Context) string {
 	return defaultEgressNamespace
 }
 
+// tmmIntVlan picks the F5SPKVlan the VXLAN tunnel terminates on. Phase 23b
+// names them ext-vlan (every pattern) and int-vlan (dual-interface only), so
+// the default follows the cluster's pattern: single-interface clusters have no
+// int-vlan and must use ext-vlan — the shape examples/egress-demo validated
+// end to end. Dual-interface keeps int-vlan. A nil cluster (unit tests, no
+// --config) falls back to int-vlan for backwards compatibility.
 func tmmIntVlan(ctx *scenarios.Context) string {
 	if v := ctx.Options["tmm-int-vlan"]; v != "" {
 		return v
+	}
+	if ctx.Cluster != nil && ctx.Cluster.IsBNKPattern() && !ctx.Cluster.HasInternalInterface() {
+		return defaultTmmExtVlan
 	}
 	return defaultTmmIntVlan
 }

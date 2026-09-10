@@ -1,3 +1,11 @@
+# CI FIXTURE — not a published example. Do not copy this to start a cluster.
+#
+# Folded into examples/demo-ai/cluster.yaml on 2026-09-10: demo-ai is the one
+# published AI example and carries this smaller rig (Llama-3-8B on ml.g5.xlarge,
+# external-only, no demo mode) as a documented alternative. This file keeps the
+# GPU node group + SageMaker shape under test in internal/intent/{gpu,sagemaker,
+# cluster}_test.go.
+#
 # cluster.yaml — AI rig: BNK load-balancer + GPU inference nodegroup.
 #
 # Deploys two nodegroups:
@@ -18,9 +26,9 @@
 # ~minutes). Use capacityType: on-demand for guaranteed availability.
 #
 # Quick start:
-#   awsbnkctl validate examples/ai-rig/cluster.yaml
-#   awsbnkctl up --config examples/ai-rig/cluster.yaml --dry-run
-#   awsbnkctl up --config examples/ai-rig/cluster.yaml
+#   awsbnkctl validate internal/intent/testdata/ai-rig/cluster.yaml
+#   awsbnkctl up --config internal/intent/testdata/ai-rig/cluster.yaml --dry-run
+#   awsbnkctl up --config internal/intent/testdata/ai-rig/cluster.yaml
 
 apiVersion: awsbnkctl/v1
 kind: Cluster
@@ -152,6 +160,11 @@ ai:
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
   jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
+  # bgp: open TCP 179 (BGP) + UDP 3784 (BFD) from the external subnet on the
+  # data-plane security group and the external F5SPKVlan, so TMM can peer with
+  # an AWS Route Server endpoint there. Harmless with no peer. The peer and the
+  # routing CRs are yours to add: see bgp-route-server.yaml in this directory.
+  bgp: true
 
 # testing: provisions the multi-ENI jumphost so forge-orchestrated aiperf
 # benchmarks have an in-network client. The jumphost (c6i.2xlarge, AL2023) sits

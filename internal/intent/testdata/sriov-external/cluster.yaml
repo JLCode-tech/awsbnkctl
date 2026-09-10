@@ -3,12 +3,12 @@
 # This is the sriov-external pattern's only end-to-end exercise: CI runs
 # `validate` plus `up`/`down --dry-run` against it so the pattern's phase
 # branches (17 ENI attach, 20 NAD, 20b vfio-node-prep, 23b vlan/GatewayClass)
-# stay covered. The user-facing config lives in examples/external-only/cluster.yaml
-# as a documented one-line `pattern:` swap.
+# stay covered. The user-facing config is examples/full-cluster/cluster.yaml, which
+# documents the single-interface swap in place.
 #
 # Referenced by .github/workflows/ci.yml, scripts/test-integration-aws.sh, and
 # internal/intent/{gpu,sagemaker}_test.go. Keep it in sync with
-# examples/external-only/cluster.yaml.
+# testdata/external-only/cluster.yaml.
 #
 # cluster.yaml — sriov-external (single-interface, SR-IOV/vfio DPDK) BNK-on-EKS.
 #
@@ -26,8 +26,8 @@
 #     driver; the device plugin injects /dev/vfio + PCIDEVICE_INTEL_COM_ENS8.
 #   - Single external ENI (preflight floor 2); no internal interface.
 #
-# To run this pattern for real, copy examples/external-only/cluster.yaml and set
-# `pattern: sriov-external` — that file documents the swap.
+# To run this pattern for real, start from examples/full-cluster/cluster.yaml, apply its
+# documented external-only swap, and set `pattern: sriov-external`.
 
 apiVersion: awsbnkctl/v1
 kind: Cluster
