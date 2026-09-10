@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/JLCode-tech/awsbnkctl/internal/manifest"
 )
 
 // instanceTypeRE is a loose sanity check for EC2 instance type strings.
@@ -28,7 +30,7 @@ var instanceTypeRE = regexp.MustCompile(`^[a-z][0-9a-z]+\.[a-z0-9]+$`)
 // time (slices 1–4 don't need it); Phase 12 returns a clear error if absent.
 //
 // certManagerVersion is validated at phase entry to match the pinned embedded
-// YAML version (1.16.1). Mismatch → clear error.
+// YAML version (EmbeddedCertManagerVersion). Mismatch → clear error.
 type BnkSpec struct {
 	// FARArchive is the path to F5's FAR pull credentials JSON file.
 	// Type: kubernetes.io/dockerconfigjson. File must be readable + non-empty.
@@ -37,7 +39,7 @@ type BnkSpec struct {
 	// Type: Opaque, key: license.jwt. File must be readable + non-empty.
 	JWT string `yaml:"jwt"`
 	// CertManagerVersion pins the embedded cert-manager YAML version.
-	// Default "1.16.1". Must match the embedded YAML or phase 12 errors.
+	// Default EmbeddedCertManagerVersion. Must match the embedded YAML or phase 12 errors.
 	CertManagerVersion string `yaml:"certManagerVersion,omitempty"`
 
 	// --- slice 7 operator-knobs (all optional; defaults match aws-gpu-setup vars.env) ---
@@ -68,8 +70,13 @@ type BnkSpec struct {
 	// PalCpuSet is the PAL CPU set string. Default "0-3".
 	PalCpuSet string `yaml:"palCpuSet,omitempty"`
 	// BGP enables BGP / dynamic routing on the TMM external VLAN.
-	// When true, Phase 23b configures allowed_services (tcp:179, udp:3784)
-	// on ext-vlan F5SPKVlan so TMM forwards control-plane packets to ZebOS.
+	// When true, Phase 07 admits tcp:179 (BGP) and udp:3784 (BFD) into
+	// SG_BNK_DATA from network.dataPath.external.cidr, and Phase 23b configures
+	// the matching allowed_services on the ext-vlan F5SPKVlan so TMM forwards
+	// the control-plane packets to the routing container (ZebOS). The peer
+	// itself (an AWS Route Server endpoint in the external subnet, or another
+	// router) and the RoutingTemplate / GlobalRoutingConfig CRs are supplied by
+	// the operator — see examples/*/bgp-route-server.yaml.
 	BGP bool `yaml:"bgp,omitempty"`
 	// DynamicRouting is an alias for BGP.
 	DynamicRouting bool `yaml:"dynamicRouting,omitempty"`
@@ -182,8 +189,9 @@ type EndpointAccessSpec struct {
 // Corresponds to the `cluster:` block in cluster.yaml.
 type ClusterSpec struct {
 	// KubernetesVersion is the EKS Kubernetes version to deploy.
-	// Default and mandated floor: MinKubernetesVersion ("1.34"). Versions below
-	// the floor are rejected by validate; see validateKubernetesVersion.
+	// Default: DefaultKubernetesVersion ("1.35", the release F5 lists for BNK
+	// 2.3.x on host Kubernetes). Mandated floor: MinKubernetesVersion ("1.34").
+	// Versions below the floor are rejected by validate; see validateKubernetesVersion.
 	KubernetesVersion string `yaml:"kubernetesVersion,omitempty"`
 	// NodeGroups defines one or more managed node groups. At least one is required
 	// when the cluster block is present.
@@ -504,8 +512,9 @@ type BigIPVESpec struct {
 
 // FloSpec configures the FLO (F5 Lifecycle Operator) Helm install in Phase 14.
 type FloSpec struct {
-	// Version overrides the default pinned chart version ("v2.21.13-0.0.28").
-	// Omit to use the default.
+	// Version overrides the FLO chart version. Omit it and the chart paired with
+	// bnk.manifestVersion in manifest.KnownReleases is installed (see
+	// Cluster.FLOVersion), so a 2.3.0 cluster keeps its 2.3.0 operator.
 	Version string `yaml:"version,omitempty"`
 	// Enabled is the master switch. Nil or true means FLO is installed.
 	// Explicitly false → Phase 14/15 log a skip and return nil immediately.
@@ -525,15 +534,37 @@ func (f *FloSpec) FloEnabled() bool {
 	return *f.Enabled
 }
 
-// FLOVersion returns the chart version to install. Falls back to the pinned
-// default when not overridden.
-const DefaultFLOVersion = "v2.21.13-0.0.28"
+// DefaultFLOVersion is the FLO chart paired with manifest.DefaultManifestVersion.
+// Kept as a var so it can never drift from the release table.
+var DefaultFLOVersion = manifest.DefaultFLOChart()
 
+// FLOVersion returns the explicit addons.flo.version override, or the chart
+// paired with the default release manifest. Prefer Cluster.FLOVersion, which
+// also honours bnk.manifestVersion.
 func (f *FloSpec) FLOVersion() string {
 	if f == nil || f.Version == "" {
 		return DefaultFLOVersion
 	}
 	return f.Version
+}
+
+// FLOVersion resolves the FLO chart Phase 14 installs, in priority order:
+//
+//  1. addons.flo.version — an explicit operator pin always wins.
+//  2. the FLO chart paired with bnk.manifestVersion in manifest.KnownReleases,
+//     so every supported 2.3.x build gets the operator F5 shipped it with.
+//  3. the default release's FLO chart, when bnk.manifestVersion is a build the
+//     table does not know (ValidateWarnings flags this case).
+func (c *Cluster) FLOVersion() string {
+	if c != nil && c.Addons != nil && c.Addons.Flo != nil && c.Addons.Flo.Version != "" {
+		return c.Addons.Flo.Version
+	}
+	if c != nil && c.Bnk != nil && c.Bnk.ManifestVersion != "" {
+		if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {
+			return chart
+		}
+	}
+	return DefaultFLOVersion
 }
 
 // LBControllerSpec configures the AWS Load Balancer Controller Helm install in Phase 14b.
@@ -739,10 +770,18 @@ func (r *byteReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// EmbeddedCertManagerVersion is the cert-manager version baked into the binary.
-// Phase 12 validates that bnk.certManagerVersion (if set) matches this exactly.
-// Why: pinned to match the FLO 2.21.13 dependency surface. Bump alongside DefaultFLOVersion.
-const EmbeddedCertManagerVersion = "1.16.1"
+// EmbeddedCertManagerVersion is the cert-manager version baked into the binary
+// (internal/k8s/manifests/cert-manager/cert-manager-v<version>.yaml, upstream
+// static install YAML verbatim). Phase 12 validates that bnk.certManagerVersion
+// (if set) matches this exactly.
+//
+// Why 1.21: BNK 2.3 asks for a currently supported cert-manager release and
+// only uses the stable cert-manager.io/v1 API (ClusterIssuer, Certificate).
+// 1.21 is supported until the 1.23 release and covers Kubernetes 1.33–1.36,
+// which spans the whole 1.34–1.35 window this tool provisions. 1.16 (the
+// previous pin) went end-of-life in June 2025 and stops at Kubernetes 1.32.
+// Bump when cert-manager's support window moves past the EKS floor.
+const EmbeddedCertManagerVersion = "1.21.1"
 
 // applyDefaults fills in zero-value fields with their documented defaults.
 // Called before validate so validation sees the post-default values.
@@ -754,7 +793,7 @@ func applyDefaults(c *Cluster) {
 
 	if c.ClusterSpec != nil {
 		if c.ClusterSpec.KubernetesVersion == "" {
-			c.ClusterSpec.KubernetesVersion = MinKubernetesVersion
+			c.ClusterSpec.KubernetesVersion = DefaultKubernetesVersion
 		}
 		for i := range c.ClusterSpec.NodeGroups {
 			ng := &c.ClusterSpec.NodeGroups[i]
@@ -852,7 +891,7 @@ func applyDefaults(c *Cluster) {
 			c.Bnk.StorageClassName = "gp2"
 		}
 		if c.Bnk.ManifestVersion == "" {
-			c.Bnk.ManifestVersion = "2.3.0-3.2598.3-0.0.170"
+			c.Bnk.ManifestVersion = manifest.DefaultManifestVersion
 		}
 		if c.Bnk.TmmMtu == 0 {
 			c.Bnk.TmmMtu = 9000
@@ -1193,6 +1232,13 @@ func parseGPUAZDenyEnv(val string) map[string][]string {
 // so review both when either date passes.
 const MinKubernetesVersion = "1.34"
 
+// DefaultKubernetesVersion is what a cluster.yaml without cluster.kubernetesVersion
+// gets. It is the newest minor BNK 2.3.x is validated on (F5's 2.3.2 / 2.3.3
+// release notes list 1.35 for host Kubernetes; 1.34 is not on their list, it
+// is only our EKS standard-support floor) and the version every example pins.
+// Must be >= MinKubernetesVersion and <= 1.<maxTestedKubernetesMinor>.
+const DefaultKubernetesVersion = "1.35"
+
 // maxTestedKubernetesMinor is the highest 1.x minor the BNK 2.3 stack is known
 // to install cleanly on. At 1.36 the apiserver started rejecting the f5-spk-pools
 // and HSL CRDs, whose integer fields declare `format: int32` together with
@@ -1376,7 +1422,7 @@ func validateTesting(c *Cluster) error {
 // Rules:
 //   - farArchive must be a non-empty path string
 //   - jwt must be a non-empty path string
-//   - certManagerVersion must match the embedded YAML version (1.16.1)
+//   - certManagerVersion must match the embedded YAML version (EmbeddedCertManagerVersion)
 func validateBnk(b *BnkSpec) error {
 	if b.FARArchive == "" {
 		return fmt.Errorf("bnk.farArchive is required when the bnk: block is present")
@@ -1388,6 +1434,14 @@ func validateBnk(b *BnkSpec) error {
 		return fmt.Errorf("bnk.certManagerVersion %q does not match the embedded cert-manager version %q; "+
 			"slice 6+ may add multi-version support — for now omit the field to use the default",
 			b.CertManagerVersion, EmbeddedCertManagerVersion)
+	}
+	// Any 2.3.x manifest is accepted (backwards compatibility is the point of
+	// the field), but a build the release table does not know gets the default
+	// release's FLO chart unless addons.flo.version pins one — say so.
+	if b.ManifestVersion != "" && !manifest.IsKnownRelease(b.ManifestVersion) {
+		fmt.Fprintf(os.Stderr, "[warn] bnk.manifestVersion %s is not in the known release table (newest known: %s); "+
+			"Phase 14 will install FLO %s unless addons.flo.version pins the chart F5 ships with that manifest\n",
+			b.ManifestVersion, manifest.DefaultManifestVersion, manifest.DefaultFLOChart())
 	}
 	return nil
 }

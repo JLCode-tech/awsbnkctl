@@ -60,7 +60,7 @@ const (
 	certManagerNS     = "cert-manager"
 	operatorNS        = "f5-cne-core"
 
-	certManagerYAMLPath = "cert-manager/cert-manager-v1.16.1.yaml"
+	certManagerYAMLPath = "cert-manager/cert-manager-v" + intent.EmbeddedCertManagerVersion + ".yaml"
 	certChainYAMLPath   = "shared/bnk-cert-chain.yaml"
 	multusYAMLPath      = "multus/multus-daemonset-v4.2.4.yaml"
 	multusDaemonSet     = "kube-multus-ds"

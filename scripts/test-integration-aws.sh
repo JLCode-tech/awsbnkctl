@@ -78,7 +78,7 @@ trap 'rm -rf "$artifacts_dir"' EXIT
 # These filenames are gitignored; the script writes them fresh every run.
 for example_dir in \
     examples/full-cluster \
-    examples/external-only \
+    internal/intent/testdata/external-only \
     internal/intent/testdata/sriov-external
 do
     echo '{"auths":{}}' > "$example_dir/cne_pull_64.json"
@@ -88,7 +88,7 @@ done
 # Validate example configs.
 echo "→ full-up-dryrun: validate example configs" >&2
 ./bin/awsbnkctl validate examples/full-cluster/cluster.yaml
-./bin/awsbnkctl validate examples/external-only/cluster.yaml
+./bin/awsbnkctl validate internal/intent/testdata/external-only/cluster.yaml
 ./bin/awsbnkctl validate internal/intent/testdata/sriov-external/cluster.yaml
 
 run_up_dryrun() {
@@ -134,8 +134,8 @@ run_down_dryrun() {
 fail=0
 run_up_dryrun   examples/full-cluster/cluster.yaml     up-dryrun-full-cluster.log     || fail=1
 run_down_dryrun examples/full-cluster/cluster.yaml     down-dryrun-full-cluster.log   || fail=1
-run_up_dryrun   examples/external-only/cluster.yaml    up-dryrun-external-only.log    || fail=1
-run_down_dryrun examples/external-only/cluster.yaml    down-dryrun-external-only.log  || fail=1
+run_up_dryrun   internal/intent/testdata/external-only/cluster.yaml    up-dryrun-external-only.log    || fail=1
+run_down_dryrun internal/intent/testdata/external-only/cluster.yaml    down-dryrun-external-only.log  || fail=1
 run_up_dryrun   internal/intent/testdata/sriov-external/cluster.yaml   up-dryrun-sriov-external.log   || fail=1
 run_down_dryrun internal/intent/testdata/sriov-external/cluster.yaml   down-dryrun-sriov-external.log || fail=1
 

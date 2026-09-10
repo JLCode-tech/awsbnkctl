@@ -40,7 +40,7 @@ if [ -z "${KUBECONFIG:-}" ]; then
 fi
 export KUBECONFIG="${KUBECONFIG:-}"
 REGION="${REGION:-ap-southeast-2}"
-VIP="${VIP:-10.0.10.100}"
+VIP="${VIP:-10.0.10.150}"
 INGRESS_HOST="${INGRESS_HOST:-bnk-ingress.bnk-demo.internal}"
 RUNTIME="${RUNTIME:-FinanceAgentV2Agent}"
 TARGET="${TARGET:-demo-v2}"

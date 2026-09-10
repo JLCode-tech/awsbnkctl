@@ -444,7 +444,7 @@ func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	if vip == "" {
 		return v, fmt.Errorf("VIP not derivable — set network.dataPath.external.cidr in cluster.yaml or pass --vip")
 	}
-	// Use .105 to avoid colliding with other scenarios' pools.
-	v.VIP = withLastOctet(vip, strconv.Itoa(105))
+	// Use .109 — cluster-wide-watch owns .105 (see docs/SCENARIOS.md, "VIP plan").
+	v.VIP = withLastOctet(vip, strconv.Itoa(109))
 	return v, nil
 }

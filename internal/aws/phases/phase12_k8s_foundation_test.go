@@ -47,7 +47,7 @@ func p12Cluster(t *testing.T, farPath, jwtPath string) *intent.Cluster {
 		Bnk: &intent.BnkSpec{
 			FARArchive:         farPath,
 			JWT:                jwtPath,
-			CertManagerVersion: "1.16.1",
+			CertManagerVersion: intent.EmbeddedCertManagerVersion,
 		},
 	}
 }

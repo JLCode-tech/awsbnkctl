@@ -19,11 +19,20 @@
 # Run from the repo root:  bash examples/demo-ai/shootout/bringup.sh
 set -euo pipefail
 
-CFG=examples/demo-ai/cluster.yaml
-CLUSTER=bnk-demo-ai
-REGION=ap-southeast-2
-EP=bnk-demo-ai-lmi                 # SageMaker endpoint name (cluster name + -lmi)
-SM_VIP=10.0.10.130                 # free VIP in BNK_EXT for the SageMaker-via-BNK leg
+# Cluster name, region and the data-path subnet are read from the intent file so
+# this script follows whatever cluster.yaml says. Override CFG (or any of the
+# derived variables) in the environment to point it elsewhere.
+CFG="${CFG:-examples/demo-ai/cluster.yaml}"
+yaml_scalar() { awk -v key="$2" '$0 ~ "^" key ":" { sub(/#.*/, ""); sub(/^[^:]*:[ \t]*/, ""); gsub(/["'"'"']/, ""); print; exit }' "$1"; }
+CLUSTER="${CLUSTER:-$(yaml_scalar "$CFG" "  name")}"
+REGION="${REGION:-$(yaml_scalar "$CFG" "  region")}"
+: "${CLUSTER:?could not read metadata.name from $CFG}"; : "${REGION:?could not read metadata.region from $CFG}"
+EP="${CLUSTER}-lmi"                # SageMaker endpoint name (cluster name + -lmi)
+# VIP for the SageMaker-via-BNK leg: last octet .130 of network.dataPath.external
+# (the shootout's slot in the VIP plan, docs/SCENARIOS.md).
+EXT_CIDR="$(awk '/^  dataPath:/ { d = 1 } d && /^    external:/ { e = 1 } d && e && /cidr:/ { sub(/#.*/, ""); print $2; exit }' "$CFG")"
+: "${EXT_CIDR:?could not read network.dataPath.external.cidr from $CFG}"
+SM_VIP="${SM_VIP:-${EXT_CIDR%.*}.130}"
 NODE_ROLE="${CLUSTER}-eks-node-role"
 : "${AWS_PROFILE:?set AWS_PROFILE}"; : "${HF_TOKEN:?set HF_TOKEN}"; : "${AWSBNKCTL_FORGE_PASSWORD:?set AWSBNKCTL_FORGE_PASSWORD}"
 ACCT=$(aws sts get-caller-identity --query Account --output text)

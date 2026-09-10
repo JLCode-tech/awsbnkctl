@@ -67,6 +67,15 @@ cluster:
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
   jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
+  # manifestVersion: which BNK 2.3.x release manifest FLO installs. Omit for the
+  # newest (2.3.3-3.2598.3-0.0.509); any 2.3.x build works and brings its own FLO
+  # chart along (see docs/ARCHITECTURE.md, "BNK release policy").
+  # manifestVersion: "2.3.2-3.2598.3-0.0.392"
+  # bgp: open TCP 179 (BGP) + UDP 3784 (BFD) from the external subnet on the
+  # data-plane security group and the external F5SPKVlan, so TMM can peer with
+  # an AWS Route Server endpoint there. Harmless with no peer. The peer and the
+  # routing CRs are yours to add: see bgp-route-server.yaml in this directory.
+  bgp: true
 
 testing:
   jumphost:

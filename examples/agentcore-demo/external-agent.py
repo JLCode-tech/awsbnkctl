@@ -21,7 +21,7 @@ import sys
 import urllib.error
 import urllib.request
 
-DEFAULT_URL = os.environ.get("BNK_MCP_URL", "http://10.0.10.100/v1/mcp/forecast")
+DEFAULT_URL = os.environ.get("BNK_MCP_URL", "http://10.0.10.150/v1/mcp/forecast")
 DEFAULT_HOST = os.environ.get("BNK_INGRESS_HOST", "bnk-ingress.bnk-demo.internal")
 # Demo credential, matching MCP_EXTERNAL_TOKEN in mcp-tool/kustomization.yaml.
 DEFAULT_TOKEN = os.environ.get("BNK_MCP_TOKEN", "demo-external-token-4b9e2d")

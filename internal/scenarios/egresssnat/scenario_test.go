@@ -154,8 +154,8 @@ func TestVerifyCallOrder(t *testing.T) {
 	if !last.OK {
 		t.Errorf("informational assertion should be OK=true, got OK=false")
 	}
-	if !strings.Contains(last.Description, "deferred") {
-		t.Errorf("informational assertion description should mention 'deferred', got %q", last.Description)
+	if !strings.Contains(last.Got, "skipped") {
+		t.Errorf("without jumphost deps the data-path assertion should be recorded as skipped, got %q", last.Got)
 	}
 }
 

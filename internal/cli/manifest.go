@@ -40,8 +40,8 @@ supplied, probes look in the current workspace or current working directory.
 
 Examples:
   awsbnkctl manifest probe
-  awsbnkctl manifest probe 2.3.0-3.2598.3-0.0.170 --all
-  awsbnkctl manifest probe 2.3.0-3.2598.3-0.0.170 --far /path/to/cne_pull_64.json`,
+  awsbnkctl manifest probe 2.3.3-3.2598.3-0.0.509 --all
+  awsbnkctl manifest probe 2.3.3-3.2598.3-0.0.509 --far /path/to/cne_pull_64.json`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runManifestProbe,
 }

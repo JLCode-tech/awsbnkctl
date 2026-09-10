@@ -663,6 +663,14 @@ func resolveVIP(ctx *scenarios.Context) string {
 	if v := ctx.Options["vip"]; v != "" {
 		return v
 	}
+	// Derive the subnet from cluster.yaml (network.dataPath.external) and keep
+	// this demo's octet, so a non-10.0.10.0/24 data path still gets a VIP inside
+	// it. scnVIP is only the no-cluster fallback (unit tests, no --config).
+	if ctx.Cluster != nil {
+		if base, err := ctx.Cluster.DefaultVIP(); err == nil && base != "" {
+			return scenarios.WithLastOctet(base, "113")
+		}
+	}
 	return scnVIP
 }
 

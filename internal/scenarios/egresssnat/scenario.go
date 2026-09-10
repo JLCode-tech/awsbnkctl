@@ -8,16 +8,18 @@
 // vxlan.create=true creates the TMM tunnel end inline; the CSRC DaemonSet
 // (f5-spk-csrc, already running) programs the worker-node end.
 //
-// Verify (Amber / control-plane only):
+// Verify:
 //
 //   - egress-client pod becomes Ready (proves namespace + image pull OK).
 //   - F5SPKEgress awsbnkctl-egress is present in EgressNamespace (proves CR
 //     accepted by the API server; status conditions checked when available).
-//   - Informational (non-gating): data-plane SNAT source-IP proof deferred to
-//     live validation — documents why this scenario is Amber.
+//   - Data path (gating when the cluster has a jumphost): a source-IP reflector
+//     is started on the jumphost's data-path ENI, the egress-client pod curls
+//     it, and the source the reflector saw must be TMM's external SelfIP —
+//     see verifySourceIP. Without jumphost state the step is recorded as
+//     skipped, so the result stays honest on clusters built without one.
 //
-// It does NOT curl a reflector and does NOT assert source-IP == TMM external
-// self-IP. That requires a live cluster cycle and is the Amber→Green gate.
+// Rating stays Amber until the data-path step has passed on a live cluster.
 package egresssnat
 
 import (
@@ -32,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
 )
 
@@ -53,6 +56,11 @@ const (
 	// Confirmed live: f5-cne-system/int-vlan (selfip 10.0.20.240).
 	// LIVE-CONFIRM: verify tmmInterfaceName matches the live F5SPKVlan name.
 	defaultTmmIntVlan = "int-vlan"
+
+	// defaultTmmExtVlan is the client-side F5SPKVlan every pattern has. On
+	// external-only / sriov-external clusters it is the ONLY VLAN, so the
+	// egress tunnel must terminate here (examples/egress-demo/egress-toggle.yaml).
+	defaultTmmExtVlan = "ext-vlan"
 )
 
 // f5SPKEgressGVR is the GroupVersionResource for F5SPKEgress objects.
@@ -72,12 +80,103 @@ func init() { scenarios.Register(&scenario{}) }
 type VerifyDeps struct {
 	WaitPodReadyFn   func(ctx context.Context, sctx *scenarios.Context, ns, name string, timeout time.Duration) error
 	GetF5SPKEgressFn func(ctx context.Context, sctx *scenarios.Context, ns, name string) (bool, string, error)
+	// The three below implement the data-path proof (see verifySourceIP). A nil
+	// StartResponderFn skips it and Verify stays control-plane only, which is
+	// what the unit tests exercise.
+	StartResponderFn func(ctx context.Context, sctx *scenarios.Context, port int) error
+	StopResponderFn  func(ctx context.Context, sctx *scenarios.Context, port int)
+	ExecInPodFn      func(sctx *scenarios.Context, ns, pod, container string, command ...string) (string, error)
 }
+
+// reflectorPort is where the jumphost source-IP reflector listens. 8080 is
+// external-resource-pool's marker responder; keep clear of it.
+const reflectorPort = 8081
+
+// Poll budget for the data-path proof (package vars so tests can shrink them).
+var (
+	sourceIPPollTimeout  = 2 * time.Minute
+	sourceIPPollInterval = 10 * time.Second
+)
 
 func realVerifyDeps() VerifyDeps {
 	return VerifyDeps{
 		WaitPodReadyFn:   waitPodReady,
 		GetF5SPKEgressFn: getF5SPKEgress,
+		StartResponderFn: func(ctx context.Context, sctx *scenarios.Context, port int) error {
+			return jumphost.StartSourceIPResponder(ctx, probeOpts(sctx), port)
+		},
+		StopResponderFn: func(ctx context.Context, sctx *scenarios.Context, port int) {
+			_ = jumphost.StopHTTPResponder(ctx, probeOpts(sctx), port)
+		},
+		ExecInPodFn: scenarios.ExecInPod,
+	}
+}
+
+func probeOpts(sctx *scenarios.Context) jumphost.ProbeOptions {
+	return jumphost.ProbeOptions{
+		Region:     sctx.Cluster.Metadata.Region,
+		InstanceID: sctx.State.Get("JUMPHOST_INSTANCE_ID"),
+		SourceIP:   sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP"),
+	}
+}
+
+// expectedSNATSource is the address the reflector must see when egress is
+// captured: TMM's external SelfIP (AUTOMAP picks the egress interface's
+// SelfIP). state.env carries it from Phase 17; the intent's derived value is
+// the fallback.
+func expectedSNATSource(sctx *scenarios.Context) string {
+	if sctx.State != nil {
+		if v := sctx.State.Get("TMM_EXT_SELFIP"); v != "" {
+			return v
+		}
+	}
+	if sctx.Cluster != nil && sctx.Cluster.Network.DataPath != nil {
+		return sctx.Cluster.Network.DataPath.SelfIPs.External
+	}
+	return ""
+}
+
+// verifySourceIP is the Amber→Green data-path proof: start a reflector on the
+// jumphost's data-path ENI, curl it FROM the captured pod, and check the
+// source the reflector saw is TMM's external SelfIP — i.e. the pod's egress
+// really went pod → VXLAN → TMM → AUTOMAP SNAT. It returns (skipped, assertion).
+// skipped is true when the cluster shape cannot run it (no jumphost state);
+// the caller records that as informational so the scenario is honest rather
+// than red on a cluster built without a jumphost.
+func verifySourceIP(d *VerifyDeps, sctx *scenarios.Context, podNS string) (bool, scenarios.Assertion) {
+	if d.StartResponderFn == nil || d.ExecInPodFn == nil || sctx.Cluster == nil || sctx.State == nil ||
+		sctx.State.Get("JUMPHOST_INSTANCE_ID") == "" || sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP") == "" {
+		return true, scenarios.Assertion{
+			Description: "data-plane SNAT source-IP proof",
+			OK:          true,
+			Got:         "skipped — needs testing.jumphost.enabled=true (JUMPHOST_INSTANCE_ID / JUMPHOST_BNK_EXT_ENI_IP in state.env); AUTOMAP should present source IP = TMM external SelfIP",
+		}
+	}
+	want := expectedSNATSource(sctx)
+	reflector := sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
+	if err := d.StartResponderFn(sctx.Ctx, sctx, reflectorPort); err != nil {
+		return false, scenarios.Assertion{Description: "source-IP reflector on the jumphost data-path ENI", OK: false, Got: err.Error()}
+	}
+	if d.StopResponderFn != nil {
+		defer d.StopResponderFn(sctx.Ctx, sctx, reflectorPort)
+	}
+	url := fmt.Sprintf("http://%s:%d/", reflector, reflectorPort)
+	var seen, lastErr string
+	// The CSRC DaemonSet programs the worker-node VXLAN end asynchronously
+	// after the CR is accepted; give it a couple of minutes.
+	ok, detail := scenarios.PollMarkers(sctx.Ctx, sourceIPPollTimeout, sourceIPPollInterval, func() (bool, string) {
+		out, err := d.ExecInPodFn(sctx, podNS, "egress-client", "curl", "curl", "-s", "--max-time", "8", url)
+		if err != nil {
+			lastErr = err.Error()
+			return false, "curl from egress-client failed: " + lastErr
+		}
+		seen = strings.TrimSpace(out)
+		return seen == want, fmt.Sprintf("reflector %s saw source %q, want TMM external SelfIP %q", url, seen, want)
+	})
+	return false, scenarios.Assertion{
+		Description: "pod egress leaves TMM with source IP = TMM external SelfIP (AUTOMAP SNAT proven end to end)",
+		OK:          ok,
+		Got:         detail,
 	}
 }
 
@@ -193,12 +292,15 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		Got:         got,
 	})
 
-	// 3. Informational (non-gating): data-plane SNAT proof deferred.
-	res.Assertions = append(res.Assertions, scenarios.Assertion{
-		Description: "data-plane SNAT source-IP proof: deferred to live validation (egress-vxlan-snat)",
-		OK:          true,
-		Got:         "AUTOMAP should present source IP = TMM external self-IP 10.0.10.240; verify with in-VPC reflector after Amber→Green promotion",
-	})
+	// 3. Data path. With a jumphost this is the real proof (gating); without
+	// one it is recorded as skipped so the result stays honest.
+	skipped, a := verifySourceIP(d, ctx, v.Namespace)
+	res.Assertions = append(res.Assertions, a)
+	if skipped {
+		res.Details = "Amber: control-plane only on this run — data-plane SNAT source-IP proof needs the jumphost (testing.jumphost.enabled=true)."
+	} else {
+		res.Details = "Control plane + data path: the reflector on the jumphost data-path ENI reports the source the pod's egress arrived from."
+	}
 
 	return scenarios.FinalizeResult(res)
 }
@@ -242,9 +344,18 @@ func egressNamespace(ctx *scenarios.Context) string {
 	return defaultEgressNamespace
 }
 
+// tmmIntVlan picks the F5SPKVlan the VXLAN tunnel terminates on. Phase 23b
+// names them ext-vlan (every pattern) and int-vlan (dual-interface only), so
+// the default follows the cluster's pattern: single-interface clusters have no
+// int-vlan and must use ext-vlan — the shape examples/egress-demo validated
+// end to end. Dual-interface keeps int-vlan. A nil cluster (unit tests, no
+// --config) falls back to int-vlan for backwards compatibility.
 func tmmIntVlan(ctx *scenarios.Context) string {
 	if v := ctx.Options["tmm-int-vlan"]; v != "" {
 		return v
+	}
+	if ctx.Cluster != nil && ctx.Cluster.IsBNKPattern() && !ctx.Cluster.HasInternalInterface() {
+		return defaultTmmExtVlan
 	}
 	return defaultTmmIntVlan
 }

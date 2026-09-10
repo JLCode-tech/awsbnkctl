@@ -9,9 +9,13 @@
 #
 # Run from the repo root:  bash examples/demo-ai/shootout/teardown.sh
 set -uo pipefail
-CFG=examples/demo-ai/cluster.yaml
-CLUSTER=bnk-demo-ai
-REGION=ap-southeast-2
+# Cluster name and region come from the intent file (override CFG / CLUSTER /
+# REGION in the environment to point elsewhere) — same derivation as bringup.sh.
+CFG="${CFG:-examples/demo-ai/cluster.yaml}"
+yaml_scalar() { awk -v key="$2" '$0 ~ "^" key ":" { sub(/#.*/, ""); sub(/^[^:]*:[ \t]*/, ""); gsub(/["'"'"']/, ""); print; exit }' "$1"; }
+CLUSTER="${CLUSTER:-$(yaml_scalar "$CFG" "  name")}"
+REGION="${REGION:-$(yaml_scalar "$CFG" "  region")}"
+: "${CLUSTER:?could not read metadata.name from $CFG}"; : "${REGION:?could not read metadata.region from $CFG}"
 NODE_ROLE="${CLUSTER}-eks-node-role"
 : "${AWS_PROFILE:?set AWS_PROFILE}"
 export KUBECONFIG="$PWD/.awsbnkctl/${CLUSTER}/kubeconfig"

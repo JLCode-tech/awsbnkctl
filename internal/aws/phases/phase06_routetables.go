@@ -41,6 +41,7 @@ func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State
 		st.Set("PUBLIC_RTB", "dry-run-rtb-pub")
 		if natID != "" {
 			fmt.Fprintf(os.Stderr, "[phase 06] dry-run: would create private route table → NAT\n")
+			fmt.Fprintf(os.Stderr, "[phase 06] dry-run: would associate BNK data-path subnets with the private route table\n")
 			st.Set("PRIVATE_RTB", "dry-run-rtb-priv")
 		} else {
 			fmt.Fprintf(os.Stderr, "[phase 06] no NAT GW in state, skipping private route table\n")
@@ -103,6 +104,23 @@ func Phase06RouteTables(ctx context.Context, cl *intent.Cluster, st *state.State
 				if err := ensureRTBAssociation(ctx, clients.EC2, privRTBID, sid); err != nil {
 					return fmt.Errorf("phase06: associate private subnet %s: %w", sid, err)
 				}
+			}
+			// Associate the BNK data-path subnets too. Until now they were left on
+			// the VPC main table (local route only), so TMM's external SelfIP had no
+			// path to the internet: transparent egress (F5SPKEgress AUTOMAP SNAT to
+			// the SelfIP) could reach nothing outside the VPC, and any route the
+			// Route Server propagates never applied to the TMM ENIs' own subnet.
+			// The private table is the right one: the ENIs carry no public IP, so
+			// egress must NAT, and in-VPC ingress to the VIP is still the local route.
+			for _, key := range []string{"BNK_EXT_SUBNET", "BNK_INT_SUBNET"} {
+				sid := st.Get(key)
+				if sid == "" || strings.HasPrefix(sid, "dry-run") {
+					continue
+				}
+				if err := ensureRTBAssociation(ctx, clients.EC2, privRTBID, sid); err != nil {
+					return fmt.Errorf("phase06: associate data-path subnet %s (%s): %w", sid, key, err)
+				}
+				fmt.Fprintf(os.Stderr, "[phase 06] data-path subnet %s (%s) → private RTB %s (NAT egress for TMM SelfIPs)\n", sid, key, privRTBID)
 			}
 			st.Set("PRIVATE_RTB", privRTBID)
 		}

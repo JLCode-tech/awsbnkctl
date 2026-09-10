@@ -20,7 +20,7 @@ set -uo pipefail
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME="${RUNTIME:-FinanceAgentV2Agent}"
 TARGET="${TARGET:-demo-v2}"
-VIP="${VIP:-10.0.10.100}"
+VIP="${VIP:-10.0.10.150}"
 INTERVAL="${INTERVAL:-300}"
 SYMBOLS=(AAPL MSFT NVDA AMZN GOOG META TSLA)
 

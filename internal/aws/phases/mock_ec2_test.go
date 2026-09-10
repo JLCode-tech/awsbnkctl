@@ -59,6 +59,7 @@ type mockEC2 struct {
 	createRTBCalls   int
 	createRouteCalls int
 	assocRTBCalls    int
+	assocRTBInputs   []*ec2.AssociateRouteTableInput
 	disassocRTBCalls int
 
 	// Security Groups (slice 7+)
@@ -249,8 +250,9 @@ func (m *mockEC2) CreateRoute(_ context.Context, _ *ec2.CreateRouteInput, _ ...f
 	m.createRouteCalls++
 	return &ec2.CreateRouteOutput{}, nil
 }
-func (m *mockEC2) AssociateRouteTable(_ context.Context, _ *ec2.AssociateRouteTableInput, _ ...func(*ec2.Options)) (*ec2.AssociateRouteTableOutput, error) {
+func (m *mockEC2) AssociateRouteTable(_ context.Context, in *ec2.AssociateRouteTableInput, _ ...func(*ec2.Options)) (*ec2.AssociateRouteTableOutput, error) {
 	m.assocRTBCalls++
+	m.assocRTBInputs = append(m.assocRTBInputs, in)
 	assocID := "rtbassoc-mock"
 	return &ec2.AssociateRouteTableOutput{AssociationId: &assocID}, nil
 }

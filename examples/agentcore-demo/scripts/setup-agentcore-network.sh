@@ -12,6 +12,10 @@ set -euo pipefail
 # hardcoded.
 
 CLUSTER_NAME="${1:-bnk-agentcore-demo}"
+# The demo Gateway in gateway-deployment.yaml is named <cluster>-gateway in the
+# default namespace; override both if you renamed it.
+GATEWAY_NAME="${GATEWAY_NAME:-${CLUSTER_NAME}-gateway}"
+GATEWAY_NS="${GATEWAY_NS:-default}"
 REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || echo "ap-southeast-2")}"
 export AWS_DEFAULT_REGION="$REGION"
 
@@ -41,13 +45,13 @@ VPC_CIDR=$(aws ec2 describe-vpcs \
     --query "Vpcs[0].CidrBlock" --output text)
 echo "Found VPC CIDR: $VPC_CIDR"
 
-echo "Discovering BNK VIP from Gateway bnk-agentcore-demo-gateway..."
-if ! VIP_IP=$(kubectl get gateway bnk-agentcore-demo-gateway -n default -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null); then
+echo "Discovering BNK VIP from Gateway $GATEWAY_NS/$GATEWAY_NAME..."
+if ! VIP_IP=$(kubectl get gateway "$GATEWAY_NAME" -n "$GATEWAY_NS" -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null); then
     echo "Failed to read Gateway. Is KUBECONFIG set and pointing at the right cluster?"
     exit 1
 fi
 if [ -z "$VIP_IP" ]; then
-    echo "Gateway bnk-agentcore-demo-gateway has no spec.addresses[0].value"
+    echo "Gateway $GATEWAY_NS/$GATEWAY_NAME has no spec.addresses[0].value"
     exit 1
 fi
 echo "Found BNK VIP: $VIP_IP"

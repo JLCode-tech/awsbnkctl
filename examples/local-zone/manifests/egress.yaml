@@ -14,7 +14,8 @@ spec:
     vxlan:
       create: true
       tmmInterfaceName: int-vlan
-      nodeInterfaceName: ens5
+      # nodeInterfaceName: ens5   # the 2.3 F5SPKEgress reference says CSRC sets this itself;
+                                 # it was pinned during the failed validation, kept for the record
       ipv4Subnet: "192.168.0.0"
       ipv4PrefixLen: 16
       ipv6Subnet: "fd50::"

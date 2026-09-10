@@ -134,3 +134,67 @@ func TestPhase06RouteTables_ErrorsWithoutVPCID(t *testing.T) {
 		t.Fatal("expected error when VPC_ID missing")
 	}
 }
+
+// TestPhase06RouteTables_DataPathSubnetsJoinPrivateRTB pins the fix for the
+// data-path subnets falling through to the VPC main table (local route only):
+// BNK_EXT / BNK_INT must be associated with the private (NAT) route table so
+// TMM's SelfIPs can egress and Route Server propagations apply to them.
+func TestPhase06RouteTables_DataPathSubnetsJoinPrivateRTB(t *testing.T) {
+	awsmw.ResetForTest()
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	st.Set("VPC_ID", "vpc-0abc")
+	st.Set("IGW_ID", "igw-0abc")
+	st.Set("NAT_GW_ID", "nat-0abc")
+	st.Set("PUBLIC_SUBNETS", "subnet-0pub1")
+	st.Set("PRIVATE_SUBNETS", "subnet-0priv1")
+	st.Set("BNK_EXT_SUBNET", "subnet-0ext")
+	st.Set("BNK_INT_SUBNET", "subnet-0int")
+
+	rtbID := "rtb-0x"
+	ec2m := &mockEC2{}
+	ec2m.createRTBOut = &ec2.CreateRouteTableOutput{RouteTable: &ec2types.RouteTable{RouteTableId: &rtbID}}
+
+	if err := Phase06RouteTables(context.Background(), testCluster(), st, testClients(ec2m), false); err != nil {
+		t.Fatalf("Phase06RouteTables: %v", err)
+	}
+	var got []string
+	for _, in := range ec2m.assocRTBInputs {
+		got = append(got, *in.SubnetId)
+	}
+	for _, want := range []string{"subnet-0pub1", "subnet-0priv1", "subnet-0ext", "subnet-0int"} {
+		found := false
+		for _, g := range got {
+			if g == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("subnet %s not associated; associations = %v", want, got)
+		}
+	}
+}
+
+// TestPhase06RouteTables_NoNATLeavesDataPathAlone: without a NAT gateway there
+// is no private table, so the data-path subnets keep the main table.
+func TestPhase06RouteTables_NoNATLeavesDataPathAlone(t *testing.T) {
+	awsmw.ResetForTest()
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	st.Set("VPC_ID", "vpc-0abc")
+	st.Set("IGW_ID", "igw-0abc")
+	st.Set("PUBLIC_SUBNETS", "subnet-0pub1")
+	st.Set("BNK_EXT_SUBNET", "subnet-0ext")
+
+	rtbID := "rtb-0x"
+	ec2m := &mockEC2{}
+	ec2m.createRTBOut = &ec2.CreateRouteTableOutput{RouteTable: &ec2types.RouteTable{RouteTableId: &rtbID}}
+	if err := Phase06RouteTables(context.Background(), testCluster(), st, testClients(ec2m), false); err != nil {
+		t.Fatalf("Phase06RouteTables: %v", err)
+	}
+	for _, in := range ec2m.assocRTBInputs {
+		if *in.SubnetId == "subnet-0ext" {
+			t.Error("data-path subnet associated although no private route table exists")
+		}
+	}
+}
