@@ -4,6 +4,14 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [1.4.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.3.1...v1.4.0) (2026-09-10)
+
+
+### Features
+
+* **bgp:** add AWS Route Server BGP peering support and pod-manager gRPC heal ([85bc83e](https://github.com/JLCode-tech/awsbnkctl/commit/85bc83eb6175c3c8029898715a867ea4db66d218))
+* **bgp:** promote AWS Route Server BGP peering and pod-manager gRPC heal to main ([7f85a06](https://github.com/JLCode-tech/awsbnkctl/commit/7f85a061e0453bf7780abe637a3c16fe1b5ed46b))
+
 ## [1.3.1](https://github.com/JLCode-tech/awsbnkctl/compare/v1.3.0...v1.3.1) (2026-09-08)
 
 
