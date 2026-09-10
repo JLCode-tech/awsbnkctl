@@ -85,6 +85,19 @@ cne-controller assigns it as a secondary IP on TMM's external ENI.
 > A Route Server endpoint bills about $0.75/hour and blocks deletion of the
 > external subnet. Remove it before `awsbnkctl down`.
 
+## Scenarios
+
+All 15 scenarios run here and `egress-snat` is the one this cluster exists for: same pattern, same `ext-vlan` tunnel. The scenario and this demo each create their own `F5SPKEgress` in `f5-cne-system` capturing different namespaces; run one at a time. `ai-inference-e2e` needs `--synthetic`. Run `core-file-collection` last.
+
+```bash
+awsbnkctl scenarios list
+awsbnkctl scenarios run http-routing-e2e -f examples/egress-demo/cluster.yaml
+awsbnkctl scenarios run --all -f examples/egress-demo/cluster.yaml
+```
+
+Which scenario needs what, and the VIP each one owns, is in
+[`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
+
 
 ## Cost & teardown
 

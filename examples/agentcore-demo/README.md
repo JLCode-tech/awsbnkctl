@@ -300,6 +300,7 @@ We have created the declarative intent file at [`examples/agentcore-demo/cluster
 *   **Region:** `ap-southeast-2`
 *   **Integration:** Local Forge `http://localhost:8000`
 *   **BGP:** `bnk.bgp: true` — opens TCP 179 / UDP 3784 from the external subnet on the data-plane SG and the external `F5SPKVlan` so TMM can peer with an AWS Route Server endpoint. Optional; the VIP is reachable in-VPC without it. Peer and routing CRs: [`bgp-route-server.yaml`](bgp-route-server.yaml) + [`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md)
+*   **Scenarios:** all 15 `awsbnkctl scenarios` run here. The demo Gateway below pins VIP `10.0.10.100`, which is also `http-routing-e2e`'s default, so run that one with `--vip 10.0.10.150`. `ai-inference-e2e` needs `--synthetic` (no GPU node group). Run `core-file-collection` last. Mapping and VIP plan: [`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
 
 ### F5 credentials (you must supply these)
 

@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/bnkconst"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
 )
 
@@ -169,13 +170,37 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 		return nil
 	}
 	patch := []byte(`{"spec":{"coreCollection":{"enabled":true},"advanced":{"coremon":{"hostPath":true}}}}`)
-	_, err := ctx.Dynamic.Resource(cneInstanceGVR).Namespace("default").Patch(
-		ctx.Ctx, "bnk-instance", types.MergePatchType, patch, metav1.PatchOptions{},
+	ns, name := cneInstanceRef(ctx)
+	_, err := ctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Patch(
+		ctx.Ctx, name, types.MergePatchType, patch, metav1.PatchOptions{},
 	)
-	if err != nil && !scenarios.IsNotFound(err) {
-		return fmt.Errorf("patch CNEInstance for coreCollection: %w", err)
+	if err != nil {
+		if scenarios.IsNotFound(err) {
+			return fmt.Errorf("patch CNEInstance %s/%s for coreCollection: not found — "+
+				"awsbnkctl names it <cluster>-bnk in %s; pass --config for the cluster that owns it: %w",
+				ns, name, bnkconst.InstanceNamespace, err)
+		}
+		return fmt.Errorf("patch CNEInstance %s/%s for coreCollection: %w", ns, name, err)
 	}
 	return nil
+}
+
+// cneInstanceRef returns the namespace and name of the CNEInstance Phase 22
+// applies: bnkconst.InstanceNamespace / <cluster>-bnk (render.InstanceNameCR).
+// Options "cne-namespace" / "cne-instance" override both for clusters that
+// were not built by awsbnkctl.
+func cneInstanceRef(ctx *scenarios.Context) (ns, name string) {
+	ns = bnkconst.InstanceNamespace
+	if ctx.Cluster != nil && ctx.Cluster.Metadata.Name != "" {
+		name = ctx.Cluster.Metadata.Name + "-bnk"
+	}
+	if v := ctx.Options["cne-namespace"]; v != "" {
+		ns = v
+	}
+	if v := ctx.Options["cne-instance"]; v != "" {
+		name = v
+	}
+	return ns, name
 }
 
 func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {

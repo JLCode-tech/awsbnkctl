@@ -52,6 +52,19 @@ cne-controller assigns it as a secondary IP on TMM's external ENI.
 > A Route Server endpoint bills about $0.75/hour and blocks deletion of the
 > external subnet. Remove it before `awsbnkctl down`.
 
+## Scenarios
+
+All 15 scenarios run here, and `ai-inference-e2e` is real: the GPU node group serves vLLM (export `HF_TOKEN` for the gated model). `ai-token-counting` and `ai-semantic-cache` can point at that backend for their data-path step. Run `core-file-collection` last.
+
+```bash
+awsbnkctl scenarios list
+awsbnkctl scenarios run http-routing-e2e -f examples/ai-rig/cluster.yaml
+awsbnkctl scenarios run --all -f examples/ai-rig/cluster.yaml
+```
+
+Which scenario needs what, and the VIP each one owns, is in
+[`docs/SCENARIOS.md`](../../docs/SCENARIOS.md).
+
 
 ## Cost & teardown
 

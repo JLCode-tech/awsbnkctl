@@ -683,6 +683,7 @@
     "jsonpath",
     "routingtemplate",
     "ZebOS",
+    "vlan",
     "zerolog"
   ],
   "ignorePaths": [

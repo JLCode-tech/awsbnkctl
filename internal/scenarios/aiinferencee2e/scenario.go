@@ -349,7 +349,7 @@ func namespace(ctx *scenarios.Context) string {
 	return scnNamespace
 }
 
-// vipFromCtx returns the VIP with the ai-inference octet (.108) from options
+// vipFromCtx returns the VIP with the ai-inference octet (.112) from options
 // or derived from the cluster's default VIP. Empty string means probe will degrade.
 func vipFromCtx(ctx *scenarios.Context) string {
 	if vip := ctx.Options["vip"]; vip != "" {
@@ -358,7 +358,7 @@ func vipFromCtx(ctx *scenarios.Context) string {
 	if ctx.Cluster != nil {
 		v, err := ctx.Cluster.DefaultVIP()
 		if err == nil {
-			return withLastOctet(v, "108")
+			return withLastOctet(v, "112")
 		}
 	}
 	return ""
@@ -424,8 +424,8 @@ func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	if vip == "" {
 		return v, fmt.Errorf("VIP not derivable — set network.dataPath.external.cidr in cluster.yaml or pass --vip")
 	}
-	// Use .108 to avoid colliding with other scenarios' pools.
-	v.VIP = withLastOctet(vip, strconv.Itoa(108))
+	// Use .112 — grpc-loadbalance owns .108 (see docs/SCENARIOS.md, "VIP plan").
+	v.VIP = withLastOctet(vip, strconv.Itoa(112))
 
 	synthetic := isSynthetic(ctx)
 	v.Synthetic = synthetic

@@ -68,6 +68,36 @@ Server, its endpoint and the routing CRs are added by hand after `up`. Each
 example ships a `bgp-route-server.yaml` and the procedure is
 [`docs/BGP-ROUTE-SERVER.md`](../docs/BGP-ROUTE-SERVER.md).
 
+## Scenarios and demos per example
+
+These are deployment examples, so the expectation is that you `up` one and then
+run `awsbnkctl scenarios run <name> -f examples/<dir>/cluster.yaml` (or
+`--all`) against it. All six enable the jumphost, so every one of the 15
+scenarios is runnable everywhere; the table shows what is *real* data path on
+each and what else applies. Full prerequisites and the VIP allocation are in
+[`docs/SCENARIOS.md`](../docs/SCENARIOS.md) (sections 6 and 7).
+
+```
+  example          all 15 scenarios   ai-inference-e2e     egress-snat data path   demo use-cases                 notes
+  ───────────────  ─────────────────  ───────────────────  ──────────────────────  ─────────────────────────────  ─────────────────────────────────────
+  full-cluster     yes                --synthetic only     control plane only      uncomment demo: (+ bigipVE:    reference cluster for the suite
+                                                                                   for bigip-cis)
+  external-only    yes                --synthetic only     yes (ext-vlan)          up --demo                      cheapest full-suite target
+  egress-demo      yes                --synthetic only     yes (ext-vlan)          up --demo                      egress-snat's natural home; its own
+                                                                                                                  toggle uses a separate F5SPKEgress
+  ai-rig           yes                real GPU + HF_TOKEN  control plane only      up --demo                      ai-token-counting / ai-semantic-cache
+                                                                                                                  can point at the vLLM leg
+  demo-ai          yes                real GPU + HF_TOKEN  control plane only      demo: on — diameter, http2,    no bigipVE: block, so no bigip-cis
+                                                                                   ingress-migration
+  agentcore-demo   yes                --synthetic only     control plane only      up --demo                      demo Gateway holds .100: run
+                                                                                                                  http-routing-e2e with --vip 10.0.10.150
+  local-zone       n/a                n/a                  n/a                     n/a                            manifests only
+```
+
+Run `core-file-collection` last: it patches the CNEInstance and FLO rolls TMM
+to add the crash mounts. On dual-interface clusters treat `egress-snat` the
+same way; the VXLAN shape it applies there is known to disturb ingress on AWS.
+
 ## Conventions
 
 Every `cluster.yaml` here follows the same rules:

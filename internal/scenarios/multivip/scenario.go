@@ -9,8 +9,8 @@
 // AWS-specific shape mirrors httptrafficsplit:
 //   - GatewayClass provisioned by Phase 23b (<cluster>-gatewayclass).
 //   - F5BnkGateway IP pool is owned by the scenario (02-f5bnkgateway.yaml).
-//     Unlike single-VIP scenarios the pool is a RANGE (.106–.110) so it can
-//     hand out both pinned VIPs (.106 + .107).
+//     Unlike single-VIP scenarios the pool is a RANGE (.115–.117) so it can
+//     hand out both pinned VIPs (.115 + .116).
 //   - Verification curls through SSH+EICE from the jumphost's BNK_EXT
 //     ENI, reading the response body to detect which backend answered.
 //
@@ -22,9 +22,9 @@
 //  5. Wait HTTPRoute scn-mv-route-a Accepted=True.
 //  6. Wait HTTPRoute scn-mv-route-b Accepted=True.
 //  7. ResyncHTTPRoutes — idempotent pool-member workaround.
-//  8. Probe VIP A (.106) with Host multivip-a.local; assert body contains
+//  8. Probe VIP A (.115) with Host multivip-a.local; assert body contains
 //     "multivip-backend-a".
-//  9. Probe VIP B (.107) with Host multivip-b.local; assert body contains
+//  9. Probe VIP B (.116) with Host multivip-b.local; assert body contains
 //     "multivip-backend-b".
 package multivip
 
@@ -135,10 +135,10 @@ func (s *scenario) Description() string {
 Multiple VIPs from ONE F5BnkGateway pool — the "chassis" model.
 
 Applies 5 templated manifests into the scenario namespace:
-  Namespace, F5BnkGateway IP pool (address RANGE .106–.110),
+  Namespace, F5BnkGateway IP pool (address RANGE .115–.117),
   two nginx Deployments+Services (mv-a / mv-b),
-  two Gateways (scn-mv-gateway-a pins VIP A .106, scn-mv-gateway-b pins
-  VIP B .107 — both drawn from the same F5BnkGateway pool),
+  two Gateways (scn-mv-gateway-a pins VIP A .115, scn-mv-gateway-b pins
+  VIP B .116 — both drawn from the same F5BnkGateway pool),
   two HTTPRoutes (multivip-a.local → mv-a, multivip-b.local → mv-b).
 
 Verify order (load-bearing):
@@ -160,7 +160,7 @@ type manifestVars struct {
 	ClusterName      string
 	GatewayClassName string
 	ExternalCIDR     string
-	// VIPA / VIPB are the two pinned VIPs (.106 / .107). PoolEnd (.110) closes
+	// VIPA / VIPB are the two pinned VIPs (.115 / .116). PoolEnd (.117) closes
 	// the F5BnkGateway address range so it comfortably covers both.
 	VIPA    string
 	VIPB    string
@@ -309,7 +309,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		return strings.Contains(bodies, markerA), g
 	})
 	res.Assertions = append(res.Assertions, scenarios.Assertion{
-		Description: "VIP A (.106) serves backend mv-a",
+		Description: "VIP A (.115) serves backend mv-a",
 		OK:          okA,
 		Got:         gotA,
 	})
@@ -320,7 +320,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		return strings.Contains(bodies, markerB), g
 	})
 	res.Assertions = append(res.Assertions, scenarios.Assertion{
-		Description: "VIP B (.107) serves backend mv-b",
+		Description: "VIP B (.116) serves backend mv-b",
 		OK:          okB,
 		Got:         gotB,
 	})
@@ -380,11 +380,11 @@ func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	if vip == "" {
 		return v, fmt.Errorf("VIP not derivable — set network.dataPath.external.cidr in cluster.yaml or pass --vip")
 	}
-	// Two distinct VIPs (.106 / .107) drawn from one F5BnkGateway pool that
-	// spans .106–.110 — the "chassis" address-range model. Octets chosen to
+	// Two distinct VIPs (.115 / .116) drawn from one F5BnkGateway pool that
+	// spans .115–.117 — the "chassis" address-range model. Octets chosen to
 	// avoid colliding with httproutee2e (.100), httptrafficsplit (.101), etc.
-	v.VIPA = withLastOctet(vip, strconv.Itoa(106))
-	v.VIPB = withLastOctet(vip, strconv.Itoa(107))
-	v.PoolEnd = withLastOctet(vip, strconv.Itoa(110))
+	v.VIPA = withLastOctet(vip, strconv.Itoa(115))
+	v.VIPB = withLastOctet(vip, strconv.Itoa(116))
+	v.PoolEnd = withLastOctet(vip, strconv.Itoa(117))
 	return v, nil
 }

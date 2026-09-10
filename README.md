@@ -264,9 +264,9 @@ Environment variables recognised by the binary:
 | **`external-resource-pool`** | Hybrid Routing | Routing traffic to non-Kubernetes external endpoints | EICE Jumphost curl |
 | **`proxy-protocol-l4`** | L4 Protocol | Proxy Protocol v1/v2 client IP preservation | EICE raw socket / curl |
 | **`tcp-l4-loadbalance`** | L4 Protocol | L4Route TCP weighted load balancing (70/30) | Multi-request TCP probe |
-| **`udp-l4-loadbalance`** | L4 Protocol | L4Route UDP datagram routing and load balancing | UDP echo probe |
-| **`grpc-loadbalance`** | L7 Protocol | gRPC stream routing over GRPCRoute & L4Route | `grpcurl` VIP probe |
-| **`cluster-wide-watch`** | Multi-Tenancy | Cross-namespace HTTP routing via CWC | Multi-namespace curl |
+| **`udp-l4-loadbalance`** | L4 Protocol | L4Route UDP datagram routing and load balancing | Control-plane conditions (no traffic probe) |
+| **`grpc-loadbalance`** | L7 Protocol | gRPC stream routing over GRPCRoute & L4Route | Control-plane conditions (no traffic probe) |
+| **`cluster-wide-watch`** | Multi-Tenancy | Cross-namespace HTTP routing via CWC | Control-plane conditions (no traffic probe) |
 | **`cwc-admin-access`** | Security | ClusterWideWatch RBAC isolation & cert validation | RBAC assertion & mTLS probe |
 | **`ai-token-counting`** | AI Gateway | Token usage measurement and rate limiting | AI Gateway HTTP POST |
 | **`ai-semantic-cache`** | AI Gateway | Semantic prompt cache hit/miss verification | AI Gateway HTTP POST |
