@@ -52,3 +52,30 @@ func TestParseReleaseManifest(t *testing.T) {
 		t.Errorf("expected non-empty full BOM output")
 	}
 }
+
+// TestKnownReleases_DefaultIsNewestAndPaired pins the release table: the
+// default manifest is the last (newest) entry and every entry names its FLO
+// chart, so Phase 14 never installs an operator older than the manifest.
+func TestKnownReleases_DefaultIsNewestAndPaired(t *testing.T) {
+	if len(KnownReleases) == 0 {
+		t.Fatal("KnownReleases is empty")
+	}
+	last := KnownReleases[len(KnownReleases)-1]
+	if last.Version != DefaultManifestVersion {
+		t.Errorf("DefaultManifestVersion %q is not the newest KnownReleases entry %q", DefaultManifestVersion, last.Version)
+	}
+	for _, r := range KnownReleases {
+		if r.FLOChart == "" {
+			t.Errorf("release %s has no FLO chart", r.Version)
+		}
+	}
+	if got, ok := FLOChartFor("2.3.0-3.2598.3-0.0.170"); !ok || got != "v2.21.13-0.0.28" {
+		t.Errorf("FLOChartFor(2.3.0) = %q,%v want v2.21.13-0.0.28,true", got, ok)
+	}
+	if _, ok := FLOChartFor("2.9.9-0.0.0-0.0.1"); ok {
+		t.Error("unknown manifest reported as known")
+	}
+	if DefaultFLOChart() != last.FLOChart {
+		t.Errorf("DefaultFLOChart() = %q, want %q", DefaultFLOChart(), last.FLOChart)
+	}
+}

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/JLCode-tech/awsbnkctl/internal/manifest"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -295,8 +297,8 @@ cluster:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.ClusterSpec.KubernetesVersion != MinKubernetesVersion {
-		t.Errorf("default KubernetesVersion: got %q, want %s", c.ClusterSpec.KubernetesVersion, MinKubernetesVersion)
+	if c.ClusterSpec.KubernetesVersion != DefaultKubernetesVersion {
+		t.Errorf("default KubernetesVersion: got %q, want %s", c.ClusterSpec.KubernetesVersion, DefaultKubernetesVersion)
 	}
 	ng := c.ClusterSpec.NodeGroups[0]
 	if ng.InstanceType != "t3.medium" {
@@ -396,7 +398,7 @@ func TestLoad_BnkBlockParsed(t *testing.T) {
 bnk:
   farArchive: ` + farPath + `
   jwt: ` + jwtPath + `
-  certManagerVersion: "1.16.1"
+  certManagerVersion: "` + EmbeddedCertManagerVersion + `"
 `
 	p := writeFile(t, dir, "cluster.yaml", yaml)
 
@@ -413,8 +415,8 @@ bnk:
 	if c.Bnk.JWT != jwtPath {
 		t.Errorf("Bnk.JWT: got %q, want %q", c.Bnk.JWT, jwtPath)
 	}
-	if c.Bnk.CertManagerVersion != "1.16.1" {
-		t.Errorf("Bnk.CertManagerVersion: got %q, want 1.16.1", c.Bnk.CertManagerVersion)
+	if c.Bnk.CertManagerVersion != EmbeddedCertManagerVersion {
+		t.Errorf("Bnk.CertManagerVersion: got %q, want %q", c.Bnk.CertManagerVersion, EmbeddedCertManagerVersion)
 	}
 }
 
@@ -423,7 +425,7 @@ func TestLoad_BnkBlockDefaultCertManagerVersion(t *testing.T) {
 	farPath := writeFile(t, dir, "far.json", `{"auths":{}}`)
 	jwtPath := writeFile(t, dir, "license.jwt", "jwt-token")
 
-	// certManagerVersion omitted — should default to 1.16.1.
+	// certManagerVersion omitted — should default to EmbeddedCertManagerVersion.
 	yaml := minimalYAML + `
 bnk:
   farArchive: ` + farPath + `
@@ -827,8 +829,8 @@ bnk:
 	if c.Bnk.StorageClassName != "gp2" {
 		t.Errorf("StorageClassName: got %q, want gp2", c.Bnk.StorageClassName)
 	}
-	if c.Bnk.ManifestVersion != "2.3.0-3.2598.3-0.0.170" {
-		t.Errorf("ManifestVersion: got %q, want 2.3.0-3.2598.3-0.0.170", c.Bnk.ManifestVersion)
+	if c.Bnk.ManifestVersion != manifest.DefaultManifestVersion {
+		t.Errorf("ManifestVersion: got %q, want %q", c.Bnk.ManifestVersion, manifest.DefaultManifestVersion)
 	}
 	if c.Bnk.TmmMtu != 9000 {
 		t.Errorf("TmmMtu: got %d, want 9000", c.Bnk.TmmMtu)
@@ -2058,17 +2060,18 @@ cluster:` + line + `
 `
 }
 
-// TestLoad_KubernetesVersion_DefaultsToFloor pins the documented default so a
-// change to MinKubernetesVersion cannot silently move it.
-func TestLoad_KubernetesVersion_DefaultsToFloor(t *testing.T) {
+// TestLoad_KubernetesVersion_DefaultsToLatestTested pins the documented default
+// (DefaultKubernetesVersion, 1.35 — the minor F5 lists for BNK 2.3.x) so a
+// change to either constant cannot silently move it.
+func TestLoad_KubernetesVersion_DefaultsToLatestTested(t *testing.T) {
 	dir := t.TempDir()
 	c, err := Load(writeFile(t, dir, "cluster.yaml", versionYAML("")))
 	if err != nil {
 		t.Fatalf("Load with no kubernetesVersion: %v", err)
 	}
-	if c.ClusterSpec.KubernetesVersion != MinKubernetesVersion {
+	if c.ClusterSpec.KubernetesVersion != DefaultKubernetesVersion {
 		t.Errorf("default KubernetesVersion = %q, want %q",
-			c.ClusterSpec.KubernetesVersion, MinKubernetesVersion)
+			c.ClusterSpec.KubernetesVersion, DefaultKubernetesVersion)
 	}
 }
 
@@ -2177,5 +2180,62 @@ func TestExampleConfigs_MeetVersionFloor(t *testing.T) {
 				t.Errorf("%s: %v", p, err)
 			}
 		})
+	}
+}
+
+// TestFLOVersion_FollowsManifest pins the operator/manifest pairing: the FLO
+// chart Phase 14 installs comes from bnk.manifestVersion via the release table,
+// an explicit addons.flo.version always wins, and an unknown manifest falls
+// back to the default release's chart.
+func TestFLOVersion_FollowsManifest(t *testing.T) {
+	c := &Cluster{Bnk: &BnkSpec{ManifestVersion: "2.3.0-3.2598.3-0.0.170"}}
+	if got := c.FLOVersion(); got != "v2.21.13-0.0.28" {
+		t.Errorf("2.3.0 manifest → FLO %q, want v2.21.13-0.0.28", got)
+	}
+	c.Bnk.ManifestVersion = "2.3.2-3.2598.3-0.0.392"
+	if got := c.FLOVersion(); got != "v2.21.13-0.0.58" {
+		t.Errorf("2.3.2 manifest → FLO %q, want v2.21.13-0.0.58", got)
+	}
+	c.Bnk.ManifestVersion = manifest.DefaultManifestVersion
+	if got := c.FLOVersion(); got != DefaultFLOVersion || got != manifest.DefaultFLOChart() {
+		t.Errorf("default manifest → FLO %q, want %q", got, manifest.DefaultFLOChart())
+	}
+	c.Bnk.ManifestVersion = "2.9.9-0.0.0-0.0.1"
+	if got := c.FLOVersion(); got != DefaultFLOVersion {
+		t.Errorf("unknown manifest → FLO %q, want default %q", got, DefaultFLOVersion)
+	}
+	c.Addons = &AddonsSpec{Flo: &FloSpec{Version: "v9.9.9-test"}}
+	if got := c.FLOVersion(); got != "v9.9.9-test" {
+		t.Errorf("explicit addons.flo.version not honoured: %q", got)
+	}
+	var nilCluster *Cluster
+	if got := nilCluster.FLOVersion(); got != DefaultFLOVersion {
+		t.Errorf("nil cluster → %q, want default", got)
+	}
+}
+
+// TestDefaultKubernetesVersion_AppliedAndAboveFloor: an omitted
+// cluster.kubernetesVersion gets DefaultKubernetesVersion, which must itself
+// sit inside the supported window.
+func TestDefaultKubernetesVersion_AppliedAndAboveFloor(t *testing.T) {
+	dir := t.TempDir()
+	p := writeFile(t, dir, "cluster.yaml", minimalYAML+`
+cluster:
+  nodeGroups:
+    - name: default
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.ClusterSpec.KubernetesVersion != DefaultKubernetesVersion {
+		t.Errorf("default kubernetesVersion = %q, want %q", c.ClusterSpec.KubernetesVersion, DefaultKubernetesVersion)
+	}
+	if err := validateKubernetesVersion(DefaultKubernetesVersion); err != nil {
+		t.Errorf("DefaultKubernetesVersion %q fails its own validation: %v", DefaultKubernetesVersion, err)
+	}
+	_, minor, _ := parseKubernetesVersion(DefaultKubernetesVersion)
+	if minor > maxTestedKubernetesMinor {
+		t.Errorf("DefaultKubernetesVersion %q is above the highest tested minor 1.%d", DefaultKubernetesVersion, maxTestedKubernetesMinor)
 	}
 }

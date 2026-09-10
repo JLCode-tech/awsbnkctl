@@ -10,19 +10,25 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/registry"
 )
 
 const (
-	FARRegistryHost        = "repo.f5.com"
-	ReleaseManifestRepo    = "oci://repo.f5.com/release"
-	ReleaseManifestChart   = "f5-bigip-k8s-manifest"
-	DefaultManifestVersion = "2.3.0-3.2598.3-0.0.170"
+	FARRegistryHost      = "repo.f5.com"
+	ReleaseManifestRepo  = "oci://repo.f5.com/release"
+	ReleaseManifestChart = "f5-bigip-k8s-manifest"
+	// DefaultManifestVersion is the newest BNK 2.3.x release manifest on
+	// repo.f5.com at the time of the last check (2026-09-10; see KnownReleases).
+	// Examples and scenarios always target this; older 2.3.x builds stay
+	// supported through bnk.manifestVersion.
+	DefaultManifestVersion = "2.3.3-3.2598.3-0.0.509"
 )
 
 // ReleaseManifest represents the parsed contents of the f5-bigip-k8s-manifest chart.
@@ -196,38 +202,34 @@ func PullReleaseManifest(ctx context.Context, username, password, manifestVersio
 		return nil, err
 	}
 
-	// Login to Helm registry
-	loginCmd := exec.CommandContext(ctx, "helm", "registry", "login", // #nosec G204 -- helm login with fixed host and stdin auth
-		FARRegistryHost, "--username", username, "--password-stdin")
-	loginCmd.Stdin = strings.NewReader(password + "\n")
-	var loginErr bytes.Buffer
-	loginCmd.Stderr = &loginErr
-	loginCmd.Stdout = io.Discard
-	if err := loginCmd.Run(); err != nil {
-		return nil, fmt.Errorf("helm registry login %s: %w\n%s",
-			FARRegistryHost, err, strings.TrimSpace(loginErr.String()))
+	// Pull with the Helm SDK's OCI client — the same library Phase 14 uses for
+	// the FLO chart — so the probe needs no host helm binary (the binary
+	// promises "no host kubectl, no host helm"). Credentials are passed to the
+	// client in memory rather than via Login, so nothing is written under
+	// ~/.config/helm (that directory is read-only in some containers).
+	regClient, err := registry.NewClient(registry.ClientOptBasicAuth(username, password))
+	if err != nil {
+		return nil, fmt.Errorf("create helm registry client: %w", err)
 	}
 
-	tgzPath := filepath.Join(absCache, fmt.Sprintf("f5-bigip-k8s-manifest-%s.tgz", manifestVersion))
-	extractedDir := filepath.Join(absCache, fmt.Sprintf("f5-bigip-k8s-manifest-%s", manifestVersion))
-	_ = os.Remove(tgzPath)
+	extractedDir := filepath.Join(absCache, ReleaseManifestChart+"-"+manifestVersion)
 	_ = os.RemoveAll(extractedDir)
+	_ = os.RemoveAll(filepath.Join(absCache, ReleaseManifestChart)) // Untar target name
 
-	pullCmd := exec.CommandContext(ctx, "helm", "pull", // #nosec G204 -- helm pull with validated version and cache dir
-		ReleaseManifestRepo+"/"+ReleaseManifestChart,
-		"--version", manifestVersion,
-		"-d", absCache)
-	var pullErr bytes.Buffer
-	pullCmd.Stderr = &pullErr
-	pullCmd.Stdout = io.Discard
-	if err := pullCmd.Run(); err != nil {
-		return nil, fmt.Errorf("helm pull release-manifest %s: %w\n%s",
-			manifestVersion, err, strings.TrimSpace(pullErr.String()))
+	cfg := &action.Configuration{RegistryClient: regClient}
+	pull := action.NewPullWithOpts(action.WithConfig(cfg))
+	pull.Settings = cli.New()
+	pull.Version = manifestVersion
+	pull.DestDir = absCache
+	pull.Untar = true
+	pull.UntarDir = absCache
+	if _, err := pull.Run(ReleaseManifestRepo + "/" + ReleaseManifestChart); err != nil {
+		return nil, fmt.Errorf("pull release-manifest %s from %s: %w", manifestVersion, ReleaseManifestRepo, err)
 	}
-
-	tarCmd := exec.CommandContext(ctx, "tar", "-xzf", tgzPath, "-C", absCache) // #nosec G204 -- tar extraction of downloaded archive
-	if err := tarCmd.Run(); err != nil {
-		return nil, fmt.Errorf("tar -xzf %s: %w", tgzPath, err)
+	// Helm untars into <UntarDir>/<chart name>; keep the version in the
+	// directory name so probes of two builds can share one cache dir.
+	if err := os.Rename(filepath.Join(absCache, ReleaseManifestChart), extractedDir); err != nil {
+		return nil, fmt.Errorf("rename extracted chart: %w", err)
 	}
 
 	manifestPath := filepath.Join(extractedDir, fmt.Sprintf("bigip-k8s-manifest-%s.yaml", manifestVersion))
@@ -243,4 +245,54 @@ func PullReleaseManifest(ctx context.Context, username, password, manifestVersio
 
 	_ = os.WriteFile(filepath.Join(absCache, "manifest.yaml"), body, 0o600) // #nosec G306,G703 -- cache write
 	return m, nil
+}
+
+// Release records what awsbnkctl needs to know about one BNK release manifest
+// without pulling it: the F5 Lifecycle Operator chart that ships with it. FLO
+// is installed by Phase 14 BEFORE the release manifest is available in-cluster,
+// so the pairing has to be known up front. Values are read from
+// oci://repo.f5.com/release/f5-bigip-k8s-manifest:<version>
+// (helm_charts → charts/f5-lifecycle-operator).
+type Release struct {
+	// Version is the release-manifest tag, e.g. "2.3.3-3.2598.3-0.0.509".
+	Version string
+	// FLOChart is the f5-lifecycle-operator chart version paired with it.
+	FLOChart string
+}
+
+// KnownReleases lists every 2.3.x release manifest published on repo.f5.com,
+// oldest first. Extend it when F5 publishes a new build (the tags list is
+// `awsbnkctl manifest probe` territory); DefaultManifestVersion must be the
+// last entry.
+var KnownReleases = []Release{
+	{Version: "2.3.0-3.2598.3-0.0.170", FLOChart: "v2.21.13-0.0.28"},
+	{Version: "2.3.1-3.2598.3-0.0.304", FLOChart: "v2.21.13-0.0.53"},
+	{Version: "2.3.2-3.2598.3-0.0.392", FLOChart: "v2.21.13-0.0.58"},
+	{Version: "2.3.3-3.2598.3-0.0.509", FLOChart: "v2.21.13-0.0.64"},
+}
+
+// FLOChartFor returns the FLO chart version paired with manifestVersion.
+// ok is false when the manifest is not in KnownReleases; callers then fall
+// back to the default release's FLO chart and should warn, because a newer
+// manifest may need a newer operator.
+func FLOChartFor(manifestVersion string) (chart string, ok bool) {
+	for _, r := range KnownReleases {
+		if r.Version == manifestVersion {
+			return r.FLOChart, true
+		}
+	}
+	return "", false
+}
+
+// DefaultFLOChart is the FLO chart paired with DefaultManifestVersion.
+func DefaultFLOChart() string {
+	chart, _ := FLOChartFor(DefaultManifestVersion)
+	return chart
+}
+
+// IsKnownRelease reports whether manifestVersion is a build awsbnkctl has been
+// exercised against (KnownReleases).
+func IsKnownRelease(manifestVersion string) bool {
+	_, ok := FLOChartFor(manifestVersion)
+	return ok
 }
