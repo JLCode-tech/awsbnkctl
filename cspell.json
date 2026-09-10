@@ -688,6 +688,8 @@
     "ZebOS",
     "vlan",
     "BNKNetPolicy",
+    "cwatch",
+    "socat",
     "zerolog"
   ],
   "ignorePaths": [
