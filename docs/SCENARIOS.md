@@ -114,8 +114,8 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 
 ### `core-file-collection`
 - **Objective**: Validates BNK's core-dump collection infrastructure: enabling `spec.coreCollection.enabled` on the `CNEInstance` makes FLO reconcile a `CoreMond` CR and DaemonSet and mount host crash directories into the TMM pods.
-- **Verification Method**: Kubernetes API inspection — the `CoreMond` CR exists, its DaemonSet is rolled out and reports Ready, and the TMM pods carry the core-dump volume mounts.
-- **Assertions**: CoreMond CR present, DaemonSet ready, TMM pod volumes mounted. No crash is induced; the scenario proves the collection path is wired, not that a core file exists.
+- **Verification Method**: Kubernetes API inspection, polled for up to 5 minutes while FLO reconciles — the `CoreMond` CR exists (CNEInstance namespace, then `f5-cne-core`), its `app=f5-coremond` DaemonSet has every desired pod Ready, the patched CNEInstance (`f5-cne-system/<cluster>-bnk`, override with options `cne-namespace` / `cne-instance`) reports a `CoreMon*` condition True (or, on builds without that condition, `spec.coreCollection.enabled=true`), and the `f5-tmm` DaemonSet carries a core/crash volume.
+- **Assertions**: each of the four facts is asserted on its own and fails on its own. No crash is induced; the scenario proves the collection path is wired, not that a core file exists.
 
 ---
 
@@ -156,7 +156,11 @@ subnet (`network.dataPath.external.cidr`, `10.0.10.0/24` in every example), so
 `scenarios run --all` never has two F5BnkGateway pools claiming the same
 address. `http-routing-e2e` alone uses the cluster default VIP (`<subnet>.100`,
 `intent.DefaultVIP`); the others replace the last octet. `--vip` moves the base
-address but keeps each scenario's octet.
+address but keeps each scenario's octet. The three demo use-cases with a VIP
+(`diameter`, `http2`, `ingress-migration`) derive theirs the same way, so a
+cluster whose external subnet is not `10.0.10.0/24` still gets every VIP inside
+its own data-path subnet. Nothing about the VIP is hardcoded to an example: the
+only inputs are `network.dataPath.external.cidr` and the per-scenario octet.
 
 | Last octet | Owner | Kind |
 | --- | --- | --- |

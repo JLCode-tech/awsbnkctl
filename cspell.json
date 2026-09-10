@@ -127,6 +127,7 @@
     "Coredumpctl",
     "coredumpctl",
     "corefiles",
+    "coremon",
     "CoreMond",
     "coresident",
     "Coscheduling",

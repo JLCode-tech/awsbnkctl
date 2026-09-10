@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -21,7 +23,7 @@ var manifestFS embed.FS
 const (
 	scnName      = "core-file-collection"
 	scnTitle     = "Core file collection (how-to #4) — CNEInstance.spec.coreCollection.enabled + CoreMond"
-	scnNamespace = "default"
+	scnNamespace = bnkconst.InstanceNamespace
 )
 
 var (
@@ -46,82 +48,8 @@ type VerifyDeps struct {
 
 func realVerifyDeps() VerifyDeps {
 	return VerifyDeps{
-		CheckCoreMondFn: func(ctx context.Context, sctx *scenarios.Context) (bool, bool, bool, string) {
-			if sctx.Dynamic == nil || sctx.Clientset == nil {
-				return true, true, true, "dry-run verification pass"
-			}
-			// Search for CoreMond CR across namespaces
-			crFound := false
-			crNS := ""
-			for _, ns := range []string{"f5-cne-core", "f5-cne-system", "default"} {
-				list, err := sctx.Dynamic.Resource(coreMondGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
-				if err == nil && len(list.Items) > 0 {
-					crFound = true
-					crNS = ns
-					break
-				}
-			}
-
-			// Check DaemonSet
-			dsFound := false
-			for _, ns := range []string{crNS, "f5-cne-core", "f5-cne-system", "default"} {
-				if ns == "" {
-					continue
-				}
-				dsList, err := sctx.Clientset.AppsV1().DaemonSets(ns).List(ctx, metav1.ListOptions{
-					LabelSelector: "app=f5-coremond",
-				})
-				if err == nil && len(dsList.Items) > 0 {
-					dsFound = true
-					break
-				}
-			}
-
-			// Check CNEInstance condition
-			condOK := false
-			cneList, err := sctx.Dynamic.Resource(cneInstanceGVR).List(ctx, metav1.ListOptions{})
-			if err == nil && len(cneList.Items) > 0 {
-				for _, cne := range cneList.Items {
-					conditions, _, _ := scenarios.NestedSlice(cne.Object, "status", "conditions")
-					for _, cRaw := range conditions {
-						if c, ok := cRaw.(map[string]interface{}); ok {
-							t, _ := c["type"].(string)
-							st, _ := c["status"].(string)
-							if (strings.Contains(strings.ToLower(t), "core") || strings.Contains(strings.ToLower(t), "ready")) && st == "True" {
-								condOK = true
-								break
-							}
-						}
-					}
-					if condOK {
-						break
-					}
-				}
-				// If CNEInstance is present and active, mark condOK true
-				if !condOK && len(cneList.Items) > 0 {
-					condOK = true
-				}
-			}
-
-			details := fmt.Sprintf("crFound=%v (ns=%s), dsFound=%v, condOK=%v", crFound, crNS, dsFound, condOK)
-			return true, true, true, details
-		},
-		CheckTMMVolumesFn: func(ctx context.Context, sctx *scenarios.Context) (bool, string) {
-			if sctx.Clientset == nil {
-				return true, "dry-run pass"
-			}
-			for _, ns := range []string{"f5-cne-system", "f5-cne-core", "default"} {
-				ds, err := sctx.Clientset.AppsV1().DaemonSets(ns).Get(ctx, "f5-tmm", metav1.GetOptions{})
-				if err == nil && ds != nil {
-					for _, v := range ds.Spec.Template.Spec.Volumes {
-						if strings.Contains(strings.ToLower(v.Name), "core") || strings.Contains(strings.ToLower(v.Name), "crash") {
-							return true, "found volume in namespace " + ns + ": " + v.Name
-						}
-					}
-				}
-			}
-			return false, "no core/crash volume found in f5-tmm spec across namespaces"
-		},
+		CheckCoreMondFn:   checkCoreMond,
+		CheckTMMVolumesFn: checkTMMVolumes,
 	}
 }
 
@@ -244,4 +172,134 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 func (s *scenario) Cleanup(ctx *scenarios.Context) error {
 	// Revert patch is preserved as no-op to protect subsequent test runs from controller churn
 	return nil
+}
+
+// Reconcile budget after the CNEInstance patch: FLO has to create the CoreMond
+// CR, roll its DaemonSet out, and re-render the TMM DaemonSet with the crash
+// mounts. Package vars so tests can shrink them.
+var (
+	reconcileTimeout = 5 * time.Minute
+	pollInterval     = 10 * time.Second
+)
+
+// coreMondLabel selects the DaemonSet FLO renders for the CoreMond CR.
+const coreMondLabel = "app=f5-coremond"
+
+// checkCoreMond is the real CheckCoreMondFn. It polls until all three facts
+// hold or the budget runs out, and returns each one honestly — the previous
+// implementation gathered the same facts and then returned true regardless.
+//
+//   - crOK:   a CoreMond CR exists (CNEInstance namespace first, then f5-cne-core).
+//   - dsOK:   the app=f5-coremond DaemonSet in that namespace has every desired
+//     pod Ready (and desires at least one).
+//   - condOK: the CNEInstance Phase 22 applied carries a CoreMon* condition with
+//     status True; on builds that expose no such condition, spec.coreCollection
+//     .enabled=true on the live object is accepted and the detail says so.
+func checkCoreMond(ctx context.Context, sctx *scenarios.Context) (crOK, dsOK, condOK bool, details string) {
+	if sctx.Dynamic == nil || sctx.Clientset == nil {
+		return false, false, false, "no Kubernetes clients — nothing verified"
+	}
+	_, details = scenarios.PollMarkers(ctx, reconcileTimeout, pollInterval, func() (bool, string) {
+		var crNS, crDetail, dsDetail, condDetail string
+		crOK, crNS, crDetail = findCoreMond(ctx, sctx)
+		dsOK, dsDetail = coreMondDaemonSetReady(ctx, sctx, crNS)
+		condOK, condDetail = cneCoreCollectionCondition(ctx, sctx)
+		return crOK && dsOK && condOK, strings.Join([]string{crDetail, dsDetail, condDetail}, "; ")
+	})
+	return crOK, dsOK, condOK, details
+}
+
+// findCoreMond looks for a CoreMond CR where FLO puts it.
+func findCoreMond(ctx context.Context, sctx *scenarios.Context) (bool, string, string) {
+	for _, ns := range []string{bnkconst.InstanceNamespace, "f5-cne-core"} {
+		list, err := sctx.Dynamic.Resource(coreMondGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
+		if err != nil || len(list.Items) == 0 {
+			continue
+		}
+		return true, ns, fmt.Sprintf("CoreMond %s/%s present", ns, list.Items[0].GetName())
+	}
+	return false, "", "no CoreMond CR in " + bnkconst.InstanceNamespace + " or f5-cne-core"
+}
+
+// coreMondDaemonSetReady requires the CoreMond DaemonSet to exist and to have
+// every desired pod Ready. An empty ns (CR not found yet) is a failure.
+func coreMondDaemonSetReady(ctx context.Context, sctx *scenarios.Context, ns string) (bool, string) {
+	if ns == "" {
+		return false, "CoreMond DaemonSet: namespace unknown (CR not found)"
+	}
+	dsList, err := sctx.Clientset.AppsV1().DaemonSets(ns).List(ctx, metav1.ListOptions{LabelSelector: coreMondLabel})
+	if err != nil {
+		return false, "CoreMond DaemonSet list: " + err.Error()
+	}
+	if len(dsList.Items) == 0 {
+		return false, "no DaemonSet with " + coreMondLabel + " in " + ns
+	}
+	ds := dsList.Items[0]
+	desired, ready := ds.Status.DesiredNumberScheduled, ds.Status.NumberReady
+	ok := desired > 0 && ready == desired
+	return ok, fmt.Sprintf("DaemonSet %s/%s ready %d/%d", ns, ds.Name, ready, desired)
+}
+
+// cneCoreCollectionCondition reads the CNEInstance this scenario patched.
+func cneCoreCollectionCondition(ctx context.Context, sctx *scenarios.Context) (bool, string) {
+	ns, name := cneInstanceRef(sctx)
+	cne, err := sctx.Dynamic.Resource(cneInstanceGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return false, fmt.Sprintf("CNEInstance %s/%s: %v", ns, name, err)
+	}
+	conditions, _, _ := scenarios.NestedSlice(cne.Object, "status", "conditions")
+	sawCoreMon := false
+	for _, raw := range conditions {
+		c, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		t, _ := c["type"].(string)
+		if !strings.Contains(strings.ToLower(t), "coremon") {
+			continue
+		}
+		sawCoreMon = true
+		if st, _ := c["status"].(string); st == "True" {
+			return true, fmt.Sprintf("CNEInstance %s/%s condition %s=True", ns, name, t)
+		}
+	}
+	if sawCoreMon {
+		return false, fmt.Sprintf("CNEInstance %s/%s has a CoreMon condition but it is not True", ns, name)
+	}
+	enabled, _, _ := unstructured.NestedBool(cne.Object, "spec", "coreCollection", "enabled")
+	if enabled {
+		return true, fmt.Sprintf("CNEInstance %s/%s exposes no CoreMon condition on this build; spec.coreCollection.enabled=true", ns, name)
+	}
+	return false, fmt.Sprintf("CNEInstance %s/%s: no CoreMon condition and spec.coreCollection.enabled is not true", ns, name)
+}
+
+// checkTMMVolumes is the real CheckTMMVolumesFn: the f5-tmm DaemonSet in the
+// CNEInstance namespace must carry a core/crash volume. Polled, because FLO
+// re-renders the DaemonSet after the patch.
+func checkTMMVolumes(ctx context.Context, sctx *scenarios.Context) (bool, string) {
+	if sctx.Clientset == nil {
+		return false, "no Kubernetes client — nothing verified"
+	}
+	ns := bnkconst.InstanceNamespace
+	if v := sctx.Options["cne-namespace"]; v != "" {
+		ns = v
+	}
+	return scenarios.PollMarkers(ctx, reconcileTimeout, pollInterval, func() (bool, string) {
+		ds, err := sctx.Clientset.AppsV1().DaemonSets(ns).Get(ctx, "f5-tmm", metav1.GetOptions{})
+		if err != nil {
+			return false, fmt.Sprintf("DaemonSet %s/f5-tmm: %v", ns, err)
+		}
+		for _, v := range ds.Spec.Template.Spec.Volumes {
+			name := strings.ToLower(v.Name)
+			hostPath := ""
+			if v.HostPath != nil {
+				hostPath = strings.ToLower(v.HostPath.Path)
+			}
+			if strings.Contains(name, "core") || strings.Contains(name, "crash") ||
+				strings.Contains(hostPath, "core") || strings.Contains(hostPath, "crash") {
+				return true, fmt.Sprintf("DaemonSet %s/f5-tmm volume %q (hostPath %q)", ns, v.Name, hostPath)
+			}
+		}
+		return false, fmt.Sprintf("DaemonSet %s/f5-tmm has no core/crash volume (%d volumes)", ns, len(ds.Spec.Template.Spec.Volumes))
+	})
 }
