@@ -34,7 +34,7 @@ All tools across the `*bnkctl` ecosystem share common core tenets:
 | **Workspaces** | `workspaces {list, new, use, current, delete}` | `cluster {use, list}` | `workspaces {list, new, use, current, delete}` | `workspaces {list, new, use, current, delete}` | Full parity |
 | **Diagnostics & Health** | `doctor` | `doctor` | `doctor` | `doctor` | Full parity |
 | **Self Management** | `self upgrade` | Pinned version | `self update` | `self update` | Full parity |
-| **BNK Forge Integration** | `bnkforge` | `bnk-forge` | `forge` | `forge` (with MCP server) | Full parity |
+| **BNK Forge Integration** | `bnkforge` | `bnk-forge` | `forge` | `forge` (MCP client to Forge, REST fallback) | Full parity |
 | **Data Visualization** | mdBook docs | Asciinema / video | ASCII topology | `topology` ASCII render + `--demo` engine | Super-set in AWS |
 
 ---
@@ -49,7 +49,7 @@ All tools across the `*bnkctl` ecosystem share common core tenets:
 | `proxy-protocol-l4` | Proxy Protocol v1/v2 header preservation | Yes | - | Yes | Yes | EICE Jumphost raw socket / curl |
 | `ai-token-counting` | AI Gateway token counting & rate limits | Yes | - | Yes | Yes | AI Gateway HTTP POST |
 | `ai-semantic-cache` | AI Gateway semantic caching | Yes | - | Yes | Yes | AI Gateway HTTP POST |
-| `ai-inference-e2e` | SageMaker / GPU model inference pipeline | - | - | - | Yes | AWS SDK / EICE Jumphost |
+| `ai-inference-e2e` | vLLM Llama-3-8B on the GPU node group, streamed (SSE) through the BNK VIP | - | - | - | Yes | EICE Jumphost curl (SSE) |
 | `multi-vip` | Multiple Gateway VIPs on same TMM | Yes | - | Yes | Yes | EICE Jumphost curl |
 | `egress-snat` | Egress gateway SNAT & firewalling | - | - | Yes | Yes | EICE Jumphost curl |
 | `grpc-loadbalance` | gRPC over L4Route & GRPCRoute | Yes | - | Yes | Yes | `grpcurl` probe to Gateway VIP |
@@ -57,4 +57,4 @@ All tools across the `*bnkctl` ecosystem share common core tenets:
 | `udp-l4-loadbalance` | L4Route UDP packet routing | Yes | - | Yes | Yes | UDP echo probe |
 | `cluster-wide-watch` | Cross-namespace HTTP routing with CWC | Yes | - | Yes | Yes | Multi-namespace curl |
 | `cwc-admin-access` | ClusterWideWatch RBAC & admin isolation | Yes | - | Yes | Yes | RBAC assertion & curl |
-| `corefiles` | TMM crash dump detection and pod health | Yes | - | Yes | Yes | Pod diagnostic inspect |
+| `core-file-collection` | Core-dump collection: `CNEInstance.spec.coreCollection.enabled` reconciles the CoreMond DaemonSet and TMM crash mounts | Yes | - | Yes | Yes | CoreMond CR / DaemonSet and TMM volume inspect |

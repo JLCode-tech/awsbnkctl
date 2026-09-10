@@ -35,7 +35,7 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 
 ### `grpc-loadbalance`
 - **Objective**: Validates gRPC stream handling and balancing across microservices.
-- **Traffic Path**: Jumphost `grpcurl` probe $\to$ TMM VIP (HTTP/2 / gRPC) $\to$ `grpc-health-probe` endpoints.
+- **Traffic Path**: Jumphost `grpcurl` probe $\to$ TMM VIP (`L4Route` TCP data plane; `GRPCRoute` on the control plane) $\to$ `kong/grpcbin` backend pods.
 - **Assertions**: Successful gRPC status code `OK` and round-robin connection balancing.
 
 ---
@@ -88,17 +88,19 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 ### `ai-token-counting`
 - **Objective**: Validates AI Gateway LLM token measurement, quota enforcement, and rate-limiting.
 - **Traffic Path**: Client HTTP POST with chat completions payload $\to$ TMM AI Gateway $\to$ Model endpoint.
-- **Assertions**: Header telemetry reporting prompt tokens, completion tokens, and rate-limit counters.
+- **Assertions**: Control plane always — backend Deployment Available, Gateway Programmed, HTTPRoute Accepted, and the `k8s.f5.com/ai-token-counting` annotation persists. With a live vLLM-compatible backend the data-path step additionally asserts token metering and HTTP 503 on overload.
+- **Rating**: Amber. The static rating cannot assume an LLM backend is present; a live run records the data-path result in the scenario output.
 
 ### `ai-semantic-cache`
 - **Objective**: Validates semantic similarity prompt caching to reduce LLM latency and compute costs.
 - **Traffic Path**: Initial prompt POST $\to$ Cache miss (backend computed); Second similar prompt POST $\to$ Cache hit (TMM cached response).
-- **Assertions**: Response latency reduction > 90% and cache-hit response header presence.
+- **Assertions**: Control plane always — Gateway Programmed, HTTPRoute Accepted, and the `k8s.f5.com/ai` / `k8s.f5.com/sse-enabled` annotations persist. When a ModelCache backend address is supplied, both responses return HTTP 200 with SSE framing and the second is faster by at least the configured speed-up (default 100 ms).
+- **Rating**: Amber. The EKS cluster ships no ModelCache backend, so the data-path step only runs when one is pointed at explicitly.
 
 ### `ai-inference-e2e`
-- **Objective**: Validates high-throughput inference routing in front of AWS SageMaker and EC2 GPU worker nodes.
-- **Traffic Path**: Inference client $\to$ TMM VIP $\to$ SageMaker Endpoint / Triton server.
-- **Assertions**: Successful inference tensor response and streaming token chunks.
+- **Objective**: Validates end-to-end LLM inference through BNK: a vLLM Deployment serving `Llama-3-8B-Instruct` on the GPU node group (requires a `gpu: true` node group and an `hf-token` Secret for the gated model).
+- **Traffic Path**: Jumphost `POST /v1/chat/completions` with `stream=true` $\to$ TMM VIP (`Gateway` + `HTTPRoute`) $\to$ vLLM pods on GPU nodes.
+- **Assertions**: vLLM Deployment Available, Gateway Programmed, HTTPRoute Accepted, then HTTP 200 with SSE framing (`data:` chunks and a `[DONE]` terminator) via the VIP.
 
 ---
 
@@ -107,9 +109,10 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 ### `egress-snat`
 - **Objective**: Validates outbound Source NAT (SNAT) and egress firewall inspection.
 - **Traffic Path**: In-cluster workload pod $\to$ TMM internal interface $\to$ SNAT translation $\to$ External destination.
-- **Assertions**: External destination observes TMM's configured SNAT IP as source.
+- **Assertions**: Control plane only — the egress client pod becomes Ready and the `F5SPKEgress` CR (VXLAN pseudo-CNI overlay, AUTOMAP SNAT) is accepted. The source-IP proof at an external destination is recorded as informational, not gating.
+- **Rating**: Amber. Promoting to Green requires a live cycle that asserts the external destination sees the TMM self-IP as source.
 
-### `corefiles`
-- **Objective**: Probes TMM container filesystems and diagnostic mounts for abnormal termination core dumps.
-- **Verification Method**: Direct Kubernetes pod inspection across all worker nodes.
-- **Assertions**: Zero core dumps present in `/var/core` and TMM uptime continuity.
+### `core-file-collection`
+- **Objective**: Validates BNK's core-dump collection infrastructure: enabling `spec.coreCollection.enabled` on the `CNEInstance` makes FLO reconcile a `CoreMond` CR and DaemonSet and mount host crash directories into the TMM pods.
+- **Verification Method**: Kubernetes API inspection — the `CoreMond` CR exists, its DaemonSet is rolled out and reports Ready, and the TMM pods carry the core-dump volume mounts.
+- **Assertions**: CoreMond CR present, DaemonSet ready, TMM pod volumes mounted. No crash is induced; the scenario proves the collection path is wired, not that a core file exists.

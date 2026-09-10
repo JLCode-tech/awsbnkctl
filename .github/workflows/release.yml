@@ -1,18 +1,33 @@
 name: Release
 
 # Automates semantic versioning, CHANGELOG generation, and GoReleaser builds.
-# 
-# 1. On every push to main, Release Please analyzes your conventional commits
-#    (feat:, fix:, chore:, etc.) and opens/updates a "Release PR".
+#
+# 1. On every push to main, Release Please analyzes the conventional commits
+#    that landed on main (feat:, fix:, chore:, ...) and opens/updates a
+#    "Release PR". NOTE: it only sees the commit subjects on main itself, so
+#    feature PRs must be squash-merged with a conventional title; a plain
+#    "Merge pull request #N" merge commit is invisible to it.
 # 2. The PR contains the version bump and the generated CHANGELOG.
-# 3. When YOU merge that Release PR, Release Please cuts the semantic tag (vX.Y.Z).
-# 4. The goreleaser job then runs against that new tag to build and publish the
-#    binaries to the GitHub Release page.
+# 3. When YOU merge that Release PR, Release Please cuts the semantic tag
+#    (vX.Y.Z) and creates the GitHub Release.
+# 4. The goreleaser job then runs against that new tag to build and upload
+#    the binaries to the GitHub Release page.
+#
+# Manual rebuild: if the goreleaser job fails for a tag (v1.2.0-v1.3.1 shipped
+# without assets because the runner was killed mid-build), run this workflow
+# from the Actions tab with the tag name to rebuild and upload the assets:
+#   gh workflow run release.yml -f tag=v1.3.1
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)build and upload assets for, e.g. v1.3.1"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -20,35 +35,45 @@ permissions:
 
 jobs:
   release-please:
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: google-github-actions/release-please-action@v4
+      - uses: googleapis/release-please-action@v4
         id: release
         with:
           release-type: go
 
   goreleaser:
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    # Runs when release-please just cut a tag, or when invoked manually for an
+    # existing tag. `!cancelled()` lets it run even though release-please is
+    # skipped on workflow_dispatch.
+    if: ${{ !cancelled() && (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
+    # Six cross-compiled targets of a large binary; bound the job so a wedged
+    # build fails fast instead of consuming the 6h default.
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: goreleaser/goreleaser-action@v5
+      - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          # --parallelism 2: linking six ~200 MB binaries concurrently on a
+          # hosted runner exhausted memory and the runner was shut down
+          # mid-build on every release from v1.2.0 to v1.3.1.
+          args: release --clean --parallelism 2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

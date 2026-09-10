@@ -35,9 +35,30 @@ forge:
   mcpUrl: http://localhost:8081/mcp/
   username: admin
   credentialTemplateId: 1
+  environment: dev                  # forge project environment (default "dev")
+  projectName: awsbnkctl-my-cluster # default "awsbnkctl-<metadata.name>"
 ```
 
 If `forge.enabled` is missing or `false`, the integration is skipped.
+
+### Project naming (`forge.projectName`)
+
+Registration creates (or reuses) a forge **project** and puts the cluster record
+inside it. The project name resolves as `AWSBNKCTL_FORGE_PROJECT` env >
+`forge.projectName` > `awsbnkctl-<metadata.name>` (`ForgeSpec.ResolveProjectName`).
+
+- **Reuse on conflict.** If the project already exists, forge answers HTTP 409
+  (or 400 with "already exists"); `awsbnkctl` treats that as "reuse" — it looks
+  the project up by name and registers the cluster into it. The same applies to
+  a cluster record that already exists in the project (its kubeconfig is
+  refreshed). Several clusters can therefore share one project by setting the
+  same `projectName`.
+- **Purge on `down`.** `Phase09ForgeRegisterDown` unregisters the cluster and
+  purges the project **only when `forge.projectName` is unset or equals the default name**
+  `awsbnkctl-<metadata.name>`. A non-default `forge.projectName` is assumed to
+  be shared, so the project is left in place and only the cluster record is
+  removed. `awsbnkctl down --keep-forge-link` skips the unregister entirely and
+  preserves `forge_link.json`.
 
 ---
 
@@ -67,8 +88,22 @@ It is unsafe to store passwords in `cluster.yaml`. You can override forge settin
 
 | Setting | Priority 1 (Env Var) | Priority 2 (YAML) | Default |
 |---|---|---|---|
-| **URL** | `AWSBNKCTL_FORGE_URL` | `forge.url` | `http://localhost:8000` |
-| **Password** | `AWSBNKCTL_FORGE_PASSWORD` | `forge.password` | *built-in dev default* |
+| **REST URL** | `AWSBNKCTL_FORGE_URL` | `forge.url` | `http://localhost:8000` |
+| **MCP URL** | `AWSBNKCTL_FORGE_MCP_URL` (see note) | `forge.mcpUrl` | `http://localhost:8081/mcp/` |
+| **Username** | `AWSBNKCTL_FORGE_USERNAME` (`benchmark` subcommands only) | `forge.username` | `admin` |
+| **Password** | `AWSBNKCTL_FORGE_PASSWORD` | `forge.password` | *built-in dev default* (`changeme`, with a warning) |
+| **Project** | `AWSBNKCTL_FORGE_PROJECT` | `forge.projectName` | `awsbnkctl-<metadata.name>` |
+| **Environment** | `AWSBNKCTL_FORGE_ENVIRONMENT` | `forge.environment` | `dev` |
+
+Notes on the two exceptions to "env beats YAML":
+
+- **MCP URL**: Phase 09 and `awsbnkctl forge *` pass `forge.mcpUrl` straight to
+  the MCP client; `AWSBNKCTL_FORGE_MCP_URL` is consulted only when neither the
+  YAML key nor the `--forge-mcp-url` flag is set (`forge.NewClient`). So for the MCP
+  endpoint the order is flag > YAML > env > default.
+- **Username**: Phase 09 resolves `forge.username` > `admin` and does not read
+  the environment. `AWSBNKCTL_FORGE_USERNAME` is read only by the `awsbnkctl
+  benchmark` family as the fallback for `--forge-user`.
 
 > [!WARNING]
 > Always use `AWSBNKCTL_FORGE_PASSWORD` in real environments!

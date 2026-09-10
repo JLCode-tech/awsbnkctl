@@ -9,7 +9,7 @@ Thank you for your interest in contributing to **awsbnkctl**! This document prov
 This project is tested on Linux and macOS hosts.
 
 **Required:**
-- **Go 1.25+** (Check `go.mod` for the exact source of truth)
+- **Go 1.26+** (Check `go.mod` for the exact source of truth)
 - **git**, **make**, **docker**
 - Standard dev utilities: `jq`, `unzip`, `gnupg`, `openssh-client`, `python3`, and `helm 3` (for chart operations)
 
@@ -22,7 +22,8 @@ This project is tested on Linux and macOS hosts.
 **NOT Required:**
 - `terraform` (awsbnkctl uses the AWS SDK directly)
 - `kubectl` (Internalized via `client-go`)
-- `goreleaser` (Pulled at release time automatically)
+- `goreleaser` (Run by the release workflow, not locally)
+- `staticcheck` (Declared as a `tool` directive in `go.mod`; run it with `go tool staticcheck`)
 
 ---
 
@@ -47,7 +48,7 @@ The unit suite runs entirely without external dependencies. Always run these loc
 ```bash
 gofmt -l .        # Must be empty
 go vet ./...      # Must be clean
-staticcheck ./... # Must be clean
+go tool staticcheck ./...  # Must be clean (tool directive in go.mod; no separate install)
 go test ./...     # Must pass
 ```
 
@@ -62,7 +63,7 @@ go test ./...     # Must pass
 > ```bash
 > gofmt -l internal cmd
 > go vet ./internal/... ./cmd/...
-> staticcheck ./internal/... ./cmd/...
+> go tool staticcheck ./internal/... ./cmd/...
 > go test ./internal/... ./cmd/...
 > ```
 
@@ -81,15 +82,19 @@ valid together with `--dry-run`.
 
 ### Integration Tiers
 
-| Tier | What it exercises | When it runs |
-|---|---|---|
-| **Unit** | Pure Go packages, fakes for external IO | Every PR (CI) |
-| **`kind`-based** | Apply manifests against a local kind cluster | PR (CI) |
-| **AWS-SDK mocked** | AWS SDK middleware fakes (tests phase orchestration) | PR (CI) |
-| **`testcontainers`** | SSH backend integration via containerised sshd | PR (CI) |
-| **Live e2e** | Real AWS account + real EKS cluster | On demand only |
+The jobs in `.github/workflows/ci.yml` run on every PR and on pushes to `main` / `staging`:
 
-*Note: Integration tests are gated by build tags so they don't run by default. To run them:*
+| Tier | CI job | What it exercises |
+|---|---|---|
+| **Unit** | `test` | `go vet`, `gofmt`, `go tool staticcheck`, `go test ./...`, `go build` — pure Go packages with fakes for external IO |
+| **`testcontainers` (sshd)** | `integration` | `internal/exec` SSH backend against a containerised sshd (Linux only) |
+| **Docker backend** | `docker-backend` | `internal/exec` docker backend against a local `busybox` container |
+| **AWS-SDK mocked** | `aws-mocked` | `internal/aws` helpers against mocked aws-sdk-go-v2 clients — no live AWS |
+| **K8s backend (`kind`)** | `k8s-backend` | `internal/exec` k8s backend and `internal/cli` ops lifecycle against an ephemeral `helm/kind-action` cluster; tests self-skip if no kubeconfig is reachable |
+| **Dry-run smoke** | `test-dryrun` | Builds the binary and runs `awsbnkctl test {connectivity,dns,throughput} --dry-run` against a materialised fake workspace |
+| **Live e2e** | `e2e-full.yml` | Real AWS account + real EKS cluster — on demand only |
+
+*Note: Integration tests are gated by the `integration` build tag so they don't run by default. To run them:*
 ```bash
 go test -tags integration ./...
 ```
@@ -138,18 +143,18 @@ Ensure you include a `VerifyDeps` struct with a `TestVerifyCallOrder` test, an i
 
 ## Releasing
 
-Releases are published automatically via `.github/workflows/release.yml` using `goreleaser` when a `vX.Y.Z` tag is pushed:
-
-```bash
-git tag -a vX.Y.Z -m "release vX.Y.Z"
-git push origin vX.Y.Z
-```
+Releases are cut by `release-please`, not by pushing tags. `.github/workflows/release.yml`
+runs on every push to `main`: `release-please` maintains an open Release PR that
+aggregates merged Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`)
+and bumps `CHANGELOG.md`; merging that PR creates the `vX.Y.Z` tag and GitHub
+release, and `goreleaser` then builds and attaches the binaries. Do not push
+tags by hand. See [docs/RELEASE.md](docs/RELEASE.md) for the full process.
 
 ---
 
 ## Reporting Issues
 
-Open an issue using the templates in `.github/ISSUE_TEMPLATE/`. For bugs, please include:
+Open a GitHub issue. For bugs, please include:
 - `awsbnkctl --version`
 - The minimal `cluster.yaml` (redacted)
 - The full stderr output

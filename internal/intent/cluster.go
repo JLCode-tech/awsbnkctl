@@ -182,7 +182,7 @@ type EndpointAccessSpec struct {
 // Corresponds to the `cluster:` block in cluster.yaml.
 type ClusterSpec struct {
 	// KubernetesVersion is the EKS Kubernetes version to deploy.
-	// Default and mandated floor: MinKubernetesVersion ("1.32"). Versions below
+	// Default and mandated floor: MinKubernetesVersion ("1.34"). Versions below
 	// the floor are rejected by validate; see validateKubernetesVersion.
 	KubernetesVersion string `yaml:"kubernetesVersion,omitempty"`
 	// NodeGroups defines one or more managed node groups. At least one is required

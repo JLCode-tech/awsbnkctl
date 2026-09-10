@@ -1,4 +1,4 @@
-# BNK egress demo — firewall policy (already applied on the cluster; re-apply only if rebuilt)
+# BNK egress demo — firewall policy (apply after `up`; re-apply if the cluster is rebuilt)
 # Blocks 1.1.1.1 for captured pods, allows everything else, logs both.
 # NOTE (BNK 2.3 eval bug): after changing this policy, the ACL blob only reaches TMM
 # right after a TMM pod restart:  kubectl delete pod -n f5-cne-system -l app=f5-tmm

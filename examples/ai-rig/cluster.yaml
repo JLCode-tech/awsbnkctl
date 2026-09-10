@@ -135,7 +135,8 @@ ai:
     # Benchmark with: --tokenizer Qwen/Qwen2.5-32B-Instruct (served name stays --model llama3)
     #
     # BEFORE uncommenting: comment out the active `model:` and `instanceType:` lines
-    # above (duplicate YAML keys are silently ignored and will use the wrong values).
+    # above (duplicate YAML keys are rejected by the parser — `validate` fails with
+    # "mapping key already defined").
     #
     # enabled: true
     # model: Qwen/Qwen2.5-32B-Instruct

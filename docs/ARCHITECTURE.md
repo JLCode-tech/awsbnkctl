@@ -50,7 +50,7 @@ network:
   natGateways: 1              
 
 cluster:                      
-  kubernetesVersion: "1.32"   # mandated floor, and the default when omitted
+  kubernetesVersion: "1.34"   # mandated floor, and the default when omitted
   nodeGroups:
     - name: default
       instanceType: m6i.4xlarge
@@ -65,22 +65,26 @@ bnk:                          # Supply-chain credentials
 - **Strict Validation:** Typos are caught immediately. Unknown fields cause a validation error.
 - **Explicit AZs:** `network.azs` is explicit to ensure reproducible deployments.
 - **`metadata.name`:** Becomes the AWS resource tag (`awsbnkctl:cluster`) and the local state folder name.
-- **`kubernetesVersion` has a mandated floor of 1.32** — see below.
+- **`kubernetesVersion` has a mandated floor of 1.34** — see below.
 
 ### Kubernetes version policy
 
-`cluster.kubernetesVersion` must be **1.32 or newer**. It is also the default when
+`cluster.kubernetesVersion` must be **1.34 or newer**. It is also the default when
 the key is omitted. Anything lower is rejected by `validate`, before any AWS call:
 
 ```
-cluster.kubernetesVersion "1.30" is below the mandated floor 1.32: 1.30/1.31 are
-at or past the end of EKS standard support and are not exercised in CI; set 1.32
-or newer
+cluster.kubernetesVersion "1.33" is below the mandated floor 1.34: everything
+below it is past the end of EKS standard support (1.31, 1.32 and 1.33 all
+reached end of standard support) and is not exercised in CI; set 1.34 or newer
 ```
 
-Two reasons for the floor. EKS moves 1.30 and 1.31 onto extended support, so a new
-cluster on them starts out costing more for no benefit; and nothing below 1.32 is
-exercised by CI any more, so allowing it would ship an untested path.
+Two reasons for the floor. It tracks EKS *standard* support: as of 2026-08,
+1.31 (EOL 2025-11-26), 1.32 (EOL 2026-03-23) and 1.33 (EOL 2026-07-29) are all
+on extended support, so a new cluster on them starts out costing more for no
+benefit and is blocked from the addon versions the BNK stack expects; and
+nothing below 1.34 is exercised by CI any more, so allowing it would ship an
+untested path. The floor is time-sensitive by design — 1.34 leaves standard
+support on 2026-12-02, at which point it should be raised again.
 
 There is a soft **upper** bound as well. BNK 2.3 is known to install cleanly up to
 **1.35**. From 1.36 the apiserver rejects the `f5-spk-pools` and HSL CRDs, whose

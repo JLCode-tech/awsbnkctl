@@ -101,7 +101,8 @@ cluster:
   nodeGroups:
     - name: default
       # m6i.4xlarge x 3 is the documented BNK 2.3 Small minimum:
-      #   - 4+ ENIs: primary + EKS CNI + 2 BNK secondaries (host-device pattern)
+      #   - 3+ ENIs: primary + 2 BNK secondaries (dual-interface). The EKS CNI stays
+      #     on the primary via prefix delegation (phase 08b) and is not counted.
       #   - 16 vCPU + 64 GB: fits the full BNK control plane + TMM (2 vCPU / 8 GiB)
       #     packed onto the single labeled node (host-device pins TMM).
       #   - 3 nodes: dSSM quorum.

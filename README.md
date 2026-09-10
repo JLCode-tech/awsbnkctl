@@ -1,10 +1,10 @@
 # awsbnkctl
 
-![BNK](https://img.shields.io/badge/BNK-2.3.2-0a3a5c)
-![Kubernetes](https://img.shields.io/badge/Kubernetes-1.32--1.35-326ce5?logo=kubernetes&logoColor=white)
+![BNK](https://img.shields.io/badge/BNK-2.3.0-0a3a5c)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-1.34--1.35-326ce5?logo=kubernetes&logoColor=white)
 ![AWS EKS](https://img.shields.io/badge/AWS-EKS-ff9900?logo=amazon-aws&logoColor=white)
 [![CI](https://github.com/JLCode-tech/awsbnkctl/actions/workflows/ci.yml/badge.svg)](https://github.com/JLCode-tech/awsbnkctl/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go)](go.mod)
+[![Go Version](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/JLCode-tech/awsbnkctl?label=download)](https://github.com/JLCode-tech/awsbnkctl/releases)
 
@@ -23,6 +23,7 @@ No Terraform. No host `kubectl`. **One binary, one intent file.**
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Data-Plane Patterns](#data-plane-patterns)
+- [Configuration](#configuration)
 - [Scenarios Catalogue](#scenarios-catalogue)
 - [Agentic Workflow](#agentic-workflow)
 - [BNK Forge Integration](#bnk-forge-integration)
@@ -48,11 +49,11 @@ No Terraform. No host `kubectl`. **One binary, one intent file.**
 
 ## Highlights
 
-- **Imperative Phased Provisioner** — 39 deterministic, ordered phases driven directly via the AWS Go SDK. AWS resource tags serve as the single source of truth; local state caches accelerate subsequent runs and are fully reconstructible from AWS tags.
+- **Imperative Phased Provisioner** — 39 deterministic, ordered phases (two of them conditional) driven directly via the AWS Go SDK. AWS resource tags (`awsbnkctl:cluster`, `awsbnkctl:component`, `awsbnkctl:managed`) serve as the single source of truth; local state caches accelerate subsequent runs and are fully reconstructible from AWS tags.
 - **Embedded Kubernetes Engine (`k`)** — Native `client-go` implementation provides `get`, `apply`, `describe`, `delete`, `logs`, `exec`, and `port-forward` with zero host `kubectl` dependencies.
 - **End-to-End Traffic Scenarios** — 15 built-in scenarios validate live L4/L7 traffic, Gateway API HTTP/gRPC routing, AI Gateway semantic caching, and CWC security policies.
-- **Agentic Workflow Built-In** — First-class AI pair-programming support with `awsbnkctl agent [claude, gemini, chatgpt, ...]`, append-only operational journaling (`awsbnkctl journal`), and an embedded Model Context Protocol (MCP) server.
-- **BNK Forge Integration** — Instant one-line cluster registration and real-time data plane topology visualization with `awsbnkctl forge register`.
+- **Agentic Workflow Built-In** — First-class AI pair-programming support with `awsbnkctl agent <cli>` (claude, gemini, aider, openai, pi, opencode) and append-only operational journaling (`awsbnkctl journal`). The binary embeds no LLM and no MCP server — bring your own coding-agent CLI.
+- **BNK Forge Integration** — One-line cluster registration with a BNK Forge instance over MCP (`awsbnkctl forge register`), plus AI benchmark telemetry (`awsbnkctl benchmark`).
 - **Cross-Platform Single Binary** — Statically compiled for Linux (amd64, arm64), macOS (Apple Silicon arm64, Intel amd64), and Windows.
 
 ---
@@ -61,12 +62,13 @@ No Terraform. No host `kubectl`. **One binary, one intent file.**
 
 | Component | Pinned Version / Range | Notes |
 |---|---|---|
-| **BNK** | `2.3.2` | Primary supported release |
-| **CNE Release Manifest** | `2.3.2-3.2598.3-0.0.392` | Resolved dynamically from FAR registry |
-| **Kubernetes (EKS)** | `1.32` – `1.35` (Default: `1.32`) | Preflight gate rejects < 1.32; 1.36+ warns |
-| **AWS Go SDK** | `v2` (`v1.44.300+`) | Direct AWS API communication |
-| **cert-manager** | `v1.16.2` | Managed via embedded Helm installer |
-| **FLO Helm Chart** | `v2.21+` | Resolved at deploy time from release manifest |
+| **BNK** | `2.3.0` | Primary supported release (`2.3.x` via `manifestVersion` override) |
+| **CNE Release Manifest** | `2.3.0-3.2598.3-0.0.170` (default) | Pulled from `repo.f5.com`; override per cluster with `bnk.manifestVersion` (e.g. `2.3.2-3.2598.3-0.0.392`) |
+| **Kubernetes (EKS)** | `1.34` – `1.35` (Default: `1.34`) | `validate` rejects < 1.34; 1.36+ warns (BNK CRDs fail to apply) |
+| **AWS SDK for Go** | `v2` (`github.com/aws/aws-sdk-go-v2 v1.42.0`) | Direct AWS API communication, no Terraform |
+| **cert-manager** | `v1.16.1` | Embedded upstream YAML applied via `client-go` (no Helm); override with `bnk.certManagerVersion` |
+| **FLO Helm Chart** | `v2.21.13-0.0.28` (default) | Override with `addons.flo.version` |
+| **Go** | `1.26` | `go.mod` toolchain floor |
 
 ---
 
@@ -74,15 +76,17 @@ No Terraform. No host `kubectl`. **One binary, one intent file.**
 
 ### Option 1: Pre-Built Binary (Recommended)
 
-Download the archive for your OS and architecture from [GitHub Releases](https://github.com/JLCode-tech/awsbnkctl/releases/latest), unpack, and place on your `PATH`:
+Download the archive for your OS and architecture from [GitHub Releases](https://github.com/JLCode-tech/awsbnkctl/releases/latest), unpack, and place on your `PATH`. Assets are named `awsbnkctl_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) alongside a `checksums.txt`:
 
 ```bash
+VERSION=1.3.1   # see https://github.com/JLCode-tech/awsbnkctl/releases/latest
+
 # macOS (Apple Silicon)
-curl -fsSL https://github.com/JLCode-tech/awsbnkctl/releases/latest/download/awsbnkctl_darwin_arm64.tar.gz | tar -xz
+curl -fsSL https://github.com/JLCode-tech/awsbnkctl/releases/download/v${VERSION}/awsbnkctl_${VERSION}_darwin_arm64.tar.gz | tar -xz
 sudo mv awsbnkctl /usr/local/bin/
 
 # Linux (x86_64)
-curl -fsSL https://github.com/JLCode-tech/awsbnkctl/releases/latest/download/awsbnkctl_linux_amd64.tar.gz | tar -xz
+curl -fsSL https://github.com/JLCode-tech/awsbnkctl/releases/download/v${VERSION}/awsbnkctl_${VERSION}_linux_amd64.tar.gz | tar -xz
 sudo mv awsbnkctl /usr/local/bin/
 ```
 
@@ -91,7 +95,9 @@ Verify installation:
 awsbnkctl version
 ```
 
-### Option 2: Go Install (Go 1.25+)
+Once installed, `awsbnkctl self update` fetches the latest release for the host OS/arch, and `awsbnkctl install` copies the running binary onto your `PATH`.
+
+### Option 2: Go Install (Go 1.26+)
 
 ```bash
 go install github.com/JLCode-tech/awsbnkctl/cmd/awsbnkctl@latest
@@ -121,7 +127,7 @@ awsbnkctl self update
 | **AWS Account & IAM Credentials** | VPC, EKS, EC2, IAM roles, S3 bucket provisioning |
 | **F5 FAR Pull Secret & JWT License** | Authenticating to `repo.f5.com` and activating BNK licenses |
 | **`aws` CLI & `ssh` (Optional)** | Only required when running live scenario probes via EC2 Instance Connect jumphost |
-| **Go 1.25+ (Optional)** | Only required when compiling from source |
+| **Go 1.26+ (Optional)** | Only required when compiling from source |
 
 > [!NOTE]
 > You do **not** need `terraform`, `kubectl`, `helm`, or `docker` installed on your machine.
@@ -139,18 +145,23 @@ Scaffold a starter configuration from one of the reference blueprints:
 cp examples/full-cluster/cluster.yaml my-cluster.yaml
 ```
 
-Edit `my-cluster.yaml` to specify your AWS region, CIDRs, node types, and credentials:
+Edit `my-cluster.yaml` to specify your AWS region, CIDRs, node types, and credentials (the loader is strict — unknown keys are rejected by `validate`):
 ```yaml
+apiVersion: awsbnkctl/v1
+kind: Cluster
+
 metadata:
   name: sydney-e2e-cluster
   region: ap-southeast-2
 
+pattern: dual-interface
+
 cluster:
-  kubernetesVersion: "1.32"
+  kubernetesVersion: "1.34"
   nodeGroups:
     - name: tmm-workers
-      instanceType: m5.xlarge
-      desiredCapacity: 2
+      instanceType: m6i.4xlarge
+      desiredSize: 2
 
 bnk:
   farArchive: ./secrets/f5-far-credentials.json
@@ -205,13 +216,40 @@ awsbnkctl down -f my-cluster.yaml --yes
 
 ## Data-Plane Patterns
 
-The `pattern` field selects the TMM data-plane interface topology and binding:
+The top-level `pattern` field selects the TMM data-plane interface topology and binding:
 
 | Pattern | Interfaces | Datapath Binding | Min ENIs | Primary Use Case |
 |---|---|---|---|---|
 | **`external-only`** | External only | `host-device` (Kernel) | 2 | Single-arm Ingress Gateway / North-South ingress |
 | **`dual-interface`** | External + Internal | `host-device` (Kernel) | 3 | Dual-arm firewall / Ingress + Egress inspection |
 | **`sriov-external`** | External only | SR-IOV (`vfio-pci` DPDK) | 2 | High-throughput line-rate packet processing |
+
+`host-device` is accepted as a legacy alias for `dual-interface`.
+
+---
+
+## Configuration
+
+Every knob lives in `cluster.yaml` (schema: `internal/intent/cluster.go`). Two optional blocks worth knowing about:
+
+- **BGP peering** — `bnk.bgp: true` (alias `bnk.dynamicRouting: true`) opens TCP 179 / UDP 3784 on the external `F5SPKVlan` so TMM forwards BGP control-plane packets to the BNK routing stack. Use it to peer with an AWS Route Server or an upstream router; `examples/singapore-pe/bgp-route-server.yaml` shows the matching `RoutingTemplate` / `GlobalRoutingConfig` resources.
+- **Shared Forge project** — `forge.projectName` registers the cluster into an existing BNK Forge project instead of the auto-created `awsbnkctl-<cluster>` one (env override `AWSBNKCTL_FORGE_PROJECT`). When a non-default name is set, `down` unregisters the cluster but does not purge the shared project.
+
+Environment variables recognised by the binary:
+
+| Variable | Effect |
+|---|---|
+| `AWSBNKCTL_SKIP_AUTH=1` | Skip AWS credential resolution; only valid together with `--dry-run` on `up` / `down` |
+| `AWSBNKCTL_HOME` | Override the workspace/state root directory (legacy alias `ROKSBNKCTL_HOME` is still honoured) |
+| `AWSBNKCTL_FORGE_URL` | BNK Forge REST base URL (overrides `forge.url`; default `http://localhost:8000`) |
+| `AWSBNKCTL_FORGE_MCP_URL` | BNK Forge MCP endpoint (overrides `forge.mcpUrl`; default `http://localhost:8081/mcp/`) |
+| `AWSBNKCTL_FORGE_USERNAME` / `AWSBNKCTL_FORGE_PASSWORD` | Forge credentials; the password is never read from YAML in production use |
+| `AWSBNKCTL_FORGE_PROJECT` | Forge project name to register into (overrides `forge.projectName`) |
+| `AWSBNKCTL_FORGE_ENVIRONMENT` | Forge project environment, e.g. `dev`, `staging`, `prod` (overrides `forge.environment`) |
+| `AWSBNKCTL_BIGIP_PASSWORD` | BIG-IP VE admin password for the `bigipVE` onboarding phase and the `bigip-cis` demo |
+| `AWSBNKCTL_GPU_AZ_DENY` | Extra GPU instance-type AZ deny entries, format `region:az1,az2;region2:az3` |
+| `AWSBNKCTL_DOCTOR_SERVICE_QUOTAS=1` | Opt `doctor` into the AWS Service Quotas checks |
+| `AWSBNKCTL_SSH_TARGET` / `AWSBNKCTL_K8S_LONG_LIVED` | Internal sentinels the CLI sets when re-dispatching a command to an `ssh:<target>` or `k8s` execution backend; not meant to be set by operators |
 
 ---
 
@@ -235,7 +273,7 @@ The `pattern` field selects the TMM data-plane interface topology and binding:
 | **`ai-inference-e2e`** | AI Gateway | End-to-end SageMaker / GPU inference routing | AWS SDK / EICE Jumphost |
 | **`multi-vip`** | Scalability | Multiple Gateway VIPs on a single TMM instance | EICE Jumphost curl |
 | **`egress-snat`** | Egress Security | Outbound SNAT and egress firewall filtering | EICE Jumphost curl |
-| **`corefiles`** | Observability | TMM core dump probe and health diagnostics | Pod diagnostic inspect |
+| **`core-file-collection`** | Observability | TMM core dump probe and health diagnostics | Pod diagnostic inspect |
 
 Run scenarios individually or execute the complete test suite:
 ```bash
@@ -249,12 +287,13 @@ awsbnkctl scenarios run <scenario-name> -f my-cluster.yaml
 `awsbnkctl` is built from the ground up for human-AI pair programming and autonomous execution:
 
 ### 1. Agent Scaffolding (`agent`)
-Generate AI coding agent instructions and workspace prompt bundles:
+Scaffold the agentic-mode files into the workspace, then print the invocation for your coding-agent CLI. `awsbnkctl` embeds no LLM — bring your own CLI:
 
 ```bash
-awsbnkctl agent claude   # Outputs CLAUDE.md tailored for Claude Code
-awsbnkctl agent gemini   # Outputs instructions for Gemini / Antigravity
-awsbnkctl agent chatgpt  # Outputs instructions for ChatGPT / OpenAI Codex
+awsbnkctl agent init      # Scaffold AGENTS.md + personas/ + journal/ into the workspace
+awsbnkctl agent           # List supported CLIs and this workspace's default
+awsbnkctl agent claude    # Print the invocation to launch Claude Code against the workspace
+awsbnkctl agent gemini    # Likewise for gemini; also: aider, openai, pi, opencode
 ```
 
 ### 2. Operational Journal (`journal`)
@@ -263,61 +302,128 @@ Maintain an audit-safe, append-only operational run log:
 ```bash
 awsbnkctl journal add "Provisioned Sydney E2E cluster and ran full scenario suite"
 awsbnkctl journal list
-awsbnkctl journal report --format markdown
+awsbnkctl journal report   # Assembles report.md from decisions.md + the journal timeline
 ```
 
-### 3. Model Context Protocol (MCP) Server
-Integrate `awsbnkctl` directly into AI desktop environments and IDEs via its built-in MCP server:
-
-```json
-{
-  "mcpServers": {
-    "awsbnkctl": {
-      "command": "awsbnkctl",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
+### 3. Model Context Protocol (MCP)
+`awsbnkctl` does **not** ship an MCP server. It is an MCP *client*: `forge register`, `up --register-with-forge`, and `benchmark` talk to a BNK Forge instance over its MCP endpoint (see below).
 
 ---
 
 ## BNK Forge Integration
 
-Connect your `awsbnkctl` clusters to [BNK Forge](https://github.com/f5devcentral/bnk-forge) for centralized fleet management, live traffic flow visualization, and policy orchestration:
+Connect your `awsbnkctl` clusters to [BNK Forge](https://github.com/f5devcentral/bnk-forge) for centralized fleet management and benchmark telemetry. The Forge endpoints and credentials come from the `forge:` block in `cluster.yaml` or the `AWSBNKCTL_FORGE_*` environment variables (see [Configuration](#configuration)):
 
 ```bash
-# Register cluster with BNK Forge instance
-awsbnkctl forge register --endpoint https://forge.example.com --token $FORGE_TOKEN
+# Register the workspace's EKS cluster with Forge (idempotent); --scan runs a smoke check afterwards
+awsbnkctl forge register -f my-cluster.yaml --scan
+awsbnkctl forge register --cluster-name my-eks --kubeconfig ~/.kube/config --project-name shared-project
 
-# Check registration and telemetry status
+# Check this workspace's registration state
 awsbnkctl forge status
 
-# Unregister cluster during teardown
+# Unregister the cluster; `cleanup` purges every awsbnkctl benchmark artifact for the workspace
 awsbnkctl forge unregister
+awsbnkctl forge cleanup
 ```
+
+`awsbnkctl up --register-with-forge` performs the registration automatically after a successful apply, and `down` removes it unless `--keep-forge-link` is passed.
 
 ---
 
 ## Command Reference
 
+Run `awsbnkctl <command> --help` for the full flag list. Global flags on every command: `-w/--workspace`, `-o/--output text|json`, `-v/--verbose`, `-q/--quiet`, `--no-color`, `--backend local|docker|k8s|ssh:<target>`, `--on <target>`, `--bootstrap`, `--insecure-host-key`.
+
+### Lifecycle
+
 | Command | Description |
 |---|---|
-| **`validate <config>`** | Validate configuration schema and network CIDR consistency |
-| **`up -f <config>`** | Provision AWS infrastructure and deploy BNK (flags: `--dry-run`, `--demo`, `--auto`) |
-| **`down -f <config>`** | Teardown BNK and AWS infrastructure (flags: `--dry-run`, `--yes`) |
-| **`status`** | Display workspace status, phase state, and pod health |
-| **`doctor`** | Run preflight diagnostics on AWS credentials, IAM, and networking |
-| **`scenarios {list,run,clean}`** | Manage and execute data-plane verification scenarios |
-| **`demo {list,run,clean}`** | Run interactive audience-facing walkthroughs and migration stories |
-| **`topology`** | Render ASCII diagram of VPC, subnets, TMM VLANs, and gateways |
-| **`k <verb> [args]`** | Embedded Kubernetes passthrough (`get`, `apply`, `describe`, `logs`, `exec`) |
-| **`manifest probe [version]`** | Inspect F5 FAR release manifest charts and image digests |
-| **`workspaces {list,use,new}`** | Manage isolated multi-cluster deployment environments |
-| **`journal {add,list,report}`** | Maintain operational execution journal |
-| **`agent {claude,gemini,...}`** | Generate AI pair-programming workspace bundles |
-| **`forge {register,status}`** | Manage BNK Forge fleet registration |
-| **`self update`** | In-place self-upgrade to the latest release |
+| **`init`** | Interactive AWS setup; collects region, VPC, subnets, FAR archive and JWT, writes the workspace config (`--dry-run` skips the upload step) |
+| **`validate <path>`** | Parse and validate a `cluster.yaml` (no AWS API calls) |
+| **`up -f <config>`** | Provision the EKS cluster + BNK stack via the phased path (flags: `--dry-run`, `--auto`, `--demo`, `--no-kubeconfig`, `--register-with-forge`, `--skip-activation-poll`) |
+| **`down -f <config>`** | Destroy everything provisioned by `up` (flags: `--dry-run`, `--yes`, `--auto`, `--keep-irsa`, `--keep-forge-link`) |
+| **`status`** | Summary of the workspace: cluster, components, deploy state (`-f` locates the phased path's `state.env`) |
+| **`doctor`** | Check prerequisites and report missing pieces (`--backend k8s|ssh:<target>`, `--target <name>` add per-backend probes) |
+| **`topology -f <config>`** | Render the cluster data-path topology (VPC, TMM VLANs, jumphost, gateways) as `--format ascii` or `mermaid` |
+| **`version`** | Print version, commit, and build date |
+
+### Validation & Demos
+
+| Command | Description |
+|---|---|
+| **`test [suite]`** | Run deployment validation tests (default: all; `--dry-run` prints the probe plan, `--insecure` skips TLS validation) |
+| **`test connectivity`** | HTTP/HTTPS reachability against configured hosts |
+| **`test dns`** | DNS resolution probe (single-vantage, GSLB-compare, or workspace-driven) |
+| **`test throughput`** | iperf3 throughput; deploys the server pod automatically |
+| **`test traffic`** | Drive HTTP traffic through TMM from the test jumphost (alias for `scenarios run http-routing-e2e`) |
+| **`test list`** | List available test suites |
+| **`test hosts {add,clear,list,remove}`** | Manage `test.connectivity.extra_hosts` in the workspace config |
+| **`scenarios list`** | Print registered scenarios |
+| **`scenarios run <name>`** | Run a scenario (or `--all`) |
+| **`scenarios clean <name>`** | Invoke a scenario's Cleanup hook |
+| **`demo list`** | Print registered demo use-cases and Green scenarios |
+| **`demo run <name>`** | Run a demo use-case (or `--all`); requires a demo cluster |
+| **`demo clean <name>`** | Invoke a demo use-case's idempotent Cleanup hook (or `--all`) |
+| **`demo preview`** | Play the up/down rocket animation locally (no AWS) to preview the demo UX |
+
+### Kubernetes & BNK Runtime
+
+| Command | Description |
+|---|---|
+| **`k apply`** | Server-side apply YAML/JSON manifests, directories, or kustomize bases |
+| **`k delete`** | Delete resources by name or label selector |
+| **`k describe`** | Show detailed human-readable resource info (events, conditions, related objects) |
+| **`k exec`** | Exec into a pod via SPDY (kubectl-equivalent in-process) |
+| **`k get`** | Get one or more resources (pods, nodes, services, CRDs, …) |
+| **`k logs`** | Stream pod logs (kubectl-equivalent direct path) |
+| **`k port-forward`** | Forward local port(s) to a pod via SPDY |
+| **`get <resource> [name]`** | Top-level alias of `k get` (`-n`, `-A`, `-l`, `-o yaml|json|wide|name|jsonpath=…`) |
+| **`logs <component>`** | Tail logs for a BNK component (`flo`, `cis`, `cert-manager`, `cneinstance`); `-f`, `--since`, `--tail`, `--previous`, `-c` |
+| **`bnk resync`** | Force the F5 cne-controller to re-resolve stale TMM pool members |
+| **`manifest probe`** | Pull and inspect a BNK release manifest from `repo.f5.com` |
+
+### AI Benchmarking & BNK Forge
+
+| Command | Description |
+|---|---|
+| **`benchmark`** | Runs the default `benchmark run` workflow when invoked directly |
+| **`benchmark setup`** | Prepare the jumphost (aiperf) and register the benchmark agent and target in Forge |
+| **`benchmark run`** | Drive an aiperf run, preset (`--scenarios`), native Forge scenario sweep (`--scenario`), or proxy shootout (`--proxies`) |
+| **`benchmark list`** | List available native Forge scenarios and smoke presets |
+| **`benchmark status`** | Check the benchmark environment, jumphost, and Forge linkage |
+| **`benchmark daemon`** | Run the persistent Forge benchmark agent daemon |
+| **`forge register`** | Register the workspace's EKS cluster with Forge (idempotent); `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
+| **`forge status`** | Show this workspace's Forge registration state |
+| **`forge unregister`** | Remove this workspace's Forge registration |
+| **`forge cleanup`** | Delete all awsbnkctl benchmark artifacts from Forge for a workspace (full purge) |
+| **`forge benchmark`** | Alias for `benchmark run` |
+
+### Agentic Workflow
+
+| Command | Description |
+|---|---|
+| **`agent`** | List supported coding-agent CLIs and this workspace's default |
+| **`agent init`** | Scaffold `AGENTS.md`, `personas/`, and `journal/` into the workspace |
+| **`agent <cli>`** | Print the invocation to launch `claude`, `gemini`, `aider`, `openai`, `pi`, or `opencode` against the workspace |
+| **`journal add <note>`** | Append a note to today's journal entry |
+| **`journal list`** | List journal entries (chronological) with one-line summaries |
+| **`journal report`** | Assemble `report.md` from `decisions.md` + the journal timeline |
+
+### Workspaces, Targets & Maintenance
+
+| Command | Description |
+|---|---|
+| **`workspaces list`** | List workspaces and their states |
+| **`workspaces current`** | Print the current workspace name |
+| **`workspaces new <name>`** | Create a new (empty) workspace skeleton; run `init -w <name>` to populate |
+| **`workspaces use <name>`** | Set the current workspace pointer |
+| **`workspaces delete <name>`** | Delete a workspace (refuses if state is non-empty unless `--force`) |
+| **`targets {add,list,remove,show}`** | Manage the SSH targets used by `--on` / `--backend ssh:<target>` |
+| **`install`** | Copy the running binary into a directory on `PATH` (`--dir`, `--force`) |
+| **`self update`** | Pull the latest release matching the host OS/arch |
+| **`completion <shell>`** | Generate the shell completion script |
+| **`help [command]`** | Help about any command |
 
 ---
 
@@ -327,20 +433,38 @@ awsbnkctl forge unregister
 awsbnkctl/
 ├── cmd/awsbnkctl/         # CLI binary entrypoint (main.go)
 ├── internal/
-│   ├── aws/               # AWS SDK client, resource graph, and 39 provisioning phases
-│   ├── bnk/               # BNK manifests, FAR client, CNE & FLO templates
-│   ├── cli/               # Cobra commands, agentic workflows, journal, workspaces
-│   ├── k8s/               # Embedded client-go wrapper, CRDs, resource helpers
-│   ├── scenarios/         # 15 automated traffic and AI validation scenarios
-│   └── topology/          # ASCII topology visualizer
-├── docs/                  # Architecture, phases, scenarios, and alignment guides
+│   ├── aws/               # aws-sdk-go-v2 wrappers (VPC, EKS, EC2, IAM, S3, STS), tags, state
+│   │   └── phases/        # The 39 ordered provisioning/teardown phases
+│   ├── bnkconst/          # BNK-wide constants shared across packages
+│   ├── cli/               # Cobra command tree (all commands; version vars stamped via ldflags)
+│   ├── config/            # Workspace paths and global config (not the cluster.yaml schema)
+│   ├── demo/              # Demo use-case registry + narration (diameter, http2, bigip-cis, ingress-migration)
+│   ├── doctor/            # Prerequisite checks behind `awsbnkctl doctor`
+│   ├── embedded/          # Agentic-mode scaffolding shipped inside the binary
+│   ├── exec/              # Execution backends: local, docker, k8s, ssh:<target>
+│   ├── forge/             # BNK Forge MCP/REST client (register, unregister, benchmark)
+│   ├── intent/            # cluster.yaml schema (v1), loader, and validation
+│   ├── jumphost/          # SSH-via-EICE probe utilities for the test jumphost
+│   ├── k8s/               # Embedded client-go wrapper (k verbs), embedded manifests, renderers
+│   ├── manifest/          # F5 release-manifest (BOM) fetch and probe
+│   ├── remote/            # Embedded SSH client and target plumbing
+│   ├── scenarios/         # 15 end-to-end validation scenarios
+│   ├── test/              # connectivity / dns / throughput probe runners
+│   ├── topology/          # Data-path topology model + ASCII/mermaid renderers
+│   └── ui/                # Terminal output primitives (spinners, progress, colour)
+├── pkg/bnk/               # Exported BNK runtime helpers (pool-member resync)
+├── docs/                  # Architecture, phases, scenarios, Forge integration, release guides
 ├── examples/              # Ready-to-deploy cluster topologies and reference blueprints
-│   ├── full-cluster/      # Comprehensive reference configuration
-│   ├── external-only/     # Single-arm ingress blueprint
-│   ├── egress-demo/       # Outbound SNAT and firewall blueprint
-│   ├── ai-rig/            # AI Gateway + SageMaker GPU inference blueprint
-│   └── agentcore-demo/    # AI Agent infrastructure + MCP tool orchestration
-├── tools/                 # Container runner packaging for BNK Forge
+│   ├── full-cluster/      # Complete dual-interface reference stack (demo + BIG-IP VE as commented blocks)
+│   ├── external-only/     # Single-arm ingress blueprint (one-line swap to sriov-external)
+│   ├── egress-demo/       # Transparent egress + egress firewall ACL blueprint
+│   ├── ai-rig/            # BNK fronting GPU inference, optional SageMaker endpoint
+│   ├── demo-ai/           # full-cluster + ai-rig composed: all protocol demos plus managed inference
+│   ├── agentcore-demo/    # One MCP tool pod behind a BNK Gateway; AgentCore runtime → BNK → tool governance
+│   ├── local-zone/        # Reference telco/edge CRs (SCTP, Diameter, HTTP/2, SNAT pool); no cluster.yaml
+│   └── singapore-pe/      # BGP peering manifests (RoutingTemplate / GlobalRoutingConfig) for bnk.bgp
+├── scripts/               # e2e and gate scripts (pre-commit, govulncheck, integration)
+├── tools/                 # BNK Forge runner packaging, docker helpers, ciwatch/sprintwatch
 └── Makefile               # Build, test, lint, and release recipes
 ```
 

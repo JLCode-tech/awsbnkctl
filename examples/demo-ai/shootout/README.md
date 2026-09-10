@@ -28,6 +28,6 @@ bash examples/demo-ai/shootout/teardown.sh
 ```
 
 ## Key Architectural Decisions
-- **k8s 1.31:** Required for Envoy AI Gateway CRDs.
+- **k8s 1.34+ (cluster runs 1.35):** the Envoy AI Gateway CRDs use the `isIP` CEL function, which needs Kubernetes 1.31 or newer; the `awsbnkctl` floor of 1.34 already clears it.
 - **Shared SigV4 Hop:** Ensures apples-to-apples proxy comparison.
 - **Envoy Timeout:** Increased to 600s to support long LLM responses.

@@ -53,7 +53,7 @@ var (
 	// flagKeepForgeLink is bound ONLY to downCmd (single-owner per the
 	// cobra shared-flag-variable anti-pattern rules above). When true,
 	// Phase09ForgeRegisterDown skips forge unregister and preserves
-	// forge-link.json so the operator can manage the forge project manually.
+	// forge_link.json so the operator can manage the forge project manually.
 	// Default false (unregister on down).
 	flagKeepForgeLink bool
 
@@ -123,7 +123,7 @@ func init() {
 	downCmd.Flags().BoolVar(&flagDownDryRun, "dry-run", false, "print what would be destroyed, make no AWS mutations")
 	downCmd.Flags().StringVarP(&flagConfig, "config", "f", "", "path to cluster.yaml (required)")
 	downCmd.Flags().BoolVar(&flagYes, "yes", false, "skip the interactive destroy confirmation (required with --config)")
-	downCmd.Flags().BoolVar(&flagKeepForgeLink, "keep-forge-link", false, "preserve forge-link.json on down (skips Phase 09 forge unregister)")
+	downCmd.Flags().BoolVar(&flagKeepForgeLink, "keep-forge-link", false, "preserve forge_link.json on down (skips Phase 09 forge unregister)")
 	downCmd.Flags().BoolVar(&flagKeepIRSA, "keep-irsa", false, "retain the OIDC provider and IRSA role on down (both are kept for reuse across cluster iterations)")
 
 	rootCmd.AddCommand(initCmd, upCmd, downCmd)
