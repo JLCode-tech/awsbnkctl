@@ -67,6 +67,11 @@ cluster:
 bnk:
   farArchive: ./cne_pull_64.json     # REPLACE with your F5 FAR pull credentials JSON
   jwt: ./license.jwt                 # REPLACE with your F5 subscription JWT
+  # bgp: open TCP 179 (BGP) + UDP 3784 (BFD) from the external subnet on the
+  # data-plane security group and the external F5SPKVlan, so TMM can peer with
+  # an AWS Route Server endpoint there. Harmless with no peer. The peer and the
+  # routing CRs are yours to add: see bgp-route-server.yaml in this directory.
+  bgp: true
 
 testing:
   jumphost:

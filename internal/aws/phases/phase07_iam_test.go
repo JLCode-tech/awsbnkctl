@@ -2,6 +2,7 @@ package phases
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
 
 // testClientsIAM returns a Clients with the given mockIAM wired in.
@@ -385,3 +387,87 @@ func TestClearSGReferences_RevokesRefsAndDeletesOrphanEKSSG(t *testing.T) {
 		t.Errorf("expected the orphaned EKS cluster SG to be deleted (1 DeleteSecurityGroup call), got %d", ec2m.deleteSGCalls)
 	}
 }
+
+// TestPhase07IAM_BGPOpensRoutingPorts pins the bnk.bgp contract on the
+// security group: with the flag set, SG_BNK_DATA admits TCP 179 (BGP) and
+// UDP 3784 (BFD) from the external data-path subnet, so a Route Server
+// endpoint there can reach TMM's external SelfIP. Without the SG rule the
+// F5SPKVlan allowed_services from Phase 23b are unreachable and the session
+// never forms.
+func TestPhase07IAM_BGPOpensRoutingPorts(t *testing.T) {
+	awsmw.ResetForTest()
+	st, _ := stateWithVPCIDOnly(t)
+	ec2Mock := &mockEC2{}
+	clients := testClientsIAM(newMockIAM())
+	clients.EC2 = ec2Mock
+
+	cl := testCluster()
+	cl.Pattern = intent.PatternExternalOnly
+	cl.Network.DataPath = &intent.DataPathSpec{
+		External: intent.SubnetSpec{CIDR: "10.0.10.0/24", AZ: "ap-southeast-2a"},
+	}
+	cl.Bnk = &intent.BnkSpec{BGP: true}
+
+	if err := Phase07IAM(context.Background(), cl, st, clients, false); err != nil {
+		t.Fatalf("Phase07IAM: %v", err)
+	}
+
+	var got []string
+	for _, in := range ec2Mock.authorizeIngressInputs {
+		for _, p := range in.IpPermissions {
+			for _, r := range p.IpRanges {
+				got = append(got, *p.IpProtocol+"/"+itoa32(*p.FromPort)+"-"+itoa32(*p.ToPort)+" from "+*r.CidrIp)
+			}
+		}
+	}
+	want := []string{
+		"tcp/179-179 from 10.0.10.0/24",
+		"udp/3784-3784 from 10.0.10.0/24",
+	}
+	if strings.Join(got, ";") != strings.Join(want, ";") {
+		t.Errorf("bgp ingress rules = %v, want %v", got, want)
+	}
+}
+
+// TestPhase07IAM_NoBGPLeavesSGClosed is the negative of the above: without
+// bnk.bgp the only ingress rule on SG_BNK_DATA is the self-reference.
+func TestPhase07IAM_NoBGPLeavesSGClosed(t *testing.T) {
+	awsmw.ResetForTest()
+	st, _ := stateWithVPCIDOnly(t)
+	ec2Mock := &mockEC2{}
+	clients := testClientsIAM(newMockIAM())
+	clients.EC2 = ec2Mock
+
+	cl := testCluster()
+	cl.Pattern = intent.PatternExternalOnly
+	cl.Network.DataPath = &intent.DataPathSpec{
+		External: intent.SubnetSpec{CIDR: "10.0.10.0/24", AZ: "ap-southeast-2a"},
+	}
+
+	if err := Phase07IAM(context.Background(), cl, st, clients, false); err != nil {
+		t.Fatalf("Phase07IAM: %v", err)
+	}
+	for _, in := range ec2Mock.authorizeIngressInputs {
+		for _, p := range in.IpPermissions {
+			if len(p.IpRanges) > 0 {
+				t.Errorf("unexpected CIDR ingress rule without bnk.bgp: %+v", p)
+			}
+		}
+	}
+}
+
+// TestPhase07IAM_BGPRequiresExternalCIDR: bnk.bgp without a data-path subnet
+// is a hard error rather than a silently unreachable peer.
+func TestPhase07IAM_BGPRequiresExternalCIDR(t *testing.T) {
+	awsmw.ResetForTest()
+	st, _ := stateWithVPCIDOnly(t)
+	cl := testCluster()
+	cl.Bnk = &intent.BnkSpec{BGP: true}
+
+	err := Phase07IAM(context.Background(), cl, st, testClientsIAM(newMockIAM()), false)
+	if err == nil || !strings.Contains(err.Error(), "dataPath.external.cidr") {
+		t.Fatalf("expected dataPath.external.cidr error, got %v", err)
+	}
+}
+
+func itoa32(v int32) string { return strconv.FormatInt(int64(v), 10) }

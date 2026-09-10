@@ -81,6 +81,25 @@ Two of the use-cases carry the "migrate to BNK" story:
   > `export AWSBNKCTL_BIGIP_PASSWORD='<pass>'` before running — it is never stored
   > in `cluster.yaml`.
 
+## BGP peering with AWS Route Server
+
+`cluster.yaml` sets `bnk.bgp: true`, so `up` opens TCP 179 (BGP) and UDP 3784
+(BFD) from the external subnet (`10.0.10.0/24`) on the data-plane security group
+and on the external `F5SPKVlan`. That makes TMM's external SelfIP
+(`10.0.10.240`) reachable as a BGP peer. Nothing peers until you create a Route
+Server endpoint in that subnet and apply [`bgp-route-server.yaml`](bgp-route-server.yaml),
+replacing its `10.0.10.31` placeholder with the endpoint's address. The full
+procedure, verification and teardown order are in
+[`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md); state for this
+cluster lives in `.awsbnkctl/full-cluster/`. BGP is optional here: the Gateway VIP
+(`10.0.10.100`) is reachable inside the VPC without it, because the
+cne-controller assigns it as a secondary IP on TMM's external ENI.
+
+> [!NOTE]
+> A Route Server endpoint bills about $0.75/hour and blocks deletion of the
+> external subnet. Remove it before `awsbnkctl down`.
+
+
 ## Cost & teardown
 
 Billable while up: 3x `m6i.4xlarge` workers, the EKS control plane, one NAT

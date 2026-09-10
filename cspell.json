@@ -677,6 +677,12 @@
     "xrefs",
     "yak-shaving",
     "yourfork",
+    "failover",
+    "globalroutingconfig",
+    "imish",
+    "jsonpath",
+    "routingtemplate",
+    "ZebOS",
     "zerolog"
   ],
   "ignorePaths": [

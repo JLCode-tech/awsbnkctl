@@ -290,7 +290,7 @@ in-cluster data plane earns its place.
 We use `awsbnkctl` to deterministically provision the entire underlying network and EKS environment in AWS (`ap-southeast-2`), integrating directly with the local Forge instance.
 
 > [!NOTE]
-> This creates a dedicated VPC, EKS cluster (`1.31`), subnets, and host-device ENIs for the BNK data path without affecting any existing workloads.
+> This creates a dedicated VPC, EKS cluster (`1.35`), subnets, and host-device ENIs for the BNK data path without affecting any existing workloads.
 
 ### Intent File (`cluster.yaml`)
 
@@ -299,6 +299,7 @@ We have created the declarative intent file at [`examples/agentcore-demo/cluster
 *   **Pattern:** `host-device` (Dual-interface for BNK inspection)
 *   **Region:** `ap-southeast-2`
 *   **Integration:** Local Forge `http://localhost:8000`
+*   **BGP:** `bnk.bgp: true` — opens TCP 179 / UDP 3784 from the external subnet on the data-plane SG and the external `F5SPKVlan` so TMM can peer with an AWS Route Server endpoint. Optional; the VIP is reachable in-VPC without it. Peer and routing CRs: [`bgp-route-server.yaml`](bgp-route-server.yaml) + [`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md)
 
 ### F5 credentials (you must supply these)
 
@@ -1121,6 +1122,7 @@ To fix this:
 | File | Contains |
 | --- | --- |
 | `cluster.yaml` | awsbnkctl intent: VPC, EKS, BNK, host-device ENIs |
+| `bgp-route-server.yaml` | Optional `RoutingTemplate` + `GlobalRoutingConfig` to peer TMM with an AWS Route Server (see `docs/BGP-ROUTE-SERVER.md`) |
 | `mcp-tool/` | The MCP finance tool: `mcp-server.py` + a Kustomize base that generates its ConfigMap |
 | `gateway-deployment.yaml` | BNK `Gateway` (listeners 80/443, VIP) + the two `HTTPRoute`s |
 | `mcp-security-policy.yaml` | Governance iRule, per-listener `BNKNetPolicy`, `F5BigFwPolicy`, `BNKSecPolicy` |

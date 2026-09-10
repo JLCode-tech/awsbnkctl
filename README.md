@@ -232,7 +232,7 @@ The top-level `pattern` field selects the TMM data-plane interface topology and 
 
 Every knob lives in `cluster.yaml` (schema: `internal/intent/cluster.go`). Two optional blocks worth knowing about:
 
-- **BGP peering** — `bnk.bgp: true` (alias `bnk.dynamicRouting: true`) opens TCP 179 / UDP 3784 on the external `F5SPKVlan` so TMM forwards BGP control-plane packets to the BNK routing stack. Use it to peer with an AWS Route Server or an upstream router; `examples/singapore-pe/bgp-route-server.yaml` shows the matching `RoutingTemplate` / `GlobalRoutingConfig` resources.
+- **BGP peering** — `bnk.bgp: true` (alias `bnk.dynamicRouting: true`) admits TCP 179 / UDP 3784 from the external data-path subnet into the data-plane security group (phase 07) and opens the same ports on the external `F5SPKVlan` (phase 23b), so TMM can peer with an AWS Route Server endpoint in that subnet. Every deployable example sets it. The peer itself and the `RoutingTemplate` / `GlobalRoutingConfig` CRs are yours to add: each example ships a `bgp-route-server.yaml`, and [`docs/BGP-ROUTE-SERVER.md`](docs/BGP-ROUTE-SERVER.md) is the end-to-end procedure.
 - **Shared Forge project** — `forge.projectName` registers the cluster into an existing BNK Forge project instead of the auto-created `awsbnkctl-<cluster>` one (env override `AWSBNKCTL_FORGE_PROJECT`). When a non-default name is set, `down` unregisters the cluster but does not purge the shared project.
 
 Environment variables recognised by the binary:
@@ -461,8 +461,7 @@ awsbnkctl/
 │   ├── ai-rig/            # BNK fronting GPU inference, optional SageMaker endpoint
 │   ├── demo-ai/           # full-cluster + ai-rig composed: all protocol demos plus managed inference
 │   ├── agentcore-demo/    # One MCP tool pod behind a BNK Gateway; AgentCore runtime → BNK → tool governance
-│   ├── local-zone/        # Reference telco/edge CRs (SCTP, Diameter, HTTP/2, SNAT pool); no cluster.yaml
-│   └── singapore-pe/      # BGP peering manifests (RoutingTemplate / GlobalRoutingConfig) for bnk.bgp
+│   └── local-zone/        # Reference telco/edge CRs (SCTP, Diameter, HTTP/2, SNAT pool); no cluster.yaml
 ├── scripts/               # e2e and gate scripts (pre-commit, govulncheck, integration)
 ├── tools/                 # BNK Forge runner packaging, docker helpers, ciwatch/sprintwatch
 └── Makefile               # Build, test, lint, and release recipes
