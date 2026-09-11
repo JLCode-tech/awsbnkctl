@@ -68,7 +68,7 @@ func TestWaitForDeploymentAvailable_WaitsForReplica(t *testing.T) {
 
 	ctx := context.Background()
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: h4DeploymentName, Namespace: InstanceNamespace}}
-	k8s := kubefake.NewSimpleClientset(deploy)
+	k8s := kubefake.NewClientset(deploy)
 	clients := &Clients{K8s: k8s}
 
 	go func() {
