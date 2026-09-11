@@ -4,6 +4,21 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [1.6.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.5.0...v1.6.0) (2026-09-11)
+
+
+### Features
+
+* **egress:** make pseudo-CNI egress work on the Amazon VPC CNI and prove it from TMM ([47af6c2](https://github.com/JLCode-tech/awsbnkctl/commit/47af6c26a6f708e8455221d8f9837ef76e6412d7))
+* **egress:** make pseudo-CNI egress work on the Amazon VPC CNI and prove it from TMM ([e381192](https://github.com/JLCode-tech/awsbnkctl/commit/e38119217f2613991d511afbd4caf179cf08b24d))
+
+
+### Bug Fixes
+
+* **irsa,node-prep:** discover the controller ServiceAccount at runtime and enable proxy ARP on BNK nodes ([3edd24c](https://github.com/JLCode-tech/awsbnkctl/commit/3edd24ccf53308cc51354ff0fb2cf219efe4f3a1))
+* **irsa,node-prep:** discover the controller ServiceAccount at runtime and enable proxy ARP on BNK nodes ([803f943](https://github.com/JLCode-tech/awsbnkctl/commit/803f943c932be58c98f915f48fdb3313584d1da1))
+* **scenarios,jumphost:** reserve jumphost IP .200, enable coreCollection at rollout, and fix scenario VIP collisions ([ef511aa](https://github.com/JLCode-tech/awsbnkctl/commit/ef511aa43c0afb244cad97901f240ad9d2826e42))
+
 ## [1.5.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.4.0...v1.5.0) (2026-09-10)
 
 
