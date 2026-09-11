@@ -6,14 +6,16 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// deployPollInterval paces waitForDeployment.
-const deployPollInterval = 5 * time.Second
+// deployPollInterval paces waitForDeployment and waitForServiceAccount
+// (a var so tests can shorten it).
+var deployPollInterval = 5 * time.Second
 
 // waitForDeployment returns the Deployment once it exists, polling until timeout.
 // Used for FLO/CNEController-owned Deployments that appear some seconds after
@@ -30,6 +32,31 @@ func waitForDeployment(ctx context.Context, clients *Clients, ns, name string, t
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("deploy %s/%s not created within %s", ns, name, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(deployPollInterval):
+		}
+	}
+}
+
+// waitForServiceAccount returns the ServiceAccount once it exists, polling
+// until timeout. FLO creates the controller Deployment a few seconds before
+// the SA it references (2 s apart on bnk-staging-test, 2026-09-11), so a
+// caller that just saw the Deployment must not assume the SA is there yet.
+func waitForServiceAccount(ctx context.Context, clients *Clients, ns, name string, timeout time.Duration) (*corev1.ServiceAccount, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		sa, err := clients.K8s.CoreV1().ServiceAccounts(ns).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			return sa, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("get sa %s/%s: %w", ns, name, err)
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("sa %s/%s not created within %s", ns, name, timeout)
 		}
 		select {
 		case <-ctx.Done():

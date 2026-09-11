@@ -89,7 +89,11 @@ func Phase21IRSASA(ctx context.Context, cl *intent.Cluster, st *state.State, cli
 	}
 	fmt.Fprintf(os.Stderr, "[phase 21] trust policy of %s scoped to %s\n", roleName, irsaSubject(InstanceNamespace, saName))
 
-	// 3. Annotate the SA (JSON merge patch: idempotent, keeps FLO's fields).
+	// 3. Wait for the SA — FLO creates it a few seconds after the Deployment —
+	//    then annotate it (JSON merge patch: idempotent, keeps FLO's fields).
+	if _, err := waitForServiceAccount(ctx, clients, InstanceNamespace, saName, cneDeployWaitTimeout); err != nil {
+		return fmt.Errorf("phase21: %w", err)
+	}
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, irsaRoleARNAnnotation, roleARN)
 	if _, err := clients.K8s.CoreV1().ServiceAccounts(InstanceNamespace).Patch(ctx, saName,
 		types.MergePatchType, []byte(patch), metav1.PatchOptions{FieldManager: phase21FieldMgr}); err != nil {
