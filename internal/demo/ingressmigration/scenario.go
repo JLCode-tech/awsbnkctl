@@ -181,7 +181,7 @@ Installs via Helm:
   haproxy        1.52.0  (controller.service.type=ClusterIP)
 
 Applies 6 SSA manifests into demo-ingress-migration:
-  Namespace, F5BnkGateway IP pool, whoami Deployment+Service,
+  Namespace, GatewaySettings, whoami Deployment+Service,
   nginx+haproxy Ingress objects, Gateway (VIP 10.0.10.113), HTTPRoute.
 
 Verify order (load-bearing):
@@ -252,10 +252,10 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 	return scenarios.ApplyManifests(ctx, scnName)
 }
 
-var f5BnkGatewayGVR = schema.GroupVersionResource{
-	Group:    "k8s.f5net.com",
-	Version:  "v1",
-	Resource: "f5-bnkgateways",
+var gatewaySettingsGVR = schema.GroupVersionResource{
+	Group:    "gateway.k8s.f5.com",
+	Version:  "v1alpha1",
+	Resource: "gatewaysettings",
 }
 
 func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
@@ -318,14 +318,14 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		Got:         scenarios.ErrString(err),
 	})
 
-	// Best-effort: F5BnkGateway present (skipped when Dynamic client is nil).
+	// Best-effort: GatewaySettings present (skipped when Dynamic client is nil).
 	// The resource name tracks the namespace (set by the {{.Namespace}} template
-	// in manifests/02-f5bnkgateway.yaml), so use ns here — not the hardcoded
+	// in manifests/02-gatewaysettings.yaml), so use ns here — not the hardcoded
 	// default — so overridden namespaces are checked correctly.
 	if ctx.Dynamic != nil {
-		_, ferr := ctx.Dynamic.Resource(f5BnkGatewayGVR).Namespace(ns).Get(ctx.Ctx, ns, metav1.GetOptions{})
+		_, ferr := ctx.Dynamic.Resource(gatewaySettingsGVR).Namespace(ns).Get(ctx.Ctx, ns, metav1.GetOptions{})
 		res.Assertions = append(res.Assertions, scenarios.Assertion{
-			Description: "F5BnkGateway " + ns + " present",
+			Description: "GatewaySettings " + ns + " present",
 			OK:          ferr == nil,
 			Got:         scenarios.ErrString(ferr),
 		})

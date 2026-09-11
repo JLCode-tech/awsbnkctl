@@ -16,7 +16,7 @@ awsbnkctl scenarios run http-routing-e2e -f cluster.yaml
      │
      ├─[1/3] Render 5 manifests to .awsbnkctl/<cluster>/artifacts/scenarios/http-routing-e2e/
      │         01-namespace.yaml         — Namespace
-     │         02-f5bnkgateway.yaml      — F5BnkGateway IP pool (scenario-owned)
+     │         02-gatewaysettings.yaml    — GatewaySettings (listener context, scenario-owned)
      │         03-nginx.yaml             — nginx Deployment + ConfigMap + Service
      │         04-gateway.yaml           — Gateway spec.addresses=[VIP]
      │         05-httproute.yaml         — HTTPRoute host=awsbnkctl.local → nginx

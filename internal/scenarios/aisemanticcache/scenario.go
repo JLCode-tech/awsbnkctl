@@ -122,7 +122,7 @@ spec.infrastructure.annotations["k8s.f5.com/ai"] value
 metadata.annotations["k8s.f5.com/sse-enabled"] value.
 
 Applies 5 templated manifests into the scenario namespace:
-  Namespace, F5BnkGateway IP pool (single-address, VIP only),
+  Namespace, GatewaySettings (listener context),
   one nginx Deployment+Service (so the HTTPRoute resolves),
   Gateway (spec.addresses=[VIP] + the k8s.f5.com/ai annotation under
   spec.infrastructure.annotations), HTTPRoute (host=

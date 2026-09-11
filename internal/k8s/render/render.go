@@ -418,36 +418,6 @@ func RenderIfaceDiscoveryPod(tmpl []byte, namespace, nodeName string) ([]byte, e
 	return Render(tmpl, vars)
 }
 
-// ─── F5SPKVlan + GatewayClass ───────────────────────────────────────────────
-
-// F5SPKVlanVars holds the substitution variables for host-device/f5spkvlan.yaml.tmpl.
-type F5SPKVlanVars struct {
-	InstanceNS         string // f5-cne-system (matches CNEInstance namespace)
-	TmmExtSelfIP       string // e.g. 10.0.10.240
-	TmmIntSelfIP       string // e.g. 10.0.20.240
-	TmmSelfIPPrefixLen int    // typically 24
-	HasInternal        bool   // render the int-vlan CR (dual-interface only)
-	EnableBGP          bool   // render allowed_services for BGP (tcp:179) and BFD (udp:3784)
-}
-
-// RenderF5SPKVlan renders the F5SPKVlan CR template for a BNK pattern. Caller
-// supplies the SelfIP values from cl.Network.DataPath.SelfIPs (auto-derived by
-// intent.applyDefaults when not explicitly set). hasInternal controls whether
-// the int-vlan CR is emitted (dual-interface only); selfInt is ignored when
-// false. enableBGP controls whether allowed_services (tcp:179, udp:3784) is
-// configured on ext-vlan for dynamic routing.
-func RenderF5SPKVlan(tmpl []byte, selfExt, selfInt string, prefixLen int, hasInternal, enableBGP bool) ([]byte, error) {
-	vars := F5SPKVlanVars{
-		InstanceNS:         cneInstanceNamespace,
-		TmmExtSelfIP:       selfExt,
-		TmmIntSelfIP:       selfInt,
-		TmmSelfIPPrefixLen: prefixLen,
-		HasInternal:        hasInternal,
-		EnableBGP:          enableBGP,
-	}
-	return Render(tmpl, vars)
-}
-
 // GatewayClassVars holds the substitution variables for host-device/gatewayclass.yaml.tmpl.
 type GatewayClassVars struct {
 	GwcName    string // <cluster>-gatewayclass
@@ -461,6 +431,85 @@ func RenderGatewayClass(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
 		GwcName:    cl.Metadata.Name + "-gatewayclass",
 		LabName:    cl.Metadata.Name,
 		InstanceNS: cneInstanceNamespace,
+	}
+	return Render(tmpl, vars)
+}
+
+// ─── Infra (BNK 2.4 network model) ──────────────────────────────────────────
+
+// Infra network names. The egress scenario references the internal one as the
+// pseudo-CNI tunnel VLAN, so keep them stable.
+const (
+	InfraName          = "infra"
+	InfraExtNetwork    = "ext-vlan"
+	InfraIntNetwork    = "int-vlan"
+	InfraListenerPool  = "listener-pool"
+	infraListenerFirst = 100
+	infraListenerLast  = 199
+)
+
+// InfraVars holds the substitution variables for host-device/infra.yaml.tmpl.
+type InfraVars struct {
+	InfraName     string // infra (singleton per BNK namespace)
+	InstanceNS    string // f5-cne-system (matches CNEInstance namespace)
+	LabName       string // cl.Metadata.Name
+	TmmExtSelfIP  string // e.g. 10.0.10.240
+	TmmIntSelfIP  string // e.g. 10.0.20.240
+	ListenerPool  string // IPAM entry the GatewaySettings reference for VIPs
+	ListenerStart string // e.g. 10.0.10.100
+	ListenerEnd   string // e.g. 10.0.10.199
+	ExternalNAD   string // external-netdevice or external-sriov
+	InternalNAD   string // internal-netdevice
+	ExtNetwork    string // ext-vlan
+	IntNetwork    string // int-vlan
+	Mtu           int    // cl.Bnk.TmmMtu
+	HasInternal   bool   // render the internal pool, attachment and network
+}
+
+// RenderInfra renders the Infra CR for a BNK pattern. Self IPs come from
+// cl.Network.DataPath.SelfIPs (auto-derived by intent.applyDefaults); the
+// listener pool is hosts .100-.199 of the external data-path subnet, which
+// covers the VIP plan and stays clear of the self IP (.240) and the jumphost
+// (.200).
+func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, error) {
+	if cl.Network.DataPath == nil || cl.Network.DataPath.SelfIPs == nil || cl.Network.DataPath.External.CIDR == "" {
+		return nil, fmt.Errorf("render infra: network.dataPath external subnet and self IPs are required")
+	}
+	sel := cl.Network.DataPath.SelfIPs
+	if sel.External == "" {
+		return nil, fmt.Errorf("render infra: external self IP not derivable (external subnet must be /24)")
+	}
+	if hasInternal && sel.Internal == "" {
+		return nil, fmt.Errorf("render infra: internal self IP not derivable (internal subnet must be /24)")
+	}
+	start, _ := intent.DeriveSelfIP(cl.Network.DataPath.External.CIDR, infraListenerFirst)
+	end, _ := intent.DeriveSelfIP(cl.Network.DataPath.External.CIDR, infraListenerLast)
+	if start == "" || end == "" {
+		return nil, fmt.Errorf("render infra: listener pool not derivable from external CIDR %q (must be /24)", cl.Network.DataPath.External.CIDR)
+	}
+	externalNAD := "external-netdevice"
+	if cl.DataplaneBinding() == "sriov" {
+		externalNAD = "external-sriov"
+	}
+	mtu := 1500
+	if cl.Bnk != nil && cl.Bnk.TmmMtu > 0 {
+		mtu = cl.Bnk.TmmMtu
+	}
+	vars := InfraVars{
+		InfraName:     InfraName,
+		InstanceNS:    cneInstanceNamespace,
+		LabName:       cl.Metadata.Name,
+		TmmExtSelfIP:  sel.External,
+		TmmIntSelfIP:  sel.Internal,
+		ListenerPool:  InfraListenerPool,
+		ListenerStart: start,
+		ListenerEnd:   end,
+		ExternalNAD:   externalNAD,
+		InternalNAD:   "internal-netdevice",
+		ExtNetwork:    InfraExtNetwork,
+		IntNetwork:    InfraIntNetwork,
+		Mtu:           mtu,
+		HasInternal:   hasInternal,
 	}
 	return Render(tmpl, vars)
 }

@@ -115,7 +115,7 @@ func TestVerifyCallOrder(t *testing.T) {
 		"RunInClusterCurl(web.haproxy.migration.local)",
 	}
 
-	// The F5BnkGateway check uses ctx.Dynamic which is nil — it records as a
+	// The GatewaySettings check uses ctx.Dynamic which is nil — it records as a
 	// failed assertion but does not call any of our hooks, so we only check the
 	// hook calls.
 	if len(calls) != len(want) {

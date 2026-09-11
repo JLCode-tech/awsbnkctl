@@ -36,8 +36,8 @@ func TestPhase23b_DryRun_HostDevice(t *testing.T) {
 	if err := Phase23bSPKVlanGatewayClass(context.Background(), cl, st, clients, true); err != nil {
 		t.Fatalf("Phase23b dry-run: %v", err)
 	}
-	if got := st.Get("F5SPKVLAN_APPLIED_AT"); got != "dry-run" {
-		t.Errorf("F5SPKVLAN_APPLIED_AT = %q, want dry-run", got)
+	if got := st.Get("INFRA_APPLIED_AT"); got != "dry-run" {
+		t.Errorf("INFRA_APPLIED_AT = %q, want dry-run", got)
 	}
 	wantGwc := cl.Metadata.Name + "-gatewayclass"
 	if got := st.Get("GATEWAYCLASS_NAME"); got != wantGwc {
@@ -58,8 +58,8 @@ func TestPhase23b_SkipsWhenNotHostDevice(t *testing.T) {
 	if err := Phase23bSPKVlanGatewayClass(context.Background(), cl, st, clients, false); err != nil {
 		t.Fatalf("Phase23b non-host-device should silently skip: %v", err)
 	}
-	if got := st.Get("F5SPKVLAN_APPLIED_AT"); got != "" {
-		t.Errorf("F5SPKVLAN_APPLIED_AT = %q, want empty (skipped)", got)
+	if got := st.Get("INFRA_APPLIED_AT"); got != "" {
+		t.Errorf("INFRA_APPLIED_AT = %q, want empty (skipped)", got)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestPhase23bDown_SkipsWhenNotHostDevice(t *testing.T) {
 }
 
 // TestPhase23b_GatewayClassCRDAbsent_BlocksBeforeApply verifies that when only
-// the F5SPKVlan CRD is present (not the GatewayClass CRD), the phase blocks at
+// the Infra CRD is present (not the GatewayClass CRD), the phase blocks at
 // the new GatewayClass CRD wait and never proceeds to any apply.
 func TestPhase23b_GatewayClassCRDAbsent_BlocksBeforeApply(t *testing.T) {
 	awsmw.ResetForTest()
@@ -110,7 +110,7 @@ func TestPhase23b_GatewayClassCRDAbsent_BlocksBeforeApply(t *testing.T) {
 	dir := t.TempDir()
 	st, _ := state.Load(dir)
 
-	// Seed the dynamic fake with ONLY the F5SPKVlan CRD — GatewayClass CRD absent.
+	// Seed the dynamic fake with ONLY the Infra CRD — GatewayClass CRD absent.
 	crdGVR := schema.GroupVersionResource{
 		Group:    "apiextensions.k8s.io",
 		Version:  "v1",
@@ -120,7 +120,7 @@ func TestPhase23b_GatewayClassCRDAbsent_BlocksBeforeApply(t *testing.T) {
 		Object: map[string]interface{}{
 			"apiVersion": "apiextensions.k8s.io/v1",
 			"kind":       "CustomResourceDefinition",
-			"metadata":   map[string]interface{}{"name": f5spkvlanCRDName},
+			"metadata":   map[string]interface{}{"name": infraCRDName},
 		},
 	}
 	scheme := buildScheme()
@@ -146,8 +146,8 @@ func TestPhase23b_GatewayClassCRDAbsent_BlocksBeforeApply(t *testing.T) {
 		t.Errorf("error should mention 'GatewayClass CRD': %v", err)
 	}
 	// Neither apply should have been reached — up-front waits block both.
-	if got := st.Get("F5SPKVLAN_APPLIED_AT"); got != "" {
-		t.Errorf("F5SPKVLAN_APPLIED_AT = %q, want empty (blocked before apply)", got)
+	if got := st.Get("INFRA_APPLIED_AT"); got != "" {
+		t.Errorf("INFRA_APPLIED_AT = %q, want empty (blocked before apply)", got)
 	}
 	if got := st.Get("GATEWAYCLASS_NAME"); got != "" {
 		t.Errorf("GATEWAYCLASS_NAME = %q, want empty (blocked before apply)", got)
@@ -155,7 +155,7 @@ func TestPhase23b_GatewayClassCRDAbsent_BlocksBeforeApply(t *testing.T) {
 }
 
 // TestPhase23b_BothCRDsPresent_ProceedsPastWaits verifies that when both the
-// F5SPKVlan and GatewayClass CRDs are present, the phase clears both CRD waits
+// Infra and GatewayClass CRDs are present, the phase clears both CRD waits
 // and proceeds to the apply step. The dynamic fake cannot execute SSA, so the
 // apply will fail — but the error must NOT mention "CRD", proving we got past
 // the waits rather than failing there.
@@ -181,7 +181,7 @@ func TestPhase23b_BothCRDsPresent_ProceedsPastWaits(t *testing.T) {
 		Object: map[string]interface{}{
 			"apiVersion": "apiextensions.k8s.io/v1",
 			"kind":       "CustomResourceDefinition",
-			"metadata":   map[string]interface{}{"name": f5spkvlanCRDName},
+			"metadata":   map[string]interface{}{"name": infraCRDName},
 		},
 	}
 	gwclassCRD := &unstructured.Unstructured{
@@ -218,7 +218,7 @@ func TestPhase23b_BothCRDsPresent_ProceedsPastWaits(t *testing.T) {
 
 // TestPhase23b_WaitsForControllerBeforeApply pins the BNK 2.4.0 fix: with both
 // CRDs present but the cne-controller Deployment not yet available, the phase
-// must block before the F5SPKVlan apply (whose validating webhook that pod
+// must block before the Infra apply (whose validating webhook that pod
 // serves) instead of failing on "no endpoints available for service".
 func TestPhase23b_WaitsForControllerBeforeApply(t *testing.T) {
 	awsmw.ResetForTest()
@@ -240,7 +240,7 @@ func TestPhase23b_WaitsForControllerBeforeApply(t *testing.T) {
 	}
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(buildScheme(),
 		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"},
-		crd(f5spkvlanCRDName), crd(gatewayClassCRDName))
+		crd(infraCRDName), crd(gatewayClassCRDName))
 	// Deployment exists but has no available replica, as during its first rollout.
 	k8s := kubefake.NewSimpleClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: h4DeploymentName, Namespace: InstanceNamespace}})
 	clients := &Clients{Profile: "test", Dynamic: dyn, K8s: k8s, RESTMapper: p12FakeRESTMapper()}
@@ -251,7 +251,7 @@ func TestPhase23b_WaitsForControllerBeforeApply(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cne-controller") {
 		t.Fatalf("want a cne-controller wait error, got %v", err)
 	}
-	if got := st.Get("F5SPKVLAN_APPLIED_AT"); got != "" {
-		t.Errorf("F5SPKVLAN_APPLIED_AT = %q, want empty (blocked before apply)", got)
+	if got := st.Get("INFRA_APPLIED_AT"); got != "" {
+		t.Errorf("INFRA_APPLIED_AT = %q, want empty (blocked before apply)", got)
 	}
 }

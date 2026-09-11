@@ -1,0 +1,65 @@
+# Infra CR — BNK 2.4 network model for the host-device pattern.
+#
+# Replaces the 2.3.x F5SPKVlan CRs. The controller programs TMM VLANs from
+# spec.networks and takes the Gateway listener context from the Infra CR, so
+# without it a Gateway is marked Programmed but no virtual server reaches TMM.
+#
+# The Nth NAD listed in CNEInstance .spec.networkAttachments is TMM trunk 1.N,
+# so ext-vlan (external NAD) is 1.1 and int-vlan (internal NAD) is 1.2.
+# Self IPs are pinned with single-address pools so they match the addresses
+# Phase 17 assigned to the ENIs. The listener pool is the VIP range every
+# scenario and demo draws from (see docs/SCENARIOS.md, "VIP plan").
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: Infra
+metadata:
+  name: {{ .InfraName }}
+  namespace: {{ .InstanceNS }}
+  labels:
+    app.kubernetes.io/managed-by: awsbnkctl
+    app.kubernetes.io/instance: {{ .LabName }}
+spec:
+  ipams:
+    - name: ext-selfip
+      ipPools:
+        - rangeStart: "{{ .TmmExtSelfIP }}"
+          rangeEnd: "{{ .TmmExtSelfIP }}"
+{{- if .HasInternal }}
+    - name: int-selfip
+      ipPools:
+        - rangeStart: "{{ .TmmIntSelfIP }}"
+          rangeEnd: "{{ .TmmIntSelfIP }}"
+{{- end }}
+    - name: {{ .ListenerPool }}
+      ipPools:
+        - rangeStart: "{{ .ListenerStart }}"
+          rangeEnd: "{{ .ListenerEnd }}"
+  networkAttachments:
+    - name: ext-attach
+      networkAttachmentDefinitions:
+        - name: {{ .ExternalNAD }}
+{{- if .HasInternal }}
+    - name: int-attach
+      networkAttachmentDefinitions:
+        - name: {{ .InternalNAD }}
+{{- end }}
+  networks:
+    - name: {{ .ExtNetwork }}
+      type: vlan
+      vlan:
+        tag: 0
+        mtu: {{ .Mtu }}
+        networkAttachmentRef:
+          name: ext-attach
+        ipamRefs:
+          - name: ext-selfip
+{{- if .HasInternal }}
+    - name: {{ .IntNetwork }}
+      type: vlan
+      vlan:
+        tag: 0
+        mtu: {{ .Mtu }}
+        networkAttachmentRef:
+          name: int-attach
+        ipamRefs:
+          - name: int-selfip
+{{- end }}

@@ -3,11 +3,15 @@ package phases
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -83,5 +87,42 @@ func TestWaitForDeploymentAvailable_WaitsForReplica(t *testing.T) {
 	}
 	if err := waitForDeploymentAvailable(ctx, clients, InstanceNamespace, "missing", 20*time.Millisecond); err == nil {
 		t.Fatal("want timeout for a Deployment that never appears, got nil")
+	}
+}
+
+// TestWaitForConditionTrue covers the Infra Programmed gate added for BNK 2.4:
+// the CR appears without the condition, then flips to Programmed=True.
+func TestWaitForConditionTrue(t *testing.T) {
+	old := deployPollInterval
+	deployPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { deployPollInterval = old })
+
+	ctx := context.Background()
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "gateway.k8s.f5.com/v1alpha1", "kind": "Infra",
+		"metadata": map[string]interface{}{"name": "infra", "namespace": InstanceNamespace},
+		"status": map[string]interface{}{"conditions": []interface{}{
+			map[string]interface{}{"type": "Programmed", "status": "False", "reason": "Programming", "message": "sending to TMM"},
+		}},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(buildScheme(),
+		map[schema.GroupVersionResource]string{infraGVR: "InfraList"}, obj)
+
+	if err := waitForConditionTrue(ctx, dyn, infraGVR, InstanceNamespace, "infra", "Programmed", 30*time.Millisecond); err == nil {
+		t.Fatal("want timeout while Programmed=False, got nil")
+	} else if !strings.Contains(err.Error(), "Programming") {
+		t.Errorf("timeout error should carry the last reason, got %v", err)
+	}
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cur, _ := dyn.Resource(infraGVR).Namespace(InstanceNamespace).Get(ctx, "infra", metav1.GetOptions{})
+		_ = unstructured.SetNestedSlice(cur.Object, []interface{}{
+			map[string]interface{}{"type": "Programmed", "status": "True", "reason": "Programmed"},
+		}, "status", "conditions")
+		_, _ = dyn.Resource(infraGVR).Namespace(InstanceNamespace).Update(ctx, cur, metav1.UpdateOptions{})
+	}()
+	if err := waitForConditionTrue(ctx, dyn, infraGVR, InstanceNamespace, "infra", "Programmed", 2*time.Second); err != nil {
+		t.Fatalf("want success once Programmed=True, got %v", err)
 	}
 }

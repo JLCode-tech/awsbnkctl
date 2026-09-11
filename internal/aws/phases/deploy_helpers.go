@@ -11,8 +11,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 )
 
 // deployPollInterval paces waitForDeployment and waitForServiceAccount
@@ -155,6 +158,41 @@ func retryWhileWebhookUnavailable(ctx context.Context, timeout time.Duration, fn
 			return fmt.Errorf("after %s the admission webhook is still unavailable: %w", timeout, err)
 		}
 		fmt.Fprintf(os.Stderr, "[phase] admission webhook not ready yet, retrying in %s: %v\n", deployPollInterval, err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(deployPollInterval):
+		}
+	}
+}
+
+// waitForConditionTrue polls a namespaced CR until status.conditions carries
+// condType with status "True", or timeout. The error names the last observed
+// status/reason/message so a stuck Infra or Gateway is diagnosable from the log.
+func waitForConditionTrue(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource, ns, name, condType string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	last := "not found"
+	for {
+		obj, err := dyn.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			conds, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+			last = "no " + condType + " condition yet"
+			for _, c := range conds {
+				m, ok := c.(map[string]interface{})
+				if !ok || m["type"] != condType {
+					continue
+				}
+				if m["status"] == "True" {
+					return nil
+				}
+				last = fmt.Sprintf("%s=%v reason=%v message=%v", condType, m["status"], m["reason"], m["message"])
+			}
+		} else if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get %s %s/%s: %w", gvr.Resource, ns, name, err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s %s/%s: %s after %s", gvr.Resource, ns, name, last, timeout)
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

@@ -109,14 +109,15 @@ func TestManifestsRendered(t *testing.T) {
 			}
 		}
 
-		// The F5BnkGateway pool must be a RANGE covering both VIPs (.115–.117).
-		if strings.HasSuffix(p, "02-f5bnkgateway.yaml") {
+		// GatewaySettings binds both Gateways to the Infra listener pool.
+		if strings.HasSuffix(p, "02-gatewaysettings.yaml") {
 			for _, want := range []string{
-				"startAddress: 10.0.10.115",
-				"endAddress: 10.0.10.117",
+				"kind: GatewaySettings",
+				"name: listener-pool",
+				"name: ext-vlan",
 			} {
 				if !strings.Contains(content, want) {
-					t.Errorf("02-f5bnkgateway.yaml missing %q:\n%s", want, content)
+					t.Errorf("02-gatewaysettings.yaml missing %q:\n%s", want, content)
 				}
 			}
 		}

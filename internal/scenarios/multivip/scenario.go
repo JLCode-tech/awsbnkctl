@@ -1,6 +1,6 @@
 // Package multivip implements scenario "multi-vip" — MULTIPLE VIPs served from
-// ONE F5BnkGateway IP pool (the "chassis" model seen on the gold-reference
-// cluster: one F5BnkGateway with an address RANGE, multiple Gateways each
+// ONE GatewaySettings (the "chassis" model seen on the gold-reference
+// cluster: one GatewaySettings with an address RANGE, multiple Gateways each
 // pinning a distinct VIP from that range).
 //
 // Two Gateways → two VIPs → two HTTPRoutes → two distinct backends, asserting
@@ -8,7 +8,7 @@
 //
 // AWS-specific shape mirrors httptrafficsplit:
 //   - GatewayClass provisioned by Phase 23b (<cluster>-gatewayclass).
-//   - F5BnkGateway IP pool is owned by the scenario (02-f5bnkgateway.yaml).
+//   - GatewaySettings is owned by the scenario (02-gatewaysettings.yaml).
 //     Unlike single-VIP scenarios the pool is a RANGE (.115–.117) so it can
 //     hand out both pinned VIPs (.115 + .116).
 //   - Verification curls through SSH+EICE from the jumphost's BNK_EXT
@@ -50,7 +50,7 @@ var manifestFS embed.FS
 
 const (
 	scnName      = "multi-vip"
-	scnTitle     = "Multiple VIPs from one F5BnkGateway pool (chassis model)"
+	scnTitle     = "Multiple VIPs from one GatewaySettings pool (chassis model)"
 	scnNamespace = "awsbnkctl-scn-multivip"
 	// hostnames: values in manifests/05-httproutes.yaml.
 	scnHostnameA = "multivip-a.local"
@@ -132,13 +132,13 @@ func (s *scenario) Rating() scenarios.Rating { return scenarios.Green }
 func (s *scenario) Dependencies() []string   { return []string{} }
 func (s *scenario) Description() string {
 	return strings.TrimSpace(`
-Multiple VIPs from ONE F5BnkGateway pool — the "chassis" model.
+Multiple VIPs from ONE GatewaySettings pool — the "chassis" model.
 
 Applies 5 templated manifests into the scenario namespace:
-  Namespace, F5BnkGateway IP pool (address RANGE .115–.117),
+  Namespace, GatewaySettings (listener context),
   two nginx Deployments+Services (mv-a / mv-b),
   two Gateways (scn-mv-gateway-a pins VIP A .115, scn-mv-gateway-b pins
-  VIP B .116 — both drawn from the same F5BnkGateway pool),
+  VIP B .116 — both drawn from the same GatewaySettings pool),
   two HTTPRoutes (multivip-a.local → mv-a, multivip-b.local → mv-b).
 
 Verify order (load-bearing):
@@ -160,11 +160,10 @@ type manifestVars struct {
 	ClusterName      string
 	GatewayClassName string
 	ExternalCIDR     string
-	// VIPA / VIPB are the two pinned VIPs (.115 / .116). PoolEnd (.117) closes
-	// the F5BnkGateway address range so it comfortably covers both.
-	VIPA    string
-	VIPB    string
-	PoolEnd string
+	// VIPA / VIPB are the two pinned VIPs (.115 / .116), both inside the Infra
+	// listener pool (.100-.199).
+	VIPA string
+	VIPB string
 }
 
 func (s *scenario) Manifests(ctx *scenarios.Context) ([]string, error) {
@@ -380,11 +379,10 @@ func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	if vip == "" {
 		return v, fmt.Errorf("VIP not derivable — set network.dataPath.external.cidr in cluster.yaml or pass --vip")
 	}
-	// Two distinct VIPs (.115 / .116) drawn from one F5BnkGateway pool that
+	// Two distinct VIPs (.115 / .116) drawn from one GatewaySettings pool that
 	// spans .115–.117 — the "chassis" address-range model. Octets chosen to
 	// avoid colliding with httproutee2e (.100), httptrafficsplit (.101), etc.
 	v.VIPA = withLastOctet(vip, strconv.Itoa(115))
 	v.VIPB = withLastOctet(vip, strconv.Itoa(116))
-	v.PoolEnd = withLastOctet(vip, strconv.Itoa(117))
 	return v, nil
 }

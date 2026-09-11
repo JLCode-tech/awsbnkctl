@@ -30,58 +30,6 @@ func TestRenderNADs_SingleInterface_OmitsInternal(t *testing.T) {
 	}
 }
 
-func TestRenderF5SPKVlan_SingleInterface_OmitsIntVlan(t *testing.T) {
-	tmpl, err := manifests.FS.ReadFile("host-device/f5spkvlan.yaml.tmpl")
-	if err != nil {
-		t.Fatalf("read template: %v", err)
-	}
-	out, err := RenderF5SPKVlan(tmpl, "10.0.10.240", "", 24, false, false)
-	if err != nil {
-		t.Fatalf("RenderF5SPKVlan: %v", err)
-	}
-	s := string(out)
-	if !strings.Contains(s, "name: ext-vlan") {
-		t.Errorf("single-interface F5SPKVlan must keep ext-vlan:\n%s", s)
-	}
-	// "int-vlan" appears in the header comment; assert the CR body is gone.
-	if strings.Contains(s, "name: int-vlan") || strings.Contains(s, "internal: true") {
-		t.Errorf("single-interface F5SPKVlan must omit the int-vlan CR:\n%s", s)
-	}
-	if strings.Contains(s, "allowed_services") {
-		t.Errorf("BGP disabled must omit allowed_services:\n%s", s)
-	}
-}
-
-func TestRenderF5SPKVlan_BGPAllowedServices(t *testing.T) {
-	tmpl, err := manifests.FS.ReadFile("host-device/f5spkvlan.yaml.tmpl")
-	if err != nil {
-		t.Fatalf("read template: %v", err)
-	}
-
-	// Test BGP enabled
-	outBGP, err := RenderF5SPKVlan(tmpl, "10.0.10.240", "10.0.20.240", 24, true, true)
-	if err != nil {
-		t.Fatalf("RenderF5SPKVlan (bgp=true): %v", err)
-	}
-	sBGP := string(outBGP)
-	if !strings.Contains(sBGP, "allowed_services:") {
-		t.Errorf("BGP enabled must include allowed_services:\n%s", sBGP)
-	}
-	if !strings.Contains(sBGP, "port: \"179\"") || !strings.Contains(sBGP, "port: \"3784\"") {
-		t.Errorf("BGP enabled must include TCP 179 and UDP 3784:\n%s", sBGP)
-	}
-
-	// Test BGP disabled
-	outNoBGP, err := RenderF5SPKVlan(tmpl, "10.0.10.240", "10.0.20.240", 24, true, false)
-	if err != nil {
-		t.Fatalf("RenderF5SPKVlan (bgp=false): %v", err)
-	}
-	sNoBGP := string(outNoBGP)
-	if strings.Contains(sNoBGP, "allowed_services:") {
-		t.Errorf("BGP disabled must omit allowed_services:\n%s", sNoBGP)
-	}
-}
-
 func TestRenderCNEInstance_SingleInterface_OmitsInternal(t *testing.T) {
 	tmpl, err := manifests.FS.ReadFile("shared/cneinstance.yaml.tmpl")
 	if err != nil {
@@ -150,5 +98,66 @@ func TestRenderCloudNetworkMapping_SingleInterface_OmitsInternalSubnet(t *testin
 	}
 	if strings.Contains(s, "10.0.20.0/24") {
 		t.Errorf("single-interface cloud-network-mapping must omit the internal subnet entry:\n%s", s)
+	}
+}
+
+func infraTestCluster(external, internal string) *intent.Cluster {
+	cl := hostDeviceClusterForRender("bnk-test")
+	cl.Network.DataPath.External.CIDR = "10.0.10.0/24"
+	cl.Network.DataPath.Internal.CIDR = "10.0.20.0/24"
+	cl.Network.DataPath.SelfIPs = &intent.SelfIPsSpec{External: external, Internal: internal, PrefixLen: 24}
+	cl.Bnk = &intent.BnkSpec{TmmMtu: 9000}
+	return cl
+}
+
+// TestRenderInfra_SingleInterface_OmitsInternal pins the external-only contract
+// for the BNK 2.4 Infra CR: the external network, its self-IP pool and the
+// listener pool are present; nothing internal is rendered.
+func TestRenderInfra_SingleInterface_OmitsInternal(t *testing.T) {
+	tmpl, err := manifests.FS.ReadFile("host-device/infra.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	out, err := RenderInfra(tmpl, infraTestCluster("10.0.10.240", ""), false)
+	if err != nil {
+		t.Fatalf("RenderInfra: %v", err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"kind: Infra", "name: infra", "namespace: f5-cne-system",
+		"name: ext-vlan", "type: vlan", "mtu: 9000",
+		"name: external-netdevice",
+		`rangeStart: "10.0.10.240"`, `rangeEnd: "10.0.10.240"`,
+		"name: listener-pool", `rangeStart: "10.0.10.100"`, `rangeEnd: "10.0.10.199"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("single-interface Infra missing %q:\n%s", want, s)
+		}
+	}
+	for _, unwanted := range []string{"name: int-vlan", "int-selfip", "internal-netdevice", "10.0.20.240"} {
+		if strings.Contains(s, unwanted) {
+			t.Errorf("single-interface Infra must omit %q:\n%s", unwanted, s)
+		}
+	}
+}
+
+// TestRenderInfra_DualInterface renders both VLAN networks with pinned self IPs.
+func TestRenderInfra_DualInterface(t *testing.T) {
+	tmpl, err := manifests.FS.ReadFile("host-device/infra.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	out, err := RenderInfra(tmpl, infraTestCluster("10.0.10.240", "10.0.20.240"), true)
+	if err != nil {
+		t.Fatalf("RenderInfra: %v", err)
+	}
+	s := string(out)
+	for _, want := range []string{"name: int-vlan", "name: int-selfip", "name: internal-netdevice", `rangeStart: "10.0.20.240"`, "name: int-attach"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("dual-interface Infra missing %q:\n%s", want, s)
+		}
+	}
+	if _, err := RenderInfra(tmpl, infraTestCluster("10.0.10.240", ""), true); err == nil {
+		t.Error("dual-interface without an internal self IP must fail")
 	}
 }

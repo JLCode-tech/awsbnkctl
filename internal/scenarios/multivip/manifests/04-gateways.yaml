@@ -5,6 +5,11 @@ metadata:
   namespace: {{.Namespace}}
 spec:
   gatewayClassName: {{.GatewayClassName}}
+  infrastructure:
+    parametersRef:
+      group: gateway.k8s.f5.com
+      kind: GatewaySettings
+      name: awsbnkctl-multivip
   addresses:
   - type: IPAddress
     value: {{.VIPA}}
@@ -22,6 +27,11 @@ metadata:
   namespace: {{.Namespace}}
 spec:
   gatewayClassName: {{.GatewayClassName}}
+  infrastructure:
+    parametersRef:
+      group: gateway.k8s.f5.com
+      kind: GatewaySettings
+      name: awsbnkctl-multivip
   addresses:
   - type: IPAddress
     value: {{.VIPB}}

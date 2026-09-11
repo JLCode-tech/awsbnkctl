@@ -240,7 +240,7 @@ func PollMarkers(ctx context.Context, maxWait, interval time.Duration, fn func()
 
 // WithLastOctet returns ip with its last octet replaced by octet. Every
 // scenario owns one fixed last octet in the external data-path subnet so their
-// F5BnkGateway pools never overlap when `scenarios run --all` leaves earlier
+// GatewaySettings pools never overlap when `scenarios run --all` leaves earlier
 // scenarios applied. The allocation is documented in docs/SCENARIOS.md
 // ("VIP plan"); http-routing-e2e alone keeps the cluster default (.100).
 // Non-IPv4 input is returned unchanged.

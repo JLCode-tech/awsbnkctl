@@ -157,7 +157,7 @@ a dual-interface pattern.
 
 Every scenario and demo owns one fixed last octet in the external data-path
 subnet (`network.dataPath.external.cidr`, `10.0.10.0/24` in every example), so
-`scenarios run --all` never has two F5BnkGateway pools claiming the same
+`scenarios run --all` never has two Gateways claiming the same
 address. `http-routing-e2e` alone uses the cluster default VIP (`<subnet>.100`,
 `intent.DefaultVIP`); the others replace the last octet. `--vip` moves the base
 address but keeps each scenario's octet. The three demo use-cases with a VIP

@@ -19,7 +19,7 @@
 //
 // AWS-specific shape mirrors httptrafficsplit / externalresourcepool:
 //   - GatewayClass provisioned by Phase 23b (<cluster>-gatewayclass).
-//   - F5BnkGateway IP pool is owned by the scenario (02-f5bnkgateway.yaml);
+//   - GatewaySettings is owned by the scenario (02-gatewaysettings.yaml);
 //     single address (VIP only, .103) so it does not collide with other
 //     scenarios' pools (.100 e2e / .101 split / .102 ext-pool).
 //   - Verification curls through SSH+EICE from the jumphost's BNK_EXT ENI.
@@ -182,7 +182,7 @@ see the backend echo back THAT source IP — proving the PROXY header was applie
 
 Applies 7 templated manifests into the scenario namespace (ordered so the
 namespace, iRule, NetPolicy, and backend exist before the Gateway/L4Route that
-reference them): Namespace, F5BnkGateway IP pool (single-address, VIP=.103 only),
+reference them): Namespace, GatewaySettings (listener context),
 nginx proxy_protocol backend, F5BigCneIrule, NetPolicy, Gateway (one TCP
 listener), L4Route (protocol TCP → proxy-backend:80).
 
