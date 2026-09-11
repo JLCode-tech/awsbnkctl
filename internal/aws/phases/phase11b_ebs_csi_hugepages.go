@@ -45,7 +45,9 @@ const (
 //     dispatched to the EBS CSI driver via CSI migration once this addon is
 //     ACTIVE. No custom SC apply needed (matches aws-gpu-setup up.sh:601-631).
 //  2. Apply the hugepages-setup DaemonSet which allocates 2Mi hugepages on
-//     role=bnk worker nodes (the f5-tmm pod requires hugepages-2Mi capacity).
+//     role=bnk worker nodes (the f5-tmm pod requires hugepages-2Mi capacity)
+//     and enables proxy ARP on the VPC CNI pod veths so TMM's server-side
+//     ARP for pool-member pod IPs is answered (see hugepages-ds.yaml).
 //  3. Wait for kubelet on the TMM node to re-advertise
 //     .status.capacity.hugepages-2Mi >= cl.Bnk.TmmHugepages. DS-Ready is NOT
 //     enough — the DS restarts kubelet and capacity surfaces on next sync
@@ -69,7 +71,7 @@ func Phase11bEBSCSIHugepages(ctx context.Context, cl *intent.Cluster, st *state.
 		}
 		fmt.Fprintf(os.Stderr, "[phase 11b] EBS CSI addon + hugepages-ds: cluster=%s sc=%s\n", name, scName)
 		fmt.Fprintln(os.Stderr, "[phase 11b] dry-run: would install aws-ebs-csi-driver EKS addon (managed)")
-		fmt.Fprintln(os.Stderr, "[phase 11b] dry-run: would apply hugepages-setup DaemonSet in kube-system")
+		fmt.Fprintln(os.Stderr, "[phase 11b] dry-run: would apply hugepages-setup DaemonSet in kube-system (2Mi hugepages + proxy ARP on VPC CNI veths)")
 		fmt.Fprintf(os.Stderr, "[phase 11b] dry-run: would wait for TMM node hugepages-2Mi >= %s\n", hugepages)
 		st.Set("EBS_CSI_ADDON_STATUS", "dry-run-ACTIVE")
 		st.Set("GP3_STORAGE_CLASS", scName)
@@ -106,7 +108,7 @@ func Phase11bEBSCSIHugepages(ctx context.Context, cl *intent.Cluster, st *state.
 		return fmt.Errorf("phase11b: hugepages DaemonSet not ready: %w", err)
 	}
 	st.Set("HUGEPAGES_DS_INSTALLED_AT", time.Now().UTC().Format(time.RFC3339))
-	fmt.Fprintln(os.Stderr, "[phase 11b] hugepages-setup DaemonSet ready")
+	fmt.Fprintln(os.Stderr, "[phase 11b] hugepages-setup DaemonSet ready (2Mi hugepages + proxy ARP on VPC CNI veths)")
 
 	// 11b.3 — Wait for kubelet to re-advertise hugepages capacity on the TMM node.
 	tmmNode := st.Get("TMM_NODE_NAME")

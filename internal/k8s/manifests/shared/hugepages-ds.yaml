@@ -1,7 +1,13 @@
 ---
-# Allocates 2MB HugePages on BNK worker nodes (label role=bnk).
-# F5 TMM requires hugepages-2Mi; default 2048 pages = 4GB.
-# Ported from aws-gpu-setup/hugepages-ds.yaml.
+# Node prep for BNK worker nodes (label role=bnk):
+#  - Allocates 2MB HugePages. F5 TMM requires hugepages-2Mi; default 2048 pages = 4GB.
+#    Ported from aws-gpu-setup/hugepages-ds.yaml.
+#  - Enables proxy ARP on the Amazon VPC CNI pod veths (prefix "eni", plus
+#    conf.default so veths created later inherit it). TMM resolves pool-member
+#    pod IPs by ARPing on its own pod interface (TMM_CALICO_ROUTER=default
+#    assumes a proxy-ARP-answering CNI router, which Calico is and VPC CNI is
+#    not); without this the host never answers and every server-side SYN is
+#    dropped. Applied on every BNK node because TMM placement is not known here.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -36,6 +42,9 @@ spec:
         - -c
         - |
           set -e
+          sysctl -qw net.ipv4.conf.default.proxy_arp=1
+          for f in /proc/sys/net/ipv4/conf/eni*/proxy_arp; do [ -e "$f" ] && echo 1 > "$f"; done
+          echo "[proxy-arp] node=$(hostname) enabled on conf.default and $(ls /proc/sys/net/ipv4/conf/ | grep -c '^eni') existing eni* veths"
           NEED=2048
           PG=/sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
           CUR=$(cat $PG)

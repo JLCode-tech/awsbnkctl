@@ -491,7 +491,7 @@ func ensureLBCIRSARole(ctx context.Context, iamClient IAMAPI, clusterName, roleN
 		roleARN = *getOut.Role.Arn
 		fmt.Fprintf(os.Stderr, "[phase 14b] IRSA role %s already exists, skipping create\n", roleName)
 	} else {
-		trustPolicy, trustErr := oidcFederatedTrustPolicy(oidcHost, accountID, namespace, saName)
+		trustPolicy, trustErr := oidcFederatedTrustPolicy(oidcHost, accountID, irsaSubject(namespace, saName))
 		if trustErr != nil {
 			return "", fmt.Errorf("building IRSA trust policy: %w", trustErr)
 		}

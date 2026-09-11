@@ -350,58 +350,6 @@ func TestRenderCloudNetworkMapping_EmbeddedShape(t *testing.T) {
 	}
 }
 
-// ─── IRSA SA render tests ──────────────────────────────────────────────────────
-
-var irsaSATmpl = []byte(`name: f5-cne-controller-{{ .InstanceNameCR }}-serviceaccount
-roleArn: {{ .CneIRSARoleARN }}
-`)
-
-func TestRenderIRSASA_Substitution(t *testing.T) {
-	cl := clusterFixture("syd-tracer")
-	roleARN := "arn:aws:iam::111122223333:role/syd-tracer-cne-controller-irsa"
-	getter := populatedStateGetter(map[string]string{
-		"CNE_IRSA_ROLE_ARN": roleARN,
-	})
-
-	out, err := RenderIRSASA(irsaSATmpl, cl, getter)
-	if err != nil {
-		t.Fatalf("RenderIRSASA: %v", err)
-	}
-	rendered := string(out)
-
-	if !strings.Contains(rendered, "syd-tracer-bnk-serviceaccount") {
-		t.Errorf("SA name not rendered correctly:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, roleARN) {
-		t.Errorf("role ARN not rendered correctly:\n%s", rendered)
-	}
-}
-
-func TestRenderIRSASA_MissingRoleARN_Errors(t *testing.T) {
-	cl := clusterFixture("syd-tracer")
-	getter := func(string) string { return "" }
-
-	_, err := RenderIRSASA(irsaSATmpl, cl, getter)
-	if err == nil {
-		t.Fatal("expected error when CNE_IRSA_ROLE_ARN missing, got nil")
-	}
-}
-
-func TestRenderIRSASA_InstanceNameCRConvention(t *testing.T) {
-	cl := clusterFixture("my-cluster")
-	roleARN := "arn:aws:iam::123:role/my-role"
-	getter := populatedStateGetter(map[string]string{"CNE_IRSA_ROLE_ARN": roleARN})
-
-	out, err := RenderIRSASA(irsaSATmpl, cl, getter)
-	if err != nil {
-		t.Fatalf("RenderIRSASA: %v", err)
-	}
-	// InstanceNameCR = my-cluster-bnk.
-	if !strings.Contains(string(out), "my-cluster-bnk-serviceaccount") {
-		t.Errorf("InstanceNameCR not set to <cluster>-bnk:\n%s", out)
-	}
-}
-
 // ─── NADs render tests ─────────────────────────────────────────────────────────
 
 var nadsTmpl = []byte(`ns: {{ .Namespace }}

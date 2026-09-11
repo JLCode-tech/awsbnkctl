@@ -201,28 +201,6 @@ func RenderCloudNetworkMapping(tmpl []byte, cl *intent.Cluster, getter func(stri
 	return Render(tmpl, vars)
 }
 
-// ─── IRSA ServiceAccount ─────────────────────────────────────────────────────
-
-// IRSASAVars holds the substitution variables for shared/irsa-sa.yaml.tmpl.
-type IRSASAVars struct {
-	InstanceNameCR string // <cluster>-bnk
-	CneIRSARoleARN string // CNE_IRSA_ROLE_ARN from state
-}
-
-// RenderIRSASA renders the IRSA ServiceAccount template. Returns an error if
-// CNE_IRSA_ROLE_ARN is not present in state (Phase 18 must have run first).
-func RenderIRSASA(tmpl []byte, cl *intent.Cluster, getter func(string) string) ([]byte, error) {
-	roleARN := getter("CNE_IRSA_ROLE_ARN")
-	if roleARN == "" {
-		return nil, fmt.Errorf("render: CNE_IRSA_ROLE_ARN not in state (Phase 18 must run first)")
-	}
-	vars := IRSASAVars{
-		InstanceNameCR: cl.Metadata.Name + "-bnk",
-		CneIRSARoleARN: roleARN,
-	}
-	return Render(tmpl, vars)
-}
-
 // ─── NetworkAttachmentDefinitions (host-device) ───────────────────────────────
 
 // NADVars holds the substitution variables for

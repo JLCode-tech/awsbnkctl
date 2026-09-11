@@ -4,78 +4,111 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
-	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
-	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
 )
 
 const (
-	irsaSAYAMLPath  = "shared/irsa-sa.yaml.tmpl"
 	phase21FieldMgr = "awsbnkctl-phase21"
+
+	// irsaRoleARNAnnotation is the annotation the EKS pod-identity webhook reads.
+	irsaRoleARNAnnotation = "eks.amazonaws.com/role-arn"
+	// irsaInjectedEnv is set on every container of a pod the webhook mutated.
+	irsaInjectedEnv = "AWS_ROLE_ARN"
+
+	cneDeployWaitTimeout = 3 * time.Minute
 )
 
-// cneSAName returns the CNE ServiceAccount name derived from the cluster name.
-// Convention: f5-cne-controller-<cluster>-bnk-serviceaccount.
-func cneSAName(clusterName string) string {
-	return "f5-cne-controller-" + clusterName + "-bnk-serviceaccount"
-}
-
-// Phase21IRSASA renders and applies the IRSA ServiceAccount into f5-cne-system.
-// The SA is required so the CNEInstance controller can assume the IRSA role
-// (Pass 3). This is pre-creation — the operator creates the SA before the
-// CNEInstance CR so that the role-ARN annotation is present before the
-// cne-controller pod starts.
+// Phase21IRSASA binds the IRSA role to the ServiceAccount the CNE controller
+// Deployment actually runs as. It runs after Phase 22 (CNEInstance) because
+// FLO creates that SA and Deployment together and the name is release-specific
+// (f5-cne-controller-<instance>-serviceaccount on older 2.3.x, plain
+// f5-cne-controller on 2.3.3), so it is discovered, never derived:
 //
-// Reads CNE_IRSA_ROLE_ARN from state (Phase 18); errors clearly if missing.
-// Idempotent: server-side-apply upserts the annotation on re-run.
-// D-005: CheckAuthOrDie called at entry.
+//  1. Wait for the controller Deployment; read spec.template.spec.serviceAccountName.
+//  2. Scope the role trust policy from Phase 18's namespace wildcard to that SA.
+//  3. Annotate the SA with eks.amazonaws.com/role-arn.
+//  4. The pods predate the annotation, so if none carries AWS_ROLE_ARN,
+//     rollout-restart the Deployment; the webhook injects on the new pod.
+//
+// Without this the controller logs "IRSA env not found" / "Cloud prerequisites
+// not met" and never assigns Gateway VIPs to the TMM ENI (bnk-staging-test,
+// 2026-09-11). Idempotent. D-005: CheckAuthOrDie at entry.
 func Phase21IRSASA(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
 	checkAuthOrDie(clients)
-	name := cl.Metadata.Name
-	fmt.Fprintf(os.Stderr, "[phase 21] IRSA SA: cluster=%s\n", name)
+	fmt.Fprintf(os.Stderr, "[phase 21] IRSA SA: cluster=%s\n", cl.Metadata.Name)
 
-	// Validate prerequisite state key.
 	roleARN := st.Get("CNE_IRSA_ROLE_ARN")
 	if roleARN == "" {
 		return fmt.Errorf("phase21: CNE_IRSA_ROLE_ARN not in state — Phase 18 (IRSA/OIDC) must run first")
 	}
 
-	saName := cneSAName(name)
-
 	if dryRun {
 		fmt.Fprintf(os.Stderr,
-			"[phase 21] dry-run: would pre-create SA %s in %s with IRSA annotation\n",
-			saName, InstanceNamespace)
+			"[phase 21] dry-run: would read the SA of deploy %s/%s, scope the IRSA trust policy to it, annotate it, and restart the controller if its pods lack IRSA credentials\n",
+			InstanceNamespace, h4DeploymentName)
 		st.Set("IRSA_SA_APPLIED_AT", "dry-run")
-		st.Set("CNE_SA_NAME", saName)
 		return nil
 	}
-
-	if clients.Dynamic == nil {
-		return fmt.Errorf("phase21: Clients.Dynamic is nil — call clients.AttachK8s(kubeconfigPath) first")
+	if clients.K8s == nil {
+		return fmt.Errorf("phase21: Clients.K8s is nil — call clients.AttachK8s(kubeconfigPath) first")
 	}
 
-	// Load + render template.
-	tmplBytes, err := k8smanifests.FS.ReadFile(irsaSAYAMLPath)
+	// 1. Discover the SA from the live Deployment.
+	deploy, err := waitForDeployment(ctx, clients, InstanceNamespace, h4DeploymentName, cneDeployWaitTimeout)
 	if err != nil {
-		return fmt.Errorf("phase21: reading embedded irsa-sa template: %w", err)
+		return fmt.Errorf("phase21: %w", err)
 	}
-	rendered, err := render.RenderIRSASA(tmplBytes, cl, st.Get)
-	if err != nil {
-		return fmt.Errorf("phase21: rendering irsa-sa: %w", err)
+	saName := deploy.Spec.Template.Spec.ServiceAccountName
+	if saName == "" {
+		saName = "default"
 	}
+	fmt.Fprintf(os.Stderr, "[phase 21] deploy %s/%s runs as ServiceAccount %s\n", InstanceNamespace, h4DeploymentName, saName)
 
-	// Apply via dynamic client (idempotent annotation upsert via SSA).
-	fmt.Fprintf(os.Stderr, "[phase 21] applying IRSA SA %s in %s\n", saName, InstanceNamespace)
-	if err := applyRawYAML(ctx, clients, rendered); err != nil {
-		return fmt.Errorf("phase21: applying IRSA SA: %w", err)
+	// 2. Trust exactly that SA.
+	oidcHost := strings.TrimPrefix(st.Get("EKS_OIDC_URL"), "https://")
+	roleName := st.Get("CNE_IRSA_ROLE_NAME")
+	if oidcHost == "" || roleName == "" {
+		return fmt.Errorf("phase21: EKS_OIDC_URL / CNE_IRSA_ROLE_NAME not in state — Phase 18 (IRSA/OIDC) must run first")
+	}
+	trust, err := oidcFederatedTrustPolicy(oidcHost, extractAccountID(roleARN), irsaSubject(InstanceNamespace, saName))
+	if err != nil {
+		return fmt.Errorf("phase21: building trust policy: %w", err)
+	}
+	if _, err := clients.IAM.UpdateAssumeRolePolicy(ctx, &iam.UpdateAssumeRolePolicyInput{
+		RoleName: ptr(roleName), PolicyDocument: ptr(trust),
+	}); err != nil {
+		return fmt.Errorf("phase21: iam:UpdateAssumeRolePolicy %s: %w", roleName, err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 21] trust policy of %s scoped to %s\n", roleName, irsaSubject(InstanceNamespace, saName))
+
+	// 3. Annotate the SA (JSON merge patch: idempotent, keeps FLO's fields).
+	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, irsaRoleARNAnnotation, roleARN)
+	if _, err := clients.K8s.CoreV1().ServiceAccounts(InstanceNamespace).Patch(ctx, saName,
+		types.MergePatchType, []byte(patch), metav1.PatchOptions{FieldManager: phase21FieldMgr}); err != nil {
+		return fmt.Errorf("phase21: annotating SA %s/%s: %w", InstanceNamespace, saName, err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 21] annotated SA %s/%s with %s\n", InstanceNamespace, saName, irsaRoleARNAnnotation)
+
+	// 4. Restart only if the running pods missed the injection.
+	injected, err := deploymentPodsHaveEnv(ctx, clients, deploy, irsaInjectedEnv)
+	if err != nil {
+		return fmt.Errorf("phase21: %w", err)
+	}
+	if injected {
+		fmt.Fprintln(os.Stderr, "[phase 21] controller pods already carry IRSA credentials — no restart")
+	} else {
+		if err := restartDeployment(ctx, clients, InstanceNamespace, h4DeploymentName); err != nil {
+			return fmt.Errorf("phase21: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "[phase 21] rollout-restarted deploy %s/%s so the pod-identity webhook injects IRSA\n", InstanceNamespace, h4DeploymentName)
 	}
 
 	st.Set("IRSA_SA_APPLIED_AT", time.Now().UTC().Format(time.RFC3339))
@@ -83,37 +116,13 @@ func Phase21IRSASA(ctx context.Context, cl *intent.Cluster, st *state.State, cli
 	return st.Save()
 }
 
-// Phase21IRSASADown deletes the IRSA ServiceAccount from f5-cne-system.
-// Tolerates NotFound.
-func Phase21IRSASADown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
+// Phase21IRSASADown clears phase 21 state. The ServiceAccount belongs to FLO
+// and leaves with its namespace in Phase 12 down; the IRSA role goes in Phase 18 down.
+func Phase21IRSASADown(_ context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
 	checkAuthOrDie(clients)
-	name := cl.Metadata.Name
-	saName := cneSAName(name)
-	fmt.Fprintf(os.Stderr, "[phase 21 down] IRSA SA: deleting %s from %s\n", saName, InstanceNamespace)
-
-	if clients.Dynamic == nil {
-		fmt.Fprintln(os.Stderr, "[phase 21 down] warning: dynamic client not available, skipping SA deletion")
-		clearPhase21State(st)
-		return st.Save()
-	}
-
-	saGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"}
-	err := clients.Dynamic.Resource(saGVR).Namespace(InstanceNamespace).Delete(ctx, saName, metav1.DeleteOptions{})
-	if err != nil && !k8serrors.IsNotFound(err) {
-		fmt.Fprintf(os.Stderr, "[phase 21 down] warning: delete SA %s/%s: %v\n", InstanceNamespace, saName, err)
-	} else if k8serrors.IsNotFound(err) {
-		fmt.Fprintf(os.Stderr, "[phase 21 down] SA %s/%s already gone\n", InstanceNamespace, saName)
-	} else {
-		fmt.Fprintf(os.Stderr, "[phase 21 down] deleted SA %s/%s\n", InstanceNamespace, saName)
-	}
-
-	clearPhase21State(st)
-	return st.Save()
-}
-
-// clearPhase21State zeroes all phase 21 state keys.
-func clearPhase21State(st *state.State) {
+	fmt.Fprintf(os.Stderr, "[phase 21 down] IRSA SA: cluster=%s (SA is FLO-owned; clearing state only)\n", cl.Metadata.Name)
 	for _, k := range []string{"IRSA_SA_APPLIED_AT", "CNE_SA_NAME"} {
 		st.Set(k, "")
 	}
+	return st.Save()
 }

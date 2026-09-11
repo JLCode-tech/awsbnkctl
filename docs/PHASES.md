@@ -52,8 +52,8 @@
 - **`cloud-network-mapping`** (`Phase19CloudNetworkMapping`): Creates the CloudNetworkMapping ConfigMap required by FLO.
 - **`nads`** (`Phase20NADs`): Creates NetworkAttachmentDefinitions for host-device integration in the cluster.
 - **`sriov-dataplane`** (`Phase20bSriovDataplane`): Configures vfio node-prep and SR-IOV device plugins (if enabled).
-- **`irsa-sa`** (`Phase21IRSASA`): Pre-creates IRSA ServiceAccounts with role annotations for AWS integration.
 - **`cne-instance`** (`Phase22CNEInstance`): Applies the CNEInstance custom resource to trigger the BNK installation.
+- **`irsa-sa`** (`Phase21IRSASA`): Reads the ServiceAccount the FLO-created `f5-cne-controller` Deployment runs as, scopes the IRSA role trust policy to it, annotates it with `eks.amazonaws.com/role-arn`, and rollout-restarts the controller if its pods lack the injected credentials. Runs after `cne-instance` because the SA name is release-specific and only known once FLO has created it.
 - **`license`** (`Phase23License`): Waits for the License CRD and applies the BNK license to activate the instance.
 - **`spk-vlan-gateway-class`** (`Phase23bSPKVlanGatewayClass`): Configures F5SPKVlan and GatewayClass data-plane plumbing.
 - **`cwc-heal`** (`Phase24CWCHeal`): Applies best-effort DNS warmup healing for the CWC pod.
