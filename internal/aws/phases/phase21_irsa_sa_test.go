@@ -4,9 +4,9 @@ package phases
 
 import (
 	"context"
-	"time"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	appsv1 "k8s.io/api/apps/v1"
