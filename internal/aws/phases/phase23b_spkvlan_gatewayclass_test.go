@@ -242,7 +242,7 @@ func TestPhase23b_WaitsForControllerBeforeApply(t *testing.T) {
 		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"},
 		crd(infraCRDName), crd(gatewayClassCRDName))
 	// Deployment exists but has no available replica, as during its first rollout.
-	k8s := kubefake.NewSimpleClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: h4DeploymentName, Namespace: InstanceNamespace}})
+	k8s := kubefake.NewClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: h4DeploymentName, Namespace: InstanceNamespace}})
 	clients := &Clients{Profile: "test", Dynamic: dyn, K8s: k8s, RESTMapper: p12FakeRESTMapper()}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
