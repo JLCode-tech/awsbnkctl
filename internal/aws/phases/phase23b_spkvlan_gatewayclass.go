@@ -37,6 +37,10 @@ const (
 
 	gatewayClassCRDName = "gatewayclasses.gateway.networking.k8s.io"
 
+	// cneControllerRBACYAMLPath is the EndpointSlice ClusterRole + binding awsbnkctl
+	// adds for the controller ServiceAccount (FLO 2.30 grants no get).
+	cneControllerRBACYAMLPath = "shared/cne-controller-rbac.yaml.tmpl"
+
 	// cneControllerAvailableWait bounds the wait for the cne-controller
 	// Deployment to have an available replica before the Infra apply. The
 	// F5 validating webhook (f5-validation-svc) is served by that pod; applying
@@ -73,6 +77,13 @@ var ipamGVR = schema.GroupVersionResource{
 	Version:  "v1",
 	Resource: "ipams",
 }
+
+// clusterRoleGVR / clusterRoleBindingGVR name the RBAC supplement awsbnkctl
+// manages for the cne-controller.
+var (
+	clusterRoleGVR        = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}
+	clusterRoleBindingGVR = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}
+)
 
 // infraGVR is the BNK 2.4 Infra CR (singleton in the CNE namespace).
 var infraGVR = schema.GroupVersionResource{
@@ -166,6 +177,23 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 			return fmt.Errorf("phase23b: waiting for cne-controller: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "[phase 23b] deploy %s/%s available\n", InstanceNamespace, h4DeploymentName)
+	}
+
+	// RBAC supplement: FLO 2.30's ClusterRole lets the controller list/watch
+	// EndpointSlices but not get them, and the 2.4.0 controller GETs the slice of
+	// every Gateway backend ("Error getting endpointSlice ... is forbidden", live
+	// 2026-09-11), so pools stayed empty. The 2.4 f5ingress chart grants get.
+	rbacTmpl, err := k8smanifests.FS.ReadFile(cneControllerRBACYAMLPath)
+	if err != nil {
+		return fmt.Errorf("phase23b: reading cne-controller rbac template: %w", err)
+	}
+	rbacRendered, err := render.RenderCNEControllerRBAC(rbacTmpl, cl)
+	if err != nil {
+		return fmt.Errorf("phase23b: rendering cne-controller rbac: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 23b] applying ClusterRole/Binding %s (EndpointSlice get for %s/%s; FLO 2.30 omits it)\n", render.CNEControllerRBACName(cl), InstanceNamespace, render.CNEControllerServiceAccount)
+	if err := applyRawYAML(ctx, clients, rbacRendered); err != nil {
+		return fmt.Errorf("phase23b: applying cne-controller rbac: %w", err)
 	}
 
 	// Render + apply GatewayClass.
@@ -268,6 +296,16 @@ func Phase23bSPKVlanGatewayClassDown(ctx context.Context, cl *intent.Cluster, st
 			fmt.Fprintf(os.Stderr, "[phase 23b down] warning: delete F5SPKVlan %s: %v\n", vlan, err)
 		} else if err == nil {
 			fmt.Fprintf(os.Stderr, "[phase 23b down] deleted F5SPKVlan %s\n", vlan)
+		}
+	}
+
+	// Delete the cne-controller RBAC supplement (cluster-scoped).
+	rbacName := render.CNEControllerRBACName(cl)
+	for _, gvr := range []schema.GroupVersionResource{clusterRoleBindingGVR, clusterRoleGVR} {
+		if err := clients.Dynamic.Resource(gvr).Delete(ctx, rbacName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+			fmt.Fprintf(os.Stderr, "[phase 23b down] warning: delete %s %s: %v\n", gvr.Resource, rbacName, err)
+		} else if err == nil {
+			fmt.Fprintf(os.Stderr, "[phase 23b down] deleted %s %s\n", gvr.Resource, rbacName)
 		}
 	}
 

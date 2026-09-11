@@ -540,6 +540,9 @@ func TestRenderCNEInstance_SetsUseGatewaySettings(t *testing.T) {
 	if strings.Count(rendered, "USE_GATEWAY_SETTINGS") != 1 {
 		t.Errorf("USE_GATEWAY_SETTINGS must appear exactly once, got %d", strings.Count(rendered, "USE_GATEWAY_SETTINGS"))
 	}
+	if !strings.Contains(ctrlEnv, "- name: MAX_ACTIVE_TMM_REPLICAS\n          value: \"32\"") {
+		t.Errorf("cneController.env missing MAX_ACTIVE_TMM_REPLICAS=32 (FLO 2.30 drops the chart default):\n%s", ctrlEnv)
+	}
 }
 
 func TestRenderCNEInstance_NilBnk_ReturnsError(t *testing.T) {

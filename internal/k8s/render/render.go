@@ -528,3 +528,38 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 	}
 	return Render(tmpl, vars)
 }
+
+// ─── cne-controller RBAC supplement (BNK 2.4 / FLO 2.30) ─────────────────────
+
+// CNEControllerServiceAccount is the ServiceAccount FLO creates for the
+// cne-controller Deployment.
+const CNEControllerServiceAccount = "f5-cne-controller"
+
+// CNEControllerRBACName is the ClusterRole/ClusterRoleBinding awsbnkctl adds
+// so the controller can read EndpointSlices (see shared/cne-controller-rbac.yaml.tmpl).
+func CNEControllerRBACName(cl *intent.Cluster) string {
+	return cl.Metadata.Name + "-cne-controller-endpointslices"
+}
+
+// CNEControllerRBACVars holds the substitution variables for
+// shared/cne-controller-rbac.yaml.tmpl.
+type CNEControllerRBACVars struct {
+	Name           string // <cluster>-cne-controller-endpointslices
+	LabName        string // cl.Metadata.Name
+	InstanceNS     string // f5-cne-system
+	ServiceAccount string // f5-cne-controller
+}
+
+// RenderCNEControllerRBAC renders the EndpointSlice ClusterRole + binding for
+// the cne-controller ServiceAccount.
+func RenderCNEControllerRBAC(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
+	if cl == nil || cl.Metadata.Name == "" {
+		return nil, fmt.Errorf("render cne-controller rbac: cluster name is required")
+	}
+	return Render(tmpl, CNEControllerRBACVars{
+		Name:           CNEControllerRBACName(cl),
+		LabName:        cl.Metadata.Name,
+		InstanceNS:     cneInstanceNamespace,
+		ServiceAccount: CNEControllerServiceAccount,
+	})
+}

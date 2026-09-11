@@ -201,6 +201,9 @@ phase 23b applies `Infra` instead of `F5SPKVlan` and every scenario ships a
 the controller container gets `USE_GATEWAY_SETTINGS=true` from the CNEInstance, because the
 2.4.0 f5ingress binary only starts the Infra and GatewaySettings reconcilers when that
 env flag is set and neither FLO 2.30 nor the f5ingress chart sets it;
+the controller also gets `MAX_ACTIVE_TMM_REPLICAS=32` (the chart default) because FLO 2.30 renders the
+Deployment without it and the 2.4 controller then keeps every TMM in standby, and phase 23b adds
+a ClusterRole/Binding for `get` on EndpointSlices, which the FLO-generated ClusterRole lacks;
 the VLAN self IPs are allocated by the F5 IPAM controller from /27 pools
 (`<subnet>.224`–`.254` around the nominal `.240`; the controller splits a pool into per-device
 blocks and rejected both a single address and a /30), so phase 23b now assigns the allocated

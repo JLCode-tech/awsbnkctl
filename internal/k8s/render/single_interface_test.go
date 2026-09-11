@@ -177,3 +177,30 @@ func TestRenderInfra_SelfIPPoolRejectsReservedBlock(t *testing.T) {
 		t.Error("internal self IP in the reserved first /27 must fail to render")
 	}
 }
+
+// TestRenderCNEControllerRBAC pins the FLO 2.30 workaround: the controller
+// ServiceAccount gets get/list/watch on EndpointSlices through an
+// awsbnkctl-managed ClusterRole and binding named after the cluster.
+func TestRenderCNEControllerRBAC(t *testing.T) {
+	tmpl, err := manifests.FS.ReadFile("shared/cne-controller-rbac.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	out, err := RenderCNEControllerRBAC(tmpl, infraTestCluster("10.0.10.240", ""))
+	if err != nil {
+		t.Fatalf("RenderCNEControllerRBAC: %v", err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"kind: ClusterRole\n", "kind: ClusterRoleBinding", "name: bnk-test-cne-controller-endpointslices",
+		`resources: ["endpointslices"]`, `verbs: ["get", "list", "watch"]`,
+		"name: f5-cne-controller", "namespace: f5-cne-system",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("cne-controller RBAC missing %q:\n%s", want, s)
+		}
+	}
+	if _, err := RenderCNEControllerRBAC(tmpl, nil); err == nil {
+		t.Error("nil cluster must fail")
+	}
+}
