@@ -4,6 +4,7 @@ package phases
 
 import (
 	"context"
+	"time"
 	"strings"
 	"testing"
 
@@ -147,5 +148,35 @@ func TestPhase21IRSASADown_ClearsState(t *testing.T) {
 		if st.Get(k) != "" {
 			t.Errorf("%s should be cleared after down, got %q", k, st.Get(k))
 		}
+	}
+}
+
+// TestPhase21IRSASA_WaitsForLateSA reproduces bnk-staging-test 2026-09-11:
+// FLO created deploy/f5-cne-controller two seconds before the SA it runs as,
+// and Phase 21 aborted `up` with `serviceaccounts "f5-cne-controller" not found`.
+func TestPhase21IRSASA_WaitsForLateSA(t *testing.T) {
+	awsmw.ResetForTest()
+	old := deployPollInterval
+	deployPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { deployPollInterval = old })
+
+	st := p21State(t)
+	clients, _ := p21Clients(t, false)
+	ctx := context.Background()
+	if err := clients.K8s.CoreV1().ServiceAccounts(InstanceNamespace).Delete(ctx, p21SA, metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("remove SA to simulate FLO lag: %v", err)
+	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, _ = clients.K8s.CoreV1().ServiceAccounts(InstanceNamespace).Create(ctx,
+			&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: p21SA, Namespace: InstanceNamespace}}, metav1.CreateOptions{})
+	}()
+
+	if err := Phase21IRSASA(ctx, hostDeviceCluster(), st, clients, false); err != nil {
+		t.Fatalf("Phase21 must wait for the late SA, got: %v", err)
+	}
+	sa, _ := clients.K8s.CoreV1().ServiceAccounts(InstanceNamespace).Get(ctx, p21SA, metav1.GetOptions{})
+	if sa.Annotations[irsaRoleARNAnnotation] != p21RoleARN {
+		t.Errorf("late SA not annotated: %v", sa.Annotations)
 	}
 }
