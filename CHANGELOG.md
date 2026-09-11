@@ -4,6 +4,15 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [1.6.1](https://github.com/JLCode-tech/awsbnkctl/compare/v1.6.0...v1.6.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **down:** delete the PVC-backed EBS volumes the CSI driver leaves behind ([1c97153](https://github.com/JLCode-tech/awsbnkctl/commit/1c971530c64ae3bf4f1449ced52f23d8a6211414))
+* **up:** phase 21 waits for the controller ServiceAccount before annotating it ([cfdb2eb](https://github.com/JLCode-tech/awsbnkctl/commit/cfdb2ebc9622af629d0893c901091afb765bea4e))
+* **up:** phase 21 waits for the controller ServiceAccount before annotating it ([710b05b](https://github.com/JLCode-tech/awsbnkctl/commit/710b05b46161d6502b5839a443ca6edc2e3c64be))
+
 ## [1.6.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.5.0...v1.6.0) (2026-09-11)
 
 
