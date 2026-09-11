@@ -1026,6 +1026,40 @@ func applyDefaults(c *Cluster) {
 	}
 }
 
+// SelfIPPoolSize is how many consecutive addresses each TMM self-IP pool spans
+// on BNK 2.4. The Infra CR hands VLAN self IPs to the F5 IPAM controller, which
+// splits every pool into per-device CIDR blocks and rejects a pool with fewer
+// than 3 blocks (seen live 2026-09-11: "parent CIDR 10.50.10.240/32 is too small
+// for 1 devices (need at least 3 blocks)"), so a single address never allocates.
+// A /30 (4 addresses) is the smallest pool that works for one TMM. Phase 17 puts
+// every pool address on the ENI so whichever one FIC picks is routable, and
+// phase 23b records the allocated address in state.
+const SelfIPPoolSize = 4
+
+// SelfIPPool returns the SelfIPPoolSize consecutive IPv4 addresses that start
+// at base. base must be aligned to the pool size so the pool's covering CIDR
+// is exactly a /30 (FIC splits the covering CIDR, not the range, so a
+// misaligned range could allocate an address outside it), and the pool must
+// stay below the subnet broadcast address.
+func SelfIPPool(base string) ([]string, error) {
+	ip := net.ParseIP(base).To4()
+	if ip == nil {
+		return nil, fmt.Errorf("self IP %q is not an IPv4 address", base)
+	}
+	last := int(ip[3])
+	if last%SelfIPPoolSize != 0 {
+		return nil, fmt.Errorf("self IP %s must be aligned to a %d-address pool (last octet a multiple of %d)", base, SelfIPPoolSize, SelfIPPoolSize)
+	}
+	if last+SelfIPPoolSize-1 > 254 {
+		return nil, fmt.Errorf("self IP pool %s-.%d runs into the subnet broadcast address", base, last+SelfIPPoolSize-1)
+	}
+	pool := make([]string, 0, SelfIPPoolSize)
+	for i := 0; i < SelfIPPoolSize; i++ {
+		pool = append(pool, net.IPv4(ip[0], ip[1], ip[2], byte(last+i)).String())
+	}
+	return pool, nil
+}
+
 // DeriveSelfIP returns the host-offset IP and prefix length for a /24 CIDR.
 // For non-/24 CIDRs, returns "" and the actual prefix length.
 // Example: DeriveSelfIP("10.0.10.0/24", 240) -> ("10.0.10.240", 24).
@@ -1049,6 +1083,19 @@ func validate(c *Cluster) error {
 	}
 	if c.Metadata.Region == "" {
 		return fmt.Errorf("metadata.region is required")
+	}
+	if c.IsBNKPattern() && c.Network.DataPath != nil && c.Network.DataPath.SelfIPs != nil {
+		sip := c.Network.DataPath.SelfIPs
+		if sip.External != "" {
+			if _, err := SelfIPPool(sip.External); err != nil {
+				return fmt.Errorf("network.dataPath.selfIPs.external: %w", err)
+			}
+		}
+		if sip.Internal != "" && c.HasInternalInterface() {
+			if _, err := SelfIPPool(sip.Internal); err != nil {
+				return fmt.Errorf("network.dataPath.selfIPs.internal: %w", err)
+			}
+		}
 	}
 	if len(c.Network.AZs) == 0 {
 		return fmt.Errorf("network.azs must contain at least one availability zone")

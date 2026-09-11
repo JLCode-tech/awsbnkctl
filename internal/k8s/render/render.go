@@ -450,24 +450,27 @@ const (
 
 // InfraVars holds the substitution variables for host-device/infra.yaml.tmpl.
 type InfraVars struct {
-	InfraName     string // infra (singleton per BNK namespace)
-	InstanceNS    string // f5-cne-system (matches CNEInstance namespace)
-	LabName       string // cl.Metadata.Name
-	TmmExtSelfIP  string // e.g. 10.0.10.240
-	TmmIntSelfIP  string // e.g. 10.0.20.240
-	ListenerPool  string // IPAM entry the GatewaySettings reference for VIPs
-	ListenerStart string // e.g. 10.0.10.100
-	ListenerEnd   string // e.g. 10.0.10.199
-	ExternalNAD   string // external-netdevice or external-sriov
-	InternalNAD   string // internal-netdevice
-	ExtNetwork    string // ext-vlan
-	IntNetwork    string // int-vlan
-	Mtu           int    // cl.Bnk.TmmMtu
-	HasInternal   bool   // render the internal pool, attachment and network
+	InfraName       string // infra (singleton per BNK namespace)
+	InstanceNS      string // f5-cne-system (matches CNEInstance namespace)
+	LabName         string // cl.Metadata.Name
+	TmmExtSelfIP    string // e.g. 10.0.10.240 (pool start)
+	TmmExtSelfIPEnd string // e.g. 10.0.10.243 (pool end, intent.SelfIPPoolSize addresses)
+	TmmIntSelfIP    string // e.g. 10.0.20.240 (pool start)
+	TmmIntSelfIPEnd string // e.g. 10.0.20.243
+	ListenerPool    string // IPAM entry the GatewaySettings reference for VIPs
+	ListenerStart   string // e.g. 10.0.10.100
+	ListenerEnd     string // e.g. 10.0.10.199
+	ExternalNAD     string // external-netdevice or external-sriov
+	InternalNAD     string // internal-netdevice
+	ExtNetwork      string // ext-vlan
+	IntNetwork      string // int-vlan
+	Mtu             int    // cl.Bnk.TmmMtu
+	HasInternal     bool   // render the internal pool, attachment and network
 }
 
-// RenderInfra renders the Infra CR for a BNK pattern. Self IPs come from
-// cl.Network.DataPath.SelfIPs (auto-derived by intent.applyDefaults); the
+// RenderInfra renders the Infra CR for a BNK pattern. Self-IP pools start at
+// cl.Network.DataPath.SelfIPs (auto-derived by intent.applyDefaults) and span
+// intent.SelfIPPoolSize addresses (see intent.SelfIPPool for why); the
 // listener pool is hosts .100-.199 of the external data-path subnet, which
 // covers the VIP plan and stays clear of the self IP (.240) and the jumphost
 // (.200).
@@ -481,6 +484,16 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 	}
 	if hasInternal && sel.Internal == "" {
 		return nil, fmt.Errorf("render infra: internal self IP not derivable (internal subnet must be /24)")
+	}
+	extPool, err := intent.SelfIPPool(sel.External)
+	if err != nil {
+		return nil, fmt.Errorf("render infra: external self IP pool: %w", err)
+	}
+	var intPool []string
+	if hasInternal {
+		if intPool, err = intent.SelfIPPool(sel.Internal); err != nil {
+			return nil, fmt.Errorf("render infra: internal self IP pool: %w", err)
+		}
 	}
 	start, _ := intent.DeriveSelfIP(cl.Network.DataPath.External.CIDR, infraListenerFirst)
 	end, _ := intent.DeriveSelfIP(cl.Network.DataPath.External.CIDR, infraListenerLast)
@@ -496,20 +509,26 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 		mtu = cl.Bnk.TmmMtu
 	}
 	vars := InfraVars{
-		InfraName:     InfraName,
-		InstanceNS:    cneInstanceNamespace,
-		LabName:       cl.Metadata.Name,
-		TmmExtSelfIP:  sel.External,
-		TmmIntSelfIP:  sel.Internal,
-		ListenerPool:  InfraListenerPool,
-		ListenerStart: start,
-		ListenerEnd:   end,
-		ExternalNAD:   externalNAD,
-		InternalNAD:   "internal-netdevice",
-		ExtNetwork:    InfraExtNetwork,
-		IntNetwork:    InfraIntNetwork,
-		Mtu:           mtu,
-		HasInternal:   hasInternal,
+		InfraName:       InfraName,
+		InstanceNS:      cneInstanceNamespace,
+		LabName:         cl.Metadata.Name,
+		TmmExtSelfIP:    extPool[0],
+		TmmExtSelfIPEnd: extPool[len(extPool)-1],
+		TmmIntSelfIP:    sel.Internal,
+		TmmIntSelfIPEnd: "",
+		ListenerPool:    InfraListenerPool,
+		ListenerStart:   start,
+		ListenerEnd:     end,
+		ExternalNAD:     externalNAD,
+		InternalNAD:     "internal-netdevice",
+		ExtNetwork:      InfraExtNetwork,
+		IntNetwork:      InfraIntNetwork,
+		Mtu:             mtu,
+		HasInternal:     hasInternal,
+	}
+	if hasInternal {
+		vars.TmmIntSelfIP = intPool[0]
+		vars.TmmIntSelfIPEnd = intPool[len(intPool)-1]
 	}
 	return Render(tmpl, vars)
 }

@@ -8,7 +8,9 @@ import (
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -62,6 +64,14 @@ var gatewayClassGVR = schema.GroupVersionResource{
 	Group:    "gateway.networking.k8s.io",
 	Version:  "v1",
 	Resource: "gatewayclasses",
+}
+
+// ipamGVR is the F5 IPAM controller's IPAM CR. The cne-controller creates one
+// per Infra VLAN network and FIC writes the allocated self IP to its status.
+var ipamGVR = schema.GroupVersionResource{
+	Group:    "fic.f5.com",
+	Version:  "v1",
+	Resource: "ipams",
 }
 
 // infraGVR is the BNK 2.4 Infra CR (singleton in the CNE namespace).
@@ -211,6 +221,14 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	}
 	fmt.Fprintf(os.Stderr, "[phase 23b] Infra %s Programmed=True\n", render.InfraName)
 
+	// Record the self IPs FIC allocated from the pools. Phase 17 stored the
+	// pool start; the egress-snat SNAT check, the BGP how-to and the topology
+	// diagram need the address TMM really got.
+	recordAllocatedSelfIP(ctx, clients.Dynamic, st, "TMM_EXT_SELFIP", render.InfraExtNetwork)
+	if hasInternal {
+		recordAllocatedSelfIP(ctx, clients.Dynamic, st, "TMM_INT_SELFIP", render.InfraIntNetwork)
+	}
+
 	return st.Save()
 }
 
@@ -264,5 +282,47 @@ func Phase23bSPKVlanGatewayClassDown(ctx context.Context, cl *intent.Cluster, st
 func clearPhase23bState(st *state.State) {
 	for _, k := range []string{"INFRA_APPLIED_AT", "F5SPKVLAN_APPLIED_AT", "GATEWAYCLASS_NAME"} {
 		st.Set(k, "")
+	}
+}
+
+// infraVlanIPAMName is the IPAM CR the cne-controller creates for an Infra
+// VLAN network: vlan-<namespace>-<network>.<infra> (seen live on BNK 2.4.0).
+func infraVlanIPAMName(ns, network string) string {
+	return fmt.Sprintf("vlan-%s-%s.%s", ns, network, render.InfraName)
+}
+
+// allocatedSelfIP returns the address FIC allocated for an Infra VLAN network,
+// or "" when the IPAM CR has no allocation yet.
+func allocatedSelfIP(ctx context.Context, dyn dynamic.Interface, ns, network string) (string, error) {
+	obj, err := dyn.Resource(ipamGVR).Namespace(ns).Get(ctx, infraVlanIPAMName(ns, network), metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	entries, _, _ := unstructured.NestedSlice(obj.Object, "status", "IPStatus")
+	for _, e := range entries {
+		m, ok := e.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if ip, _ := m["ip"].(string); ip != "" {
+			return ip, nil
+		}
+	}
+	return "", nil
+}
+
+// recordAllocatedSelfIP writes the FIC-allocated self IP of an Infra VLAN
+// network to state under key. A missing allocation is a warning, not an
+// error: the pool start phase 17 stored stays in place.
+func recordAllocatedSelfIP(ctx context.Context, dyn dynamic.Interface, st *state.State, key, network string) {
+	ip, err := allocatedSelfIP(ctx, dyn, InstanceNamespace, network)
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "[phase 23b] warning: reading IPAM %s: %v (keeping %s=%s)\n", infraVlanIPAMName(InstanceNamespace, network), err, key, st.Get(key))
+	case ip == "":
+		fmt.Fprintf(os.Stderr, "[phase 23b] warning: IPAM %s has no allocated address yet (keeping %s=%s)\n", infraVlanIPAMName(InstanceNamespace, network), key, st.Get(key))
+	default:
+		st.Set(key, ip)
+		fmt.Fprintf(os.Stderr, "[phase 23b] %s self IP allocated by IPAM: %s=%s\n", network, key, ip)
 	}
 }

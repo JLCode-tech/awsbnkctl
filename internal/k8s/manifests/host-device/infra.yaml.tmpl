@@ -6,9 +6,11 @@
 #
 # The Nth NAD listed in CNEInstance .spec.networkAttachments is TMM trunk 1.N,
 # so ext-vlan (external NAD) is 1.1 and int-vlan (internal NAD) is 1.2.
-# Self IPs are pinned with single-address pools so they match the addresses
-# Phase 17 assigned to the ENIs. The listener pool is the VIP range every
-# scenario and demo draws from (see docs/SCENARIOS.md, "VIP plan").
+# Each self-IP pool is the 4-address /30 starting at the configured self IP:
+# the F5 IPAM controller splits a pool into per-device blocks and needs at
+# least 3, so a single address never allocates. Phase 17 puts all four on the
+# ENI; phase 23b records the one FIC allocated (TMM_EXT_SELFIP / TMM_INT_SELFIP).
+# The listener pool is the VIP range every scenario and demo draws from (see docs/SCENARIOS.md, "VIP plan").
 apiVersion: gateway.k8s.f5.com/v1alpha1
 kind: Infra
 metadata:
@@ -22,12 +24,12 @@ spec:
     - name: ext-selfip
       ipPools:
         - rangeStart: "{{ .TmmExtSelfIP }}"
-          rangeEnd: "{{ .TmmExtSelfIP }}"
+          rangeEnd: "{{ .TmmExtSelfIPEnd }}"
 {{- if .HasInternal }}
     - name: int-selfip
       ipPools:
         - rangeStart: "{{ .TmmIntSelfIP }}"
-          rangeEnd: "{{ .TmmIntSelfIP }}"
+          rangeEnd: "{{ .TmmIntSelfIPEnd }}"
 {{- end }}
     - name: {{ .ListenerPool }}
       ipPools:

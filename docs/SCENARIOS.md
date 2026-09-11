@@ -188,7 +188,7 @@ only inputs are `network.dataPath.external.cidr` and the per-scenario octet.
 | `.130` | `demo-ai` proxy shootout | example |
 | `.200` | Jumphost external ENI (`<subnet>.200`, Phase 17b) | infrastructure |
 | `.201`–`.202` | `local-zone` reference manifests | example |
-| `.240` | TMM external SelfIP (`<subnet>.240`, Phase 17) | infrastructure |
+| `.240`–`.243` | TMM external self-IP pool (`<subnet>.240`/30, Phase 17; the F5 IPAM controller allocates one of them to TMM, recorded as `TMM_EXT_SELFIP` by Phase 23b) | infrastructure |
 
 `cwc-admin-access`, `core-file-collection` and `egress-snat` allocate no VIP.
 

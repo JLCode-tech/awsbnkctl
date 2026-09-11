@@ -135,22 +135,23 @@ func Phase17SecondaryENIs(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	// provides the authoritative values. See constants_hostdevice.go.
 	fmt.Fprintf(os.Stderr, "[phase 17] MACs captured; phase 17c will resolve ifname+PCI on node\n")
 
-	// Assign TMM SelfIPs as secondary private IPs on each ENI.
-	// Per F5 Multi-AZ PDF p.9: AWS won't route SelfIPs to the ENI unless they
-	// are also listed as secondary IPs on the ENI. Without this, F5SPKVlan
-	// SelfIP plumbing silently fails (Phase 23b applies the F5SPKVlan CR but
-	// the cne-controller can't program the data path until the IPs are on the
-	// ENI). aws-gpu-setup mirrors this in up.sh assign_selfip after attach.
+	// Assign the TMM self-IP pools as secondary private IPs on each ENI.
+	// Per F5 Multi-AZ PDF p.9: AWS won't route a self IP to the ENI unless it
+	// is also listed as a secondary IP there. On BNK 2.4 the Infra CR lets the
+	// F5 IPAM controller pick the self IP from a pool of intent.SelfIPPoolSize
+	// addresses (a /30 is the smallest pool FIC accepts), so every pool address
+	// goes on the ENI and phase 23b records the one FIC allocated. Until then
+	// state carries the pool start.
 	if c := cl.Network.DataPath; c != nil && c.SelfIPs != nil {
 		if c.SelfIPs.External != "" {
-			if err := assignSelfIPIfNeeded(ctx, clients.EC2, extENI, c.SelfIPs.External); err != nil {
-				return fmt.Errorf("phase17: assigning external SelfIP %s to %s: %w", c.SelfIPs.External, extENI, err)
+			if err := assignSelfIPPool(ctx, clients.EC2, extENI, c.SelfIPs.External); err != nil {
+				return fmt.Errorf("phase17: assigning external SelfIP pool %s to %s: %w", c.SelfIPs.External, extENI, err)
 			}
 			st.Set("TMM_EXT_SELFIP", c.SelfIPs.External)
 		}
 		if hasInternal && c.SelfIPs.Internal != "" {
-			if err := assignSelfIPIfNeeded(ctx, clients.EC2, intENI, c.SelfIPs.Internal); err != nil {
-				return fmt.Errorf("phase17: assigning internal SelfIP %s to %s: %w", c.SelfIPs.Internal, intENI, err)
+			if err := assignSelfIPPool(ctx, clients.EC2, intENI, c.SelfIPs.Internal); err != nil {
+				return fmt.Errorf("phase17: assigning internal SelfIP pool %s to %s: %w", c.SelfIPs.Internal, intENI, err)
 			}
 			st.Set("TMM_INT_SELFIP", c.SelfIPs.Internal)
 		}
@@ -160,6 +161,21 @@ func Phase17SecondaryENIs(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	}
 
 	return st.Save()
+}
+
+// assignSelfIPPool puts every address of the self-IP pool that starts at base
+// on the ENI (see intent.SelfIPPool). Idempotent per address.
+func assignSelfIPPool(ctx context.Context, ec2c EC2API, eniID, base string) error {
+	pool, err := intent.SelfIPPool(base)
+	if err != nil {
+		return err
+	}
+	for _, ip := range pool {
+		if err := assignSelfIPIfNeeded(ctx, ec2c, eniID, ip); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // assignSelfIPIfNeeded assigns a secondary private IP to an ENI. Idempotent:

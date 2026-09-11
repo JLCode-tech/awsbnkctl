@@ -2271,3 +2271,42 @@ func TestIsReservedGatewayVIPOffset(t *testing.T) {
 		}
 	}
 }
+
+// TestSelfIPPool pins the BNK 2.4 self-IP pool: 4 consecutive addresses from
+// an aligned start, rejected when misaligned or when it reaches the broadcast.
+func TestSelfIPPool(t *testing.T) {
+	got, err := SelfIPPool("10.0.10.240")
+	if err != nil {
+		t.Fatalf("SelfIPPool(.240): %v", err)
+	}
+	want := []string{"10.0.10.240", "10.0.10.241", "10.0.10.242", "10.0.10.243"}
+	if len(got) != len(want) {
+		t.Fatalf("pool = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("pool[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	for _, bad := range []string{"10.0.10.241", "10.0.10.252", "not-an-ip", "fd00::1"} {
+		if _, err := SelfIPPool(bad); err == nil {
+			t.Errorf("SelfIPPool(%q) = nil error, want error", bad)
+		}
+	}
+}
+
+// TestValidate_SelfIPPoolAlignment rejects an explicit self IP that cannot
+// start a /30 pool before any AWS call is made.
+func TestValidate_SelfIPPoolAlignment(t *testing.T) {
+	c, err := Load("../../examples/full-cluster/cluster.yaml")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Network.DataPath == nil || c.Network.DataPath.SelfIPs == nil {
+		t.Fatal("full-cluster example must derive self IPs")
+	}
+	c.Network.DataPath.SelfIPs.External = "10.0.10.241"
+	if err := validate(c); err == nil || !strings.Contains(err.Error(), "selfIPs.external") {
+		t.Errorf("misaligned external self IP: err = %v, want selfIPs.external error", err)
+	}
+}

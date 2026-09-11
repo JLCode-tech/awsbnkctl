@@ -333,3 +333,49 @@ func TestPhase17SecondaryENIsDown_DetachesAndDeletes(t *testing.T) {
 		t.Errorf("deleteENICalls = %d, want at least 1", ec2m.deleteENICalls)
 	}
 }
+
+// TestPhase17SecondaryENIs_AssignsSelfIPPool pins the BNK 2.4 contract: every
+// address of each intent.SelfIPPoolSize self-IP pool is put on its ENI, so
+// whichever one the F5 IPAM controller allocates is routable.
+func TestPhase17SecondaryENIs_AssignsSelfIPPool(t *testing.T) {
+	awsmw.ResetForTest()
+	st, _ := stateWithENIPrereqs(t)
+	st.Set("INTERNAL_ENI", "eni-existing-int")
+	st.Set("EXTERNAL_ENI", "eni-existing-ext")
+	cl := eniTestCluster()
+	cl.Network.DataPath = &intent.DataPathSpec{
+		External: intent.SubnetSpec{CIDR: "10.0.10.0/24", AZ: "a"},
+		Internal: intent.SubnetSpec{CIDR: "10.0.20.0/24", AZ: "a"},
+		SelfIPs:  &intent.SelfIPsSpec{External: "10.0.10.240", Internal: "10.0.20.240", PrefixLen: 24},
+	}
+
+	instanceID := "i-0123456789abcdef0"
+	mac := "0a:1b:2c:3d:4e:5f"
+	ec2m := &mockEC2{
+		describeENIsOut: &ec2.DescribeNetworkInterfacesOutput{
+			NetworkInterfaces: []ec2types.NetworkInterface{{
+				NetworkInterfaceId: ptr("eni-existing-int"),
+				MacAddress:         &mac,
+				Attachment:         &ec2types.NetworkInterfaceAttachment{InstanceId: &instanceID},
+			}},
+		},
+	}
+	if err := Phase17SecondaryENIs(context.Background(), cl, st, testClients(ec2m), false); err != nil {
+		t.Fatalf("Phase17SecondaryENIs: %v", err)
+	}
+	want := []string{
+		"10.0.10.240", "10.0.10.241", "10.0.10.242", "10.0.10.243",
+		"10.0.20.240", "10.0.20.241", "10.0.20.242", "10.0.20.243",
+	}
+	if len(ec2m.assignedSelfIPs) != len(want) {
+		t.Fatalf("assigned %v, want %v", ec2m.assignedSelfIPs, want)
+	}
+	for i := range want {
+		if ec2m.assignedSelfIPs[i] != want[i] {
+			t.Errorf("assigned[%d] = %q, want %q", i, ec2m.assignedSelfIPs[i], want[i])
+		}
+	}
+	if got := st.Get("TMM_EXT_SELFIP"); got != "10.0.10.240" {
+		t.Errorf("TMM_EXT_SELFIP = %q, want pool start until phase 23b records the allocation", got)
+	}
+}

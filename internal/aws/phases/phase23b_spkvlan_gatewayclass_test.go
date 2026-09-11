@@ -255,3 +255,47 @@ func TestPhase23b_WaitsForControllerBeforeApply(t *testing.T) {
 		t.Errorf("INFRA_APPLIED_AT = %q, want empty (blocked before apply)", got)
 	}
 }
+
+// TestPhase23b_RecordAllocatedSelfIP pins the BNK 2.4 readback: the address
+// the F5 IPAM controller wrote to the Infra VLAN's IPAM CR replaces the pool
+// start in state; a missing CR or empty allocation leaves state untouched.
+func TestPhase23b_RecordAllocatedSelfIP(t *testing.T) {
+	ipam := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "fic.f5.com/v1",
+		"kind":       "IPAM",
+		"metadata":   map[string]interface{}{"name": infraVlanIPAMName(InstanceNamespace, "ext-vlan"), "namespace": InstanceNamespace},
+		"status": map[string]interface{}{"IPStatus": []interface{}{
+			map[string]interface{}{"deviceID": "DP-0", "ip": "10.0.10.242", "status": "Ok"},
+		}},
+	}}
+	pending := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "fic.f5.com/v1",
+		"kind":       "IPAM",
+		"metadata":   map[string]interface{}{"name": infraVlanIPAMName(InstanceNamespace, "int-vlan"), "namespace": InstanceNamespace},
+		"status": map[string]interface{}{"IPStatus": []interface{}{
+			map[string]interface{}{"deviceID": "DP-0", "status": "ipAllocationPending"},
+		}},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(buildScheme(),
+		map[schema.GroupVersionResource]string{ipamGVR: "IPAMList"}, ipam, pending)
+	st, _ := state.Load(t.TempDir())
+	st.Set("TMM_EXT_SELFIP", "10.0.10.240")
+	st.Set("TMM_INT_SELFIP", "10.0.20.240")
+
+	recordAllocatedSelfIP(context.Background(), dyn, st, "TMM_EXT_SELFIP", "ext-vlan")
+	recordAllocatedSelfIP(context.Background(), dyn, st, "TMM_INT_SELFIP", "int-vlan")
+	recordAllocatedSelfIP(context.Background(), dyn, st, "TMM_OTHER_SELFIP", "no-such-vlan")
+
+	if got := st.Get("TMM_EXT_SELFIP"); got != "10.0.10.242" {
+		t.Errorf("TMM_EXT_SELFIP = %q, want the IPAM-allocated 10.0.10.242", got)
+	}
+	if got := st.Get("TMM_INT_SELFIP"); got != "10.0.20.240" {
+		t.Errorf("TMM_INT_SELFIP = %q, want the pool start kept while allocation is pending", got)
+	}
+	if got := st.Get("TMM_OTHER_SELFIP"); got != "" {
+		t.Errorf("TMM_OTHER_SELFIP = %q, want unset when the IPAM CR is missing", got)
+	}
+	if got := infraVlanIPAMName("f5-cne-system", "ext-vlan"); got != "vlan-f5-cne-system-ext-vlan.infra" {
+		t.Errorf("infraVlanIPAMName = %q", got)
+	}
+}
