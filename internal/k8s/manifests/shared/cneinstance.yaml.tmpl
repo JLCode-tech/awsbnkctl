@@ -77,6 +77,12 @@ spec:
           value: "{{ .CloudHostDeviceName }}"
         - name: CLOUD_HOST_DEVICE_TAG
           value: "{{ .CloudHostDeviceTag }}"
+        # BNK 2.4: the controller only runs the Infra and GatewaySettings
+        # reconcilers when this flag is set (env default false; neither FLO
+        # 2.30 nor the f5ingress chart sets it). Without it the Infra CR stays
+        # "Waiting for controller" and Gateways get no listener context.
+        - name: USE_GATEWAY_SETTINGS
+          value: "true"
     demoMode:
       enabled: false
     maintenanceMode:

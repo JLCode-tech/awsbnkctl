@@ -198,6 +198,9 @@ context from the new `Infra` CR and ignores `F5BnkGateway` (live 2026-09-11: eve
 Gateway logged "Pre-computed 0 device contexts" and TMM got no virtual server), so
 phase 23b applies `Infra` instead of `F5SPKVlan` and every scenario ships a
 `GatewaySettings` that its Gateway references through `infrastructure.parametersRef`;
+the controller container gets `USE_GATEWAY_SETTINGS=true` from the CNEInstance, because the
+2.4.0 f5ingress binary only starts the Infra and GatewaySettings reconcilers when that
+env flag is set and neither FLO 2.30 nor the f5ingress chart sets it;
 `k8s.f5net.com/v3` F5SPKEgress, `k8s.f5net.com/v1` F5SPKStaticRoute and
 `k8s.f5net.com/v1alpha1` RoutingTemplate / GlobalRoutingConfig are still watched; the Gateway API extension group moved from
 `gateway.k8s.f5net.com` to `gateway.k8s.f5.com` (L4Route `v1`, NetPolicy and
