@@ -295,7 +295,7 @@ type CNEInstanceVars struct {
 	// Operator-knobs (cluster.yaml bnk:)
 	DeploymentSize   string // default "Small"
 	StorageClassName string // default "gp3"
-	ManifestVersion  string // default "2.21.13"
+	ManifestVersion  string // default manifest.DefaultManifestVersion
 	TmmMtu           int    // default 9000
 	TmmCpu           string // default "4"
 	TmmMemory        string // default "16Gi"

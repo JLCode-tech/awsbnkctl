@@ -2,6 +2,8 @@ package manifest
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -77,5 +79,58 @@ func TestKnownReleases_DefaultIsNewestAndPaired(t *testing.T) {
 	}
 	if DefaultFLOChart() != last.FLOChart {
 		t.Errorf("DefaultFLOChart() = %q, want %q", DefaultFLOChart(), last.FLOChart)
+	}
+}
+
+// TestKnownReleases_24Default pins the BNK 2.4 pairing: the default is the
+// "2.4.0" manifest (the string FLO matches, not the docs' "+0.0.380" form)
+// and it installs the FLO chart F5 shipped with it.
+func TestKnownReleases_24Default(t *testing.T) {
+	if DefaultManifestVersion != "2.4.0" {
+		t.Errorf("DefaultManifestVersion = %q, want 2.4.0", DefaultManifestVersion)
+	}
+	if got, ok := FLOChartFor("2.4.0"); !ok || got != "v2.30.0-0.5.2" {
+		t.Errorf("FLOChartFor(2.4.0) = %q,%v want v2.30.0-0.5.2,true", got, ok)
+	}
+	if got, ok := FLOChartFor("2.3.3-3.2598.3-0.0.509"); !ok || got != "v2.21.13-0.0.64" {
+		t.Errorf("FLOChartFor(2.3.3) = %q,%v want v2.21.13-0.0.64,true (2.3.x must stay deployable)", got, ok)
+	}
+	if _, ok := FLOChartFor("2.4.0-3.3175.0+0.0.380"); ok {
+		t.Error("the docs' +0.0.380 spelling must not be treated as a known manifest; FLO cannot pull it")
+	}
+}
+
+// TestFindManifestFile covers the 2.4.0 chart layout, where the OCI tag
+// (2.4.0-3.3175.0-0.0.380) no longer matches the manifest file name
+// (bigip-k8s-manifest-2.4.0.yaml).
+func TestFindManifestFile(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("releases: []\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := findManifestFile(dir, "2.4.0"); err == nil {
+		t.Error("empty dir: want error, got nil")
+	}
+
+	write("bigip-k8s-manifest-2.4.0.yaml")
+	got, err := findManifestFile(dir, "2.4.0")
+	if err != nil || filepath.Base(got) != "bigip-k8s-manifest-2.4.0.yaml" {
+		t.Errorf("exact name: got %q, %v", got, err)
+	}
+	got, err = findManifestFile(dir, "2.4.0-3.3175.0-0.0.380")
+	if err != nil || filepath.Base(got) != "bigip-k8s-manifest-2.4.0.yaml" {
+		t.Errorf("tag differs from file name: got %q, %v; want the single manifest in the chart", got, err)
+	}
+
+	write("bigip-k8s-manifest-2.3.3-3.2598.3-0.0.509.yaml")
+	got, err = findManifestFile(dir, "2.3.3-3.2598.3-0.0.509")
+	if err != nil || filepath.Base(got) != "bigip-k8s-manifest-2.3.3-3.2598.3-0.0.509.yaml" {
+		t.Errorf("exact name with two files: got %q, %v", got, err)
+	}
+	if _, err := findManifestFile(dir, "9.9.9"); err == nil {
+		t.Error("two files, none matching: want error, got nil")
 	}
 }

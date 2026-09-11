@@ -11,8 +11,8 @@
 #     kubectl apply -f mcp-security-policy.yaml
 #
 # BNK 2.3 attaches policy to a Gateway through two policy-attachment CRs:
-#   * BNKNetPolicy -> attaches F5BigCneIrule (general L7 extensions)
-#   * BNKSecPolicy -> attaches F5BigFwPolicy / F5BigLogProfile / F5BigDdosGlobal
+#   * NetPolicy -> attaches F5BigCneIrule (general L7 extensions)
+#   * SecPolicy -> attaches F5BigFwPolicy / F5BigLogProfile / F5BigDdosGlobal
 #
 # What is enforced here is a REQUEST-RATE limit, not a token quota. BNK's token
 # enforcement (`k8s.f5.com/ai-token-counting`) only works on LLM inference
@@ -196,20 +196,20 @@ spec:
         HTTP::release
     }
 ---
-# One BNKNetPolicy per listener. Two reasons this is listener-scoped
+# One NetPolicy per listener. Two reasons this is listener-scoped
 # (`sectionName`) rather than Gateway-scoped:
 #
 #   1. BNK Forge's Gateway Topology view only renders iRule attachments under a
-#      listener. A BNKNetPolicy with no `sectionName` attaches and works, but is
+#      listener. A NetPolicy with no `sectionName` attaches and works, but is
 #      invisible in Forge — verified live 2026-08-19.
-#   2. BNKNetPolicy allows exactly one targetRef, so covering both listeners
+#   2. NetPolicy allows exactly one targetRef, so covering both listeners
 #      needs two CRs.
 #
 # Do NOT also attach the same iRule at Gateway scope: gateway-level iRules run
 # first and listener-level second, so the rule would execute twice per request
 # and the counter would trip at half the configured limit.
-apiVersion: gateway.k8s.f5net.com/v1alpha1
-kind: BNKNetPolicy
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: NetPolicy
 metadata:
   name: mcp-net-policy-http
   namespace: default
@@ -224,8 +224,8 @@ spec:
     kind: F5BigCneIrule
     name: mcp-rate-limit-irule
 ---
-apiVersion: gateway.k8s.f5net.com/v1alpha1
-kind: BNKNetPolicy
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: NetPolicy
 metadata:
   name: mcp-net-policy-http443
   namespace: default
@@ -266,8 +266,8 @@ spec:
     action: reject
     logging: true
 ---
-apiVersion: gateway.k8s.f5net.com/v1alpha1
-kind: BNKSecPolicy
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: SecPolicy
 metadata:
   name: mcp-sec-policy
   namespace: default

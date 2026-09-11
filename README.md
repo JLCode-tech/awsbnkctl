@@ -1,6 +1,6 @@
 # awsbnkctl
 
-![BNK](https://img.shields.io/badge/BNK-2.3.3-0a3a5c)
+![BNK](https://img.shields.io/badge/BNK-2.4.0-0a3a5c)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-1.34--1.35-326ce5?logo=kubernetes&logoColor=white)
 ![AWS EKS](https://img.shields.io/badge/AWS-EKS-ff9900?logo=amazon-aws&logoColor=white)
 [![CI](https://github.com/JLCode-tech/awsbnkctl/actions/workflows/ci.yml/badge.svg)](https://github.com/JLCode-tech/awsbnkctl/actions/workflows/ci.yml)
@@ -91,10 +91,10 @@ switch it to either single-interface pattern.
 
 | Component | Version | Change it with |
 |---|---|---|
-| BNK release manifest | `2.3.3-3.2598.3-0.0.509` (newest 2.3.x; 2.3.0–2.3.2 also supported) | `bnk.manifestVersion` — the matching FLO chart follows automatically |
+| BNK release manifest | `2.4.0` (BNK 2.4; the 2.3.0–2.3.3 builds also supported) | `bnk.manifestVersion` — the matching FLO chart follows automatically |
 | Kubernetes (EKS) | default `1.35`, floor `1.34`, 1.36+ warns | `cluster.kubernetesVersion` |
 | cert-manager | `v1.21.1`, embedded upstream YAML | `intent.EmbeddedCertManagerVersion` |
-| FLO chart | paired with the manifest (`v2.21.13-0.0.64` for 2.3.3) | `addons.flo.version` |
+| FLO chart | paired with the manifest (`v2.30.0-0.5.2` for 2.4.0) | `addons.flo.version` |
 | Go | 1.26 | `go.mod` |
 
 Four of those pins expire on a calendar. Check them before a new deployment:
@@ -103,8 +103,8 @@ Four of those pins expire on a calendar. Check them before a new deployment:
 |---|---|---|---|
 | EKS standard support for the Kubernetes floor | `1.34` | **2026-12-02** | raise `intent.MinKubernetesVersion` |
 | cert-manager support window | `v1.21.1` (K8s 1.33–1.36) | cert-manager **1.23** releases | embed the newest supported minor |
-| Newest BNK 2.3.x manifest | `2.3.3-3.2598.3-0.0.509` | F5 publishes a build (`awsbnkctl manifest probe`) | add a row to `manifest.KnownReleases` |
-| BNK CRDs on Kubernetes 1.36+ | `format: int32` + `maximum: 4294967295` still in 2.3.3 | a future BNK manifest fixes it | drop the 1.36 warning |
+| Newest BNK manifest | `2.4.0` | F5 publishes a build (`awsbnkctl manifest probe`) | add a row to `manifest.KnownReleases` |
+| BNK CRDs on Kubernetes 1.36+ | `format: int32` + `maximum: 4294967295` still in 2.4.0 | a future BNK manifest fixes it | drop the 1.36 warning |
 
 The reasoning behind each pin is in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

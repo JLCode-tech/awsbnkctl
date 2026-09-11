@@ -6,9 +6,9 @@
 //   - F5BigCneIrule (group: k8s.f5net.com, kind: F5BigCneIrule) carrying a TCL
 //     iRule that, on SERVER_CONNECTED, prepends a PROXY v1 header containing the
 //     captured client addr/port + local addr/port.
-//   - BNKNetPolicy (group: gateway.k8s.f5net.com/v1alpha1) whose extensionRefs
+//   - NetPolicy (group: gateway.k8s.f5.com/v1alpha1) whose extensionRefs
 //     attach the iRule and whose targetRefs bind it to the Gateway's TCP listener.
-//   - L4Route (group: gateway.k8s.f5net.com/v1, protocol TCP) routing the
+//   - L4Route (group: gateway.k8s.f5.com/v1, protocol TCP) routing the
 //     listener to the nginx backend Service.
 //
 // nginx is configured with `listen 80 proxy_protocol`, so it parses the PROXY
@@ -28,7 +28,7 @@
 //  1. Wait proxy-backend Deployment Available.
 //  2. Wait Gateway scn-proxyproto-gateway Programmed=True.
 //  3. Wait L4Route scn-proxyproto-route Accepted=True.
-//  4. Best-effort confirm the F5BigCneIrule + BNKNetPolicy CRs exist.
+//  4. Best-effort confirm the F5BigCneIrule + NetPolicy CRs exist.
 //  5. Probe: curl the VIP (no Host header — this is L4/TCP) N times reading the
 //     body; assert >=1 returns HTTP 200 AND the body contains the jumphost
 //     source IP (proving proxy_protocol_addr == real client IP).
@@ -63,18 +63,18 @@ const (
 )
 
 // l4RouteGVR is the BNK L4Route CR (Gateway API extension). Verified against a
-// live BNK cluster: group gateway.k8s.f5net.com, version v1, resource l4routes.
+// live BNK cluster: group gateway.k8s.f5.com, version v1, resource l4routes.
 var l4RouteGVR = schema.GroupVersionResource{
-	Group:    "gateway.k8s.f5net.com",
+	Group:    "gateway.k8s.f5.com",
 	Version:  "v1",
 	Resource: "l4routes",
 }
 
-// bnkNetPolicyGVR is the BNKNetPolicy CR that attaches the iRule to the Gateway.
+// bnkNetPolicyGVR is the NetPolicy CR that attaches the iRule to the Gateway.
 var bnkNetPolicyGVR = schema.GroupVersionResource{
-	Group:    "gateway.k8s.f5net.com",
+	Group:    "gateway.k8s.f5.com",
 	Version:  "v1alpha1",
-	Resource: "bnknetpolicies",
+	Resource: "netpolicies",
 }
 
 // f5BigCneIruleGVR is the F5BigCneIrule CR carrying the PROXY-protocol iRule.
@@ -170,7 +170,7 @@ func (s *scenario) Description() string {
 	return strings.TrimSpace(`
 Proxy-Protocol L4 scenario exercising a PROXY-protocol iRule on an L4 (TCP) route
 (how-to #9). Three F5 CRs cooperate: an F5BigCneIrule carrying the TCL that
-prepends a PROXY v1 header on SERVER_CONNECTED, a BNKNetPolicy that attaches that
+prepends a PROXY v1 header on SERVER_CONNECTED, a NetPolicy that attaches that
 iRule to the Gateway's TCP listener (extensionRefs → iRule, targetRefs → Gateway),
 and an L4Route (protocol TCP) routing the listener to the nginx backend.
 
@@ -181,16 +181,16 @@ see the backend echo back THAT source IP — proving the PROXY header was applie
 (without it, nginx would see TMM's SNAT address instead).
 
 Applies 7 templated manifests into the scenario namespace (ordered so the
-namespace, iRule, BNKNetPolicy, and backend exist before the Gateway/L4Route that
+namespace, iRule, NetPolicy, and backend exist before the Gateway/L4Route that
 reference them): Namespace, F5BnkGateway IP pool (single-address, VIP=.103 only),
-nginx proxy_protocol backend, F5BigCneIrule, BNKNetPolicy, Gateway (one TCP
+nginx proxy_protocol backend, F5BigCneIrule, NetPolicy, Gateway (one TCP
 listener), L4Route (protocol TCP → proxy-backend:80).
 
 Verify order (load-bearing):
   1. proxy-backend Deployment Available.
   2. Gateway scn-proxyproto-gateway Programmed=True.
   3. L4Route scn-proxyproto-route Accepted=True.
-  4. Best-effort confirm the F5BigCneIrule + BNKNetPolicy CRs exist.
+  4. Best-effort confirm the F5BigCneIrule + NetPolicy CRs exist.
   5. SSH via EICE to the jumphost and curl --interface <BNK_EXT_ENI_IP>
      http://<VIP>/ N times (no Host header — L4), reading the body.
   6. Assert: >=1 curl returns HTTP 200 AND the body contains the jumphost
@@ -277,7 +277,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		Got:         scenarios.ErrString(err),
 	})
 
-	// --- Step 4: iRule + BNKNetPolicy present (best-effort Get) ---
+	// --- Step 4: iRule + NetPolicy present (best-effort Get) ---
 	err = d.IrulePresentFn(ctx.Ctx, ctx, ns, "pp-prepend")
 	res.Assertions = append(res.Assertions, scenarios.Assertion{
 		Description: "F5BigCneIrule pp-prepend present",
@@ -287,7 +287,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 
 	err = d.NetPolicyPresentFn(ctx.Ctx, ctx, ns, "scn-proxyproto-attach")
 	res.Assertions = append(res.Assertions, scenarios.Assertion{
-		Description: "BNKNetPolicy scn-proxyproto-attach present",
+		Description: "NetPolicy scn-proxyproto-attach present",
 		OK:          err == nil,
 		Got:         scenarios.ErrString(err),
 	})
