@@ -1038,6 +1038,9 @@ func applyDefaults(c *Cluster) {
 // self IP. FIC picks the address; phase 23b puts it on the ENI and records it.
 const SelfIPPoolPrefix = 27
 
+// selfIPPoolMask selects the host bits inside a /SelfIPPoolPrefix block.
+const selfIPPoolMask = byte(1<<(32-SelfIPPoolPrefix) - 1)
+
 // SelfIPPoolRange returns the rangeStart/rangeEnd of the self-IP pool for
 // selfIP: the /SelfIPPoolPrefix block that contains it, minus its last address
 // (FIC reserves the parent CIDR boundaries, and for the default .240 the last
@@ -1047,13 +1050,12 @@ func SelfIPPoolRange(selfIP string) (start, end string, err error) {
 	if ip == nil {
 		return "", "", fmt.Errorf("self IP %q is not an IPv4 address", selfIP)
 	}
-	size := 1 << (32 - SelfIPPoolPrefix)
-	first := int(ip[3]) / size * size
+	first := ip[3] &^ selfIPPoolMask
 	if first == 0 {
 		return "", "", fmt.Errorf("self IP %s falls in the first /%d of its subnet, which AWS reserves", selfIP, SelfIPPoolPrefix)
 	}
-	start = net.IPv4(ip[0], ip[1], ip[2], byte(first)).String()
-	end = net.IPv4(ip[0], ip[1], ip[2], byte(first+size-2)).String()
+	start = net.IPv4(ip[0], ip[1], ip[2], first).String()
+	end = net.IPv4(ip[0], ip[1], ip[2], first+selfIPPoolMask-1).String()
 	return start, end, nil
 }
 
