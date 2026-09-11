@@ -27,8 +27,11 @@ const (
 	infraYAMLPath = "host-device/infra.yaml.tmpl"
 	// infraProgrammedWait bounds the wait for Infra status Programmed=True, the
 	// signal that TMM has the VLANs and the controller has the listener context.
-	infraProgrammedWait  = 5 * time.Minute
-	gatewayClassYAMLPath = "host-device/gatewayclass.yaml.tmpl"
+	infraProgrammedWait = 5 * time.Minute
+	// gatewayClassAcceptedWait bounds the wait for GatewayClass Accepted=True; the
+	// Infra CR is only reconciled once the class exists.
+	gatewayClassAcceptedWait = 3 * time.Minute
+	gatewayClassYAMLPath     = "host-device/gatewayclass.yaml.tmpl"
 
 	gatewayClassCRDName = "gatewayclasses.gateway.networking.k8s.io"
 
@@ -155,7 +158,31 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 		fmt.Fprintf(os.Stderr, "[phase 23b] deploy %s/%s available\n", InstanceNamespace, h4DeploymentName)
 	}
 
-	// Render + apply Infra.
+	// Render + apply GatewayClass.
+	gwcTmpl, err := k8smanifests.FS.ReadFile(gatewayClassYAMLPath)
+	if err != nil {
+		return fmt.Errorf("phase23b: reading gatewayclass template: %w", err)
+	}
+	gwcRendered, err := render.RenderGatewayClass(gwcTmpl, cl)
+	if err != nil {
+		return fmt.Errorf("phase23b: rendering gatewayclass: %w", err)
+	}
+	gwcName := name + "-gatewayclass"
+	fmt.Fprintf(os.Stderr, "[phase 23b] applying GatewayClass %s\n", gwcName)
+	if err := retryWhileWebhookUnavailable(ctx, webhookRetryWait, func() error { return applyRawYAML(ctx, clients, gwcRendered) }); err != nil {
+		return fmt.Errorf("phase23b: applying GatewayClass: %w", err)
+	}
+	st.Set("GATEWAYCLASS_NAME", gwcName)
+	fmt.Fprintf(os.Stderr, "[phase 23b] waiting for GatewayClass %s Accepted=True (up to %s)\n", gwcName, gatewayClassAcceptedWait)
+	if err := waitForConditionTrue(ctx, clients.Dynamic, gatewayClassGVR, "", gwcName, "Accepted", gatewayClassAcceptedWait); err != nil {
+		return fmt.Errorf("phase23b: GatewayClass %s did not reach Accepted=True: %w", gwcName, err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 23b] GatewayClass %s Accepted=True\n", gwcName)
+
+	// Render + apply Infra. The controller only reconciles the Infra CR once a
+	// GatewayClass names it (F5: "Install GatewayClass" before "Deploy the Infra
+	// CR"); applied first, Infra sits at "Accepted=Unknown Waiting for controller"
+	// (seen live 2026-09-11).
 	infraTmpl, err := k8smanifests.FS.ReadFile(infraYAMLPath)
 	if err != nil {
 		return fmt.Errorf("phase23b: reading infra template: %w", err)
@@ -183,22 +210,6 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 		return fmt.Errorf("phase23b: Infra %s did not reach Programmed=True: %w", render.InfraName, err)
 	}
 	fmt.Fprintf(os.Stderr, "[phase 23b] Infra %s Programmed=True\n", render.InfraName)
-
-	// Render + apply GatewayClass.
-	gwcTmpl, err := k8smanifests.FS.ReadFile(gatewayClassYAMLPath)
-	if err != nil {
-		return fmt.Errorf("phase23b: reading gatewayclass template: %w", err)
-	}
-	gwcRendered, err := render.RenderGatewayClass(gwcTmpl, cl)
-	if err != nil {
-		return fmt.Errorf("phase23b: rendering gatewayclass: %w", err)
-	}
-	gwcName := name + "-gatewayclass"
-	fmt.Fprintf(os.Stderr, "[phase 23b] applying GatewayClass %s\n", gwcName)
-	if err := retryWhileWebhookUnavailable(ctx, webhookRetryWait, func() error { return applyRawYAML(ctx, clients, gwcRendered) }); err != nil {
-		return fmt.Errorf("phase23b: applying GatewayClass: %w", err)
-	}
-	st.Set("GATEWAYCLASS_NAME", gwcName)
 
 	return st.Save()
 }
