@@ -38,7 +38,7 @@
 - **`secondary-enis`** (`Phase17SecondaryENIs`): Creates secondary ENIs for the data plane (internal/external) attached directly to the worker node.
 - **`jumphost`** (`Phase17bJumphost`): Provisions a secure EC2 jumphost for internal testing and API access.
 - **`bigip-ve`** (`Phase17eBigIPVE`): Provisions an optional BIG-IP Virtual Edition instance for proxy tests (opt-in).
-- **`iface-discovery`** (`Phase17cIfaceDiscovery`): Discovers and records interface details (MACs, device indices) for data-plane networking.
+- **`iface-discovery`** (`Phase17cIfaceDiscovery`): Runs a host-netns probe on the TMM node and records the Linux names + PCI addresses of the data-path ENIs (`EXTERNAL_IFNAME`/`INTERNAL_IFNAME`) and of the node's primary ENI (`NODE_PRIMARY_IFNAME`, consumed by `egress-snat` as the pseudo-CNI `nodeInterfaceName`). The data-path pair is matched once (TMM later owns those NICs); the primary is re-resolved on re-run if missing from state.
 - **`demo-stage`** (`Phase17dDemoStage`): Pre-stages demo client assets (grpcurl, python scripts) on the jumphost.
 - **`irsa-oidc`** (`Phase18IRSAOIDC`): Configures the OIDC provider for IAM Roles for Service Accounts (IRSA).
 
