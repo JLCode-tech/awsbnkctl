@@ -435,14 +435,41 @@ func RenderGatewayClass(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
 	return Render(tmpl, vars)
 }
 
+// ─── F5SPKVlan (TMM VLANs + self IPs; still the source of the active-TMM count on 2.4) ───
+
+// F5SPKVlanVars holds the substitution variables for host-device/f5spkvlan.yaml.tmpl.
+type F5SPKVlanVars struct {
+	InstanceNS         string // f5-cne-system (matches CNEInstance namespace)
+	TmmExtSelfIP       string // e.g. 10.0.10.240
+	TmmIntSelfIP       string // e.g. 10.0.20.240
+	TmmSelfIPPrefixLen int    // typically 24
+	HasInternal        bool   // render the int-vlan CR (dual-interface only)
+	EnableBGP          bool   // render allowed_services for BGP (tcp:179) and BFD (udp:3784)
+}
+
+// RenderF5SPKVlan renders the F5SPKVlan CRs for a BNK pattern from the nominal
+// self IPs in cl.Network.DataPath.SelfIPs (auto-derived by intent.applyDefaults).
+// hasInternal controls the int-vlan CR; enableBGP adds allowed_services on ext-vlan.
+func RenderF5SPKVlan(tmpl []byte, selfExt, selfInt string, prefixLen int, hasInternal, enableBGP bool) ([]byte, error) {
+	return Render(tmpl, F5SPKVlanVars{
+		InstanceNS:         cneInstanceNamespace,
+		TmmExtSelfIP:       selfExt,
+		TmmIntSelfIP:       selfInt,
+		TmmSelfIPPrefixLen: prefixLen,
+		HasInternal:        hasInternal,
+		EnableBGP:          enableBGP,
+	})
+}
+
 // ─── Infra (BNK 2.4 network model) ──────────────────────────────────────────
 
-// Infra network names. The egress scenario references the internal one as the
-// pseudo-CNI tunnel VLAN, so keep them stable.
+// Infra network names. They coexist with the F5SPKVlan CRs ext-vlan / int-vlan
+// (F5's 2.4 example also names them apart: F5SPKVlan "external", Infra
+// "external-vlan"); GatewaySettings networkRefs point at these.
 const (
 	InfraName          = "infra"
-	InfraExtNetwork    = "ext-vlan"
-	InfraIntNetwork    = "int-vlan"
+	InfraExtNetwork    = "ext-vlan-infra"
+	InfraIntNetwork    = "int-vlan-infra"
 	InfraListenerPool  = "listener-pool"
 	infraListenerFirst = 100
 	infraListenerLast  = 199

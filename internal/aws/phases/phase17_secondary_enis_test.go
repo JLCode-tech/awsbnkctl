@@ -334,10 +334,10 @@ func TestPhase17SecondaryENIsDown_DetachesAndDeletes(t *testing.T) {
 	}
 }
 
-// TestPhase17SecondaryENIs_NoSelfIPAssignment pins the BNK 2.4 contract: the
-// F5 IPAM controller picks the self IP, so phase 17 assigns nothing on the ENI
-// and only records the nominal value phase 23b later overwrites.
-func TestPhase17SecondaryENIs_NoSelfIPAssignment(t *testing.T) {
+// TestPhase17SecondaryENIs_AssignsNominalSelfIPs pins the contract: the
+// F5SPKVlan self IPs (.240) go on their ENIs as secondary IPs; the Infra pool
+// address the F5 IPAM controller picks is added by phase 23b, not here.
+func TestPhase17SecondaryENIs_AssignsNominalSelfIPs(t *testing.T) {
 	awsmw.ResetForTest()
 	st, _ := stateWithENIPrereqs(t)
 	st.Set("INTERNAL_ENI", "eni-existing-int")
@@ -363,10 +363,11 @@ func TestPhase17SecondaryENIs_NoSelfIPAssignment(t *testing.T) {
 	if err := Phase17SecondaryENIs(context.Background(), cl, st, testClients(ec2m), false); err != nil {
 		t.Fatalf("Phase17SecondaryENIs: %v", err)
 	}
-	if ec2m.assignSelfIPCalls != 0 {
-		t.Errorf("phase 17 assigned %v; on BNK 2.4 the allocated self IP is assigned by phase 23b", ec2m.assignedSelfIPs)
+	want := []string{"10.0.10.240", "10.0.20.240"}
+	if len(ec2m.assignedSelfIPs) != len(want) || ec2m.assignedSelfIPs[0] != want[0] || ec2m.assignedSelfIPs[1] != want[1] {
+		t.Errorf("assigned %v, want exactly the F5SPKVlan self IPs %v", ec2m.assignedSelfIPs, want)
 	}
 	if got := st.Get("TMM_EXT_SELFIP"); got != "10.0.10.240" {
-		t.Errorf("TMM_EXT_SELFIP = %q, want the nominal self IP until phase 23b records the allocation", got)
+		t.Errorf("TMM_EXT_SELFIP = %q, want the F5SPKVlan self IP", got)
 	}
 }

@@ -135,16 +135,22 @@ func Phase17SecondaryENIs(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	// provides the authoritative values. See constants_hostdevice.go.
 	fmt.Fprintf(os.Stderr, "[phase 17] MACs captured; phase 17c will resolve ifname+PCI on node\n")
 
-	// Record the nominal TMM self IPs. On BNK 2.4 the Infra CR lets the F5 IPAM
-	// controller allocate the real self IP from the /27 pool around this value,
-	// so the ENI secondary-IP step (F5 Multi-AZ PDF p.9: AWS only delivers to
-	// addresses the ENI owns) moved to phase 23b, which knows the allocated
-	// address and overwrites these keys with it.
+	// Assign the F5SPKVlan self IPs as secondary private IPs on each ENI.
+	// Per F5 Multi-AZ PDF p.9: AWS won't route a self IP to the ENI unless it
+	// is also listed as a secondary IP there. On BNK 2.4 the Infra CR adds a
+	// second, IPAM-allocated self IP per VLAN; phase 23b puts that one on the
+	// ENI once the F5 IPAM controller has chosen it.
 	if c := cl.Network.DataPath; c != nil && c.SelfIPs != nil {
 		if c.SelfIPs.External != "" {
+			if err := assignSelfIPIfNeeded(ctx, clients.EC2, extENI, c.SelfIPs.External, "[phase 17]"); err != nil {
+				return fmt.Errorf("phase17: assigning external SelfIP %s to %s: %w", c.SelfIPs.External, extENI, err)
+			}
 			st.Set("TMM_EXT_SELFIP", c.SelfIPs.External)
 		}
 		if hasInternal && c.SelfIPs.Internal != "" {
+			if err := assignSelfIPIfNeeded(ctx, clients.EC2, intENI, c.SelfIPs.Internal, "[phase 17]"); err != nil {
+				return fmt.Errorf("phase17: assigning internal SelfIP %s to %s: %w", c.SelfIPs.Internal, intENI, err)
+			}
 			st.Set("TMM_INT_SELFIP", c.SelfIPs.Internal)
 		}
 		if c.SelfIPs.PrefixLen > 0 {

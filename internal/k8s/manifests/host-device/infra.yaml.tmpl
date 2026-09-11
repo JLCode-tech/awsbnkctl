@@ -1,8 +1,9 @@
 # Infra CR — BNK 2.4 network model for the host-device pattern.
 #
-# Replaces the 2.3.x F5SPKVlan CRs. The controller programs TMM VLANs from
-# spec.networks and takes the Gateway listener context from the Infra CR, so
-# without it a Gateway is marked Programmed but no virtual server reaches TMM.
+# Applied next to the F5SPKVlan CRs (which still define the TMM VLANs/self IPs
+# and the active-TMM count on 2.4). The controller takes the Gateway listener
+# context (IPAM pools, VLAN network) from the Infra CR, so without it a Gateway
+# is marked Programmed but no virtual server reaches TMM.
 #
 # The Nth NAD listed in CNEInstance .spec.networkAttachments is TMM trunk 1.N,
 # so ext-vlan (external NAD) is 1.1 and int-vlan (internal NAD) is 1.2.

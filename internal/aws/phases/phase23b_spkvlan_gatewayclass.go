@@ -37,6 +37,12 @@ const (
 
 	gatewayClassCRDName = "gatewayclasses.gateway.networking.k8s.io"
 
+	// f5spkvlanCRDName / f5spkvlanYAMLPath: the TMM VLAN + self IP CRs. Still
+	// required on 2.4 (F5's network page applies them; the controller derives the
+	// active-TMM count from their self IPs).
+	f5spkvlanCRDName  = "f5-spk-vlans.k8s.f5net.com"
+	f5spkvlanYAMLPath = "host-device/f5spkvlan.yaml.tmpl"
+
 	// cneControllerRBACYAMLPath is the EndpointSlice ClusterRole + binding awsbnkctl
 	// adds for the controller ServiceAccount (FLO 2.30 grants no get).
 	cneControllerRBACYAMLPath = "shared/cne-controller-rbac.yaml.tmpl"
@@ -55,8 +61,7 @@ const (
 	gatewayClassCRDWait = 3 * time.Minute
 )
 
-// f5spkvlanGVR is the 2.3.x F5SPKVlan CR; Phase23bDown still deletes it so a
-// cluster built by an older awsbnkctl tears down cleanly.
+// f5spkvlanGVR is the F5SPKVlan CR (applied here, deleted by Phase23bDown).
 var f5spkvlanGVR = schema.GroupVersionResource{
 	Group:    "k8s.f5net.com",
 	Version:  "v1",
@@ -92,12 +97,16 @@ var infraGVR = schema.GroupVersionResource{
 	Resource: "infras",
 }
 
-// Phase23bSPKVlanGatewayClass applies the Infra + GatewayClass CRs that
-// complete TMM data-plane plumbing (host-device pattern).
+// Phase23bSPKVlanGatewayClass applies the F5SPKVlan + GatewayClass + Infra CRs
+// that complete TMM data-plane plumbing (host-device pattern).
 //
-//   - Infra (BNK 2.4) binds TMM trunks 1.1 (external) / 1.2 (internal) to named
-//     virtual interfaces inside the TMM pod netns, announcing the SelfIPs
-//     that Phase 17 assigned as secondary IPs on the AWS ENIs.
+//   - F5SPKVlan binds TMM trunks 1.1 (external) / 1.2 (internal) to named
+//     virtual interfaces inside the TMM pod netns, announcing the nominal
+//     SelfIPs Phase 17 assigned on the AWS ENIs; the controller derives the
+//     active-TMM count from these CRs.
+//   - Infra (BNK 2.4) adds the listener IPAM pools and VLAN networks the
+//     GatewaySettings reference; its self IPs are allocated by the F5 IPAM
+//     controller and put on the ENIs here.
 //   - GatewayClass registers the BNK cne-controller as a Gateway API
 //     implementation so operator-facing Gateway CRs can target it via
 //     spec.gatewayClassName.
@@ -179,6 +188,32 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 		fmt.Fprintf(os.Stderr, "[phase 23b] deploy %s/%s available\n", InstanceNamespace, h4DeploymentName)
 	}
 
+	// Render + apply the F5SPKVlan CRs first (F5 2.4 order: VLANs at install,
+	// then GatewayClass, Infra, GatewaySettings). Without them the 2.4 controller
+	// reports "maxActiveDevices=0", keeps every TMM in standby and pre-computes 0
+	// device contexts for every Gateway (live 2026-09-11, run 7).
+	fmt.Fprintf(os.Stderr, "[phase 23b] waiting for CRD %s (up to %s)\n", f5spkvlanCRDName, infraCRDWait)
+	if err := k8swait.WaitForCRDExists(ctx, clients.Dynamic, f5spkvlanCRDName, infraCRDWait); err != nil {
+		return fmt.Errorf("phase23b: waiting for F5SPKVlan CRD: %w", err)
+	}
+	spkTmpl, err := k8smanifests.FS.ReadFile(f5spkvlanYAMLPath)
+	if err != nil {
+		return fmt.Errorf("phase23b: reading f5spkvlan template: %w", err)
+	}
+	spkRendered, err := render.RenderF5SPKVlan(spkTmpl, selfIPs.External, selfIPs.Internal, selfIPs.PrefixLen, hasInternal, cl.IsBGPEnabled())
+	if err != nil {
+		return fmt.Errorf("phase23b: rendering f5spkvlan: %w", err)
+	}
+	if hasInternal {
+		fmt.Fprintf(os.Stderr, "[phase 23b] applying F5SPKVlan ext-vlan (selfip=%s) + int-vlan (selfip=%s)\n", selfIPs.External, selfIPs.Internal)
+	} else {
+		fmt.Fprintf(os.Stderr, "[phase 23b] applying F5SPKVlan ext-vlan (selfip=%s)\n", selfIPs.External)
+	}
+	if err := retryWhileWebhookUnavailable(ctx, webhookRetryWait, func() error { return applyRawYAML(ctx, clients, spkRendered) }); err != nil {
+		return fmt.Errorf("phase23b: applying F5SPKVlan: %w", err)
+	}
+	st.Set("F5SPKVLAN_APPLIED_AT", time.Now().UTC().Format(time.RFC3339))
+
 	// RBAC supplement: FLO 2.30's ClusterRole lets the controller list/watch
 	// EndpointSlices but not get them, and the 2.4.0 controller GETs the slice of
 	// every Gateway backend ("Error getting endpointSlice ... is forbidden", live
@@ -229,14 +264,11 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	if err != nil {
 		return fmt.Errorf("phase23b: rendering infra: %w", err)
 	}
-	if cl.IsBGPEnabled() {
-		fmt.Fprintln(os.Stderr, "[phase 23b] warning: bnk.bgp is set, but the BNK 2.4 Infra CR has no per-VLAN allowed-services; verify BGP reachability to the external self IP live")
-	}
 	if hasInternal {
-		fmt.Fprintf(os.Stderr, "[phase 23b] applying Infra %s: %s (selfip=%s) + %s (selfip=%s), listener pool %s\n",
+		fmt.Fprintf(os.Stderr, "[phase 23b] applying Infra %s: %s (self IP pool around %s) + %s (self IP pool around %s), listener pool %s\n",
 			render.InfraName, render.InfraExtNetwork, selfIPs.External, render.InfraIntNetwork, selfIPs.Internal, render.InfraListenerPool)
 	} else {
-		fmt.Fprintf(os.Stderr, "[phase 23b] applying Infra %s: %s (selfip=%s), listener pool %s\n",
+		fmt.Fprintf(os.Stderr, "[phase 23b] applying Infra %s: %s (self IP pool around %s), listener pool %s\n",
 			render.InfraName, render.InfraExtNetwork, selfIPs.External, render.InfraListenerPool)
 	}
 	if err := retryWhileWebhookUnavailable(ctx, webhookRetryWait, func() error { return applyRawYAML(ctx, clients, infraRendered) }); err != nil {
@@ -249,15 +281,15 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	}
 	fmt.Fprintf(os.Stderr, "[phase 23b] Infra %s Programmed=True\n", render.InfraName)
 
-	// Put the self IPs FIC allocated on the ENIs (AWS only delivers traffic
-	// for addresses the ENI owns, F5 Multi-AZ PDF p.9) and record them: the
-	// egress-snat SNAT check, the BGP how-to and the topology diagram need the
-	// address TMM really got, not the nominal value phase 17 stored.
-	if err := recordAllocatedSelfIP(ctx, clients, st, "TMM_EXT_SELFIP", "EXTERNAL_ENI", render.InfraExtNetwork); err != nil {
+	// Put the Infra self IPs FIC allocated on the ENIs (AWS only delivers traffic
+	// for addresses the ENI owns, F5 Multi-AZ PDF p.9) and record them under
+	// their own keys; TMM_EXT_SELFIP / TMM_INT_SELFIP stay the F5SPKVlan self IPs
+	// (egress SNAT, BGP how-to, topology diagram).
+	if err := recordAllocatedSelfIP(ctx, clients, st, "TMM_EXT_INFRA_SELFIP", "EXTERNAL_ENI", render.InfraExtNetwork); err != nil {
 		return fmt.Errorf("phase23b: %w", err)
 	}
 	if hasInternal {
-		if err := recordAllocatedSelfIP(ctx, clients, st, "TMM_INT_SELFIP", "INTERNAL_ENI", render.InfraIntNetwork); err != nil {
+		if err := recordAllocatedSelfIP(ctx, clients, st, "TMM_INT_INFRA_SELFIP", "INTERNAL_ENI", render.InfraIntNetwork); err != nil {
 			return fmt.Errorf("phase23b: %w", err)
 		}
 	}
@@ -265,7 +297,7 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	return st.Save()
 }
 
-// Phase23bSPKVlanGatewayClassDown deletes the Infra CR (and any 2.3.x F5SPKVlan CRs)
+// Phase23bSPKVlanGatewayClassDown deletes the Infra CR, the F5SPKVlan CRs, the RBAC supplement
 // and the cluster-scoped GatewayClass. Tolerates NotFound everywhere.
 // Skipped silently when the cluster is not a BNK pattern. Deleting a
 // non-existent int-vlan (single-interface clusters) is tolerated via NotFound.
@@ -289,7 +321,7 @@ func Phase23bSPKVlanGatewayClassDown(ctx context.Context, cl *intent.Cluster, st
 		fmt.Fprintf(os.Stderr, "[phase 23b down] deleted Infra %s\n", render.InfraName)
 	}
 
-	// Delete 2.3.x F5SPKVlan CRs if an older awsbnkctl created them.
+	// Delete the F5SPKVlan CRs.
 	for _, vlan := range []string{"ext-vlan", "int-vlan"} {
 		err := clients.Dynamic.Resource(f5spkvlanGVR).Namespace(InstanceNamespace).Delete(ctx, vlan, metav1.DeleteOptions{})
 		if err != nil && !k8serrors.IsNotFound(err) {
@@ -323,7 +355,7 @@ func Phase23bSPKVlanGatewayClassDown(ctx context.Context, cl *intent.Cluster, st
 }
 
 func clearPhase23bState(st *state.State) {
-	for _, k := range []string{"INFRA_APPLIED_AT", "F5SPKVLAN_APPLIED_AT", "GATEWAYCLASS_NAME"} {
+	for _, k := range []string{"INFRA_APPLIED_AT", "F5SPKVLAN_APPLIED_AT", "GATEWAYCLASS_NAME", "TMM_EXT_INFRA_SELFIP", "TMM_INT_INFRA_SELFIP"} {
 		st.Set(k, "")
 	}
 }

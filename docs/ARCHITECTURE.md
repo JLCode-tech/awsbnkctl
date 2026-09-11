@@ -196,7 +196,7 @@ What was checked against the 2.4.0 charts and CRD installer (2026-09-11): the
 to every build; the 2.4.0 controller takes the TMM VLANs and the Gateway listener
 context from the new `Infra` CR and ignores `F5BnkGateway` (live 2026-09-11: every
 Gateway logged "Pre-computed 0 device contexts" and TMM got no virtual server), so
-phase 23b applies `Infra` instead of `F5SPKVlan` and every scenario ships a
+phase 23b applies the `F5SPKVlan` CRs (still the source of TMM VLANs, self IPs and the active-TMM count on 2.4, as in F5's 2.4 network page) plus an `Infra` CR for the listener IPAM pools, and every scenario ships a
 `GatewaySettings` that its Gateway references through `infrastructure.parametersRef`;
 the controller container gets `USE_GATEWAY_SETTINGS=true` from the CNEInstance, because the
 2.4.0 f5ingress binary only starts the Infra and GatewaySettings reconcilers when that

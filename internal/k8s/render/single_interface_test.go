@@ -125,7 +125,7 @@ func TestRenderInfra_SingleInterface_OmitsInternal(t *testing.T) {
 	s := string(out)
 	for _, want := range []string{
 		"kind: Infra", "name: infra", "namespace: f5-cne-system",
-		"name: ext-vlan", "type: vlan", "mtu: 9000",
+		"name: ext-vlan-infra", "type: vlan", "mtu: 9000",
 		"name: external-netdevice",
 		`rangeStart: "10.0.10.224"`, `rangeEnd: "10.0.10.254"`,
 		"name: listener-pool", `rangeStart: "10.0.10.100"`, `rangeEnd: "10.0.10.199"`,
@@ -134,7 +134,7 @@ func TestRenderInfra_SingleInterface_OmitsInternal(t *testing.T) {
 			t.Errorf("single-interface Infra missing %q:\n%s", want, s)
 		}
 	}
-	for _, unwanted := range []string{"name: int-vlan", "int-selfip", "internal-netdevice", "10.0.20."} {
+	for _, unwanted := range []string{"name: int-vlan-infra", "int-selfip", "internal-netdevice", "10.0.20."} {
 		if strings.Contains(s, unwanted) {
 			t.Errorf("single-interface Infra must omit %q:\n%s", unwanted, s)
 		}
@@ -152,7 +152,7 @@ func TestRenderInfra_DualInterface(t *testing.T) {
 		t.Fatalf("RenderInfra: %v", err)
 	}
 	s := string(out)
-	for _, want := range []string{"name: int-vlan", "name: int-selfip", "name: internal-netdevice", `rangeStart: "10.0.20.224"`, `rangeEnd: "10.0.20.254"`, "name: int-attach"} {
+	for _, want := range []string{"name: int-vlan-infra", "name: int-selfip", "name: internal-netdevice", `rangeStart: "10.0.20.224"`, `rangeEnd: "10.0.20.254"`, "name: int-attach"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("dual-interface Infra missing %q:\n%s", want, s)
 		}
@@ -202,5 +202,40 @@ func TestRenderCNEControllerRBAC(t *testing.T) {
 	}
 	if _, err := RenderCNEControllerRBAC(tmpl, nil); err == nil {
 		t.Error("nil cluster must fail")
+	}
+}
+
+// TestRenderF5SPKVlan pins the F5SPKVlan CRs that still define the TMM VLANs
+// on BNK 2.4: ext-vlan on trunk 1.1 with the nominal self IP, int-vlan only
+// for dual-interface, BGP allowed_services only when enabled.
+func TestRenderF5SPKVlan(t *testing.T) {
+	tmpl, err := manifests.FS.ReadFile("host-device/f5spkvlan.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	out, err := RenderF5SPKVlan(tmpl, "10.0.10.240", "", 24, false, false)
+	if err != nil {
+		t.Fatalf("RenderF5SPKVlan single: %v", err)
+	}
+	s := string(out)
+	for _, want := range []string{"kind: F5SPKVlan", "name: ext-vlan", `- "1.1"`, `- "10.0.10.240"`, "prefixlen_v4: 24"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("single-interface F5SPKVlan missing %q:\n%s", want, s)
+		}
+	}
+	for _, unwanted := range []string{"name: int-vlan", "allowed_services"} {
+		if strings.Contains(s, unwanted) {
+			t.Errorf("single-interface F5SPKVlan must omit %q:\n%s", unwanted, s)
+		}
+	}
+	out, err = RenderF5SPKVlan(tmpl, "10.0.10.240", "10.0.20.240", 24, true, true)
+	if err != nil {
+		t.Fatalf("RenderF5SPKVlan dual: %v", err)
+	}
+	s = string(out)
+	for _, want := range []string{"name: int-vlan", "internal: true", `- "1.2"`, `- "10.0.20.240"`, `port: "179"`, `port: "3784"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("dual-interface F5SPKVlan missing %q:\n%s", want, s)
+		}
 	}
 }
