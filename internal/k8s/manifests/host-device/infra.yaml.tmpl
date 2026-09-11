@@ -23,20 +23,33 @@ metadata:
     app.kubernetes.io/instance: {{ .LabName }}
 spec:
   ipams:
+    # availabilityZone: the controller groups TMM devices per zone (its log
+    # shows group "ap-southeast-2a") and counts the self IPs a group can use when
+    # deciding how many TMMs may be active. On AWS a pool without a zone was not
+    # attributed to the group (maxActiveDevices=0, live 2026-09-11).
     - name: ext-selfip
       ipPools:
         - rangeStart: "{{ .TmmExtSelfIP }}"
           rangeEnd: "{{ .TmmExtSelfIPEnd }}"
+{{- if .ExtAZ }}
+          availabilityZone: "{{ .ExtAZ }}"
+{{- end }}
 {{- if .HasInternal }}
     - name: int-selfip
       ipPools:
         - rangeStart: "{{ .TmmIntSelfIP }}"
           rangeEnd: "{{ .TmmIntSelfIPEnd }}"
+{{- if .IntAZ }}
+          availabilityZone: "{{ .IntAZ }}"
+{{- end }}
 {{- end }}
     - name: {{ .ListenerPool }}
       ipPools:
         - rangeStart: "{{ .ListenerStart }}"
           rangeEnd: "{{ .ListenerEnd }}"
+{{- if .ExtAZ }}
+          availabilityZone: "{{ .ExtAZ }}"
+{{- end }}
   networkAttachments:
     - name: ext-attach
       networkAttachmentDefinitions:

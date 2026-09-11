@@ -152,7 +152,7 @@ func TestRenderInfra_DualInterface(t *testing.T) {
 		t.Fatalf("RenderInfra: %v", err)
 	}
 	s := string(out)
-	for _, want := range []string{"name: int-vlan-infra", "name: int-selfip", "name: internal-netdevice", `rangeStart: "10.0.20.224"`, `rangeEnd: "10.0.20.254"`, "name: int-attach"} {
+	for _, want := range []string{`availabilityZone: "ap-southeast-2a"`, "name: int-vlan-infra", "name: int-selfip", "name: internal-netdevice", `rangeStart: "10.0.20.224"`, `rangeEnd: "10.0.20.254"`, "name: int-attach"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("dual-interface Infra missing %q:\n%s", want, s)
 		}

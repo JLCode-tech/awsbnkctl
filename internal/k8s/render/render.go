@@ -493,6 +493,8 @@ type InfraVars struct {
 	IntNetwork      string // int-vlan
 	Mtu             int    // cl.Bnk.TmmMtu
 	HasInternal     bool   // render the internal pool, attachment and network
+	ExtAZ           string // availability zone of the external data-path subnet (pool zone)
+	IntAZ           string // availability zone of the internal data-path subnet
 }
 
 // RenderInfra renders the Infra CR for a BNK pattern. Each self-IP pool is the
@@ -552,6 +554,8 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 		IntNetwork:      InfraIntNetwork,
 		Mtu:             mtu,
 		HasInternal:     hasInternal,
+		ExtAZ:           cl.Network.DataPath.External.AZ,
+		IntAZ:           cl.Network.DataPath.Internal.AZ,
 	}
 	return Render(tmpl, vars)
 }
