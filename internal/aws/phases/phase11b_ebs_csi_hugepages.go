@@ -137,9 +137,6 @@ func Phase11bEBSCSIHugepagesDown(ctx context.Context, cl *intent.Cluster, st *st
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 11b down] EBS CSI addon + hugepages-ds: cluster=%s\n", name)
 
-	// Runs on every path: the PVC-backed volumes outlive the cluster otherwise.
-	defer deleteClusterVolumes(ctx, clients.EC2, name)
-
 	if clients.K8s == nil {
 		fmt.Fprintln(os.Stderr, "[phase 11b down] warning: k8s client not available, skipping k8s teardown")
 		clearPhase11bState(st)
@@ -176,19 +173,19 @@ func Phase11bEBSCSIHugepagesDown(ctx context.Context, cl *intent.Cluster, st *st
 	return st.Save()
 }
 
-// Volume sweep budget: pods from the deleted BNK namespaces take up to a minute
-// to release their volumes (in-use → available) before they can be deleted.
+// Volume sweep budget: after the node group is deleted the last detachments
+// can lag the instance terminations by a few seconds.
 var (
-	volumeSweepTimeout  = 3 * time.Minute
+	volumeSweepTimeout  = 2 * time.Minute
 	volumeSweepInterval = 10 * time.Second
 )
 
 // deleteClusterVolumes deletes the EBS volumes the CSI driver provisioned for
 // this cluster's PVCs (tag kubernetes.io/cluster/<name>). Phase 12 down deletes
-// the namespaces without waiting and this phase removes the CSI addon, so the
-// driver never gets to reclaim them; without this they stay behind as
-// `available` volumes (5 × gp2 per BNK instance, seen live 2026-09-11).
-// Best-effort: logs and returns on any error.
+// the namespaces without waiting and Phase 11b down removes the CSI addon, so
+// the driver never reclaims them; a volume still attached to a node stays
+// in-use until the node is gone, which is why Phase 10 down calls this after
+// the node group is deleted. Best-effort: logs and returns on any error.
 func deleteClusterVolumes(ctx context.Context, ec2c EC2API, clusterName string) {
 	if ec2c == nil {
 		return

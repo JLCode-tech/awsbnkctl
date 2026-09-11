@@ -37,17 +37,3 @@ func TestDeleteClusterVolumes_DeletesAvailableLeavesBusy(t *testing.T) {
 func TestDeleteClusterVolumes_NilEC2NoPanic(t *testing.T) {
 	deleteClusterVolumes(context.Background(), nil, "tracer")
 }
-
-// TestPhase11bDown_SweepsVolumes: the sweep runs on the nil-K8s path too.
-func TestPhase11bDown_SweepsVolumes(t *testing.T) {
-	fastVolumeSweep(t)
-	cl, st, _ := phase11bCluster(t)
-	m := &mockEC2{volumes: map[string]ec2types.VolumeState{"vol-a": ec2types.VolumeStateAvailable}}
-	clients := &Clients{Profile: "test", EKS: newMockEKS(), EC2: m}
-	if err := Phase11bEBSCSIHugepagesDown(context.Background(), cl, st, clients); err != nil {
-		t.Fatalf("down: %v", err)
-	}
-	if len(m.volumes) != 0 {
-		t.Errorf("PVC volume should have been deleted, got %v", m.volumes)
-	}
-}
