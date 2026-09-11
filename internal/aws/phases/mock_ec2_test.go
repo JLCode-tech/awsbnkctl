@@ -13,6 +13,10 @@ import (
 // mockEC2 is the shared test double for EC2API.
 // Each method has a configurable result; call counts support idempotency assertions.
 type mockEC2 struct {
+	// EBS volumes (phase 11b down sweep): id → state; DeleteVolume removes the entry.
+	volumes           map[string]ec2types.VolumeState
+	deleteVolumeCalls int
+
 	// VPC
 	describeVpcsOut *ec2.DescribeVpcsOutput
 	describeVpcsErr error
@@ -305,6 +309,21 @@ func (m *mockEC2) RevokeSecurityGroupIngress(_ context.Context, in *ec2.RevokeSe
 	m.revokeIngressInputs = append(m.revokeIngressInputs, in)
 	return &ec2.RevokeSecurityGroupIngressOutput{}, m.revokeIngressErr
 }
+func (m *mockEC2) DescribeVolumes(_ context.Context, _ *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	out := &ec2.DescribeVolumesOutput{}
+	for id, st := range m.volumes {
+		id := id
+		out.Volumes = append(out.Volumes, ec2types.Volume{VolumeId: &id, State: st})
+	}
+	return out, nil
+}
+
+func (m *mockEC2) DeleteVolume(_ context.Context, in *ec2.DeleteVolumeInput, _ ...func(*ec2.Options)) (*ec2.DeleteVolumeOutput, error) {
+	m.deleteVolumeCalls++
+	delete(m.volumes, *in.VolumeId)
+	return &ec2.DeleteVolumeOutput{}, nil
+}
+
 func (m *mockEC2) DescribeNetworkInterfaces(_ context.Context, _ *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 	if m.describeENIsOut == nil {
 		return &ec2.DescribeNetworkInterfacesOutput{}, m.describeENIsErr

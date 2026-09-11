@@ -233,6 +233,9 @@ func Phase10NodeGroupDown(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		st.Set("NODEGROUP_"+upper+"_NAME", "")
 		st.Set("NODEGROUP_"+upper+"_ARN", "")
 	}
+	// The nodes are gone, so every PVC volume the CSI driver provisioned has
+	// detached; nothing else will delete them now that the driver is removed.
+	deleteClusterVolumes(ctx, clients.EC2, clusterName)
 
 	// Delete the BNK Launch Template.
 	ltID := st.Get("LT_ID")

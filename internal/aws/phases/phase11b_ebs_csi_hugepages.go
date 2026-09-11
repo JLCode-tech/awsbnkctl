@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/smithy-go"
@@ -169,6 +171,61 @@ func Phase11bEBSCSIHugepagesDown(ctx context.Context, cl *intent.Cluster, st *st
 
 	clearPhase11bState(st)
 	return st.Save()
+}
+
+// Volume sweep budget: after the node group is deleted the last detachments
+// can lag the instance terminations by a few seconds.
+var (
+	volumeSweepTimeout  = 2 * time.Minute
+	volumeSweepInterval = 10 * time.Second
+)
+
+// deleteClusterVolumes deletes the EBS volumes the CSI driver provisioned for
+// this cluster's PVCs (tag kubernetes.io/cluster/<name>). Phase 12 down deletes
+// the namespaces without waiting and Phase 11b down removes the CSI addon, so
+// the driver never reclaims them; a volume still attached to a node stays
+// in-use until the node is gone, which is why Phase 10 down calls this after
+// the node group is deleted. Best-effort: logs and returns on any error.
+func deleteClusterVolumes(ctx context.Context, ec2c EC2API, clusterName string) {
+	if ec2c == nil {
+		return
+	}
+	filter := &ec2.DescribeVolumesInput{Filters: []ec2types.Filter{{Name: aws.String("tag-key"), Values: []string{"kubernetes.io/cluster/" + clusterName}}}}
+	deleted := 0
+	deadline := time.Now().Add(volumeSweepTimeout)
+	for {
+		out, err := ec2c.DescribeVolumes(ctx, filter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[phase 11b down] warning: DescribeVolumes: %v\n", err)
+			return
+		}
+		busy := 0
+		for _, v := range out.Volumes {
+			switch v.State {
+			case ec2types.VolumeStateAvailable:
+				if _, err := ec2c.DeleteVolume(ctx, &ec2.DeleteVolumeInput{VolumeId: v.VolumeId}); err != nil {
+					fmt.Fprintf(os.Stderr, "[phase 11b down] warning: DeleteVolume %s: %v\n", aws.ToString(v.VolumeId), err)
+					continue
+				}
+				deleted++
+			case ec2types.VolumeStateDeleted, ec2types.VolumeStateDeleting:
+			default:
+				busy++
+			}
+		}
+		if busy == 0 || time.Now().After(deadline) {
+			if busy > 0 {
+				fmt.Fprintf(os.Stderr, "[phase 11b down] warning: %d PVC volume(s) still attached after %s — left behind\n", busy, volumeSweepTimeout)
+			}
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(volumeSweepInterval):
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[phase 11b down] deleted %d PVC volume(s) tagged kubernetes.io/cluster/%s\n", deleted, clusterName)
 }
 
 // ensureEBSCSIAddon installs the aws-ebs-csi-driver EKS managed addon

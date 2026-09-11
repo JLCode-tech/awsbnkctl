@@ -30,7 +30,7 @@
 
 ## STAGE 3 — Nodes · kubeconfig · ENIs · jumphost
 
-- **`node-group`** (`Phase10NodeGroup`): Provisions the EKS managed node group and waits for nodes to join the cluster.
+- **`node-group`** (`Phase10NodeGroup`): Provisions the EKS managed node group and waits for nodes to join the cluster. On `down`, after the node group is gone it also deletes the EBS volumes the CSI driver provisioned for the cluster's PVCs (tag `kubernetes.io/cluster/<name>`), which nothing else reclaims once the namespaces and addon are deleted.
 - **`kubeconfig`** (`Phase11Kubeconfig`): Generates and saves the admin kubeconfig via the AWS SDK.
 - **`tmm-node-label`** (`Phase16TMMNodeLabel`): Labels the specific worker node targeted for TMM scheduling.
 - **`nvidia-device-plugin`** (`Phase11cNvidiaDevicePlugin`): Deploys the NVIDIA device plugin (GPU node groups only).
@@ -44,7 +44,7 @@
 
 ## STAGE 4 — BNK supply chain · activation
 
-- **`ebs-csi-hugepages`** (`Phase11bEBSCSIHugepages`): Deploys the EBS CSI managed addon, gp3 StorageClass, and configures node hugepages.
+- **`ebs-csi-hugepages`** (`Phase11bEBSCSIHugepages`): Deploys the EBS CSI managed addon, gp3 StorageClass, and configures node hugepages and proxy ARP.
 - **`k8s-foundation`** (`Phase12K8sFoundation`): Deploys foundational cluster components including cert-manager and the Multus CNI.
 - **`flo-helm`** (`Phase14FLOHelm`): Deploys the F5 Lifecycle Operator (FLO) via Helm.
 - **`lb-controller`** (`Phase14bLBController`): Installs the AWS Load Balancer Controller (opt-in).
