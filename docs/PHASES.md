@@ -44,7 +44,7 @@
 
 ## STAGE 4 — BNK supply chain · activation
 
-- **`ebs-csi-hugepages`** (`Phase11bEBSCSIHugepages`): Deploys the EBS CSI managed addon, gp3 StorageClass, and configures node hugepages.
+- **`ebs-csi-hugepages`** (`Phase11bEBSCSIHugepages`): Deploys the EBS CSI managed addon, gp3 StorageClass, and configures node hugepages and proxy ARP. On `down` it also deletes the EBS volumes the CSI driver provisioned for the cluster's PVCs (tag `kubernetes.io/cluster/<name>`), which the driver cannot reclaim once the namespaces and addon are gone.
 - **`k8s-foundation`** (`Phase12K8sFoundation`): Deploys foundational cluster components including cert-manager and the Multus CNI.
 - **`flo-helm`** (`Phase14FLOHelm`): Deploys the F5 Lifecycle Operator (FLO) via Helm.
 - **`lb-controller`** (`Phase14bLBController`): Installs the AWS Load Balancer Controller (opt-in).
