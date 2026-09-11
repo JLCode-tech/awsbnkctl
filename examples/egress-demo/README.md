@@ -20,9 +20,12 @@ from pods in the captured namespace is intercepted on `eth0`, carried to TMM ove
 the tunnel, SNATed to the external SelfIP, filtered by the
 `firewallEnforcedPolicy` ACL, and leaves the VPC through the NAT gateway.
 
-This needs the `external-only` (or `sriov-external`) pattern. On
-`dual-interface` the node-side VXLAN end does not converge on AWS and the
-redirect can disturb ingress as well.
+On AWS the CR needs `nodeInterfaceName` set to the worker's primary NIC, and
+TMM needs a default route plus a route back to the VPC (see
+`static-routes.yaml`). Works on both `external-only` and `dual-interface`.
+
+Only traffic leaving the VPC goes through TMM; pod-to-VPC traffic stays on the
+node.
 
 ## Files
 
@@ -32,6 +35,7 @@ redirect can disturb ingress as well.
 | `firewall-policy.yaml` | `F5BigCneAddresslist` + `F5BigFwPolicy` that blocks `1.1.1.1/32` |
 | `workload.yaml` | the captured `agent` pod (namespace `bnk-egress-demo`) and an uncaptured control pod |
 | `egress-toggle.yaml` | the `F5SPKEgress` CR: apply = BNK on, delete = BNK off |
+| `static-routes.yaml` | the two TMM routes egress needs; apply once |
 | `probe.sh` / `watch.sh` | what the pod sees: its public source IP and whether `1.1.1.1` is reachable |
 
 ## Run it
@@ -43,6 +47,7 @@ export KUBECONFIG=.awsbnkctl/bnk-egress/kubeconfig
 kubectl apply -f examples/egress-demo/firewall-policy.yaml
 kubectl apply -f examples/egress-demo/workload.yaml
 kubectl -n bnk-egress-demo rollout status deploy/agent --timeout=120s
+awsbnkctl k apply --config examples/egress-demo/cluster.yaml -f examples/egress-demo/static-routes.yaml
 ```
 
 Terminal 1, the pod's view:
@@ -54,8 +59,8 @@ kubectl exec -it -n bnk-egress-demo deploy/agent -c nginx -- sh /demo/watch.sh
 Terminal 2, the toggle:
 
 ```bash
-kubectl apply  -f examples/egress-demo/egress-toggle.yaml   # BNK on:  source IP changes, 1.1.1.1 blocked
-kubectl delete -f examples/egress-demo/egress-toggle.yaml   # BNK off: back to the node identity
+awsbnkctl k apply --config examples/egress-demo/cluster.yaml -f examples/egress-demo/egress-toggle.yaml   # BNK on:  source IP changes, 1.1.1.1 blocked
+kubectl delete -n f5-cne-system f5-spk-egresses.k8s.f5net.com bnk-egress-demo                              # BNK off: back to the node identity
 ```
 
 The control pod in `bnk-egress-control` is never captured, so it shows the

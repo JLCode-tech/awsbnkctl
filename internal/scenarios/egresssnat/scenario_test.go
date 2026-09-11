@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios/egresssnat"
 
@@ -36,8 +38,8 @@ func TestRegistered(t *testing.T) {
 	if s == nil {
 		t.Fatal("egress-snat not registered — init() not called?")
 	}
-	if s.Rating() != scenarios.Amber {
-		t.Errorf("rating = %q, want amber", s.Rating())
+	if s.Rating() != scenarios.Green {
+		t.Errorf("rating = %q, want green", s.Rating())
 	}
 	if len(s.Dependencies()) != 0 {
 		t.Errorf("dependencies = %v, want empty", s.Dependencies())
@@ -264,5 +266,55 @@ func TestOptionsOverrides(t *testing.T) {
 				t.Errorf("03-f5spkegress.yaml should use custom-vlan, got:\n%s", content)
 			}
 		}
+	}
+}
+
+// TestManifestsRendered_WithClusterAndState is the live shape: state.env
+// carries the node's primary NIC from Phase 17c and cluster.yaml carries the
+// CIDRs, so the F5SPKEgress pins nodeInterfaceName and a fourth manifest adds
+// the two TMM static routes (VPC via the tunnel VLAN gateway, default via ext).
+func TestManifestsRendered_WithClusterAndState(t *testing.T) {
+	dir := t.TempDir()
+	sctx := minimalCtx(dir)
+	st, err := state.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Set("NODE_PRIMARY_IFNAME", "ens5")
+	sctx.State = st
+	sctx.Cluster = &intent.Cluster{
+		Pattern: intent.PatternDualInterface,
+		Network: intent.Network{
+			VPCCidr: "10.50.0.0/16",
+			DataPath: &intent.DataPathSpec{
+				External: intent.SubnetSpec{CIDR: "10.50.10.0/24"},
+				Internal: intent.SubnetSpec{CIDR: "10.50.20.0/24"},
+			},
+		},
+	}
+
+	paths, err := scenarios.Find("egress-snat").Manifests(sctx)
+	if err != nil {
+		t.Fatalf("Manifests: %v", err)
+	}
+	if len(paths) != 4 {
+		t.Fatalf("expected 4 manifest paths, got %d: %v", len(paths), paths)
+	}
+	all := ""
+	for _, p := range paths {
+		raw, _ := readFileHelper(p)
+		all += string(raw)
+	}
+	for _, want := range []string{
+		"nodeInterfaceName: ens5",
+		"destination: 10.50.0.0", "prefixLen: 16", "gateway: 10.50.20.1",
+		"destination: 0.0.0.0", "gateway: 10.50.10.1",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("rendered manifests missing %q", want)
+		}
+	}
+	if strings.Contains(all, "{{") {
+		t.Error("rendered manifests still contain template directives")
 	}
 }

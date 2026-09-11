@@ -34,6 +34,10 @@ const (
 	// InternalIFName is the Linux interface name for the internal TMM NIC (device index 2).
 	InternalIFName = "ens7"
 
+	// PrimaryIFName is the Linux interface name for the node's primary ENI (device index 0).
+	// Dry-run only; live runs discover it in Phase 17c (NODE_PRIMARY_IFNAME).
+	PrimaryIFName = "ens5"
+
 	// ExternalPCI is the PCI bus address for the external TMM NIC.
 	ExternalPCI = "0000:00:08.0"
 
