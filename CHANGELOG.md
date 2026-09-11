@@ -4,6 +4,14 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [1.5.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.4.0...v1.5.0) (2026-09-10)
+
+
+### Features
+
+* **bgp:** open BGP/BFD on the data-plane SG and make every example peering-ready ([#25](https://github.com/JLCode-tech/awsbnkctl/issues/25)) ([6652383](https://github.com/JLCode-tech/awsbnkctl/commit/6652383c519b390746c701d8febfb04999e38e0a))
+* **bnk:** 2.3.3 default with per-release FLO pairing, cert-manager 1.21, and scenario hardening ([#26](https://github.com/JLCode-tech/awsbnkctl/issues/26)) ([f9dd351](https://github.com/JLCode-tech/awsbnkctl/commit/f9dd351803600908e2cec1dfca2cb5160754b5dc))
+
 ## [1.4.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.3.1...v1.4.0) (2026-09-10)
 
 
