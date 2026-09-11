@@ -201,9 +201,10 @@ phase 23b applies `Infra` instead of `F5SPKVlan` and every scenario ships a
 the controller container gets `USE_GATEWAY_SETTINGS=true` from the CNEInstance, because the
 2.4.0 f5ingress binary only starts the Infra and GatewaySettings reconcilers when that
 env flag is set and neither FLO 2.30 nor the f5ingress chart sets it;
-the VLAN self IPs are allocated by the F5 IPAM controller from 4-address pools
-(`<subnet>.240`–`.243`; the F5 IPAM controller splits a pool into per-device blocks and rejects fewer than 3,
-so the 2.3 single self IP became a /30 pool that phase 17 puts on the ENI in full);
+the VLAN self IPs are allocated by the F5 IPAM controller from /27 pools
+(`<subnet>.224`–`.254` around the nominal `.240`; the controller splits a pool into per-device
+blocks and rejected both a single address and a /30), so phase 23b now assigns the allocated
+address on the ENI and records it, where 2.3 pinned `.240` in phase 17;
 `k8s.f5net.com/v3` F5SPKEgress, `k8s.f5net.com/v1` F5SPKStaticRoute and
 `k8s.f5net.com/v1alpha1` RoutingTemplate / GlobalRoutingConfig are still watched; the Gateway API extension group moved from
 `gateway.k8s.f5net.com` to `gateway.k8s.f5.com` (L4Route `v1`, NetPolicy and

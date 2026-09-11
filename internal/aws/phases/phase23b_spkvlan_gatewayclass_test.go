@@ -2,6 +2,8 @@ package phases
 
 import (
 	"context"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubefake "k8s.io/client-go/kubernetes/fake"
@@ -257,15 +259,16 @@ func TestPhase23b_WaitsForControllerBeforeApply(t *testing.T) {
 }
 
 // TestPhase23b_RecordAllocatedSelfIP pins the BNK 2.4 readback: the address
-// the F5 IPAM controller wrote to the Infra VLAN's IPAM CR replaces the pool
-// start in state; a missing CR or empty allocation leaves state untouched.
+// the F5 IPAM controller wrote to the Infra VLAN's IPAM CR is put on the ENI
+// and replaces the nominal value in state; a pending allocation or a missing
+// CR leaves state untouched and assigns nothing.
 func TestPhase23b_RecordAllocatedSelfIP(t *testing.T) {
 	ipam := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "fic.f5.com/v1",
 		"kind":       "IPAM",
 		"metadata":   map[string]interface{}{"name": infraVlanIPAMName(InstanceNamespace, "ext-vlan"), "namespace": InstanceNamespace},
 		"status": map[string]interface{}{"IPStatus": []interface{}{
-			map[string]interface{}{"deviceID": "DP-0", "ip": "10.0.10.242", "status": "Ok"},
+			map[string]interface{}{"deviceID": "DP-0", "ip": "10.0.10.226", "status": "Ok"},
 		}},
 	}}
 	pending := &unstructured.Unstructured{Object: map[string]interface{}{
@@ -278,19 +281,32 @@ func TestPhase23b_RecordAllocatedSelfIP(t *testing.T) {
 	}}
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(buildScheme(),
 		map[schema.GroupVersionResource]string{ipamGVR: "IPAMList"}, ipam, pending)
+	ec2m := &mockEC2{describeENIsOut: &ec2.DescribeNetworkInterfacesOutput{NetworkInterfaces: []ec2types.NetworkInterface{{NetworkInterfaceId: ptr("eni-ext")}}}}
+	clients := &Clients{Profile: "test", Dynamic: dyn, EC2: ec2m}
 	st, _ := state.Load(t.TempDir())
 	st.Set("TMM_EXT_SELFIP", "10.0.10.240")
 	st.Set("TMM_INT_SELFIP", "10.0.20.240")
+	st.Set("EXTERNAL_ENI", "eni-ext")
+	st.Set("INTERNAL_ENI", "eni-int")
 
-	recordAllocatedSelfIP(context.Background(), dyn, st, "TMM_EXT_SELFIP", "ext-vlan")
-	recordAllocatedSelfIP(context.Background(), dyn, st, "TMM_INT_SELFIP", "int-vlan")
-	recordAllocatedSelfIP(context.Background(), dyn, st, "TMM_OTHER_SELFIP", "no-such-vlan")
+	for _, tc := range []struct{ key, eniKey, network string }{
+		{"TMM_EXT_SELFIP", "EXTERNAL_ENI", "ext-vlan"},
+		{"TMM_INT_SELFIP", "INTERNAL_ENI", "int-vlan"},
+		{"TMM_OTHER_SELFIP", "OTHER_ENI", "no-such-vlan"},
+	} {
+		if err := recordAllocatedSelfIP(context.Background(), clients, st, tc.key, tc.eniKey, tc.network); err != nil {
+			t.Fatalf("recordAllocatedSelfIP(%s): %v", tc.network, err)
+		}
+	}
 
-	if got := st.Get("TMM_EXT_SELFIP"); got != "10.0.10.242" {
-		t.Errorf("TMM_EXT_SELFIP = %q, want the IPAM-allocated 10.0.10.242", got)
+	if got := st.Get("TMM_EXT_SELFIP"); got != "10.0.10.226" {
+		t.Errorf("TMM_EXT_SELFIP = %q, want the IPAM-allocated 10.0.10.226", got)
+	}
+	if len(ec2m.assignedSelfIPs) != 1 || ec2m.assignedSelfIPs[0] != "10.0.10.226" {
+		t.Errorf("ENI assignments = %v, want exactly the allocated 10.0.10.226", ec2m.assignedSelfIPs)
 	}
 	if got := st.Get("TMM_INT_SELFIP"); got != "10.0.20.240" {
-		t.Errorf("TMM_INT_SELFIP = %q, want the pool start kept while allocation is pending", got)
+		t.Errorf("TMM_INT_SELFIP = %q, want the nominal value kept while allocation is pending", got)
 	}
 	if got := st.Get("TMM_OTHER_SELFIP"); got != "" {
 		t.Errorf("TMM_OTHER_SELFIP = %q, want unset when the IPAM CR is missing", got)

@@ -221,12 +221,17 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	}
 	fmt.Fprintf(os.Stderr, "[phase 23b] Infra %s Programmed=True\n", render.InfraName)
 
-	// Record the self IPs FIC allocated from the pools. Phase 17 stored the
-	// pool start; the egress-snat SNAT check, the BGP how-to and the topology
-	// diagram need the address TMM really got.
-	recordAllocatedSelfIP(ctx, clients.Dynamic, st, "TMM_EXT_SELFIP", render.InfraExtNetwork)
+	// Put the self IPs FIC allocated on the ENIs (AWS only delivers traffic
+	// for addresses the ENI owns, F5 Multi-AZ PDF p.9) and record them: the
+	// egress-snat SNAT check, the BGP how-to and the topology diagram need the
+	// address TMM really got, not the nominal value phase 17 stored.
+	if err := recordAllocatedSelfIP(ctx, clients, st, "TMM_EXT_SELFIP", "EXTERNAL_ENI", render.InfraExtNetwork); err != nil {
+		return fmt.Errorf("phase23b: %w", err)
+	}
 	if hasInternal {
-		recordAllocatedSelfIP(ctx, clients.Dynamic, st, "TMM_INT_SELFIP", render.InfraIntNetwork)
+		if err := recordAllocatedSelfIP(ctx, clients, st, "TMM_INT_SELFIP", "INTERNAL_ENI", render.InfraIntNetwork); err != nil {
+			return fmt.Errorf("phase23b: %w", err)
+		}
 	}
 
 	return st.Save()
@@ -311,18 +316,30 @@ func allocatedSelfIP(ctx context.Context, dyn dynamic.Interface, ns, network str
 	return "", nil
 }
 
-// recordAllocatedSelfIP writes the FIC-allocated self IP of an Infra VLAN
-// network to state under key. A missing allocation is a warning, not an
-// error: the pool start phase 17 stored stays in place.
-func recordAllocatedSelfIP(ctx context.Context, dyn dynamic.Interface, st *state.State, key, network string) {
-	ip, err := allocatedSelfIP(ctx, dyn, InstanceNamespace, network)
-	switch {
-	case err != nil:
-		fmt.Fprintf(os.Stderr, "[phase 23b] warning: reading IPAM %s: %v (keeping %s=%s)\n", infraVlanIPAMName(InstanceNamespace, network), err, key, st.Get(key))
-	case ip == "":
-		fmt.Fprintf(os.Stderr, "[phase 23b] warning: IPAM %s has no allocated address yet (keeping %s=%s)\n", infraVlanIPAMName(InstanceNamespace, network), key, st.Get(key))
-	default:
-		st.Set(key, ip)
-		fmt.Fprintf(os.Stderr, "[phase 23b] %s self IP allocated by IPAM: %s=%s\n", network, key, ip)
+// recordAllocatedSelfIP puts the FIC-allocated self IP of an Infra VLAN
+// network on the ENI named by eniKey in state and writes it to state under
+// key. A missing allocation is a warning, not an error (the nominal value phase
+// 17 stored stays); a failed ENI assignment is an error because TMM would own
+// an address AWS never delivers to.
+func recordAllocatedSelfIP(ctx context.Context, clients *Clients, st *state.State, key, eniKey, network string) error {
+	ipamName := infraVlanIPAMName(InstanceNamespace, network)
+	ip, err := allocatedSelfIP(ctx, clients.Dynamic, InstanceNamespace, network)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[phase 23b] warning: reading IPAM %s: %v (keeping %s=%s)\n", ipamName, err, key, st.Get(key))
+		return nil
 	}
+	if ip == "" {
+		fmt.Fprintf(os.Stderr, "[phase 23b] warning: IPAM %s has no allocated address yet (keeping %s=%s)\n", ipamName, key, st.Get(key))
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "[phase 23b] %s self IP allocated by IPAM: %s=%s\n", network, key, ip)
+	if eniID := st.Get(eniKey); eniID != "" && clients.EC2 != nil {
+		if err := assignSelfIPIfNeeded(ctx, clients.EC2, eniID, ip, "[phase 23b]"); err != nil {
+			return fmt.Errorf("assigning allocated self IP %s to %s (%s): %w", ip, eniID, eniKey, err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "[phase 23b] warning: %s not in state or no EC2 client; %s not assigned to an ENI\n", eniKey, ip)
+	}
+	st.Set(key, ip)
+	return nil
 }

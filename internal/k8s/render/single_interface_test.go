@@ -127,14 +127,14 @@ func TestRenderInfra_SingleInterface_OmitsInternal(t *testing.T) {
 		"kind: Infra", "name: infra", "namespace: f5-cne-system",
 		"name: ext-vlan", "type: vlan", "mtu: 9000",
 		"name: external-netdevice",
-		`rangeStart: "10.0.10.240"`, `rangeEnd: "10.0.10.243"`,
+		`rangeStart: "10.0.10.224"`, `rangeEnd: "10.0.10.254"`,
 		"name: listener-pool", `rangeStart: "10.0.10.100"`, `rangeEnd: "10.0.10.199"`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("single-interface Infra missing %q:\n%s", want, s)
 		}
 	}
-	for _, unwanted := range []string{"name: int-vlan", "int-selfip", "internal-netdevice", "10.0.20.240"} {
+	for _, unwanted := range []string{"name: int-vlan", "int-selfip", "internal-netdevice", "10.0.20."} {
 		if strings.Contains(s, unwanted) {
 			t.Errorf("single-interface Infra must omit %q:\n%s", unwanted, s)
 		}
@@ -152,7 +152,7 @@ func TestRenderInfra_DualInterface(t *testing.T) {
 		t.Fatalf("RenderInfra: %v", err)
 	}
 	s := string(out)
-	for _, want := range []string{"name: int-vlan", "name: int-selfip", "name: internal-netdevice", `rangeStart: "10.0.20.240"`, `rangeEnd: "10.0.20.243"`, "name: int-attach"} {
+	for _, want := range []string{"name: int-vlan", "name: int-selfip", "name: internal-netdevice", `rangeStart: "10.0.20.224"`, `rangeEnd: "10.0.20.254"`, "name: int-attach"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("dual-interface Infra missing %q:\n%s", want, s)
 		}
@@ -162,18 +162,18 @@ func TestRenderInfra_DualInterface(t *testing.T) {
 	}
 }
 
-// TestRenderInfra_SelfIPPoolMustBeAligned pins the BNK 2.4 self-IP pool
-// contract: a pool that is not a /30 cannot be rendered (FIC splits the
-// covering CIDR, so a misaligned range could allocate outside it).
-func TestRenderInfra_SelfIPPoolMustBeAligned(t *testing.T) {
+// TestRenderInfra_SelfIPPoolRejectsReservedBlock pins the BNK 2.4 self-IP pool
+// contract: a self IP in the first /27 of its subnet (AWS-reserved addresses)
+// cannot be rendered.
+func TestRenderInfra_SelfIPPoolRejectsReservedBlock(t *testing.T) {
 	tmpl, err := manifests.FS.ReadFile("host-device/infra.yaml.tmpl")
 	if err != nil {
 		t.Fatalf("read template: %v", err)
 	}
-	if _, err := RenderInfra(tmpl, infraTestCluster("10.0.10.241", ""), false); err == nil {
-		t.Error("misaligned external self IP must fail to render")
+	if _, err := RenderInfra(tmpl, infraTestCluster("10.0.10.5", ""), false); err == nil {
+		t.Error("external self IP in the reserved first /27 must fail to render")
 	}
-	if _, err := RenderInfra(tmpl, infraTestCluster("10.0.10.240", "10.0.20.242"), true); err == nil {
-		t.Error("misaligned internal self IP must fail to render")
+	if _, err := RenderInfra(tmpl, infraTestCluster("10.0.10.240", "10.0.20.9"), true); err == nil {
+		t.Error("internal self IP in the reserved first /27 must fail to render")
 	}
 }

@@ -135,24 +135,16 @@ func Phase17SecondaryENIs(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	// provides the authoritative values. See constants_hostdevice.go.
 	fmt.Fprintf(os.Stderr, "[phase 17] MACs captured; phase 17c will resolve ifname+PCI on node\n")
 
-	// Assign the TMM self-IP pools as secondary private IPs on each ENI.
-	// Per F5 Multi-AZ PDF p.9: AWS won't route a self IP to the ENI unless it
-	// is also listed as a secondary IP there. On BNK 2.4 the Infra CR lets the
-	// F5 IPAM controller pick the self IP from a pool of intent.SelfIPPoolSize
-	// addresses (a /30 is the smallest pool FIC accepts), so every pool address
-	// goes on the ENI and phase 23b records the one FIC allocated. Until then
-	// state carries the pool start.
+	// Record the nominal TMM self IPs. On BNK 2.4 the Infra CR lets the F5 IPAM
+	// controller allocate the real self IP from the /27 pool around this value,
+	// so the ENI secondary-IP step (F5 Multi-AZ PDF p.9: AWS only delivers to
+	// addresses the ENI owns) moved to phase 23b, which knows the allocated
+	// address and overwrites these keys with it.
 	if c := cl.Network.DataPath; c != nil && c.SelfIPs != nil {
 		if c.SelfIPs.External != "" {
-			if err := assignSelfIPPool(ctx, clients.EC2, extENI, c.SelfIPs.External); err != nil {
-				return fmt.Errorf("phase17: assigning external SelfIP pool %s to %s: %w", c.SelfIPs.External, extENI, err)
-			}
 			st.Set("TMM_EXT_SELFIP", c.SelfIPs.External)
 		}
 		if hasInternal && c.SelfIPs.Internal != "" {
-			if err := assignSelfIPPool(ctx, clients.EC2, intENI, c.SelfIPs.Internal); err != nil {
-				return fmt.Errorf("phase17: assigning internal SelfIP pool %s to %s: %w", c.SelfIPs.Internal, intENI, err)
-			}
 			st.Set("TMM_INT_SELFIP", c.SelfIPs.Internal)
 		}
 		if c.SelfIPs.PrefixLen > 0 {
@@ -163,26 +155,11 @@ func Phase17SecondaryENIs(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	return st.Save()
 }
 
-// assignSelfIPPool puts every address of the self-IP pool that starts at base
-// on the ENI (see intent.SelfIPPool). Idempotent per address.
-func assignSelfIPPool(ctx context.Context, ec2c EC2API, eniID, base string) error {
-	pool, err := intent.SelfIPPool(base)
-	if err != nil {
-		return err
-	}
-	for _, ip := range pool {
-		if err := assignSelfIPIfNeeded(ctx, ec2c, eniID, ip); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // assignSelfIPIfNeeded assigns a secondary private IP to an ENI. Idempotent:
-// describes first and skips if the IP is already in the assigned list.
-// Uses AllowReassignment=true to be safe if the IP was previously assigned
-// to a different ENI (e.g. orphaned by a partial down).
-func assignSelfIPIfNeeded(ctx context.Context, ec2c EC2API, eniID, selfIP string) error {
+// describes first and skips if the IP is already in the assigned list. A
+// collision with an address another ENI owns is surfaced, not stolen. tag is
+// the "[phase NN]" log prefix of the caller.
+func assignSelfIPIfNeeded(ctx context.Context, ec2c EC2API, eniID, selfIP, tag string) error {
 	out, err := ec2c.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
 		NetworkInterfaceIds: []string{eniID},
 	})
@@ -194,20 +171,18 @@ func assignSelfIPIfNeeded(ctx context.Context, ec2c EC2API, eniID, selfIP string
 	}
 	for _, ip := range out.NetworkInterfaces[0].PrivateIpAddresses {
 		if ip.PrivateIpAddress != nil && *ip.PrivateIpAddress == selfIP {
-			fmt.Fprintf(os.Stderr, "[phase 17] SelfIP %s already assigned to %s\n", selfIP, eniID)
+			fmt.Fprintf(os.Stderr, "%s SelfIP %s already assigned to %s\n", tag, selfIP, eniID)
 			return nil
 		}
 	}
-	allowReassignment := true
 	_, err = ec2c.AssignPrivateIpAddresses(ctx, &ec2.AssignPrivateIpAddressesInput{
 		NetworkInterfaceId: ptr(eniID),
 		PrivateIpAddresses: []string{selfIP},
-		AllowReassignment:  &allowReassignment,
 	})
 	if err != nil {
 		return fmt.Errorf("ec2:AssignPrivateIpAddresses %s: %w", eniID, err)
 	}
-	fmt.Fprintf(os.Stderr, "[phase 17] assigned SelfIP %s to %s (per F5 Multi-AZ PDF p.9)\n", selfIP, eniID)
+	fmt.Fprintf(os.Stderr, "%s assigned SelfIP %s to %s (per F5 Multi-AZ PDF p.9)\n", tag, selfIP, eniID)
 	return nil
 }
 

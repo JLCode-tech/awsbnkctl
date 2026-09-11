@@ -453,10 +453,10 @@ type InfraVars struct {
 	InfraName       string // infra (singleton per BNK namespace)
 	InstanceNS      string // f5-cne-system (matches CNEInstance namespace)
 	LabName         string // cl.Metadata.Name
-	TmmExtSelfIP    string // e.g. 10.0.10.240 (pool start)
-	TmmExtSelfIPEnd string // e.g. 10.0.10.243 (pool end, intent.SelfIPPoolSize addresses)
-	TmmIntSelfIP    string // e.g. 10.0.20.240 (pool start)
-	TmmIntSelfIPEnd string // e.g. 10.0.20.243
+	TmmExtSelfIP    string // pool start, e.g. 10.0.10.224 (the /27 holding the configured .240)
+	TmmExtSelfIPEnd string // pool end, e.g. 10.0.10.254
+	TmmIntSelfIP    string // pool start, e.g. 10.0.20.224
+	TmmIntSelfIPEnd string // pool end, e.g. 10.0.20.254
 	ListenerPool    string // IPAM entry the GatewaySettings reference for VIPs
 	ListenerStart   string // e.g. 10.0.10.100
 	ListenerEnd     string // e.g. 10.0.10.199
@@ -468,9 +468,9 @@ type InfraVars struct {
 	HasInternal     bool   // render the internal pool, attachment and network
 }
 
-// RenderInfra renders the Infra CR for a BNK pattern. Self-IP pools start at
-// cl.Network.DataPath.SelfIPs (auto-derived by intent.applyDefaults) and span
-// intent.SelfIPPoolSize addresses (see intent.SelfIPPool for why); the
+// RenderInfra renders the Infra CR for a BNK pattern. Each self-IP pool is the
+// /27 that contains cl.Network.DataPath.SelfIPs (auto-derived by
+// intent.applyDefaults; see intent.SelfIPPoolRange for why); the
 // listener pool is hosts .100-.199 of the external data-path subnet, which
 // covers the VIP plan and stays clear of the self IP (.240) and the jumphost
 // (.200).
@@ -485,13 +485,13 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 	if hasInternal && sel.Internal == "" {
 		return nil, fmt.Errorf("render infra: internal self IP not derivable (internal subnet must be /24)")
 	}
-	extPool, err := intent.SelfIPPool(sel.External)
+	extStart, extEnd, err := intent.SelfIPPoolRange(sel.External)
 	if err != nil {
 		return nil, fmt.Errorf("render infra: external self IP pool: %w", err)
 	}
-	var intPool []string
+	var intStart, intEnd string
 	if hasInternal {
-		if intPool, err = intent.SelfIPPool(sel.Internal); err != nil {
+		if intStart, intEnd, err = intent.SelfIPPoolRange(sel.Internal); err != nil {
 			return nil, fmt.Errorf("render infra: internal self IP pool: %w", err)
 		}
 	}
@@ -512,10 +512,10 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 		InfraName:       InfraName,
 		InstanceNS:      cneInstanceNamespace,
 		LabName:         cl.Metadata.Name,
-		TmmExtSelfIP:    extPool[0],
-		TmmExtSelfIPEnd: extPool[len(extPool)-1],
-		TmmIntSelfIP:    sel.Internal,
-		TmmIntSelfIPEnd: "",
+		TmmExtSelfIP:    extStart,
+		TmmExtSelfIPEnd: extEnd,
+		TmmIntSelfIP:    intStart,
+		TmmIntSelfIPEnd: intEnd,
 		ListenerPool:    InfraListenerPool,
 		ListenerStart:   start,
 		ListenerEnd:     end,
@@ -525,10 +525,6 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 		IntNetwork:      InfraIntNetwork,
 		Mtu:             mtu,
 		HasInternal:     hasInternal,
-	}
-	if hasInternal {
-		vars.TmmIntSelfIP = intPool[0]
-		vars.TmmIntSelfIPEnd = intPool[len(intPool)-1]
 	}
 	return Render(tmpl, vars)
 }
