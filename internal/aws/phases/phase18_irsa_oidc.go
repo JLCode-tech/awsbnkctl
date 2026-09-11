@@ -38,8 +38,9 @@ const cneControllerVpcReadPolicy = `{"Version":"2012-10-17","Statement":[{"Effec
 //     (crypto/tls.Dial — no os/exec per D-001).
 //  3. iam:GetOpenIDConnectProvider by computed ARN; if absent →
 //     iam:CreateOpenIDConnectProvider. Tag with awsbnkctl:*.
-//  4. Create <cluster>-cne-controller-irsa IAM role with federated
-//     assume-role-policy targeting system:serviceaccount:<INSTANCE_NS>/<CNE_SA_NAME>.
+//  4. Create <cluster>-cne-controller-irsa IAM role with a federated
+//     assume-role-policy for system:serviceaccount:<INSTANCE_NS>:* — the
+//     controller SA does not exist yet; Phase 21 scopes it to the real name.
 //  5. Put inline policy CneControllerVpcRead (VPC + ENI read/write actions).
 //  6. EC2 AuthorizeSecurityGroupIngress: add SG_BNK_DATA as source to the EKS
 //     cluster SG (EKS_SECURITY_GROUP from state). Tolerates duplicate-rule errors.
@@ -53,25 +54,6 @@ func Phase18IRSAOIDC(ctx context.Context, cl *intent.Cluster, st *state.State, c
 	fmt.Fprintf(os.Stderr, "[phase 18] irsa+oidc: cluster=%s\n", name)
 
 	irsaRoleName := name + "-cne-controller-irsa"
-
-	// Resolve SA identifiers from state (written by slice 7b / dryRun defaults).
-	instanceNS := st.Get("INSTANCE_NS")
-	if instanceNS == "" {
-		instanceNS = "f5-cne-system"
-	}
-	cneSAName := st.Get("CNE_SA_NAME")
-	if cneSAName == "" {
-		// CNE_SA_NAME is set in slice 7b (Phase 21); use deterministic default.
-		// MUST match Phase 21's CNEServiceAccountName() which appends "-bnk-" —
-		// the SA YAML template renders f5-cne-controller-<cluster>-bnk-serviceaccount
-		// via InstanceNameCR=<cluster>-bnk. A name mismatch here means the IRSA
-		// role's trust policy rejects sts:AssumeRoleWithWebIdentity for the actual
-		// SA, cne-controller logs "Cloud prerequisites not met" / cloudProviderInstanceNil,
-		// and AssignPrivateIpAddresses for the Gateway VIP is never called. Caught
-		// live on syd-tracer 2026-05-23 — TMM had the VIP in its listener config
-		// but the BNK_EXT ENI never received 10.0.10.100 as a secondary IP.
-		cneSAName = "f5-cne-controller-" + name + "-bnk-serviceaccount"
-	}
 
 	if dryRun {
 		fmt.Fprintln(os.Stderr, "[phase 18] dry-run: would resolve EKS OIDC issuer, compute thumbprint, create OIDC provider")
@@ -138,7 +120,7 @@ func Phase18IRSAOIDC(ctx context.Context, cl *intent.Cluster, st *state.State, c
 	oidcHost := strings.TrimPrefix(issuerURL, "https://")
 
 	irsaRoleARN, err := ensureIRSARole(ctx, clients.IAM, name, irsaRoleName, oidcHost, accountID,
-		instanceNS, cneSAName, cl.Tags, cl.Metadata.Labels)
+		irsaSubject(InstanceNamespace, "*"), cl.Tags, cl.Metadata.Labels)
 	if err != nil {
 		return fmt.Errorf("phase18: IRSA role: %w", err)
 	}
@@ -325,9 +307,16 @@ func ensureOIDCProvider(ctx context.Context, iamClient IAMAPI, clusterName, issu
 // accountID is the AWS account number (e.g. "111122223333").
 // namespace is the k8s namespace (e.g. "f5-cne-system").
 // saName is the k8s service account name.
-func oidcFederatedTrustPolicy(oidcHost, accountID, namespace, saName string) (string, error) {
+// irsaSubject is the OIDC token subject for a ServiceAccount; saName may be "*".
+func irsaSubject(namespace, saName string) string {
+	return "system:serviceaccount:" + namespace + ":" + saName
+}
+
+// oidcFederatedTrustPolicy builds the IRSA trust document. StringLike so the
+// same builder serves Phase 18's namespace wildcard and Phase 21's exact SA.
+func oidcFederatedTrustPolicy(oidcHost, accountID, subject string) (string, error) {
 	type conditionEntry struct {
-		Eq map[string]string `json:"StringEquals"`
+		Eq map[string]string `json:"StringLike"`
 	}
 	type statement struct {
 		Effect    string            `json:"Effect"`
@@ -349,7 +338,7 @@ func oidcFederatedTrustPolicy(oidcHost, accountID, namespace, saName string) (st
 				Action: "sts:AssumeRoleWithWebIdentity",
 				Condition: conditionEntry{
 					Eq: map[string]string{
-						oidcHost + ":sub": "system:serviceaccount:" + namespace + ":" + saName,
+						oidcHost + ":sub": subject,
 						oidcHost + ":aud": "sts.amazonaws.com",
 					},
 				},
@@ -365,7 +354,7 @@ func oidcFederatedTrustPolicy(oidcHost, accountID, namespace, saName string) (st
 
 // ensureIRSARole creates the IRSA role for f5-cne-controller (idempotent).
 func ensureIRSARole(ctx context.Context, iamClient IAMAPI, clusterName, roleName,
-	oidcHost, accountID, namespace, saName string,
+	oidcHost, accountID, subject string,
 	extraTags, labels map[string]string) (string, error) {
 
 	// Check if role already exists.
@@ -385,7 +374,7 @@ func ensureIRSARole(ctx context.Context, iamClient IAMAPI, clusterName, roleName
 		roleARN = *getOut.Role.Arn
 		fmt.Fprintf(os.Stderr, "[phase 18] IRSA role %s already exists, skipping create\n", roleName)
 	} else {
-		trustPolicy, err := oidcFederatedTrustPolicy(oidcHost, accountID, namespace, saName)
+		trustPolicy, err := oidcFederatedTrustPolicy(oidcHost, accountID, subject)
 		if err != nil {
 			return "", fmt.Errorf("building IRSA trust policy: %w", err)
 		}

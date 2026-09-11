@@ -92,7 +92,7 @@ func TestPhase18IRSAOIDC_IRSARoleCreate(t *testing.T) {
 	roleName := cl.Metadata.Name + "-cne-controller-irsa"
 
 	roleARN, err := ensureIRSARole(context.Background(), iamMock, cl.Metadata.Name, roleName,
-		oidcHost, accountID, "f5-cne-system", "f5-cne-controller-tracer-bnk-serviceaccount",
+		oidcHost, accountID, irsaSubject("f5-cne-system", "*"),
 		nil, nil)
 	if err != nil {
 		t.Fatalf("ensureIRSARole: %v", err)
@@ -130,13 +130,13 @@ func TestPhase18IRSAOIDC_IRSARoleIdempotent(t *testing.T) {
 	roleName := cl.Metadata.Name + "-cne-controller-irsa"
 
 	if _, err := ensureIRSARole(context.Background(), iamMock, cl.Metadata.Name, roleName,
-		oidcHost, accountID, "f5-cne-system", "sa-name", nil, nil); err != nil {
+		oidcHost, accountID, irsaSubject("f5-cne-system", "sa-name"), nil, nil); err != nil {
 		t.Fatalf("ensureIRSARole run1: %v", err)
 	}
 	createAfterRun1 := iamMock.createRoleCalls
 
 	if _, err := ensureIRSARole(context.Background(), iamMock, cl.Metadata.Name, roleName,
-		oidcHost, accountID, "f5-cne-system", "sa-name", nil, nil); err != nil {
+		oidcHost, accountID, irsaSubject("f5-cne-system", "sa-name"), nil, nil); err != nil {
 		t.Fatalf("ensureIRSARole run2: %v", err)
 	}
 	if iamMock.createRoleCalls != createAfterRun1 {
@@ -411,8 +411,7 @@ func TestOIDCFederatedTrustPolicy(t *testing.T) {
 	policy, err := oidcFederatedTrustPolicy(
 		"oidc.eks.ap-southeast-2.amazonaws.com/id/TESTOIDC",
 		"111122223333",
-		"f5-cne-system",
-		"f5-cne-controller-tracer-sa",
+		irsaSubject("f5-cne-system", "f5-cne-controller-tracer-sa"),
 	)
 	if err != nil {
 		t.Fatalf("oidcFederatedTrustPolicy: %v", err)

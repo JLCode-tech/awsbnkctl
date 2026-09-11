@@ -569,15 +569,16 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 	}); err != nil {
 		return err
 	}
-	// Phase 21: IRSA ServiceAccount pre-creation with eks.amazonaws.com/role-arn annotation.
-	if err := stage(4, "irsa-sa", func() error {
-		return phases.Phase21IRSASA(ctx, cl, st, clients, dryRun)
-	}); err != nil {
-		return err
-	}
 	// Phase 22: CNEInstance CR apply + reconcile-started gate (2 min).
 	if err := stage(4, "cne-instance", func() error {
 		return phases.Phase22CNEInstance(ctx, cl, st, clients, dryRun)
+	}); err != nil {
+		return err
+	}
+	// Phase 21: bind the IRSA role to the controller's real ServiceAccount
+	// (discovered from the FLO-created Deployment, hence after Phase 22).
+	if err := stage(4, "irsa-sa", func() error {
+		return phases.Phase21IRSASA(ctx, cl, st, clients, dryRun)
 	}); err != nil {
 		return err
 	}
@@ -879,7 +880,6 @@ func printDownPlan(w io.Writer, cl *intent.Cluster, st *state.State, keepIRSA, k
 		{label: "GatewayClass + F5SPKVlan", key: "GATEWAYCLASS_NAME"},
 		{label: "License CR", key: "LICENSE_NAME"},
 		{label: "CNEInstance CR", key: "CNEINSTANCE_NAME"},
-		{label: "IRSA ServiceAccount", key: "CNE_SA_NAME"},
 		{label: "internal NAD", key: "INTERNAL_NAD"},
 		{label: "external NAD", key: "EXTERNAL_NAD"},
 		// LBC resources — present only when addons.lbController.enabled=true.
