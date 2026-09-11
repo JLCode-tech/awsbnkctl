@@ -217,6 +217,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 	})
 
 	res := scenarios.Result{
+		DataPath:   true,
 		Assertions: assertions,
 	}
 	return scenarios.FinalizeResult(res)

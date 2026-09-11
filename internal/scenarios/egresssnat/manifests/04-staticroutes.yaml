@@ -1,0 +1,29 @@
+# TMM routes the egress path needs. AWS puts the subnet router on the first
+# host address of every subnet.
+#  - the VPC via the tunnel VLAN's gateway: VXLAN replies to worker nodes must
+#    leave on the VLAN they arrived on; TMM's default otherwise sends them out
+#    its pod interface with the VLAN SelfIP as source, which the VPC drops.
+#  - default via the external VLAN's gateway: AUTOMAP SNAT picks the SelfIP of
+#    the egress interface, so this is what makes the source the external
+#    SelfIP and sends the traffic out ext-vlan → NAT gateway.
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: awsbnkctl-egress-vpc
+  namespace: {{.EgressNamespace}}
+spec:
+  destination: {{.VpcNet}}
+  prefixLen: {{.VpcPrefixLen}}
+  gateway: {{.TunnelGateway}}
+  type: gateway
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: awsbnkctl-egress-default
+  namespace: {{.EgressNamespace}}
+spec:
+  destination: 0.0.0.0
+  prefixLen: 0
+  gateway: {{.ExtGateway}}
+  type: gateway

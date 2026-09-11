@@ -18,6 +18,7 @@ type mockIAM struct {
 	inlinePolicies   map[string][]string                  // role name → slice of inline policy names
 	oidcProviders    map[string]string                    // oidc provider ARN → url
 	managedPolicies  map[string]*iamtypes.Policy          // policy ARN → policy
+	trustPolicies    map[string]string                    // role name → assume-role policy document
 
 	// Per-method call counts.
 	createRoleCalls               int
@@ -53,7 +54,16 @@ func newMockIAM() *mockIAM {
 		inlinePolicies:   make(map[string][]string),
 		oidcProviders:    make(map[string]string),
 		managedPolicies:  make(map[string]*iamtypes.Policy),
+		trustPolicies:    make(map[string]string),
 	}
+}
+
+func (m *mockIAM) UpdateAssumeRolePolicy(_ context.Context, in *iam.UpdateAssumeRolePolicyInput, _ ...func(*iam.Options)) (*iam.UpdateAssumeRolePolicyOutput, error) {
+	if _, ok := m.roles[*in.RoleName]; !ok {
+		return nil, mkNoSuchEntity("role not found: " + *in.RoleName)
+	}
+	m.trustPolicies[*in.RoleName] = *in.PolicyDocument
+	return &iam.UpdateAssumeRolePolicyOutput{}, nil
 }
 
 // mkNoSuchEntity returns an *iamtypes.NoSuchEntityException for testing.
@@ -82,6 +92,9 @@ func (m *mockIAM) CreateRole(_ context.Context, in *iam.CreateRoleInput, _ ...fu
 	m.roles[*in.RoleName] = role
 	m.attachedPolicies[*in.RoleName] = make(map[string]bool)
 	m.inlinePolicies[*in.RoleName] = nil
+	if in.AssumeRolePolicyDocument != nil {
+		m.trustPolicies[*in.RoleName] = *in.AssumeRolePolicyDocument
+	}
 	return &iam.CreateRoleOutput{Role: role}, nil
 }
 

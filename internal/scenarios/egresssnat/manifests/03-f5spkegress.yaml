@@ -12,3 +12,11 @@ spec:
     vxlan:
       create: true
       tmmInterfaceName: {{.TmmIntVlan}}
+{{- if .NodeIfname}}
+      nodeInterfaceName: {{.NodeIfname}}
+{{- end}}
+      ipv4Subnet: "192.168.0.0"
+      ipv4PrefixLen: 16
+      ipv6Subnet: "fd50::"
+      ipv6PrefixLen: 112
+

@@ -1,25 +1,21 @@
 // Package egresssnat implements scenario "egress-snat" — transparent pod
 // egress through TMM with AUTOMAP source translation using the pseudo-CNI
-// VXLAN overlay (how-to #10, Amber).
+// VXLAN overlay (how-to #10, Green).
 //
-// On the awsbnkctl host-device topology the internal NIC (ens7) is moved into
-// the TMM pod, so the worker node has no internal-VLAN interface to use for
-// the appNodeInterface mode. The VXLAN overlay is required: F5SPKEgress with
-// vxlan.create=true creates the TMM tunnel end inline; the CSRC DaemonSet
-// (f5-spk-csrc, already running) programs the worker-node end.
+// The worker node has no interface on TMM's VLANs (host-device moves those
+// NICs into the TMM pod), so the tunnel runs over the pod network: F5SPKEgress
+// with vxlan.create=true and nodeInterfaceName = the node's primary NIC
+// (NODE_PRIMARY_IFNAME from Phase 17c). TMM also needs two static routes —
+// the VPC via the tunnel VLAN's gateway and a default via ext-vlan's — which
+// 04-staticroutes.yaml provides.
 //
 // Verify:
 //
-//   - egress-client pod becomes Ready (proves namespace + image pull OK).
-//   - F5SPKEgress awsbnkctl-egress is present in EgressNamespace (proves CR
-//     accepted by the API server; status conditions checked when available).
-//   - Data path (gating when the cluster has a jumphost): a source-IP reflector
-//     is started on the jumphost's data-path ENI, the egress-client pod curls
-//     it, and the source the reflector saw must be TMM's external SelfIP —
-//     see verifySourceIP. Without jumphost state the step is recorded as
-//     skipped, so the result stays honest on clusters built without one.
-//
-// Rating stays Amber until the data-path step has passed on a live cluster.
+//   - egress-client pod becomes Ready.
+//   - F5SPKEgress awsbnkctl-egress is present (status checked when available).
+//   - Data path (gating): curls from the pod to an out-of-VPC target must move
+//     TMM's own counters — see verifyTMMEgress. Without an exec client the step
+//     is recorded as skipped so the result stays honest.
 package egresssnat
 
 import (
@@ -27,6 +23,8 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,7 +32,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
 )
 
@@ -72,6 +69,13 @@ var f5SPKEgressGVR = schema.GroupVersionResource{
 	Resource: "f5-spk-egresses",
 }
 
+// f5SPKStaticRouteGVR addresses the two TMM routes 04-staticroutes.yaml creates.
+var f5SPKStaticRouteGVR = schema.GroupVersionResource{
+	Group:    "k8s.f5net.com",
+	Version:  "v1",
+	Resource: "f5-spk-staticroutes",
+}
+
 func init() { scenarios.Register(&scenario{}) }
 
 // VerifyDeps holds the function pointers used by Verify. The zero value routes
@@ -80,17 +84,23 @@ func init() { scenarios.Register(&scenario{}) }
 type VerifyDeps struct {
 	WaitPodReadyFn   func(ctx context.Context, sctx *scenarios.Context, ns, name string, timeout time.Duration) error
 	GetF5SPKEgressFn func(ctx context.Context, sctx *scenarios.Context, ns, name string) (bool, string, error)
-	// The three below implement the data-path proof (see verifySourceIP). A nil
-	// StartResponderFn skips it and Verify stays control-plane only, which is
-	// what the unit tests exercise.
-	StartResponderFn func(ctx context.Context, sctx *scenarios.Context, port int) error
-	StopResponderFn  func(ctx context.Context, sctx *scenarios.Context, port int)
-	ExecInPodFn      func(sctx *scenarios.Context, ns, pod, container string, command ...string) (string, error)
+	// The two below implement the data-path proof (see verifyTMMEgress). A nil
+	// ExecInPodFn skips it and Verify stays control-plane only, which is what
+	// the unit tests exercise.
+	TMMPodFn    func(sctx *scenarios.Context) (string, error)
+	ExecInPodFn func(sctx *scenarios.Context, ns, pod, container string, command ...string) (string, error)
 }
 
-// reflectorPort is where the jumphost source-IP reflector listens. 8080 is
-// external-resource-pool's marker responder; keep clear of it.
-const reflectorPort = 8081
+const (
+	tmmNamespace      = "f5-cne-system"
+	tmmPodSelector    = "app=f5-tmm"
+	tmmDebugContainer = "debug" // the TMM pod sidecar that ships tmctl
+	egressCurlCount   = 3
+	// defaultEgressTarget must be OUTSIDE the VPC: the CSRC DaemonSet keeps
+	// pod→VPC traffic on the node ("addVpcCniEastWestRule"), so only external
+	// destinations traverse the tunnel. Override with --opt egress-target=URL.
+	defaultEgressTarget = "http://checkip.amazonaws.com/"
+)
 
 // Poll budget for the data-path proof (package vars so tests can shrink them).
 var (
@@ -102,79 +112,132 @@ func realVerifyDeps() VerifyDeps {
 	return VerifyDeps{
 		WaitPodReadyFn:   waitPodReady,
 		GetF5SPKEgressFn: getF5SPKEgress,
-		StartResponderFn: func(ctx context.Context, sctx *scenarios.Context, port int) error {
-			return jumphost.StartSourceIPResponder(ctx, probeOpts(sctx), port)
-		},
-		StopResponderFn: func(ctx context.Context, sctx *scenarios.Context, port int) {
-			_ = jumphost.StopHTTPResponder(ctx, probeOpts(sctx), port)
-		},
-		ExecInPodFn: scenarios.ExecInPod,
+		TMMPodFn:         tmmPodName,
+		ExecInPodFn:      scenarios.ExecInPod,
 	}
 }
 
-func probeOpts(sctx *scenarios.Context) jumphost.ProbeOptions {
-	return jumphost.ProbeOptions{
-		Region:     sctx.Cluster.Metadata.Region,
-		InstanceID: sctx.State.Get("JUMPHOST_INSTANCE_ID"),
-		SourceIP:   sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP"),
+// tmmPodName returns the first Running TMM pod (the scenario runs single-TMM shapes).
+func tmmPodName(sctx *scenarios.Context) (string, error) {
+	pods, err := sctx.Clientset.CoreV1().Pods(tmmNamespace).List(sctx.Ctx, metav1.ListOptions{LabelSelector: tmmPodSelector})
+	if err != nil {
+		return "", fmt.Errorf("listing TMM pods: %w", err)
 	}
+	for _, p := range pods.Items {
+		if p.Status.Phase == corev1.PodRunning {
+			return p.Name, nil
+		}
+	}
+	return "", fmt.Errorf("no Running pod with %s in %s", tmmPodSelector, tmmNamespace)
 }
 
-// expectedSNATSource is the address the reflector must see when egress is
-// captured: TMM's external SelfIP (AUTOMAP picks the egress interface's
-// SelfIP). state.env carries it from Phase 17; the intent's derived value is
-// the fallback.
+// expectedSNATSource is the address egress must be SNATed to when captured:
+// TMM's external SelfIP (AUTOMAP picks the egress interface's SelfIP, and the
+// default static route pins that interface to ext-vlan). state.env carries it
+// from Phase 17; the intent's derived value is the fallback.
 func expectedSNATSource(sctx *scenarios.Context) string {
-	if sctx.State != nil {
-		if v := sctx.State.Get("TMM_EXT_SELFIP"); v != "" {
-			return v
-		}
-	}
-	if sctx.Cluster != nil && sctx.Cluster.Network.DataPath != nil {
-		return sctx.Cluster.Network.DataPath.SelfIPs.External
-	}
-	return ""
+	return scenarios.NetVarsFor(sctx.Cluster, sctx.State).TMMExtSelfIP
 }
 
-// verifySourceIP is the Amber→Green data-path proof: start a reflector on the
-// jumphost's data-path ENI, curl it FROM the captured pod, and check the
-// source the reflector saw is TMM's external SelfIP — i.e. the pod's egress
-// really went pod → VXLAN → TMM → AUTOMAP SNAT. It returns (skipped, assertion).
-// skipped is true when the cluster shape cannot run it (no jumphost state);
-// the caller records that as informational so the scenario is honest rather
-// than red on a cluster built without a jumphost.
-func verifySourceIP(d *VerifyDeps, sctx *scenarios.Context, podNS string) (bool, scenarios.Assertion) {
-	if d.StartResponderFn == nil || d.ExecInPodFn == nil || sctx.Cluster == nil || sctx.State == nil ||
-		sctx.State.Get("JUMPHOST_INSTANCE_ID") == "" || sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP") == "" {
+// tmmCounters is what TMM has seen for this scenario's egress: connections on
+// the egress virtual server and connections SNATed to the external SelfIP.
+type tmmCounters struct{ virtual, snat int }
+
+// readTMMCounters pulls both counters with tmctl from the TMM debug sidecar.
+func readTMMCounters(d *VerifyDeps, sctx *scenarios.Context, tmmPod, vsName, selfIPHex string) (tmmCounters, error) {
+	vs, err := d.ExecInPodFn(sctx, tmmNamespace, tmmPod, tmmDebugContainer,
+		"tmctl", "-d", "blade", "-w", "400", "virtual_server_stat", "-s", "name,clientside.tot_conns")
+	if err != nil {
+		return tmmCounters{}, fmt.Errorf("tmctl virtual_server_stat: %w", err)
+	}
+	sn, err := d.ExecInPodFn(sctx, tmmNamespace, tmmPod, tmmDebugContainer,
+		"tmctl", "-d", "blade", "-w", "400", "pool_member_stat", "-s", "pool_name,addr,serverside.tot_conns")
+	if err != nil {
+		return tmmCounters{}, fmt.Errorf("tmctl pool_member_stat: %w", err)
+	}
+	return tmmCounters{virtual: lastIntOnLine(vs, vsName), snat: lastIntOnLine(sn, selfIPHex)}, nil
+}
+
+// lastIntOnLine returns the last whitespace-separated integer on the first
+// line of out containing needle, or 0 when there is no such line.
+func lastIntOnLine(out, needle string) int {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, needle) {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			return 0
+		}
+		n, _ := strconv.Atoi(f[len(f)-1])
+		return n
+	}
+	return 0
+}
+
+// ipv4Hex renders an IPv4 address the way tmctl prints pool-member addresses
+// (IPv4-mapped, 20 bytes), e.g. 10.50.10.240 → "FF:FF:0A:32:0A:F0:00:00:00:00".
+func ipv4Hex(ip string) string {
+	p := net.ParseIP(ip).To4()
+	if p == nil {
+		return ""
+	}
+	return fmt.Sprintf("FF:FF:%02X:%02X:%02X:%02X:00:00:00:00", p[0], p[1], p[2], p[3])
+}
+
+// egressVirtualName is the listener TMM creates for an F5SPKEgress: <ns>-<cr>-egress-ipv4.
+func egressVirtualName(egressNS string) string { return egressNS + "-awsbnkctl-egress-egress-ipv4" }
+
+// verifyTMMEgress is the data-path proof: curl an out-of-VPC target FROM the
+// captured pod and require TMM's own counters to move by the same amount —
+// connections on the egress virtual server (traffic traversed the tunnel) and
+// connections SNATed to the external SelfIP (AUTOMAP rewrote the source). It
+// reads TMM, not a reflector, because the pseudo-CNI keeps pod→VPC traffic on
+// the node, so nothing inside the VPC can observe the SelfIP. It returns
+// (skipped, assertion); skipped is true when there is no exec client, so the
+// scenario stays honest rather than red on control-plane-only runs.
+func verifyTMMEgress(d *VerifyDeps, sctx *scenarios.Context, podNS, egressNS string) (bool, scenarios.Assertion) {
+	want := expectedSNATSource(sctx)
+	if d.ExecInPodFn == nil || d.TMMPodFn == nil || want == "" {
 		return true, scenarios.Assertion{
-			Description: "data-plane SNAT source-IP proof",
+			Description: "data-plane proof (TMM egress virtual + SNAT counters)",
 			OK:          true,
-			Got:         "skipped — needs testing.jumphost.enabled=true (JUMPHOST_INSTANCE_ID / JUMPHOST_BNK_EXT_ENI_IP in state.env); AUTOMAP should present source IP = TMM external SelfIP",
+			Got:         "skipped — needs a Kubernetes exec client and TMM_EXT_SELFIP in state.env",
 		}
 	}
-	want := expectedSNATSource(sctx)
-	reflector := sctx.State.Get("JUMPHOST_BNK_EXT_ENI_IP")
-	if err := d.StartResponderFn(sctx.Ctx, sctx, reflectorPort); err != nil {
-		return false, scenarios.Assertion{Description: "source-IP reflector on the jumphost data-path ENI", OK: false, Got: err.Error()}
+	tmmPod, err := d.TMMPodFn(sctx)
+	if err != nil {
+		return false, scenarios.Assertion{Description: "locate the TMM pod", OK: false, Got: err.Error()}
 	}
-	if d.StopResponderFn != nil {
-		defer d.StopResponderFn(sctx.Ctx, sctx, reflectorPort)
+	target := sctx.Options["egress-target"]
+	if target == "" {
+		target = defaultEgressTarget
 	}
-	url := fmt.Sprintf("http://%s:%d/", reflector, reflectorPort)
-	var seen, lastErr string
+	vsName, selfHex := egressVirtualName(egressNS), ipv4Hex(want)
 	// The CSRC DaemonSet programs the worker-node VXLAN end asynchronously
 	// after the CR is accepted; give it a couple of minutes.
 	ok, detail := scenarios.PollMarkers(sctx.Ctx, sourceIPPollTimeout, sourceIPPollInterval, func() (bool, string) {
-		out, err := d.ExecInPodFn(sctx, podNS, "egress-client", "curl", "curl", "-s", "--max-time", "8", url)
+		before, err := readTMMCounters(d, sctx, tmmPod, vsName, selfHex)
 		if err != nil {
-			lastErr = err.Error()
-			return false, "curl from egress-client failed: " + lastErr
+			return false, err.Error()
 		}
-		seen = strings.TrimSpace(out)
-		return seen == want, fmt.Sprintf("reflector %s saw source %q, want TMM external SelfIP %q", url, seen, want)
+		okCurls := 0
+		for i := 0; i < egressCurlCount; i++ {
+			if _, err := d.ExecInPodFn(sctx, podNS, "egress-client", "curl", "curl", "-s", "-o", "/dev/null", "--max-time", "8", target); err == nil {
+				okCurls++
+			}
+		}
+		after, err := readTMMCounters(d, sctx, tmmPod, vsName, selfHex)
+		if err != nil {
+			return false, err.Error()
+		}
+		dv, ds := after.virtual-before.virtual, after.snat-before.snat
+		pass := okCurls == egressCurlCount && dv >= egressCurlCount && ds >= egressCurlCount
+		return pass, fmt.Sprintf("%d/%d curls from egress-client to %s succeeded; TMM egress virtual %s +%d conns; SNAT to %s +%d conns",
+			okCurls, egressCurlCount, target, vsName, dv, want, ds)
 	})
 	return false, scenarios.Assertion{
-		Description: "pod egress leaves TMM with source IP = TMM external SelfIP (AUTOMAP SNAT proven end to end)",
+		Description: "pod egress traverses TMM and is SNATed to the external SelfIP (egress virtual + AUTOMAP counters)",
 		OK:          ok,
 		Got:         detail,
 	}
@@ -187,49 +250,52 @@ type scenario struct {
 
 func (s *scenario) Name() string             { return scnName }
 func (s *scenario) Title() string            { return scnTitle }
-func (s *scenario) Rating() scenarios.Rating { return scenarios.Amber }
+func (s *scenario) Rating() scenarios.Rating { return scenarios.Green }
 func (s *scenario) Dependencies() []string   { return []string{} }
 func (s *scenario) Description() string {
 	return strings.TrimSpace(`
 Egress SNAT scenario — transparent pod outbound traffic through TMM via
 pseudo-CNI VXLAN overlay with AUTOMAP source translation (how-to #10).
 
-The F5SPKEgress CR (snatType: SRC_TRANS_AUTOMAP) with pseudoCNIConfig
-vxlan.create=true causes the BNK controller to:
-  1. Create a VXLAN tunnel on the TMM side (tmmInterfaceName=int-vlan).
-  2. Signal the CSRC DaemonSet to program the worker-node VXLAN end.
-  3. Intercept traffic from designated namespaces on eth0 and route it
-     through TMM, source-translating to the external self-IP (10.0.10.240).
+The F5SPKEgress CR (snatType: SRC_TRANS_AUTOMAP, vxlan.create=true) makes the
+BNK controller build a VXLAN tunnel end on TMM and the CSRC DaemonSet build
+the other end on each worker's primary NIC (nodeInterfaceName). Traffic from
+the captured namespace to destinations outside the VPC is carried to TMM and
+source-translated to the external SelfIP; pod-to-VPC traffic stays on the node.
 
-Applies 3 templated manifests:
-  01-namespace.yaml    — scenario namespace (awsbnkctl-scn-egress)
-  02-curlpod.yaml      — egress-client pod (curlimages/curl:8.10.1, eth0 only,
-                         no NAD annotation — normal pod network)
-  03-f5spkegress.yaml  — F5SPKEgress CR in EgressNamespace (f5-cne-system)
+Applies 4 templated manifests:
+  01-namespace.yaml     — scenario namespace (awsbnkctl-scn-egress)
+  02-curlpod.yaml       — egress-client pod (curlimages/curl, normal pod network)
+  03-f5spkegress.yaml   — F5SPKEgress CR in EgressNamespace (f5-cne-system)
+  04-staticroutes.yaml  — TMM routes: VPC via the tunnel VLAN gateway, default
+                          via the external VLAN gateway (needs cluster.yaml)
 
-Verify (control-plane only, Amber):
-  1. egress-client pod Ready (namespace + image pull OK).
-  2. F5SPKEgress awsbnkctl-egress present in EgressNamespace; status
-     conditions checked when available.
-  3. Informational: data-plane SNAT source-IP proof deferred to live
-     validation — the Amber→Green promotion gate.
+Verify:
+  1. egress-client pod Ready.
+  2. F5SPKEgress awsbnkctl-egress present (status conditions when available).
+  3. Data path: 3 curls from the pod to an out-of-VPC URL (default
+     http://checkip.amazonaws.com/) must raise TMM's egress virtual-server
+     connections and its SNAT-to-external-SelfIP connections by 3 (tmctl in
+     the TMM debug sidecar).
 
-Cleanup: delete the scenario namespace (idempotent) AND delete the
-F5SPKEgress CR from EgressNamespace (idempotent; not-found ignored).
-
-LIVE-CONFIRM items:
-  - Exact namespace the F5SPKEgress CR must live in (default: f5-cne-system).
-  - tmmInterfaceName value matching the live F5SPKVlan (default: int-vlan).
-  - F5SPKEgress status condition names (Ready / Programmed) if any.
+Cleanup: delete the scenario namespace, the F5SPKEgress CR and the two
+F5SPKStaticRoute CRs (idempotent; not-found ignored).
 `)
 }
 
-// manifestVars holds the template variables for the 3 manifests.
+// manifestVars holds the template variables for the manifests.
 type manifestVars struct {
-	Namespace       string
-	EgressNamespace string
-	TmmIntVlan      string
+	scenarios.NetVars // NodeIfname (VXLAN endpoint NIC), VpcNet/VpcPrefixLen, ExtGateway/IntGateway
+	Namespace         string
+	EgressNamespace   string
+	TmmIntVlan        string
+	// TunnelGateway is the router of the VLAN the tunnel ends on: VXLAN replies
+	// to workers must leave on the VLAN they arrived on (04-staticroutes.yaml,
+	// skipped when there is no cluster.yaml to derive gateways from).
+	TunnelGateway string
 }
+
+const staticRoutesManifest = "04-staticroutes.yaml"
 
 func (s *scenario) Manifests(ctx *scenarios.Context) ([]string, error) {
 	v := buildManifestVars(ctx)
@@ -238,6 +304,9 @@ func (s *scenario) Manifests(ctx *scenarios.Context) ([]string, error) {
 	err := fs.WalkDir(manifestFS, "manifests", func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil || d.IsDir() {
 			return werr
+		}
+		if strings.HasSuffix(p, staticRoutesManifest) && v.ExtGateway == "" {
+			return nil
 		}
 		tmplBytes, e := manifestFS.ReadFile(p)
 		if e != nil {
@@ -269,9 +338,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		d = &real
 	}
 	v := buildManifestVars(ctx)
-	res := scenarios.Result{
-		Details: "Amber: control-plane only — data-plane SNAT source-IP proof (pod egress observed source == TMM external self-IP 10.0.10.240) is deferred to live validation.",
-	}
+	res := scenarios.Result{}
 
 	// 1. egress-client pod Ready.
 	err := d.WaitPodReadyFn(ctx.Ctx, ctx, v.Namespace, "egress-client", 3*time.Minute)
@@ -292,14 +359,15 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		Got:         got,
 	})
 
-	// 3. Data path. With a jumphost this is the real proof (gating); without
-	// one it is recorded as skipped so the result stays honest.
-	skipped, a := verifySourceIP(d, ctx, v.Namespace)
+	// 3. Data path, read from TMM itself (gating); without an exec client it
+	// is recorded as skipped so the result stays honest.
+	skipped, a := verifyTMMEgress(d, ctx, v.Namespace, v.EgressNamespace)
 	res.Assertions = append(res.Assertions, a)
 	if skipped {
-		res.Details = "Amber: control-plane only on this run — data-plane SNAT source-IP proof needs the jumphost (testing.jumphost.enabled=true)."
+		res.Details = "Control plane only on this run — the TMM-counter data-path proof needs a Kubernetes exec client."
 	} else {
-		res.Details = "Control plane + data path: the reflector on the jumphost data-path ENI reports the source the pod's egress arrived from."
+		res.DataPath = true
+		res.Details = "Control plane + data path: the pod's out-of-VPC curls moved TMM's egress-virtual and SNAT-to-external-SelfIP counters."
 	}
 
 	return scenarios.FinalizeResult(res)
@@ -314,12 +382,19 @@ func (s *scenario) Cleanup(ctx *scenarios.Context) error {
 		return fmt.Errorf("deleting namespace %s: %w", v.Namespace, err)
 	}
 
-	// Delete the F5SPKEgress CR from EgressNamespace (idempotent).
-	err = ctx.Dynamic.Resource(f5SPKEgressGVR).Namespace(v.EgressNamespace).Delete(
-		ctx.Ctx, "awsbnkctl-egress", metav1.DeleteOptions{},
-	)
-	if err != nil && !scenarios.IsNotFound(err) {
-		return fmt.Errorf("deleting F5SPKEgress awsbnkctl-egress from %s: %w", v.EgressNamespace, err)
+	// Delete the F5SPKEgress CR and the two static routes from EgressNamespace (idempotent).
+	for _, r := range []struct {
+		gvr  schema.GroupVersionResource
+		name string
+	}{
+		{f5SPKEgressGVR, "awsbnkctl-egress"},
+		{f5SPKStaticRouteGVR, "awsbnkctl-egress-vpc"},
+		{f5SPKStaticRouteGVR, "awsbnkctl-egress-default"},
+	} {
+		err := ctx.Dynamic.Resource(r.gvr).Namespace(v.EgressNamespace).Delete(ctx.Ctx, r.name, metav1.DeleteOptions{})
+		if err != nil && !scenarios.IsNotFound(err) {
+			return fmt.Errorf("deleting %s %s from %s: %w", r.gvr.Resource, r.name, v.EgressNamespace, err)
+		}
 	}
 	return nil
 }
@@ -361,11 +436,20 @@ func tmmIntVlan(ctx *scenarios.Context) string {
 }
 
 func buildManifestVars(ctx *scenarios.Context) manifestVars {
-	return manifestVars{
+	v := manifestVars{
+		NetVars:         scenarios.NetVarsFor(ctx.Cluster, ctx.State),
 		Namespace:       namespace(ctx),
 		EgressNamespace: egressNamespace(ctx),
 		TmmIntVlan:      tmmIntVlan(ctx),
 	}
+	if o := ctx.Options["node-interface"]; o != "" {
+		v.NodeIfname = o
+	}
+	v.TunnelGateway = v.ExtGateway
+	if v.TmmIntVlan == defaultTmmIntVlan && v.IntGateway != "" {
+		v.TunnelGateway = v.IntGateway
+	}
+	return v
 }
 
 // waitPodReady polls until the named Pod has a Ready condition True, or timeout.

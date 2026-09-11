@@ -93,7 +93,11 @@ func (o *ApplyOptions) Run(ctx context.Context) error {
 //  4. plain file: parse as a YAML stream
 func (o *ApplyOptions) loadObjects() ([]*unstructured.Unstructured, error) {
 	if o.Filename == "-" {
-		return parseYAMLStream(os.Stdin)
+		in := o.IOStreams.In
+		if in == nil {
+			in = os.Stdin
+		}
+		return parseYAMLStream(in)
 	}
 	st, err := os.Stat(o.Filename)
 	if err != nil {

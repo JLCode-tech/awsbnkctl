@@ -112,8 +112,9 @@ func TestPhase17cIfaceDiscovery_DryRun_SetsConstants(t *testing.T) {
 		t.Fatalf("Phase17cIfaceDiscovery dry-run: %v", err)
 	}
 
-	// All 6 keys must be set.
+	// All 7 keys must be set.
 	checks := map[string]string{
+		"NODE_PRIMARY_IFNAME":    PrimaryIFName,
 		"EXTERNAL_IFNAME":        ExternalIFName,
 		"INTERNAL_IFNAME":        InternalIFName,
 		"EXTERNAL_PCI":           ExternalPCI,
@@ -180,6 +181,7 @@ func TestPhase17cIfaceDiscoveryDown_ClearsKeys(t *testing.T) {
 	st.Set("EXTERNAL_PCI", "0000:00:08.0")
 	st.Set("INTERNAL_PCI", "0000:00:07.0")
 	st.Set("CLOUD_HOST_DEVICE_NAME", "ens8")
+	st.Set("NODE_PRIMARY_IFNAME", "ens5")
 	st.Set("IFACE_DISCOVERY_AT", "2026-05-26T00:00:00Z")
 
 	clients := &Clients{Profile: "test", K8s: nil}
@@ -190,7 +192,7 @@ func TestPhase17cIfaceDiscoveryDown_ClearsKeys(t *testing.T) {
 	}
 
 	for _, key := range []string{
-		"EXTERNAL_IFNAME", "INTERNAL_IFNAME",
+		"NODE_PRIMARY_IFNAME", "EXTERNAL_IFNAME", "INTERNAL_IFNAME",
 		"EXTERNAL_PCI", "INTERNAL_PCI",
 		"CLOUD_HOST_DEVICE_NAME", "IFACE_DISCOVERY_AT",
 	} {

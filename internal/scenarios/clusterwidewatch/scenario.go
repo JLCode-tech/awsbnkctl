@@ -205,6 +205,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 	// Same jumphost curl the HTTP scenarios use; the Green rating rests on it.
 	if deps.RunCurlProbesFn != nil {
 		vip, iterations, timeout, probeErr := scenarios.BuildProbeParams(ctx)
+		vip = scenarios.WithLastOctet(vip, "105")
 		switch {
 		case probeErr != nil:
 			assertions = append(assertions, scenarios.Assertion{Description: "jumphost probe setup", OK: false, Got: probeErr.Error()})
@@ -225,6 +226,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 	}
 
 	res := scenarios.Result{
+		DataPath:   true,
 		Assertions: assertions,
 	}
 	return scenarios.FinalizeResult(res)

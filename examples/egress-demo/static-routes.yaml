@@ -1,0 +1,24 @@
+# TMM routes for egress. Apply once:
+#   awsbnkctl k apply --config examples/egress-demo/cluster.yaml -f examples/egress-demo/static-routes.yaml
+# Values come from cluster.yaml: the VPC CIDR and the external subnet's gateway.
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: bnk-egress-demo-vpc
+  namespace: f5-cne-system
+spec:
+  destination: {{.VpcNet}}
+  prefixLen: {{.VpcPrefixLen}}
+  gateway: {{.ExtGateway}}
+  type: gateway
+---
+apiVersion: k8s.f5net.com/v1
+kind: F5SPKStaticRoute
+metadata:
+  name: bnk-egress-demo-default
+  namespace: f5-cne-system
+spec:
+  destination: 0.0.0.0
+  prefixLen: 0
+  gateway: {{.ExtGateway}}
+  type: gateway

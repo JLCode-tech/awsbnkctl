@@ -251,7 +251,7 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		d = &real
 	}
 	ns := namespace(ctx)
-	res := scenarios.Result{}
+	res := scenarios.Result{DataPath: true}
 
 	// --- Step 1: backend Deployment Available ---
 	err := d.WaitDeploymentAvailableFn(ctx.Ctx, ctx, ns, "proxy-backend", 3*time.Minute)

@@ -496,10 +496,9 @@ func TestDryRun_Phase21IRSASA(t *testing.T) {
 	if st.Get("IRSA_SA_APPLIED_AT") != "dry-run" {
 		t.Errorf("IRSA_SA_APPLIED_AT = %q, want dry-run", st.Get("IRSA_SA_APPLIED_AT"))
 	}
-	// hostDeviceCluster() uses cluster name "tracer" (from testCluster() in phase02_vpc_test.go).
-	wantSA := cneSAName("tracer")
-	if st.Get("CNE_SA_NAME") != wantSA {
-		t.Errorf("CNE_SA_NAME = %q, want %q", st.Get("CNE_SA_NAME"), wantSA)
+	// CNE_SA_NAME is discovered from the live Deployment, so dry-run leaves it unset.
+	if st.Get("CNE_SA_NAME") != "" {
+		t.Errorf("CNE_SA_NAME = %q, want empty in dry-run", st.Get("CNE_SA_NAME"))
 	}
 }
 

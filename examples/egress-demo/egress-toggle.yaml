@@ -10,12 +10,10 @@
 #   ON  -> egress source IP = the BNK NAT EIP  (single controlled identity)
 #   OFF -> egress source IP = the pod's node public IP  (uncontrolled)
 #
-# tmmInterfaceName is the client-side F5SPKVlan name (external-only => ext-vlan).
-# nodeInterfaceName: the BNK 2.3 F5SPKEgress reference says this is "populated
-# automatically and should not be manually configured" — the CSRC DaemonSet
-# discovers the node NIC. It is left unset here for that reason. The demo was
-# first validated with it pinned to ens5 (AL2023 on Nitro), so if the VXLAN end
-# on the worker never comes up, uncomment the line below as the fallback.
+# Apply with `awsbnkctl k apply --config examples/egress-demo/cluster.yaml -f <this file>`:
+# it fills {{.NodeIfname}} (the worker's primary NIC, required on AWS) from the
+# cluster state. Apply static-routes.yaml once as well.
+# tmmInterfaceName: the F5SPKVlan the tunnel ends on (external-only => ext-vlan).
 apiVersion: k8s.f5net.com/v3
 kind: F5SPKEgress
 metadata:
@@ -31,7 +29,7 @@ spec:
     vxlan:
       create: true
       tmmInterfaceName: ext-vlan
-      # nodeInterfaceName: ens5   # fallback only — see header comment
+      nodeInterfaceName: {{.NodeIfname}}
       ipv4Subnet: "192.168.0.0"
       ipv4PrefixLen: 16
       ipv6Subnet: "fd50::"

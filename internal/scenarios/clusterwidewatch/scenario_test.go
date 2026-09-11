@@ -9,6 +9,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
 )
 
@@ -70,5 +71,45 @@ func TestClusterWideWatch_Verify(t *testing.T) {
 	}
 	if len(res.Assertions) != 3 {
 		t.Errorf("expected 3 assertions, got %d", len(res.Assertions))
+	}
+}
+
+func TestClusterWideWatch_Verify_ProbeVIP(t *testing.T) {
+	var probedVIP string
+	s := &scenario{
+		vDeps: &VerifyDeps{
+			WaitDeploymentAvailableFn: func(ctx context.Context, sctx *scenarios.Context, ns, name string, timeout time.Duration) error {
+				return nil
+			},
+			WaitConditionFn: func(ctx context.Context, sctx *scenarios.Context, gvr schema.GroupVersionResource, ns, name, condType string, timeout time.Duration) error {
+				return nil
+			},
+			WaitHTTPRouteConditionFn: func(ctx context.Context, sctx *scenarios.Context, ns, name, condType string, timeout time.Duration) error {
+				return nil
+			},
+			RunCurlProbesFn: func(ctx context.Context, sctx *scenarios.Context, vip string, iterations int, timeout time.Duration) (bool, string) {
+				probedVIP = vip
+				return true, "5/5 HTTP 200"
+			},
+		},
+	}
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	st.Set("JUMPHOST_INSTANCE_ID", "i-test")
+	st.Set("JUMPHOST_BNK_EXT_ENI_IP", "10.50.10.200")
+	sctx := &scenarios.Context{
+		Ctx:          context.Background(),
+		State:        st,
+		WorkspaceDir: dir,
+		Options: map[string]string{
+			"vip": "10.50.10.100",
+		},
+	}
+	res := s.Verify(sctx)
+	if !res.DataPath {
+		t.Errorf("expected res.DataPath to be true")
+	}
+	if probedVIP != "10.50.10.105" {
+		t.Errorf("probed VIP = %q, want 10.50.10.105", probedVIP)
 	}
 }

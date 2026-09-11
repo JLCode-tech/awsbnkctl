@@ -36,7 +36,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -196,20 +195,8 @@ func Phase24cPodManagerHeal(ctx context.Context, _ *intent.Cluster, _ *state.Sta
 		}
 
 		if bounces < h4MaxBounces && anyWedged {
-			// Trigger a rollout-restart via annotation patch on the Deployment template.
-			patchBody := []byte(fmt.Sprintf(
-				`{"spec":{"template":{"metadata":{"annotations":{"awsbnkctl.io/restartedAt":%q}}}}}`,
-				time.Now().UTC().Format(time.RFC3339),
-			))
-			_, patchErr := clients.K8s.AppsV1().Deployments(InstanceNamespace).Patch(
-				ctx,
-				h4DeploymentName,
-				types.StrategicMergePatchType,
-				patchBody,
-				metav1.PatchOptions{},
-			)
-			if patchErr != nil {
-				fmt.Fprintf(os.Stderr, "[phase 24c] warning: patch deployment %s: %v — retrying\n", h4DeploymentName, patchErr)
+			if err := restartDeployment(ctx, clients, InstanceNamespace, h4DeploymentName); err != nil {
+				fmt.Fprintf(os.Stderr, "[phase 24c] warning: %v — retrying\n", err)
 				continue
 			}
 			bounces++

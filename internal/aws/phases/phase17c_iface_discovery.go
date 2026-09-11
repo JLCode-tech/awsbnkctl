@@ -3,12 +3,15 @@ package phases
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -52,6 +55,7 @@ func Phase17cIfaceDiscovery(ctx context.Context, cl *intent.Cluster, st *state.S
 
 	if dryRun {
 		fmt.Fprintln(os.Stderr, "[phase 17c] dry-run: setting iface constants from architecture defaults")
+		st.Set("NODE_PRIMARY_IFNAME", PrimaryIFName)
 		st.Set("EXTERNAL_IFNAME", ExternalIFName)
 		st.Set("EXTERNAL_PCI", ExternalPCI)
 		st.Set("CLOUD_HOST_DEVICE_NAME", ExternalIFName)
@@ -82,12 +86,14 @@ func Phase17cIfaceDiscovery(ctx context.Context, cl *intent.Cluster, st *state.S
 		return fmt.Errorf("phase17c: TMM_NODE_NAME not in state (run phase16 first)")
 	}
 
-	// Idempotency: if the iface mapping is already resolved in state,
-	// secondary ENIs have already been discovered and potentially claimed by TMM.
-	// Skip re-discovery to avoid failing against host-netns probe pods.
-	if ifaceMappingResolved(st, hasInternal) {
-		fmt.Fprintf(os.Stderr, "[phase 17c] iface mapping already resolved in state — skipping re-discovery (EXTERNAL_IFNAME=%s INTERNAL_IFNAME=%s)\n",
-			st.Get("EXTERNAL_IFNAME"), st.Get("INTERNAL_IFNAME"))
+	// Idempotency: once the data-path mapping is in state the secondary ENIs may
+	// already be claimed by TMM (invisible to a host-netns probe), so it is never
+	// re-matched. The primary ENI stays on the host, so a state file from before
+	// NODE_PRIMARY_IFNAME existed still gets it resolved on re-run.
+	dataPathDone := ifaceMappingResolved(st, hasInternal)
+	if dataPathDone && st.Get("NODE_PRIMARY_IFNAME") != "" {
+		fmt.Fprintf(os.Stderr, "[phase 17c] iface mapping already resolved in state — skipping re-discovery (EXTERNAL_IFNAME=%s INTERNAL_IFNAME=%s NODE_PRIMARY_IFNAME=%s)\n",
+			st.Get("EXTERNAL_IFNAME"), st.Get("INTERNAL_IFNAME"), st.Get("NODE_PRIMARY_IFNAME"))
 		return nil
 	}
 
@@ -126,28 +132,40 @@ func Phase17cIfaceDiscovery(ctx context.Context, cl *intent.Cluster, st *state.S
 		return fmt.Errorf("phase17c: parsing probe JSON: %w\nraw output: %s", err, logBytes)
 	}
 
-	// Match MACs to discovered interfaces.
-	extIf, extPCI, intIf, intPCI, err := matchInterfaces(discovered, extMAC, intMAC)
-	if err != nil {
-		return fmt.Errorf("phase17c: MAC matching: %w", err)
+	if !dataPathDone {
+		// Match MACs to discovered interfaces.
+		extIf, extPCI, intIf, intPCI, err := matchInterfaces(discovered, extMAC, intMAC)
+		if err != nil {
+			return fmt.Errorf("phase17c: MAC matching: %w", err)
+		}
+
+		// Persist to state. Internal keys only for dual-interface (intIf/intPCI are
+		// empty for single-interface patterns).
+		st.Set("EXTERNAL_IFNAME", extIf)
+		st.Set("EXTERNAL_PCI", extPCI)
+		st.Set("CLOUD_HOST_DEVICE_NAME", extIf)
+		if hasInternal {
+			st.Set("INTERNAL_IFNAME", intIf)
+			st.Set("INTERNAL_PCI", intPCI)
+		}
+		if hasInternal {
+			fmt.Fprintf(os.Stderr, "[phase 17c] discovered: external=%s(%s) internal=%s(%s)\n",
+				extIf, extPCI, intIf, intPCI)
+		} else {
+			fmt.Fprintf(os.Stderr, "[phase 17c] discovered: external=%s(%s)\n", extIf, extPCI)
+		}
 	}
 
-	// Persist to state. Internal keys only for dual-interface (intIf/intPCI are
-	// empty for single-interface patterns).
-	st.Set("EXTERNAL_IFNAME", extIf)
-	st.Set("EXTERNAL_PCI", extPCI)
-	st.Set("CLOUD_HOST_DEVICE_NAME", extIf)
-	if hasInternal {
-		st.Set("INTERNAL_IFNAME", intIf)
-		st.Set("INTERNAL_PCI", intPCI)
+	// The node's primary NIC (device index 0) is what the egress pseudo-CNI
+	// builds its worker-side VXLAN endpoint on (F5SPKEgress nodeInterfaceName);
+	// its Linux name is AMI-specific, so it is discovered the same way.
+	primaryIf, err := primaryIfname(ctx, clients.EC2, st.Get("TMM_INSTANCE_ID"), discovered)
+	if err != nil {
+		return fmt.Errorf("phase17c: %w", err)
 	}
+	st.Set("NODE_PRIMARY_IFNAME", primaryIf)
 	st.Set("IFACE_DISCOVERY_AT", time.Now().UTC().Format(time.RFC3339))
-	if hasInternal {
-		fmt.Fprintf(os.Stderr, "[phase 17c] discovered: external=%s(%s) internal=%s(%s)\n",
-			extIf, extPCI, intIf, intPCI)
-	} else {
-		fmt.Fprintf(os.Stderr, "[phase 17c] discovered: external=%s(%s)\n", extIf, extPCI)
-	}
+	fmt.Fprintf(os.Stderr, "[phase 17c] discovered: primary=%s\n", primaryIf)
 
 	if err := st.Save(); err != nil {
 		return fmt.Errorf("phase17c: saving state: %w", err)
@@ -174,6 +192,7 @@ func Phase17cIfaceDiscoveryDown(ctx context.Context, _ *intent.Cluster, st *stat
 	}
 
 	for _, key := range []string{
+		"NODE_PRIMARY_IFNAME",
 		"EXTERNAL_IFNAME",
 		"INTERNAL_IFNAME",
 		"EXTERNAL_PCI",
@@ -221,6 +240,33 @@ func matchInterfaces(discovered map[string]ifaceInfo, extMAC, intMAC string) (ex
 			strings.Join(missing, ", "), discovered)
 	}
 	return extIf, extPCI, intIf, intPCI, nil
+}
+
+// primaryIfname resolves the Linux name of the node's primary ENI (attachment
+// device index 0) by matching its MAC against the probe output.
+func primaryIfname(ctx context.Context, ec2c EC2API, instanceID string, discovered map[string]ifaceInfo) (string, error) {
+	if instanceID == "" {
+		return "", errors.New("TMM_INSTANCE_ID not in state (run phase16 first)")
+	}
+	out, err := ec2c.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
+		Filters: []ec2types.Filter{
+			{Name: ptr("attachment.instance-id"), Values: []string{instanceID}},
+			{Name: ptr("attachment.device-index"), Values: []string{"0"}},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("DescribeNetworkInterfaces (primary ENI of %s): %w", instanceID, err)
+	}
+	if len(out.NetworkInterfaces) == 0 || out.NetworkInterfaces[0].MacAddress == nil {
+		return "", fmt.Errorf("instance %s: primary ENI MAC not available", instanceID)
+	}
+	mac := strings.ToLower(*out.NetworkInterfaces[0].MacAddress)
+	for m, info := range discovered {
+		if strings.ToLower(m) == mac {
+			return info.Ifname, nil
+		}
+	}
+	return "", fmt.Errorf("primary ENI MAC %s not found on node; discovered interfaces: %v", mac, discovered)
 }
 
 // podLogs retrieves the stdout logs from the named pod.

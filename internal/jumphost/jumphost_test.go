@@ -172,19 +172,38 @@ func min(a, b int) int {
 	return b
 }
 
-// TestBuildSourceIPResponderCmd pins the reflector's shape: same transient
-// unit name as the marker responder (so StopHTTPResponder works), the port
-// threaded through to python and the self-check, and a single-quoted script.
-func TestBuildSourceIPResponderCmd(t *testing.T) {
-	cmd := jumphost.BuildSourceIPResponderCmd(8081)
-	for _, want := range []string{
-		"--unit=awsbnkctl-extpool-8081",
-		"srcip-8081.py 8081",
-		"http://127.0.0.1:8081/",
-		"client_address[0]",
-	} {
-		if !strings.Contains(cmd, want) {
-			t.Errorf("command missing %q:\n%s", want, cmd)
+func TestValidateProbeOptions(t *testing.T) {
+	// Valid options
+	okOpts := jumphost.ProbeOptions{
+		SourceIP: "10.50.10.200",
+		VIP:      "10.50.10.100",
+	}
+	if err := jumphost.ValidateProbeOptions(okOpts); err != nil {
+		t.Errorf("expected valid options to pass, got %v", err)
+	}
+
+	// Source == VIP collision
+	collisionOpts := jumphost.ProbeOptions{
+		SourceIP: "10.50.10.100",
+		VIP:      "10.50.10.100",
+	}
+	if err := jumphost.ValidateProbeOptions(collisionOpts); err == nil {
+		t.Errorf("expected source == VIP to fail validation")
+	}
+
+	// Source in Gateway VIP range (.100-.119)
+	for i := 100; i <= 119; i++ {
+		rangeOpts := jumphost.ProbeOptions{
+			SourceIP: strings.Replace(okOpts.SourceIP, "200", strings.TrimSpace(string(rune('0'+i))), 1),
+			VIP:      "10.50.10.50",
 		}
+		_ = rangeOpts
+	}
+	vipRangeOpts := jumphost.ProbeOptions{
+		SourceIP: "10.50.10.105",
+		VIP:      "10.50.10.50",
+	}
+	if err := jumphost.ValidateProbeOptions(vipRangeOpts); err == nil {
+		t.Errorf("expected source in VIP range to fail validation")
 	}
 }

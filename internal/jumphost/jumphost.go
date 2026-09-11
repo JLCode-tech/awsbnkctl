@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,6 +128,9 @@ func prepareEICEKey(ctx context.Context, region, instanceID string) (keyPath, pu
 // the operator workflow already used for jumphost probing. Requires the `aws` CLI and
 // `ssh` to be on PATH.
 func RunCurlProbes(ctx context.Context, opts ProbeOptions) ([]ProbeResult, error) {
+	if err := validateProbeOptions(opts); err != nil {
+		return nil, err
+	}
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
 	}
@@ -307,6 +311,9 @@ func SSHCurlBodyViaEICE(ctx context.Context, region, instanceID, keyPath, source
 // The Host header is set from opts.Hostname (empty = no header).
 // Returns per-iteration results including the response body.
 func RunCurlBodyProbes(ctx context.Context, opts ProbeOptions) ([]BodyProbeResult, error) {
+	if err := validateProbeOptions(opts); err != nil {
+		return nil, err
+	}
 	if opts.Iterations <= 0 {
 		opts.Iterations = 5
 	}
@@ -467,50 +474,18 @@ func GenerateEphemeralED25519() (privPEM []byte, pubAuthLine string, err error) 
 	return pemBytes, auth, nil
 }
 
-// buildSourceIPResponderCmd returns the remote command that starts a tiny
-// HTTP server on the jumphost whose only response body is the peer's source
-// IP. Scenarios use it as an in-VPC reflector: a pod curls it through the BNK
-// egress path and the body reveals whether TMM SNAT rewrote the source to its
-// external SelfIP. Same systemd transient-unit naming as the marker responder
-// so StopHTTPResponder tears it down.
-func buildSourceIPResponderCmd(port int) string {
-	unit := fmt.Sprintf("awsbnkctl-extpool-%d", port)
-	script := `from http.server import BaseHTTPRequestHandler, HTTPServer
-import sys
-class H(BaseHTTPRequestHandler):
-    def do_GET(self):
-        b = self.client_address[0].encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
-        self.send_header("Content-Length", str(len(b)))
-        self.end_headers()
-        self.wfile.write(b)
-    def log_message(self, *a):
-        pass
-HTTPServer(("", int(sys.argv[1])), H).serve_forever()
-`
-	return fmt.Sprintf(
-		`mkdir -p /tmp/awsbnkctl-extpool && printf '%%s' %s > /tmp/awsbnkctl-extpool/srcip-%d.py; sudo systemctl stop %s 2>/dev/null; sudo systemctl reset-failed %s 2>/dev/null; sudo systemd-run --unit=%s python3 /tmp/awsbnkctl-extpool/srcip-%d.py %d >/dev/null 2>&1; sleep 2; curl -s -o /dev/null -w '%%{http_code}' http://127.0.0.1:%d/`,
-		shellSingleQuote(script), port, unit, unit, unit, port, port, port,
-	)
-}
-
-// StartSourceIPResponder starts the source-IP reflector (see
-// buildSourceIPResponderCmd) on the jumphost and returns nil only when the
-// in-host self-curl answers 200. Stop it with StopHTTPResponder(port).
-func StartSourceIPResponder(ctx context.Context, opts ProbeOptions, port int) error {
-	keyPath, _, cleanup, err := prepareEICEKey(ctx, opts.Region, opts.InstanceID)
-	if err != nil {
-		return err
+// validateProbeOptions guards against source IP == VIP and source IP in VIP range.
+func validateProbeOptions(opts ProbeOptions) error {
+	if opts.SourceIP != "" && opts.VIP != "" && opts.SourceIP == opts.VIP {
+		return fmt.Errorf("probe source IP (%s) cannot equal target VIP (%s)", opts.SourceIP, opts.VIP)
 	}
-	defer cleanup()
-
-	out, runErr := SSHRunViaEICE(ctx, opts.Region, opts.InstanceID, keyPath, buildSourceIPResponderCmd(port))
-	if runErr != nil {
-		return fmt.Errorf("starting source-IP responder on :%d: %w (remote stdout: %q)", port, runErr, out)
-	}
-	if strings.TrimSpace(out) != "200" {
-		return fmt.Errorf("source-IP responder on :%d did not return 200 (remote stdout: %q)", port, out)
+	if opts.SourceIP != "" {
+		parts := strings.Split(opts.SourceIP, ".")
+		if len(parts) == 4 {
+			if octet, err := strconv.Atoi(parts[3]); err == nil && octet >= 100 && octet <= 119 {
+				return fmt.Errorf("probe source IP (%s) collides with Gateway VIP range (.100-.119)", opts.SourceIP)
+			}
+		}
 	}
 	return nil
 }
