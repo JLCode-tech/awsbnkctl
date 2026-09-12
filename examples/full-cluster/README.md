@@ -34,7 +34,7 @@ awsbnkctl down -f cluster.yaml --yes
 | SR-IOV / DPDK data plane | off | the two edits above, then `pattern: sriov-external`. **Experimental**; use a fresh cluster |
 | Demo mode | off | uncomment `demo:` (or `up --demo`). Enables `awsbnkctl demo run` for the Diameter, HTTP/2 and ingress-migration demos |
 | BIG-IP VE appliance | off | uncomment `bigipVE:` with demo mode on. Adds a chargeable c5n.2xlarge for the `bigip-cis` demo; password via `AWSBNKCTL_BIGIP_PASSWORD` |
-| BNK release | 2.3.3 | `bnk.manifestVersion` (a 2.3.2 pin is shown commented) |
+| BNK release | 2.4.0 | `bnk.manifestVersion` (a 2.3.3 pin is shown commented) |
 | BGP ports | on | `bnk.bgp`; see below |
 
 ### The single-interface patterns

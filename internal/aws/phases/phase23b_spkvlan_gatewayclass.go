@@ -26,6 +26,17 @@ const (
 	gatewayClassYAMLPath = "host-device/gatewayclass.yaml.tmpl"
 
 	gatewayClassCRDName = "gatewayclasses.gateway.networking.k8s.io"
+
+	// cneControllerAvailableWait bounds the wait for the cne-controller
+	// Deployment to have an available replica before the F5SPKVlan apply. The
+	// F5 validating webhook (f5-validation-svc) is served by that pod; applying
+	// before it is ready fails with "no endpoints available for service".
+	// The controller is in its first rollout (and phase 21 may have restarted
+	// it) when this phase runs, so a cold start of several minutes is normal.
+	cneControllerAvailableWait = 10 * time.Minute
+	// webhookRetryWait bounds the apply retries while the webhook endpoint is
+	// still registering after the pod reports Ready.
+	webhookRetryWait = 3 * time.Minute
 	// Why: installed by the same FLO crd-installer Job as the F5SPKVlan CRD; 3 min is generous.
 	gatewayClassCRDWait = 3 * time.Minute
 )
@@ -118,6 +129,19 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	}
 	fmt.Fprintf(os.Stderr, "[phase 23b] CRD %s ready\n", gatewayClassCRDName)
 
+	// Wait for the cne-controller to be available: its pod serves the F5
+	// validating webhook that admits F5SPKVlan. Seen live on BNK 2.4.0
+	// (2026-09-11): the CRDs were established while the controller pod was
+	// still starting and the apply failed with "no endpoints available for
+	// service f5-validation-svc".
+	if clients.K8s != nil {
+		fmt.Fprintf(os.Stderr, "[phase 23b] waiting for deploy %s/%s to be available (up to %s)\n", InstanceNamespace, h4DeploymentName, cneControllerAvailableWait)
+		if err := waitForDeploymentAvailable(ctx, clients, InstanceNamespace, h4DeploymentName, cneControllerAvailableWait); err != nil {
+			return fmt.Errorf("phase23b: waiting for cne-controller: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "[phase 23b] deploy %s/%s available\n", InstanceNamespace, h4DeploymentName)
+	}
+
 	// Render + apply F5SPKVlan.
 	spkTmpl, err := k8smanifests.FS.ReadFile(f5spkvlanYAMLPath)
 	if err != nil {
@@ -138,7 +162,7 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	} else {
 		fmt.Fprintf(os.Stderr, "[phase 23b] applying F5SPKVlan ext-vlan (selfip=%s)%s\n", selfIPs.External, bgpMsg)
 	}
-	if err := applyRawYAML(ctx, clients, spkRendered); err != nil {
+	if err := retryWhileWebhookUnavailable(ctx, webhookRetryWait, func() error { return applyRawYAML(ctx, clients, spkRendered) }); err != nil {
 		return fmt.Errorf("phase23b: applying F5SPKVlan: %w", err)
 	}
 	st.Set("F5SPKVLAN_APPLIED_AT", time.Now().UTC().Format(time.RFC3339))
@@ -154,7 +178,7 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	}
 	gwcName := name + "-gatewayclass"
 	fmt.Fprintf(os.Stderr, "[phase 23b] applying GatewayClass %s\n", gwcName)
-	if err := applyRawYAML(ctx, clients, gwcRendered); err != nil {
+	if err := retryWhileWebhookUnavailable(ctx, webhookRetryWait, func() error { return applyRawYAML(ctx, clients, gwcRendered) }); err != nil {
 		return fmt.Errorf("phase23b: applying GatewayClass: %w", err)
 	}
 	st.Set("GATEWAYCLASS_NAME", gwcName)

@@ -2,6 +2,9 @@ package phases
 
 import (
 	"context"
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	"strings"
 	"testing"
 	"time"
@@ -210,5 +213,45 @@ func TestPhase23b_BothCRDsPresent_ProceedsPastWaits(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "CRD") {
 		t.Errorf("error mentions 'CRD', meaning the phase did NOT clear both CRD waits — investigate: %v", err)
+	}
+}
+
+// TestPhase23b_WaitsForControllerBeforeApply pins the BNK 2.4.0 fix: with both
+// CRDs present but the cne-controller Deployment not yet available, the phase
+// must block before the F5SPKVlan apply (whose validating webhook that pod
+// serves) instead of failing on "no endpoints available for service".
+func TestPhase23b_WaitsForControllerBeforeApply(t *testing.T) {
+	awsmw.ResetForTest()
+	old := deployPollInterval
+	deployPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { deployPollInterval = old })
+
+	cl := hostDeviceCluster()
+	cl.Network.DataPath.SelfIPs = &intent.SelfIPsSpec{External: "10.0.10.240", Internal: "10.0.20.240", PrefixLen: 24}
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+
+	crdGVR := schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
+	crd := func(name string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition",
+			"metadata": map[string]interface{}{"name": name},
+		}}
+	}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(buildScheme(),
+		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"},
+		crd(f5spkvlanCRDName), crd(gatewayClassCRDName))
+	// Deployment exists but has no available replica, as during its first rollout.
+	k8s := kubefake.NewClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: h4DeploymentName, Namespace: InstanceNamespace}})
+	clients := &Clients{Profile: "test", Dynamic: dyn, K8s: k8s, RESTMapper: p12FakeRESTMapper()}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	err := Phase23bSPKVlanGatewayClass(ctx, cl, st, clients, false)
+	if err == nil || !strings.Contains(err.Error(), "cne-controller") {
+		t.Fatalf("want a cne-controller wait error, got %v", err)
+	}
+	if got := st.Get("F5SPKVLAN_APPLIED_AT"); got != "" {
+		t.Errorf("F5SPKVLAN_APPLIED_AT = %q, want empty (blocked before apply)", got)
 	}
 }

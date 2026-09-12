@@ -30,7 +30,7 @@ var (
 		Resource: "grpcroutes",
 	}
 	l4RouteGVR = schema.GroupVersionResource{
-		Group:    "gateway.k8s.f5net.com",
+		Group:    "gateway.k8s.f5.com",
 		Version:  "v1",
 		Resource: "l4routes",
 	}

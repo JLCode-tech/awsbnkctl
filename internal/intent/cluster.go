@@ -55,7 +55,7 @@ type BnkSpec struct {
 	// ManifestVersion is the BNK manifest version pulled by FLO from
 	// oci://repo.f5.com/release/f5-bigip-k8s-manifest. Default matches
 	// aws-gpu-setup MANIFEST_VERSION — the FLO chart version
-	// (v2.21.13-0.0.28) is unrelated to this manifest version.
+	// (e.g. v2.30.0-0.5.2 for 2.4.0) is paired per release in manifest.KnownReleases.
 	ManifestVersion string `yaml:"manifestVersion,omitempty"`
 	// TmmMtu is the TMM interface MTU. Default 9000.
 	TmmMtu int `yaml:"tmmMtu,omitempty"`
@@ -190,7 +190,7 @@ type EndpointAccessSpec struct {
 type ClusterSpec struct {
 	// KubernetesVersion is the EKS Kubernetes version to deploy.
 	// Default: DefaultKubernetesVersion ("1.35", the release F5 lists for BNK
-	// 2.3.x on host Kubernetes). Mandated floor: MinKubernetesVersion ("1.34").
+	// 2.3.x and 2.4.0 on host Kubernetes). Mandated floor: MinKubernetesVersion ("1.34").
 	// Versions below the floor are rejected by validate; see validateKubernetesVersion.
 	KubernetesVersion string `yaml:"kubernetesVersion,omitempty"`
 	// NodeGroups defines one or more managed node groups. At least one is required
@@ -552,7 +552,7 @@ func (f *FloSpec) FLOVersion() string {
 //
 //  1. addons.flo.version — an explicit operator pin always wins.
 //  2. the FLO chart paired with bnk.manifestVersion in manifest.KnownReleases,
-//     so every supported 2.3.x build gets the operator F5 shipped it with.
+//     so every supported build gets the operator F5 shipped it with.
 //  3. the default release's FLO chart, when bnk.manifestVersion is a build the
 //     table does not know (ValidateWarnings flags this case).
 func (c *Cluster) FLOVersion() string {
@@ -1268,7 +1268,7 @@ func parseGPUAZDenyEnv(val string) map[string][]string {
 const MinKubernetesVersion = "1.34"
 
 // DefaultKubernetesVersion is what a cluster.yaml without cluster.kubernetesVersion
-// gets. It is the newest minor BNK 2.3.x is validated on (F5's 2.3.2 / 2.3.3
+// gets. It is the newest minor BNK 2.3.x and 2.4.0 are validated on (F5's 2.3.x / 2.4.0
 // release notes list 1.35 for host Kubernetes; 1.34 is not on their list, it
 // is only our EKS standard-support floor) and the version every example pins.
 // Must be >= MinKubernetesVersion and <= 1.<maxTestedKubernetesMinor>.
@@ -1470,7 +1470,7 @@ func validateBnk(b *BnkSpec) error {
 			"slice 6+ may add multi-version support — for now omit the field to use the default",
 			b.CertManagerVersion, EmbeddedCertManagerVersion)
 	}
-	// Any 2.3.x manifest is accepted (backwards compatibility is the point of
+	// Any known 2.3.x or 2.4.x manifest is accepted (backwards compatibility is the point of
 	// the field), but a build the release table does not know gets the default
 	// release's FLO chart unless addons.flo.version pins one — say so.
 	if b.ManifestVersion != "" && !manifest.IsKnownRelease(b.ManifestVersion) {

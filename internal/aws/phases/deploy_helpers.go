@@ -3,6 +3,8 @@ package phases
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -101,4 +103,62 @@ func restartDeployment(ctx context.Context, clients *Clients, ns, name string) e
 		return fmt.Errorf("restart deploy %s/%s: %w", ns, name, err)
 	}
 	return nil
+}
+
+// waitForDeploymentAvailable returns once the Deployment exists and reports at
+// least one available replica, polling until timeout. Phase 23b uses it so the
+// F5 validating webhook (served by the cne-controller pod) has an endpoint
+// before the first F5SPKVlan apply.
+func waitForDeploymentAvailable(ctx context.Context, clients *Clients, ns, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		d, err := clients.K8s.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get deploy %s/%s: %w", ns, name, err)
+		}
+		if err == nil && d.Status.AvailableReplicas > 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("deploy %s/%s not available within %s", ns, name, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(deployPollInterval):
+		}
+	}
+}
+
+// isWebhookUnavailable reports whether err is the apiserver telling us an
+// admission webhook could not be reached — typically "no endpoints available
+// for service" while the serving pod is still starting.
+func isWebhookUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "failed calling webhook") ||
+		strings.Contains(msg, "no endpoints available for service")
+}
+
+// retryWhileWebhookUnavailable runs fn, retrying on webhook-unavailable errors
+// until timeout. Any other error is returned immediately.
+func retryWhileWebhookUnavailable(ctx context.Context, timeout time.Duration, fn func() error) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := fn()
+		if err == nil || !isWebhookUnavailable(err) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("after %s the admission webhook is still unavailable: %w", timeout, err)
+		}
+		fmt.Fprintf(os.Stderr, "[phase] admission webhook not ready yet, retrying in %s: %v\n", deployPollInterval, err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(deployPollInterval):
+		}
+	}
 }

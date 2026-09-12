@@ -103,7 +103,7 @@ The annotation block is kept, commented out, in `gateway-deployment.yaml`.
 
 The namespace, service name and port are load-bearing: Forge queries
 `http://loki.llm-egress:3100` for streams labelled `job="llm-gateway"`. Forge
-only renders an iRule attachment when the `BNKNetPolicy` names a listener via
+only renders an iRule attachment when the `NetPolicy` names a listener via
 `sectionName`, which is why the demo ships one policy per listener.
 
 BNK's token columns are zero, honestly: it never sees the model call. Bedrock's

@@ -62,7 +62,7 @@ func newFakeL4Client(obj *unstructured.Unstructured) *dynamicfake.FakeDynamicCli
 func makeL4RouteFlat(ns, name, condType, condStatus string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "gateway.k8s.f5net.com/v1",
+			"apiVersion": "gateway.k8s.f5.com/v1",
 			"kind":       "L4Route",
 			"metadata": map[string]interface{}{
 				"name":            name,
@@ -84,7 +84,7 @@ func makeL4RouteFlat(ns, name, condType, condStatus string) *unstructured.Unstru
 func makeL4RouteParents(ns, name, condType, condStatus string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "gateway.k8s.f5net.com/v1",
+			"apiVersion": "gateway.k8s.f5.com/v1",
 			"kind":       "L4Route",
 			"metadata": map[string]interface{}{
 				"name":            name,

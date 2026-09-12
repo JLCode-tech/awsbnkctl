@@ -94,6 +94,10 @@ spec:
       env:
         - name: TMM_CALICO_ROUTER
           value: "default"
+        # BNK 2.4 keeps ZebOS as the routing container; F5's 2.4 examples set
+        # this explicitly, so the RoutingTemplate syntax stays ZebOS.
+        - name: ZEBOS_STATE
+          value: "legacy"
         - name: TMM_DEFAULT_MTU
           value: "{{ .TmmMtu }}"
         - name: PAL_CPU_SET

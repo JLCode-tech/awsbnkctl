@@ -60,9 +60,9 @@ const (
 )
 
 // l4RouteGVR is the BNK L4Route CR. Verified against a live BNK cluster:
-// group gateway.k8s.f5net.com, version v1, resource l4routes.
+// group gateway.k8s.f5.com, version v1, resource l4routes.
 var l4RouteGVR = schema.GroupVersionResource{
-	Group:    "gateway.k8s.f5net.com",
+	Group:    "gateway.k8s.f5.com",
 	Version:  "v1",
 	Resource: "l4routes",
 }
