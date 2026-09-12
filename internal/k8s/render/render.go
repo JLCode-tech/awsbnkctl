@@ -435,37 +435,10 @@ func RenderGatewayClass(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
 	return Render(tmpl, vars)
 }
 
-// ─── F5SPKVlan (TMM VLANs + self IPs; still the source of the active-TMM count on 2.4) ───
-
-// F5SPKVlanVars holds the substitution variables for host-device/f5spkvlan.yaml.tmpl.
-type F5SPKVlanVars struct {
-	InstanceNS         string // f5-cne-system (matches CNEInstance namespace)
-	TmmExtSelfIP       string // e.g. 10.0.10.240
-	TmmIntSelfIP       string // e.g. 10.0.20.240
-	TmmSelfIPPrefixLen int    // typically 24
-	HasInternal        bool   // render the int-vlan CR (dual-interface only)
-	EnableBGP          bool   // render allowed_services for BGP (tcp:179) and BFD (udp:3784)
-}
-
-// RenderF5SPKVlan renders the F5SPKVlan CRs for a BNK pattern from the nominal
-// self IPs in cl.Network.DataPath.SelfIPs (auto-derived by intent.applyDefaults).
-// hasInternal controls the int-vlan CR; enableBGP adds allowed_services on ext-vlan.
-func RenderF5SPKVlan(tmpl []byte, selfExt, selfInt string, prefixLen int, hasInternal, enableBGP bool) ([]byte, error) {
-	return Render(tmpl, F5SPKVlanVars{
-		InstanceNS:         cneInstanceNamespace,
-		TmmExtSelfIP:       selfExt,
-		TmmIntSelfIP:       selfInt,
-		TmmSelfIPPrefixLen: prefixLen,
-		HasInternal:        hasInternal,
-		EnableBGP:          enableBGP,
-	})
-}
-
 // ─── Infra (BNK 2.4 network model) ──────────────────────────────────────────
 
-// Infra network names. They coexist with the F5SPKVlan CRs ext-vlan / int-vlan
-// (F5's 2.4 example also names them apart: F5SPKVlan "external", Infra
-// "external-vlan"); GatewaySettings networkRefs point at these.
+// Infra network names; GatewaySettings networkRefs (ingress listener network,
+// egress tunnel network) point at these.
 const (
 	InfraName          = "infra"
 	InfraExtNetwork    = "ext-vlan-infra"
@@ -473,7 +446,28 @@ const (
 	InfraListenerPool  = "listener-pool"
 	infraListenerFirst = 100
 	infraListenerLast  = 199
+
+	// InfraEgressSubnet / InfraEgressPort are the egress tunnel defaults
+	// (Infra spec.egressDefaults): the VXLAN overlay subnet between the worker
+	// nodes and TMM and its UDP port. 192.168.0.0/16 stays clear of every
+	// example VPC (10.x); the product default would be 10.0.0.0/16.
+	InfraEgressSubnet = "192.168.0.0/16"
+	InfraEgressPort   = 4789
+	// Static route names in the Infra CR (spec.staticRoutes[].name).
+	InfraRouteVPC     = "vpc"
+	InfraRouteDefault = "default"
 )
+
+// InfraTunnelNetwork is the Infra network the egress tunnel terminates on
+// (Infra egressDefaults.networkRef and the GatewaySettings egressConfigs
+// networkRef): the internal VLAN on dual-interface clusters, the external VLAN
+// when it is the only one.
+func InfraTunnelNetwork(hasInternal bool) string {
+	if hasInternal {
+		return InfraIntNetwork
+	}
+	return InfraExtNetwork
+}
 
 // InfraVars holds the substitution variables for host-device/infra.yaml.tmpl.
 type InfraVars struct {
@@ -495,6 +489,17 @@ type InfraVars struct {
 	HasInternal     bool   // render the internal pool, attachment and network
 	ExtAZ           string // availability zone of the external data-path subnet (pool zone)
 	IntAZ           string // availability zone of the internal data-path subnet
+	// Egress: the tunnel defaults and the two static routes the egress path
+	// needs (see infra.yaml.tmpl). The routes are rendered only when VpcCidr
+	// and both gateways are known.
+	TunnelNetwork string // int-vlan-infra (dual-interface) or ext-vlan-infra
+	EgressSubnet  string // InfraEgressSubnet
+	EgressPort    int    // InfraEgressPort
+	VpcCidr       string // network.vpcCidr, e.g. 10.0.0.0/16
+	TunnelGateway string // AWS router of the tunnel VLAN's subnet, e.g. 10.0.20.1
+	ExtGateway    string // AWS router of the external subnet, e.g. 10.0.10.1
+	RouteVPC      string // InfraRouteVPC
+	RouteDefault  string // InfraRouteDefault
 }
 
 // RenderInfra renders the Infra CR for a BNK pattern. Each self-IP pool is the
@@ -537,6 +542,12 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 	if cl.Bnk != nil && cl.Bnk.TmmMtu > 0 {
 		mtu = cl.Bnk.TmmMtu
 	}
+	// AWS puts the subnet router on the first host address of every subnet.
+	extGW, _ := intent.DeriveSelfIP(cl.Network.DataPath.External.CIDR, 1)
+	tunnelGW := extGW
+	if hasInternal {
+		tunnelGW, _ = intent.DeriveSelfIP(cl.Network.DataPath.Internal.CIDR, 1)
+	}
 	vars := InfraVars{
 		InfraName:       InfraName,
 		InstanceNS:      cneInstanceNamespace,
@@ -556,6 +567,14 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 		HasInternal:     hasInternal,
 		ExtAZ:           cl.Network.DataPath.External.AZ,
 		IntAZ:           cl.Network.DataPath.Internal.AZ,
+		TunnelNetwork:   InfraTunnelNetwork(hasInternal),
+		EgressSubnet:    InfraEgressSubnet,
+		EgressPort:      InfraEgressPort,
+		VpcCidr:         cl.Network.VPCCidr,
+		TunnelGateway:   tunnelGW,
+		ExtGateway:      extGW,
+		RouteVPC:        InfraRouteVPC,
+		RouteDefault:    InfraRouteDefault,
 	}
 	return Render(tmpl, vars)
 }

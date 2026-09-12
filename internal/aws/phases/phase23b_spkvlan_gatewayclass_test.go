@@ -193,17 +193,10 @@ func TestPhase23b_BothCRDsPresent_ProceedsPastWaits(t *testing.T) {
 			"metadata":   map[string]interface{}{"name": gatewayClassCRDName},
 		},
 	}
-	vlanCRD := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "apiextensions.k8s.io/v1",
-			"kind":       "CustomResourceDefinition",
-			"metadata":   map[string]interface{}{"name": f5spkvlanCRDName},
-		},
-	}
 	scheme := buildScheme()
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"},
-		[]runtime.Object{spkvlanCRD, gwclassCRD, vlanCRD}...,
+		[]runtime.Object{spkvlanCRD, gwclassCRD}...,
 	)
 	clients := &Clients{
 		Profile:    "test",
@@ -249,7 +242,7 @@ func TestPhase23b_WaitsForControllerBeforeApply(t *testing.T) {
 	}
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(buildScheme(),
 		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"},
-		crd(infraCRDName), crd(gatewayClassCRDName), crd(f5spkvlanCRDName))
+		crd(infraCRDName), crd(gatewayClassCRDName))
 	// Deployment exists but has no available replica, as during its first rollout.
 	k8s := kubefake.NewClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: h4DeploymentName, Namespace: InstanceNamespace}})
 	clients := &Clients{Profile: "test", Dynamic: dyn, K8s: k8s, RESTMapper: p12FakeRESTMapper()}

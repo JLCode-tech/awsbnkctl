@@ -15,7 +15,7 @@ every cluster awsbnkctl builds — the embedded CNEInstance enables
 | Phase | Effect |
 | --- | --- |
 | 07 `iam` | Admits TCP 179 (BGP) and UDP 3784 (BFD) into the data-plane security group `SG_BNK_DATA` from `network.dataPath.external.cidr`. |
-| 23b `spk-vlan-gateway-class` | Renders `allowed_services` for the same two ports on the external `F5SPKVlan`, so TMM hands those packets to the routing container instead of dropping them. |
+| 23b `spk-vlan-gateway-class` | On BNK 2.3 rendered `allowed_services` for the same two ports on the external `F5SPKVlan`. The BNK 2.4 `Infra` CR has no per-VLAN allowed services, so the phase only warns; verify that TMM hands BGP/BFD packets to the routing container on a live 2.4 cluster. |
 
 It does **not** create a Route Server, an endpoint, a peer, or any routing CRs.
 Those are below. With no peer the flag is inert, which is why every example can

@@ -71,9 +71,9 @@ type BnkSpec struct {
 	PalCpuSet string `yaml:"palCpuSet,omitempty"`
 	// BGP enables BGP / dynamic routing on the TMM external VLAN.
 	// When true, Phase 07 admits tcp:179 (BGP) and udp:3784 (BFD) into
-	// SG_BNK_DATA from network.dataPath.external.cidr, and Phase 23b configures
-	// the matching allowed_services on the ext-vlan F5SPKVlan so TMM forwards
-	// the control-plane packets to the routing container (ZebOS). The peer
+	// SG_BNK_DATA from network.dataPath.external.cidr. (The 2.3 F5SPKVlan carried
+	// matching allowed_services; the BNK 2.4 Infra CR has no per-VLAN allowed
+	// services, so phase 23b only warns — verify BGP reachability live.) The peer
 	// itself (an AWS Route Server endpoint in the external subnet, or another
 	// router) and the RoutingTemplate / GlobalRoutingConfig CRs are supplied by
 	// the operator — see examples/*/bgp-route-server.yaml.
@@ -94,9 +94,9 @@ type DataPathSpec struct {
 	SelfIPs  *SelfIPsSpec `yaml:"selfIPs,omitempty"`
 }
 
-// SelfIPsSpec carries the TMM SelfIP addresses that get assigned as secondary
-// private IPs on each TMM data-plane ENI (Phase 17) and announced inside the
-// TMM pod netns via F5SPKVlan CRs (Phase 23b). Per F5 Multi-AZ PDF p.9, AWS
+// SelfIPsSpec carries the nominal TMM SelfIP addresses: the centre of the /27
+// self-IP pools in the BNK 2.4 Infra CR (Phase 23b), from which the F5 IPAM
+// controller allocates the address TMM gets and phase 23b puts on the ENI. Per F5 Multi-AZ PDF p.9, AWS
 // won't route SelfIPs to the ENI unless they're also listed as secondary IPs
 // on the ENI. Auto-derived to <subnet>.240/<prefix> from the data-path
 // subnets when omitted (e.g. 10.0.10.0/24 → 10.0.10.240). On BNK 2.4 this is
@@ -661,7 +661,7 @@ func (c *Cluster) IsBNKPattern() bool {
 }
 
 // HasInternalInterface reports whether a second (internal, server-side) ENI,
-// data-path subnet, NetworkAttachmentDefinition and F5SPKVlan should be
+// data-path subnet, NetworkAttachmentDefinition and Infra VLAN should be
 // provisioned. True only for dual-interface. Single-interface patterns reach
 // in-cluster backends over CNI and have no internal interface.
 func (c *Cluster) HasInternalInterface() bool {
