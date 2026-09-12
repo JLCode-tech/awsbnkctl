@@ -4,9 +4,11 @@ import (
 	"context"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"io"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
 )
 
 // TestPhase23b_DryRun_HostDevice verifies the dry-run path sets the expected
@@ -313,5 +316,54 @@ func TestPhase23b_RecordAllocatedSelfIP(t *testing.T) {
 	}
 	if got := infraVlanIPAMName("f5-cne-system", "ext-vlan"); got != "vlan-f5-cne-system-ext-vlan.infra" {
 		t.Errorf("infraVlanIPAMName = %q", got)
+	}
+}
+
+// TestPhase23b_DryRun_BGPNote pins what bnk.bgp means for phase 23b on BNK 2.4:
+// no per-VLAN allowed-services are rendered (the Infra CRD has none) and the
+// phase says so once, naming the ports phase 07 opens instead. Without the flag
+// the note is absent.
+func TestPhase23b_DryRun_BGPNote(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bgp  bool
+	}{{"bgp", true}, {"no-bgp", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			awsmw.ResetForTest()
+			cl := hostDeviceCluster()
+			cl.Network.DataPath.SelfIPs = &intent.SelfIPsSpec{External: "10.0.10.240", Internal: "10.0.20.240", PrefixLen: 24}
+			cl.Bnk = &intent.BnkSpec{BGP: tc.bgp}
+			dir := t.TempDir()
+			st, _ := state.Load(dir)
+
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved := os.Stderr
+			os.Stderr = w
+			runErr := Phase23bSPKVlanGatewayClass(context.Background(), cl, st, &Clients{Profile: "test"}, true)
+			os.Stderr = saved
+			_ = w.Close()
+			out, _ := io.ReadAll(r)
+			if runErr != nil {
+				t.Fatalf("Phase23b dry-run: %v", runErr)
+			}
+			got := strings.Count(string(out), bgpInfraNote)
+			want := 0
+			if tc.bgp {
+				want = 1
+			}
+			if got != want {
+				t.Errorf("BGP note printed %d times, want %d:\n%s", got, want, out)
+			}
+			if tc.bgp {
+				for _, s := range []string{"tcp/179", "udp/3784", "no per-VLAN allowed-services", "SG_BNK_DATA", render.ZebOSConfigMapName} {
+					if !strings.Contains(bgpInfraNote, s) {
+						t.Errorf("BGP note must mention %q: %s", s, bgpInfraNote)
+					}
+				}
+			}
+		})
 	}
 }

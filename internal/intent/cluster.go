@@ -71,11 +71,13 @@ type BnkSpec struct {
 	PalCpuSet string `yaml:"palCpuSet,omitempty"`
 	// BGP enables BGP / dynamic routing on the TMM external VLAN.
 	// When true, Phase 07 admits tcp:179 (BGP) and udp:3784 (BFD) into
-	// SG_BNK_DATA from network.dataPath.external.cidr. (The 2.3 F5SPKVlan carried
-	// matching allowed_services; the BNK 2.4 Infra CR has no per-VLAN allowed
-	// services, so phase 23b only warns — verify BGP reachability live.) The peer
+	// SG_BNK_DATA from network.dataPath.external.cidr. That is the whole cluster
+	// side on BNK 2.4: the Infra CR has no per-VLAN allowed-services (the 2.3
+	// F5SPKVlan did) and the routing container peers from the external self IP
+	// by default, so phase 23b renders nothing extra and just says so. The peer
 	// itself (an AWS Route Server endpoint in the external subnet, or another
-	// router) and the RoutingTemplate / GlobalRoutingConfig CRs are supplied by
+	// router) and the ZebOS ConfigMap that carries the BGP stanza (2.4.0 runs
+	// the ZebOS routing container; render.ZebOSConfigMapName) are supplied by
 	// the operator — see examples/*/bgp-route-server.yaml.
 	BGP bool `yaml:"bgp,omitempty"`
 	// DynamicRouting is an alias for BGP.

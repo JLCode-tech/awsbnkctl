@@ -238,3 +238,36 @@ func TestRenderCNEControllerRBAC(t *testing.T) {
 		t.Error("nil cluster must fail")
 	}
 }
+
+// TestRenderInfra_BGPFlagLeavesInfraUnchanged pins the BNK 2.4 BGP contract:
+// bnk.bgp changes nothing in the Infra CR. The 2.4 Infra CRD has no per-VLAN
+// allowed-services (the 2.3 F5SPKVlan's allowed_services for tcp:179/udp:3784
+// have no counterpart), so the same manifest serves BGP and non-BGP clusters
+// and phase 07's security-group rule is the only cluster-side change.
+func TestRenderInfra_BGPFlagLeavesInfraUnchanged(t *testing.T) {
+	tmpl, err := manifests.FS.ReadFile("host-device/infra.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	plain, err := RenderInfra(tmpl, infraTestCluster("10.0.10.240", "10.0.20.240"), true)
+	if err != nil {
+		t.Fatalf("RenderInfra: %v", err)
+	}
+	bgp := infraTestCluster("10.0.10.240", "10.0.20.240")
+	bgp.Bnk.BGP = true
+	if !bgp.IsBGPEnabled() {
+		t.Fatal("test cluster must report BGP enabled")
+	}
+	withBGP, err := RenderInfra(tmpl, bgp, true)
+	if err != nil {
+		t.Fatalf("RenderInfra (bgp): %v", err)
+	}
+	if string(plain) != string(withBGP) {
+		t.Errorf("bnk.bgp must not change the Infra CR (no per-VLAN allowed-services on 2.4):\n--- without\n%s\n--- with\n%s", plain, withBGP)
+	}
+	for _, unwanted := range []string{"allowed_services", "allowedServices", "179", "3784"} {
+		if strings.Contains(string(withBGP), unwanted) {
+			t.Errorf("Infra must not carry %q (the 2.4 CRD has no such field):\n%s", unwanted, withBGP)
+		}
+	}
+}
