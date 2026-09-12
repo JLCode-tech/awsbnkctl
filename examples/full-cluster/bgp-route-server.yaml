@@ -1,43 +1,24 @@
 # bgp-route-server.yaml — peer TMM with an AWS Route Server (BGP + BFD).
 #
-# Companion to cluster.yaml, which sets bnk.bgp: true. That flag opens TCP 179
-# and UDP 3784 on the data-plane security group (phase 07). On BNK 2.4 that is
-# all the cluster side needs: the Infra CR that defines the external VLAN has no
-# per-VLAN allowed-services list (the 2.3 F5SPKVlan did) and the routing
-# container peers from the external self IP by default. This file does NOT
-# create the peer. Apply it after `awsbnkctl up` has finished and you have a
-# Route Server endpoint in the external data-path subnet — the procedure is in
-# docs/BGP-ROUTE-SERVER.md and summarised in README.md ("BGP peering with AWS
-# Route Server").
-#
-# Why a ConfigMap and not GlobalRoutingConfig/RoutingTemplate: FLO installs
-# BNK 2.4.0 with the ZebOS routing container (F5's 2.4 CNEInstance examples set
-# ZEBOS_STATE: legacy; FLO 2.30 has no OcNOS switch). ZebOS reads its BGP
-# configuration from this ConfigMap (F5 "Set up dynamic routing with BGP") and
-# the BFD watcher hot-reloads it — no TMM restart. The 2.4 routing CRs are the
-# OcNOS path: on ZebOS the controller cannot deliver them ("No heartbeat from
-# grpc-svc-f5dr", live 2026-09-12). FLO creates this ConfigMap with an empty
-# ZebOS.conf; applying this file fills it in, and the TMM chart keeps the
-# content across upgrades.
+# cluster.yaml sets bnk.bgp: true, which opens TCP 179 and UDP 3784 on the
+# data-plane security group. That is all the cluster side needs on BNK 2.4.
+# This file is the BGP stanza: FLO installs 2.4.0 with the ZebOS routing
+# container, which reads its configuration from this ConfigMap and reloads it
+# without a TMM restart. Apply it after `awsbnkctl up`, once you have a Route
+# Server endpoint in the external data-path subnet (docs/BGP-ROUTE-SERVER.md).
 #
 # Addresses match this example's network.dataPath.external (10.0.10.0/24):
-#   10.0.10.240  BGP router-id (any unique IPv4; the nominal self IP). The
-#                --peer-address you give the Route Server is TMM_EXT_SELFIP
-#                from state.env — the F5 IPAM controller allocates it from
-#                .224-.254 (typically .225), so read it, do not assume .240.
-#   10.0.10.31   REPLACE (three lines) with the Route Server endpoint's
-#                EniAddress. AWS allocates it; read it back with
-#                `aws ec2 describe-route-server-endpoints`.
+#   10.0.10.240  BGP router-id. Give the Route Server peer TMM_EXT_SELFIP from
+#                state.env as --peer-address; IPAM allocates it from .224-.254.
+#   10.0.10.31   REPLACE (three lines) with the Route Server endpoint address
+#                from `aws ec2 describe-route-server-endpoints`.
 # ASNs: 65000 is TMM, 65001 is the Route Server (--amazon-side-asn 65001).
-# Change both sides together if these clash with something in your account.
 #
-# `redistribute kernel` announces the Gateway VIP (10.0.10.100 in this example),
-# which TMM installs as a kernel route, to the Route Server; it then propagates
-# it into the route tables you enabled propagation on. Connected routes are
-# deliberately NOT redistributed: the SelfIP subnet is already local to the VPC.
-# `fall-over bfd` runs BFD to the peer, which the Route Server peer is created
-# with (PeerLivenessDetection=bfd); ext-vlan-infra is the external VLAN's
-# interface inside the routing container (the Infra network name).
+# `redistribute kernel` announces the Gateway VIPs (10.0.10.100 here), which
+# TMM installs as kernel routes. Connected routes are not redistributed: the
+# self-IP subnet is already local to the VPC. `fall-over bfd` matches the peer
+# created with PeerLivenessDetection=bfd; ext-vlan-infra is the external VLAN
+# inside the routing container.
 apiVersion: v1
 kind: ConfigMap
 metadata:

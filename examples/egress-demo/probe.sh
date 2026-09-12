@@ -1,7 +1,7 @@
 #!/bin/sh
 # BNK egress probe — run inside the captured "agent" pod. Shows the identity the
 # outside world sees + reachability. The result FLIPS depending on whether BNK
-# egress capture is ON (F5SPKEgress present) or OFF.
+# egress capture is ON (EgressGateway present) or OFF.
 #
 # Mounted into the pod at /demo via the `egress-probe` ConfigMap
 # (see workload.yaml). One-shot; use watch.sh for a continuous on-screen view.

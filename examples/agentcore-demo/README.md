@@ -69,7 +69,7 @@ one before it.
 | --- | --- | --- |
 | 1 | `awsbnkctl up -f examples/agentcore-demo/cluster.yaml` | from the repo root, so state lands in `.awsbnkctl/bnk-agentcore-demo/` |
 | 2 | `awsbnkctl k apply -f mcp-tool/` | the directory, not a file: Kustomize generates the ConfigMap and the bearer-token Secret |
-| 3 | `awsbnkctl k apply -f gateway-deployment.yaml` | the Gateway with listeners on 80 and 443 and both `HTTPRoute`s |
+| 3 | `awsbnkctl k apply --config cluster.yaml -f gateway-deployment.yaml` | the `GatewaySettings`, the Gateway with listeners on 80 and 443 and both `HTTPRoute`s; `--config` fills in the GatewayClass name from state |
 | 4 | `scripts/setup-agentcore-network.sh` | reads the VIP off the live Gateway; creates the agent security group, SG-to-SG ingress and the private Route 53 zone |
 | 5 | `awsbnkctl k apply -f mcp-security-policy.yaml` | the rate-limit iRule and firewall attach to listeners that must already exist |
 | 6 | `awsbnkctl k apply -f mcp-observability.yaml` | Loki and the log collector in `llm-egress` |
@@ -147,7 +147,7 @@ on `.150`, outside the scenario range. `ai-inference-e2e` needs `--synthetic`.
 | Rate limit trips at half the count | the same iRule attached at both Gateway and listener scope runs twice; attach per listener only |
 | VIP goes dark after applying a policy file | a manifest re-declared the `Gateway` with only `metadata`, so apply pruned its `listeners`; re-apply `gateway-deployment.yaml` |
 | HTTPS listener healthy but nothing listens on 443 | a listener's protocol was changed in place; delete the Gateway and re-apply |
-| `Gateway` with `infrastructure.parametersRef` gets no address | that path needs F5 IPAM CRs that this cluster does not have; use `spec.addresses` as the demo does |
+| `Gateway` is `Programmed=True` but TMM has no virtual server | the Gateway has no `infrastructure.parametersRef` to a `GatewaySettings`, or its static address is outside the Infra listener pool (`.100`–`.199`); use the shape in `gateway-deployment.yaml` |
 | `httpx.ReadError` right after redeploying the MCP pod | a warm agent held a pooled connection to the old pod; invoke again |
 | `agentcore invoke` times out with "Runtime initialization time exceeded" | the ECR repository was deleted out of band; recreate `bnkagent/financeagentv2agent`, change `main.py` trivially, `npx agentcore deploy --target demo-v2 -y` |
 | The agent politely declines a tool instead of calling it | a model guardrail read the tool description; keep sensitivity wording out of the docstring |
@@ -169,11 +169,11 @@ awsbnkctl down -f examples/agentcore-demo/cluster.yaml --yes
 | --- | --- |
 | `cluster.yaml` | the awsbnkctl intent |
 | `mcp-tool/` | the MCP finance tool: `mcp-server.py` and the Kustomize base that generates its ConfigMap and token Secret |
-| `gateway-deployment.yaml` | the BNK `Gateway` (80 and 443) and both `HTTPRoute`s |
+| `gateway-deployment.yaml` | the `GatewaySettings`, the BNK `Gateway` (80 and 443) and both `HTTPRoute`s |
 | `mcp-security-policy.yaml` | rate-limit iRule, per-listener `NetPolicy`, `F5BigFwPolicy`, `SecPolicy` |
 | `mcp-observability.yaml` | `llm-egress` namespace, Loki, the `bnkgov-collector` DaemonSet |
 | `mcp-bedrock-token-shipper.yaml` | IRSA ServiceAccount and the shipper that copies Bedrock token counts into Loki |
-| `bgp-route-server.yaml` | optional Route Server peering CRs |
+| `bgp-route-server.yaml` | optional BGP stanza (a ZebOS ConfigMap) for Route Server peering |
 | `external-agent.py` | the unmanaged caller, run from inside the VPC |
 | `agent/` | the AgentCore runtime (`FinanceAgentV2Agent`) and its deployment config |
 | `scripts/rebuild.sh` | builds everything in order |

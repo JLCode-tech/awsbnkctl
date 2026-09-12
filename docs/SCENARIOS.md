@@ -184,10 +184,10 @@ only inputs are `network.dataPath.external.cidr` and the per-scenario octet.
 | `.113` | `ingress-migration` | demo |
 | `.115`–`.117` | `multi-vip` (VIP A `.115`, VIP B `.116`, pool end `.117`) | scenario |
 | `.120` | `bigip-cis` (BIG-IP VE virtual server, `bigipVE.vip`) | demo |
-| `.150` | `agentcore-demo` Gateway (`gateway-deployment.yaml`) | example |
+| `.121`–`.123` | `local-zone` reference manifests (SCTP, Diameter, HTTP/2) | example |
 | `.130` | `demo-ai` proxy shootout | example |
+| `.150` | `agentcore-demo` Gateway (`gateway-deployment.yaml`) | example |
 | `.200` | Jumphost external ENI (`<subnet>.200`, Phase 17b) | infrastructure |
-| `.201`–`.202` | `local-zone` reference manifests | example |
 | `.224`–`.254` | TMM external self-IP pool: the /27 around the nominal `<subnet>.240`. The F5 IPAM controller allocates one address to TMM; Phase 23b puts it on the ENI and records it as `TMM_EXT_SELFIP` | infrastructure |
 
 `cwc-admin-access`, `core-file-collection` and `egress-snat` allocate no VIP.

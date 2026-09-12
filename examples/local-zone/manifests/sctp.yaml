@@ -1,18 +1,27 @@
+# SCTP (9000) reference: GatewaySettings, echo backend, Gateway with a static
+# VIP inside the Infra listener pool, L4Route. The Gateway listener rejected
+# `protocol: SCTP` in the trial this comes from; kept as the reproduction case.
+# Apply with the cluster config so {{.GATEWAYCLASS_NAME}} is filled from state:
+#   awsbnkctl k apply --config <cluster.yaml> -f examples/local-zone/manifests/sctp.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
   name: sctp-scenario
 ---
-apiVersion: k8s.f5net.com/v1
-kind: F5BnkGateway
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
 metadata:
-  name: sctp-vip-pool
+  name: sctp-scenario
   namespace: sctp-scenario
 spec:
   ingressConfig:
-    defaultListenerNetworks:
-    - name: ext
-      ipv4BaseCidr: "10.0.10.200/32"
+    defaultListenerNetwork:
+      ipamRefs:
+      - name: listener-pool
+      networkRefs:
+      - name: ext-vlan-infra
+      sourceNATConfig:
+        type: Automap
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -50,16 +59,21 @@ spec:
     targetPort: 9000
     protocol: SCTP
 ---
-apiVersion: gateway.networking.k8s.io/v1beta1
+apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: sctp-gateway
   namespace: sctp-scenario
 spec:
-  gatewayClassName: bnk-perth-lz-gatewayclass
+  gatewayClassName: {{.GATEWAYCLASS_NAME}}
+  infrastructure:
+    parametersRef:
+      group: gateway.k8s.f5.com
+      kind: GatewaySettings
+      name: sctp-scenario
   addresses:
   - type: IPAddress
-    value: 10.0.10.200
+    value: 10.0.10.121
   listeners:
   - name: sctp-listen
     protocol: SCTP

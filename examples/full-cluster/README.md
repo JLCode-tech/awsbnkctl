@@ -9,7 +9,7 @@
 
 Start here. This `cluster.yaml` builds the complete stack: VPC and subnets, the
 two TMM data-path subnets, EKS with a three-node group sized for BNK, the BNK
-2.3 control plane and TMM on dedicated ENIs, and a jumphost that can send test
+2.4 control plane and TMM on dedicated ENIs, and a jumphost that can send test
 traffic into the external data path. Every other example is this file plus a few
 toggles.
 
@@ -79,7 +79,7 @@ Run `core-file-collection` last: it patches the CNEInstance and TMM restarts.
 ## BGP
 
 `bnk.bgp: true` opens TCP 179 and UDP 3784 from the external subnet on the
-data-plane security group and the external VLAN. To actually peer, build a
+data-plane security group. To actually peer, build a
 Route Server endpoint in that subnet and apply
 [`bgp-route-server.yaml`](bgp-route-server.yaml) with the endpoint's address in
 place of `10.0.10.31`. Procedure, verification and the teardown order (the

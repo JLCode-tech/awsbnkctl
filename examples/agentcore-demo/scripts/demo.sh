@@ -107,9 +107,9 @@ IRULE_READY=$(kubectl get f5-big-cne-irules mcp-rate-limit-irule -n default \
   -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
 [ "$IRULE_READY" = "True" ] && ok "governance iRule programmed on TMM" || bad "iRule not programmed"
 
-POLICIES=$(kubectl get bnknetpolicies -n default --no-headers 2>/dev/null | wc -l | tr -d ' ')
-[ "$POLICIES" -ge 2 ] && ok "$POLICIES listener-scoped BNKNetPolicies attached" \
-  || bad "expected 2 BNKNetPolicies (one per listener), found $POLICIES"
+POLICIES=$(kubectl get netpolicies.gateway.k8s.f5.com -n default --no-headers 2>/dev/null | wc -l | tr -d ' ')
+[ "$POLICIES" -ge 2 ] && ok "$POLICIES listener-scoped NetPolicies attached" \
+  || bad "expected 2 NetPolicies (one per listener), found $POLICIES"
 
 TOOL_READY=$(kubectl get deploy mcp-financial-tool -n default \
   -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
