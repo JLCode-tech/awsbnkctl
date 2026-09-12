@@ -44,6 +44,7 @@ type mockIAM struct {
 	createOIDCErr               error
 	createPolicyErr             error
 	getPolicyErr                error
+	deletePolicyErr             error
 }
 
 func newMockIAM() *mockIAM {
@@ -342,6 +343,9 @@ func (m *mockIAM) GetPolicy(_ context.Context, in *iam.GetPolicyInput, _ ...func
 
 func (m *mockIAM) DeletePolicy(_ context.Context, in *iam.DeletePolicyInput, _ ...func(*iam.Options)) (*iam.DeletePolicyOutput, error) {
 	m.deletePolicyCalls++
+	if m.deletePolicyErr != nil {
+		return nil, m.deletePolicyErr
+	}
 	arn := ""
 	if in.PolicyArn != nil {
 		arn = *in.PolicyArn

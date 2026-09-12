@@ -88,6 +88,22 @@ var (
 	clusterRoleBindingGVR = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}
 )
 
+// bgpInfraNote is what bnk.bgp means for this phase on BNK 2.4. The 2.3
+// F5SPKVlan carried allowed_services (tcp:179 BGP, udp:3784 BFD) so TMM would
+// hand those packets to the routing container. The 2.4 Infra CRD (spec: ipams,
+// networkAttachments, vrfs, networks, staticRoutes, egressDefaults) and the
+// GatewaySettings CRD have no per-VLAN allowed-services field, and the 2.4 BGP
+// how-tos (how-tos/border-gateway-protocol) have no step that opens ports on
+// the VLAN: the routing container peers from the external self IP by default.
+// So nothing is rendered into Infra for BGP; phase 07 opens the same ports on
+// SG_BNK_DATA, and the peer + BGP configuration are the operator's
+// (docs/BGP-ROUTE-SERVER.md). That configuration is the ZebOS ConfigMap
+// (render.ZebOSConfigMapName): FLO 2.30 installs 2.4.0 with the ZebOS routing
+// container (ZEBOS_STATE=legacy, as in F5's 2.4 CNEInstance examples) and the
+// GlobalRoutingConfig/RoutingTemplate CRs are the OcNOS path — on ZebOS the
+// controller reports "No heartbeat from grpc-svc-f5dr" (live 2026-09-12).
+var bgpInfraNote = fmt.Sprintf("[phase 23b] bnk.bgp: the BNK 2.4 Infra CR has no per-VLAN allowed-services (none needed: BGP tcp/179 + BFD udp/3784 reach the routing container on the external self IP by default; phase 07 opens them on SG_BNK_DATA); BGP config goes in the ZebOS ConfigMap %s/%s (docs/BGP-ROUTE-SERVER.md)", InstanceNamespace, render.ZebOSConfigMapName)
+
 // infraGVR is the BNK 2.4 Infra CR (singleton in the CNE namespace).
 var infraGVR = schema.GroupVersionResource{
 	Group:    "gateway.k8s.f5.com",
@@ -132,6 +148,9 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 			fmt.Fprintln(os.Stderr, "[phase 23b] dry-run: would wait for the Infra CRD then apply Infra (ext-vlan + int-vlan, listener pool) + GatewayClass")
 		} else {
 			fmt.Fprintln(os.Stderr, "[phase 23b] dry-run: would wait for the Infra CRD then apply Infra (ext-vlan, listener pool) + GatewayClass (single-interface)")
+		}
+		if cl.IsBGPEnabled() {
+			fmt.Fprintln(os.Stderr, bgpInfraNote)
 		}
 		st.Set("INFRA_APPLIED_AT", "dry-run")
 		st.Set("GATEWAYCLASS_NAME", name+"-gatewayclass")
@@ -235,7 +254,7 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 		return fmt.Errorf("phase23b: rendering infra: %w", err)
 	}
 	if cl.IsBGPEnabled() {
-		fmt.Fprintln(os.Stderr, "[phase 23b] warning: bnk.bgp is set, but the BNK 2.4 Infra CR has no per-VLAN allowed-services; verify BGP reachability to the external self IP live")
+		fmt.Fprintln(os.Stderr, bgpInfraNote)
 	}
 	if hasInternal {
 		fmt.Fprintf(os.Stderr, "[phase 23b] applying Infra %s: %s (self IP pool around %s) + %s (self IP pool around %s), listener pool %s, egress tunnel on %s, static routes\n",

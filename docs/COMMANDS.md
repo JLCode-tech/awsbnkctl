@@ -127,8 +127,12 @@ The binary embeds no LLM; bring your own coding-agent CLI.
 
 - **BGP peering** — `bnk.bgp: true` (alias `bnk.dynamicRouting: true`) admits
   TCP 179 / UDP 3784 from the external data-path subnet into the data-plane
-  security group. (On BNK 2.4 the external VLAN comes from the `Infra` CR, which has no per-VLAN allowed-services list; verify BGP reachability live.) Every
-  example sets it. The Route Server and the routing CRs are yours to add:
+  security group. That is the whole cluster side on BNK 2.4: the `Infra` CR that
+  defines the external VLAN has no per-VLAN allowed-services list (the 2.3
+  F5SPKVlan did) and the routing container peers from the external self IP by
+  default. Every
+  example sets it. The Route Server and the ZebOS BGP ConfigMap (2.4.0 runs the
+  ZebOS routing container, so the routing CRs do not apply) are yours to add:
   [`BGP-ROUTE-SERVER.md`](BGP-ROUTE-SERVER.md).
 - **Shared Forge project** — `forge.projectName` registers the cluster into an
   existing Forge project instead of the auto-created `awsbnkctl-<cluster>` one.
