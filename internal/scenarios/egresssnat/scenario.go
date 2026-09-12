@@ -123,8 +123,9 @@ func tmmPodName(sctx *scenarios.Context) (string, error) {
 // expectedSNATSource is the address egress must be SNATed to when captured:
 // TMM's external self IP (AUTOMAP picks the egress interface's self IP, and
 // the Infra default route pins that interface to the external VLAN). state.env
-// carries the address the F5 IPAM controller allocated (phase 23b); the
-// intent's nominal value is the fallback.
+// carries the address the F5 IPAM controller allocated (phase 23b, e.g. .225;
+// confirmed live 2026-09-12 as the AUTOMAP source); the intent's nominal
+// value is the fallback.
 func expectedSNATSource(sctx *scenarios.Context) string {
 	return scenarios.NetVarsFor(sctx.Cluster, sctx.State).TMMExtSelfIP
 }
@@ -163,9 +164,9 @@ func readTMMCounters(d *VerifyDeps, sctx *scenarios.Context, tmmPod, ns, name, s
 	return c, nil
 }
 
-// egressVirtualName is the listener name TMM used for a 2.3 F5SPKEgress,
-// <ns>-<cr>-egress-ipv4, and the first candidate for an EgressGateway.
-// LIVE-CONFIRM: pin the 2.4 name once tmctl has shown it.
+// egressVirtualName is the wildcard listener TMM creates for an EgressGateway:
+// <ns>-<name>-egress-ipv4, the same pattern the 2.3 F5SPKEgress used
+// (confirmed live on BNK 2.4.0, 2026-09-12: awsbnkctl-scn-egress-awsbnkctl-egress-egress-ipv4).
 func egressVirtualName(ns, name string) string { return ns + "-" + name + "-egress-ipv4" }
 
 // egressVirtualLine picks the virtual_server_stat line of this scenario's
