@@ -30,9 +30,9 @@ const (
 	// jumphostInstanceTerminatedTimeout is the maximum time to wait for terminated state.
 	jumphostInstanceTerminatedTimeout = 10 * time.Minute
 
-	// eicePollInterval / eiceReadyTimeout covers the time EICE spends in "creating" state.
-	eicePollInterval = 5 * time.Second
-	eiceReadyTimeout = 5 * time.Minute
+	// eicePollInterval / eiceReadyTimeout cover the time EICE spends in the
+	// "create-in-progress" state. AWS documents no SLA; 8-9 minutes has been seen
+	// live, so the budget is 10 minutes. Vars so tests can shrink them.
 )
 
 // Phase17bJumphost provisions a multi-ENI EC2 jumphost + EC2 Instance Connect
@@ -799,18 +799,47 @@ func waitInstanceTerminated(ctx context.Context, ec2c EC2API, instanceID string)
 	return fmt.Errorf("timeout waiting for instance %s to terminate", instanceID)
 }
 
-// waitEICEReady polls until the EICE reaches "create-complete" state.
+var (
+	eicePollInterval = 5 * time.Second
+	eiceReadyTimeout = 10 * time.Minute
+)
+
+// waitEICEReady polls until the EICE reaches "create-complete". It fails fast
+// when AWS reports "create-failed" (the StateMessage names the cause, e.g. a
+// subnet without free addresses or a quota), logs every describe error instead
+// of hiding it behind the timeout, and gives up after eiceReadyTimeout.
 func waitEICEReady(ctx context.Context, ec2c EC2API, eiceID string) error {
 	deadline := time.Now().Add(eiceReadyTimeout)
-	for time.Now().Before(deadline) {
+	last := "no describe response yet"
+	for {
 		out, err := ec2c.DescribeInstanceConnectEndpoints(ctx, &ec2.DescribeInstanceConnectEndpointsInput{
 			InstanceConnectEndpointIds: []string{eiceID},
 		})
-		if err == nil && len(out.InstanceConnectEndpoints) > 0 {
-			s := out.InstanceConnectEndpoints[0].State
-			if s == ec2types.Ec2InstanceConnectEndpointStateCreateComplete {
-				return nil
+		switch {
+		case err != nil:
+			last = "describe error: " + err.Error()
+			fmt.Fprintf(os.Stderr, "[phase 17b] ec2:DescribeInstanceConnectEndpoints %s: %v (retrying)\n", eiceID, err)
+		case len(out.InstanceConnectEndpoints) == 0:
+			last = "not returned by describe"
+		default:
+			e := out.InstanceConnectEndpoints[0]
+			msg := ""
+			if e.StateMessage != nil {
+				msg = *e.StateMessage
 			}
+			switch e.State {
+			case ec2types.Ec2InstanceConnectEndpointStateCreateComplete:
+				return nil
+			case ec2types.Ec2InstanceConnectEndpointStateCreateFailed:
+				return fmt.Errorf("EICE %s create-failed: %s", eiceID, msg)
+			}
+			last = fmt.Sprintf("state=%s", e.State)
+			if msg != "" {
+				last += " (" + msg + ")"
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("EICE %s did not reach create-complete after %s: %s", eiceID, eiceReadyTimeout, last)
 		}
 		select {
 		case <-ctx.Done():
@@ -818,7 +847,6 @@ func waitEICEReady(ctx context.Context, ec2c EC2API, eiceID string) error {
 		case <-time.After(eicePollInterval):
 		}
 	}
-	return fmt.Errorf("timeout waiting for EICE %s to reach create-complete", eiceID)
 }
 
 // lookupInstanceByTag looks up a non-terminated EC2 instance by cluster + component tags.

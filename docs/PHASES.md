@@ -36,7 +36,7 @@
 - **`nvidia-device-plugin`** (`Phase11cNvidiaDevicePlugin`): Deploys the NVIDIA device plugin (GPU node groups only).
 - **`sagemaker-lmi`** (`PhaseSageMakerUp`): Provisions a SageMaker LMI endpoint (opt-in).
 - **`secondary-enis`** (`Phase17SecondaryENIs`): Creates secondary ENIs for the data plane (internal/external) attached directly to the worker node and records the nominal TMM self IPs (`<subnet>.240`); on BNK 2.4 the address is allocated by the F5 IPAM controller, so Phase 23b assigns it on the ENI.
-- **`jumphost`** (`Phase17bJumphost`): Provisions a secure EC2 jumphost for internal testing and API access.
+- **`jumphost`** (`Phase17bJumphost`): Provisions a secure EC2 jumphost for internal testing and API access. Waits up to 10 minutes for the EC2 Instance Connect Endpoint, fails fast with the AWS state message when it reaches `create-failed`, and logs describe errors instead of hiding them behind the timeout.
 - **`bigip-ve`** (`Phase17eBigIPVE`): Provisions an optional BIG-IP Virtual Edition instance for proxy tests (opt-in).
 - **`iface-discovery`** (`Phase17cIfaceDiscovery`): Runs a host-netns probe on the TMM node and records the Linux names + PCI addresses of the data-path ENIs (`EXTERNAL_IFNAME`/`INTERNAL_IFNAME`) and of the node's primary ENI (`NODE_PRIMARY_IFNAME`, consumed by `egress-snat` as the pseudo-CNI `nodeInterfaceName`). The data-path pair is matched once (TMM later owns those NICs); the primary is re-resolved on re-run if missing from state.
 - **`demo-stage`** (`Phase17dDemoStage`): Pre-stages demo client assets (grpcurl, python scripts) on the jumphost.

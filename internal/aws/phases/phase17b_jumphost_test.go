@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -398,5 +399,57 @@ func TestValidateJumphostExtIP(t *testing.T) {
 		if err := validateJumphostExtIP(ip); err == nil {
 			t.Errorf("expected %s to fail validation (VIP collision)", ip)
 		}
+	}
+}
+
+// TestWaitEICEReady_CreateFailedFailsFast pins the phase 17b fix: a
+// "create-failed" endpoint surfaces AWS's StateMessage immediately instead of
+// burning the whole wait budget.
+func TestWaitEICEReady_CreateFailedFailsFast(t *testing.T) {
+	oldPoll, oldTimeout := eicePollInterval, eiceReadyTimeout
+	eicePollInterval, eiceReadyTimeout = time.Millisecond, time.Minute
+	defer func() { eicePollInterval, eiceReadyTimeout = oldPoll, oldTimeout }()
+
+	ec2m := &mockEC2{describeEICEsOut: &ec2.DescribeInstanceConnectEndpointsOutput{
+		InstanceConnectEndpoints: []ec2types.Ec2InstanceConnectEndpoint{{
+			InstanceConnectEndpointId: ptr("eice-0fail"),
+			State:                     ec2types.Ec2InstanceConnectEndpointStateCreateFailed,
+			StateMessage:              ptr("subnet subnet-0abc has no free IP addresses"),
+		}},
+	}}
+	start := time.Now()
+	err := waitEICEReady(context.Background(), ec2m, "eice-0fail")
+	if err == nil || !strings.Contains(err.Error(), "create-failed") || !strings.Contains(err.Error(), "no free IP addresses") {
+		t.Fatalf("err = %v, want create-failed with the StateMessage", err)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Errorf("create-failed took %s to surface; must fail fast", time.Since(start))
+	}
+}
+
+// TestWaitEICEReady_DescribeErrorsAreRetriedAndReported keeps polling through
+// describe errors and names the last one in the timeout error.
+func TestWaitEICEReady_DescribeErrorsAreRetriedAndReported(t *testing.T) {
+	oldPoll, oldTimeout := eicePollInterval, eiceReadyTimeout
+	eicePollInterval, eiceReadyTimeout = time.Millisecond, 20*time.Millisecond
+	defer func() { eicePollInterval, eiceReadyTimeout = oldPoll, oldTimeout }()
+
+	ec2m := &mockEC2{describeEICEsErr: fmt.Errorf("RequestLimitExceeded")}
+	err := waitEICEReady(context.Background(), ec2m, "eice-0err")
+	if err == nil || !strings.Contains(err.Error(), "RequestLimitExceeded") || !strings.Contains(err.Error(), "did not reach create-complete") {
+		t.Fatalf("err = %v, want timeout error naming the describe error", err)
+	}
+}
+
+// TestWaitEICEReady_CompleteReturnsNil is the happy path.
+func TestWaitEICEReady_CompleteReturnsNil(t *testing.T) {
+	ec2m := &mockEC2{describeEICEsOut: &ec2.DescribeInstanceConnectEndpointsOutput{
+		InstanceConnectEndpoints: []ec2types.Ec2InstanceConnectEndpoint{{
+			InstanceConnectEndpointId: ptr("eice-0ok"),
+			State:                     ec2types.Ec2InstanceConnectEndpointStateCreateComplete,
+		}},
+	}}
+	if err := waitEICEReady(context.Background(), ec2m, "eice-0ok"); err != nil {
+		t.Fatalf("err = %v, want nil", err)
 	}
 }
