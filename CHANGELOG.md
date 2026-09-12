@@ -4,6 +4,36 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [2.0.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.6.1...v2.0.0) (2026-09-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **bnk:** adopt the BNK 2.4 Infra and GatewaySettings network model
+* **bnk:** awsbnkctl 2.x targets BNK 2.4; the 2.3 line lives on the release-2.3 branch.
+
+### Features
+
+* **bnk:** adopt the BNK 2.4 Infra and GatewaySettings network model ([368ee44](https://github.com/JLCode-tech/awsbnkctl/commit/368ee44ae6129823f7895d44cafc7fee65f6eff1))
+* **bnk:** move the default release to BNK 2.4.0 ([5a6afc4](https://github.com/JLCode-tech/awsbnkctl/commit/5a6afc4fd25c3832b4e4095771a9bdf2a806c0e7))
+* **egress-snat:** port the scenario and the egress examples to the BNK 2.4 EgressGateway ([13fc882](https://github.com/JLCode-tech/awsbnkctl/commit/13fc882b7d7a13214f7cf90aeb725d932afa2535))
+* **infra:** carry egress defaults and static routes in the Infra CR, drop F5SPKVlan on 2.4 ([644b200](https://github.com/JLCode-tech/awsbnkctl/commit/644b2002ff09cf9e445ca0ccc107bf7092a46fb3))
+
+
+### Bug Fixes
+
+* **bnk24:** work around two FLO 2.30 gaps that keep every TMM in standby and pools empty ([a32279b](https://github.com/JLCode-tech/awsbnkctl/commit/a32279bd1086ad52eb79ed9a3eb7f233aa307ad5))
+* **cneinstance:** set USE_GATEWAY_SETTINGS=true on the 2.4 controller ([3997967](https://github.com/JLCode-tech/awsbnkctl/commit/399796726201e2c4fd487433723adb7724fb025c))
+* **infra:** allocate TMM self IPs from /27 pools and assign the allocated address in phase 23b ([3aa18fe](https://github.com/JLCode-tech/awsbnkctl/commit/3aa18fe7cb9535c739b5ab5e2e2fbc4b02cc6a7a))
+* **infra:** allocate TMM self IPs from /30 pools the F5 IPAM controller accepts ([cfbe37f](https://github.com/JLCode-tech/awsbnkctl/commit/cfbe37f2d368cbad074339d7aadf7265653bba77))
+* **infra:** tag the IPAM pools with the data-path availability zone ([b517704](https://github.com/JLCode-tech/awsbnkctl/commit/b5177044fa1344b33e1ec7e93c292544aa538acc))
+* **intent:** build the self-IP pool bounds with byte arithmetic (gosec G115) ([3d43c9d](https://github.com/JLCode-tech/awsbnkctl/commit/3d43c9da94d644613566785885d27aafcec03a94))
+* **phase17b:** fail fast on EICE create-failed, log describe errors, 10 min wait ([ed3eda9](https://github.com/JLCode-tech/awsbnkctl/commit/ed3eda95d6dc6e2f06fae3f9cc1afb262e9f56de))
+* **phase17b:** fail fast on EICE create-failed, log describe errors, 10 min wait ([2b00528](https://github.com/JLCode-tech/awsbnkctl/commit/2b00528992583cd5692341f1236370c3a048fa7a))
+* **phase23b:** apply the GatewayClass before the Infra CR ([7bb83e6](https://github.com/JLCode-tech/awsbnkctl/commit/7bb83e6a9e61369eac2be57cb7155ae021b5f86e))
+* **phase23b:** keep the F5SPKVlan CRs on BNK 2.4 next to the Infra CR ([7084a9f](https://github.com/JLCode-tech/awsbnkctl/commit/7084a9fc3be0a559102d9b39d89b8a75bc0e6cda))
+* **phase23b:** wait for the cne-controller before applying F5SPKVlan ([96c4202](https://github.com/JLCode-tech/awsbnkctl/commit/96c4202db6d54795c922925583d776b587bc9a4b))
+
 ## [1.6.1](https://github.com/JLCode-tech/awsbnkctl/compare/v1.6.0...v1.6.1) (2026-09-11)
 
 
