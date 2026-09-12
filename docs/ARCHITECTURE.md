@@ -193,15 +193,33 @@ know). Add a row when F5 publishes a new build; the tags are listed by
 
 What was checked against the 2.4.0 charts and CRD installer (2026-09-11): the
 `CNEInstance` CRD only gained fields since 2.3.3, so the embedded template applies
-to every build; the F5 CRDs the scenarios and examples use are all installed and
-watched by the 2.4.0 controller (`k8s.f5net.com/v1` for F5BnkGateway and
-F5SPKVlan, `k8s.f5net.com/v3` for F5SPKEgress, `k8s.f5net.com/v1alpha1` for
-RoutingTemplate / GlobalRoutingConfig); the Gateway API extension group moved from
+to every build; the 2.4.0 controller takes the TMM VLANs and the Gateway listener
+context from the new `Infra` CR and ignores `F5BnkGateway` (live 2026-09-11: every
+Gateway logged "Pre-computed 0 device contexts" and TMM got no virtual server), so
+phase 23b applies an `Infra` CR instead of `F5SPKVlan` (the 2.4 release notes: Infra consolidates F5SPKVlan, F5SPKStaticRoute, VRF and VxLAN; in GatewaySettings mode the controller ignores those CRs), and every scenario ships a
+`GatewaySettings` that its Gateway references through `infrastructure.parametersRef`;
+the Infra also carries the TMM self-IP pools (tagged with the data-path availability zone,
+which is what lets the controller count the zone's self IPs and activate the TMM), the VIP
+listener pool, the egress tunnel defaults and the two static routes egress needs;
+the controller container gets `USE_GATEWAY_SETTINGS=true` from the CNEInstance, because the
+2.4.0 f5ingress binary only starts the Infra and GatewaySettings reconcilers when that
+env flag is set and neither FLO 2.30 nor the f5ingress chart sets it;
+the controller also gets `MAX_ACTIVE_TMM_REPLICAS=32` (the chart default) because FLO 2.30 renders the
+Deployment without it and the 2.4 controller then keeps every TMM in standby, and phase 23b adds
+a ClusterRole/Binding for `get` on EndpointSlices, which the FLO-generated ClusterRole lacks;
+the VLAN self IPs are allocated by the F5 IPAM controller from /27 pools
+(`<subnet>.224`–`.254` around the nominal `.240`; the controller splits a pool into per-device
+blocks and rejected both a single address and a /30), so phase 23b now assigns the allocated
+address on the ENI and records it, where 2.3 pinned `.240` in phase 17;
+`k8s.f5net.com/v3` F5SPKEgress and `k8s.f5net.com/v1` F5SPKStaticRoute are still installed
+but only reach the validation webhook in GatewaySettings mode (live 2026-09-12: TMM egress
+counters stayed at 0 with them), so egress runs on the 2.4 model: `EgressGateway`
+(`gateway.k8s.f5.com/v1alpha1`) + `GatewaySettings` `egressConfigs` + the Infra `egressDefaults`
+and `staticRoutes`; `k8s.f5net.com/v1alpha1` RoutingTemplate / GlobalRoutingConfig are still watched; the Gateway API extension group moved from
 `gateway.k8s.f5net.com` to `gateway.k8s.f5.com` (L4Route `v1`, NetPolicy and
 SecPolicy `v1alpha1`, formerly BNKNetPolicy and BNKSecPolicy), and the 2.4.0
 controller no longer watches the old group, so 2.3.x manifests for those kinds do
-not work on 2.4.0; 2.4.0 adds `Infra`, `GatewaySettings` and `EgressGateway`
-(`gateway.k8s.f5.com/v1alpha1`), which awsbnkctl does not use yet; the routing
+not work on 2.4.0; the routing
 container is still ZebOS (the TMM chart default), so `ZEBOS_STATE=legacy` is set as
 in F5's 2.4 examples; and the `format: int32` + `maximum: 4294967295` defect that
 blocks Kubernetes 1.36 is still present in the 2.4.0 CRDs, so the 1.36 warning

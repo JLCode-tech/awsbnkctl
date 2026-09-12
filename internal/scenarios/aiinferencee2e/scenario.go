@@ -110,7 +110,7 @@ AI inference scenario: vLLM serving Llama-3-8B-Instruct on the GPU nodegroup
 behind the BNK VIP (Green — full data-plane).
 
 Applies 5 templated manifests into the scenario namespace:
-  Namespace, F5BnkGateway IP pool (single-address, VIP only),
+  Namespace, GatewaySettings (listener context),
   vLLM Deployment (GPU nodeSelector + nvidia.com/gpu taint toleration,
   nvidia.com/gpu: "1", serves meta-llama/Meta-Llama-3-8B-Instruct) + Service,
   Gateway (spec.addresses=[VIP]), HTTPRoute (-> vllm:80).

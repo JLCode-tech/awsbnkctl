@@ -333,3 +333,44 @@ func TestPhase17SecondaryENIsDown_DetachesAndDeletes(t *testing.T) {
 		t.Errorf("deleteENICalls = %d, want at least 1", ec2m.deleteENICalls)
 	}
 }
+
+// TestPhase17SecondaryENIs_RecordsNominalSelfIPsOnly pins the BNK 2.4
+// contract: phase 17 records the nominal self IPs (.240, the centre of the
+// Infra /27 pools) but assigns nothing on the ENIs; the address the F5 IPAM
+// controller picks is put on the ENI by phase 23b.
+func TestPhase17SecondaryENIs_RecordsNominalSelfIPsOnly(t *testing.T) {
+	awsmw.ResetForTest()
+	st, _ := stateWithENIPrereqs(t)
+	st.Set("INTERNAL_ENI", "eni-existing-int")
+	st.Set("EXTERNAL_ENI", "eni-existing-ext")
+	cl := eniTestCluster()
+	cl.Network.DataPath = &intent.DataPathSpec{
+		External: intent.SubnetSpec{CIDR: "10.0.10.0/24", AZ: "a"},
+		Internal: intent.SubnetSpec{CIDR: "10.0.20.0/24", AZ: "a"},
+		SelfIPs:  &intent.SelfIPsSpec{External: "10.0.10.240", Internal: "10.0.20.240", PrefixLen: 24},
+	}
+
+	instanceID := "i-0123456789abcdef0"
+	mac := "0a:1b:2c:3d:4e:5f"
+	ec2m := &mockEC2{
+		describeENIsOut: &ec2.DescribeNetworkInterfacesOutput{
+			NetworkInterfaces: []ec2types.NetworkInterface{{
+				NetworkInterfaceId: ptr("eni-existing-int"),
+				MacAddress:         &mac,
+				Attachment:         &ec2types.NetworkInterfaceAttachment{InstanceId: &instanceID},
+			}},
+		},
+	}
+	if err := Phase17SecondaryENIs(context.Background(), cl, st, testClients(ec2m), false); err != nil {
+		t.Fatalf("Phase17SecondaryENIs: %v", err)
+	}
+	if len(ec2m.assignedSelfIPs) != 0 {
+		t.Errorf("assigned %v, want no ENI secondary IPs from phase 17 (phase 23b assigns the IPAM-allocated one)", ec2m.assignedSelfIPs)
+	}
+	if got := st.Get("TMM_EXT_SELFIP"); got != "10.0.10.240" {
+		t.Errorf("TMM_EXT_SELFIP = %q, want the nominal self IP", got)
+	}
+	if got := st.Get("TMM_INT_SELFIP"); got != "10.0.20.240" {
+		t.Errorf("TMM_INT_SELFIP = %q, want the nominal self IP", got)
+	}
+}

@@ -4,7 +4,7 @@
 //
 // AWS-specific shape:
 //   - GatewayClass is provisioned by Phase 23b (<cluster>-gatewayclass).
-//   - F5BnkGateway IP pool is owned by the scenario (02-f5bnkgateway.yaml)
+//   - GatewaySettings is owned by the scenario (02-gatewaysettings.yaml)
 //     because no lifecycle phase provisions it cluster-wide; the scenario
 //     provisions a namespaced pool so it can be self-contained and cleaned up.
 //   - Verification curls through SSH+EICE from the jumphost's
@@ -119,7 +119,7 @@ func (s *scenario) Description() string {
 End-to-end HTTPRoute scenario with real data-plane traffic via AWS EICE jumphost.
 
 Applies 5 templated manifests into the scenario namespace:
-  Namespace, F5BnkGateway IP pool, nginx Deployment+Service,
+  Namespace, GatewaySettings, nginx Deployment+Service,
   Gateway (spec.addresses=[VIP]), HTTPRoute (host=awsbnkctl.local → nginx).
 
 Verify order (load-bearing):
@@ -179,10 +179,10 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 	return scenarios.ApplyManifests(ctx, scnName)
 }
 
-var f5BnkGatewayGVR = schema.GroupVersionResource{
-	Group:    "k8s.f5net.com",
-	Version:  "v1",
-	Resource: "f5-bnkgateways",
+var gatewaySettingsGVR = schema.GroupVersionResource{
+	Group:    "gateway.k8s.f5.com",
+	Version:  "v1alpha1",
+	Resource: "gatewaysettings",
 }
 
 func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
@@ -229,11 +229,11 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		Got:         scenarios.ErrString(err),
 	})
 
-	// Best-effort: F5BnkGateway present (skipped when Dynamic client is nil).
+	// Best-effort: GatewaySettings present (skipped when Dynamic client is nil).
 	if ctx.Dynamic != nil {
-		_, ferr := ctx.Dynamic.Resource(f5BnkGatewayGVR).Namespace(ns).Get(ctx.Ctx, "awsbnkctl-default", metav1.GetOptions{})
+		_, ferr := ctx.Dynamic.Resource(gatewaySettingsGVR).Namespace(ns).Get(ctx.Ctx, "awsbnkctl-default", metav1.GetOptions{})
 		res.Assertions = append(res.Assertions, scenarios.Assertion{
-			Description: "F5BnkGateway awsbnkctl-default present",
+			Description: "GatewaySettings awsbnkctl-default present",
 			OK:          ferr == nil,
 			Got:         scenarios.ErrString(ferr),
 		})

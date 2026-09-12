@@ -127,7 +127,7 @@ The binary embeds no LLM; bring your own coding-agent CLI.
 
 - **BGP peering** — `bnk.bgp: true` (alias `bnk.dynamicRouting: true`) admits
   TCP 179 / UDP 3784 from the external data-path subnet into the data-plane
-  security group and opens the same ports on the external `F5SPKVlan`. Every
+  security group. (On BNK 2.4 the external VLAN comes from the `Infra` CR, which has no per-VLAN allowed-services list; verify BGP reachability live.) Every
   example sets it. The Route Server and the routing CRs are yours to add:
   [`BGP-ROUTE-SERVER.md`](BGP-ROUTE-SERVER.md).
 - **Shared Forge project** — `forge.projectName` registers the cluster into an

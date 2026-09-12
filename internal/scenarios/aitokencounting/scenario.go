@@ -141,7 +141,7 @@ per-user rate-limit enforcement are configured through the Gateway
 spec.infrastructure.annotations["k8s.f5.com/ai-token-counting"] value.
 
 Applies 5 templated manifests into the scenario namespace:
-  Namespace, F5BnkGateway IP pool (single-address, VIP only),
+  Namespace, GatewaySettings (listener context),
   one nginx Deployment+Service (so the HTTPRoute resolves),
   Gateway (spec.addresses=[VIP] + the k8s.f5.com/ai-token-counting
   annotation under spec.infrastructure.annotations), HTTPRoute

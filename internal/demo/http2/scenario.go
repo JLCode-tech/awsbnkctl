@@ -7,7 +7,7 @@
 //  1. Wait for control-plane conditions: h2c-backend Deployment Available,
 //     Gateway http2-gateway Programmed=True, HTTPRoute http2-route Accepted=True,
 //     HTTPRoute http2-route ResolvedRefs=True.
-//  2. Best-effort F5BnkGateway get (demo-http2 resource).
+//  2. Best-effort GatewaySettings get (demo-http2 resource).
 //  3. Call pkg/bnk.ResyncHTTPRoutes — idempotent pool-member workaround for
 //     cne-controller stale-pool bug (project_pool_member_sync_root_cause).
 //     MUST run after control-plane is settled; moving it before the condition
@@ -183,13 +183,13 @@ func (s *scenario) Description() string {
 HTTP/2 (h2c) end-to-end through BNK — both legs are HTTP/2.
 
 Applies 5 templated manifests into the demo namespace:
-  Namespace, F5BnkGateway IP pool, nginx Deployment+Service (appProtocol h2c),
+  Namespace, GatewaySettings, nginx Deployment+Service (appProtocol h2c),
   Gateway (spec.addresses=[VIP]), HTTPRoute (host=http2.awsbnkctl.local → nginx).
 
 Verify order (load-bearing):
   1. Wait for control-plane conditions: h2c-backend Available, Gateway Programmed=True,
      HTTPRoute Accepted=True + ResolvedRefs=True.
-  2. Best-effort F5BnkGateway demo-http2 check.
+  2. Best-effort GatewaySettings demo-http2 check.
   3. Call pkg/bnk.ResyncHTTPRoutes — idempotent pool-member workaround for
      cne-controller stale pool-member bug (project_pool_member_sync_root_cause).
   4. SSH+EICE curl --http2-prior-knowledge from the jumphost's BNK_EXT ENI.
@@ -243,10 +243,10 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 	return scenarios.ApplyManifests(ctx, scnName)
 }
 
-var f5BnkGatewayGVR = schema.GroupVersionResource{
-	Group:    "k8s.f5net.com",
-	Version:  "v1",
-	Resource: "f5-bnkgateways",
+var gatewaySettingsGVR = schema.GroupVersionResource{
+	Group:    "gateway.k8s.f5.com",
+	Version:  "v1alpha1",
+	Resource: "gatewaysettings",
 }
 
 func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
@@ -293,11 +293,11 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		Got:         scenarios.ErrString(err),
 	})
 
-	// Best-effort: F5BnkGateway present (skipped when Dynamic client is nil).
+	// Best-effort: GatewaySettings present (skipped when Dynamic client is nil).
 	if ctx.Dynamic != nil {
-		_, ferr := ctx.Dynamic.Resource(f5BnkGatewayGVR).Namespace(ns).Get(ctx.Ctx, "demo-http2", metav1.GetOptions{})
+		_, ferr := ctx.Dynamic.Resource(gatewaySettingsGVR).Namespace(ns).Get(ctx.Ctx, "demo-http2", metav1.GetOptions{})
 		res.Assertions = append(res.Assertions, scenarios.Assertion{
-			Description: "F5BnkGateway demo-http2 present",
+			Description: "GatewaySettings demo-http2 present",
 			OK:          ferr == nil,
 			Got:         scenarios.ErrString(ferr),
 		})

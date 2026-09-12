@@ -418,36 +418,6 @@ func RenderIfaceDiscoveryPod(tmpl []byte, namespace, nodeName string) ([]byte, e
 	return Render(tmpl, vars)
 }
 
-// ─── F5SPKVlan + GatewayClass ───────────────────────────────────────────────
-
-// F5SPKVlanVars holds the substitution variables for host-device/f5spkvlan.yaml.tmpl.
-type F5SPKVlanVars struct {
-	InstanceNS         string // f5-cne-system (matches CNEInstance namespace)
-	TmmExtSelfIP       string // e.g. 10.0.10.240
-	TmmIntSelfIP       string // e.g. 10.0.20.240
-	TmmSelfIPPrefixLen int    // typically 24
-	HasInternal        bool   // render the int-vlan CR (dual-interface only)
-	EnableBGP          bool   // render allowed_services for BGP (tcp:179) and BFD (udp:3784)
-}
-
-// RenderF5SPKVlan renders the F5SPKVlan CR template for a BNK pattern. Caller
-// supplies the SelfIP values from cl.Network.DataPath.SelfIPs (auto-derived by
-// intent.applyDefaults when not explicitly set). hasInternal controls whether
-// the int-vlan CR is emitted (dual-interface only); selfInt is ignored when
-// false. enableBGP controls whether allowed_services (tcp:179, udp:3784) is
-// configured on ext-vlan for dynamic routing.
-func RenderF5SPKVlan(tmpl []byte, selfExt, selfInt string, prefixLen int, hasInternal, enableBGP bool) ([]byte, error) {
-	vars := F5SPKVlanVars{
-		InstanceNS:         cneInstanceNamespace,
-		TmmExtSelfIP:       selfExt,
-		TmmIntSelfIP:       selfInt,
-		TmmSelfIPPrefixLen: prefixLen,
-		HasInternal:        hasInternal,
-		EnableBGP:          enableBGP,
-	}
-	return Render(tmpl, vars)
-}
-
 // GatewayClassVars holds the substitution variables for host-device/gatewayclass.yaml.tmpl.
 type GatewayClassVars struct {
 	GwcName    string // <cluster>-gatewayclass
@@ -463,4 +433,183 @@ func RenderGatewayClass(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
 		InstanceNS: cneInstanceNamespace,
 	}
 	return Render(tmpl, vars)
+}
+
+// ─── Infra (BNK 2.4 network model) ──────────────────────────────────────────
+
+// Infra network names; GatewaySettings networkRefs (ingress listener network,
+// egress tunnel network) point at these.
+const (
+	InfraName          = "infra"
+	InfraExtNetwork    = "ext-vlan-infra"
+	InfraIntNetwork    = "int-vlan-infra"
+	InfraListenerPool  = "listener-pool"
+	infraListenerFirst = 100
+	infraListenerLast  = 199
+
+	// InfraEgressSubnet / InfraEgressPort are the egress tunnel defaults
+	// (Infra spec.egressDefaults): the VXLAN overlay subnet between the worker
+	// nodes and TMM and its UDP port. 192.168.0.0/16 stays clear of every
+	// example VPC (10.x); the product default would be 10.0.0.0/16.
+	InfraEgressSubnet = "192.168.0.0/16"
+	InfraEgressPort   = 4789
+	// Static route names in the Infra CR (spec.staticRoutes[].name).
+	InfraRouteVPC     = "vpc"
+	InfraRouteDefault = "default"
+)
+
+// InfraTunnelNetwork is the Infra network the egress tunnel terminates on
+// (Infra egressDefaults.networkRef and the GatewaySettings egressConfigs
+// networkRef): the internal VLAN on dual-interface clusters, the external VLAN
+// when it is the only one.
+func InfraTunnelNetwork(hasInternal bool) string {
+	if hasInternal {
+		return InfraIntNetwork
+	}
+	return InfraExtNetwork
+}
+
+// InfraVars holds the substitution variables for host-device/infra.yaml.tmpl.
+type InfraVars struct {
+	InfraName       string // infra (singleton per BNK namespace)
+	InstanceNS      string // f5-cne-system (matches CNEInstance namespace)
+	LabName         string // cl.Metadata.Name
+	TmmExtSelfIP    string // pool start, e.g. 10.0.10.224 (the /27 holding the configured .240)
+	TmmExtSelfIPEnd string // pool end, e.g. 10.0.10.254
+	TmmIntSelfIP    string // pool start, e.g. 10.0.20.224
+	TmmIntSelfIPEnd string // pool end, e.g. 10.0.20.254
+	ListenerPool    string // IPAM entry the GatewaySettings reference for VIPs
+	ListenerStart   string // e.g. 10.0.10.100
+	ListenerEnd     string // e.g. 10.0.10.199
+	ExternalNAD     string // external-netdevice or external-sriov
+	InternalNAD     string // internal-netdevice
+	ExtNetwork      string // ext-vlan
+	IntNetwork      string // int-vlan
+	Mtu             int    // cl.Bnk.TmmMtu
+	HasInternal     bool   // render the internal pool, attachment and network
+	ExtAZ           string // availability zone of the external data-path subnet (pool zone)
+	IntAZ           string // availability zone of the internal data-path subnet
+	// Egress: the tunnel defaults and the two static routes the egress path
+	// needs (see infra.yaml.tmpl). The routes are rendered only when VpcCidr
+	// and both gateways are known.
+	TunnelNetwork string // int-vlan-infra (dual-interface) or ext-vlan-infra
+	EgressSubnet  string // InfraEgressSubnet
+	EgressPort    int    // InfraEgressPort
+	VpcCidr       string // network.vpcCidr, e.g. 10.0.0.0/16
+	TunnelGateway string // AWS router of the tunnel VLAN's subnet, e.g. 10.0.20.1
+	ExtGateway    string // AWS router of the external subnet, e.g. 10.0.10.1
+	RouteVPC      string // InfraRouteVPC
+	RouteDefault  string // InfraRouteDefault
+}
+
+// RenderInfra renders the Infra CR for a BNK pattern. Each self-IP pool is the
+// /27 that contains cl.Network.DataPath.SelfIPs (auto-derived by
+// intent.applyDefaults; see intent.SelfIPPoolRange for why); the
+// listener pool is hosts .100-.199 of the external data-path subnet, which
+// covers the VIP plan and stays clear of the self IP (.240) and the jumphost
+// (.200).
+func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, error) {
+	if cl.Network.DataPath == nil || cl.Network.DataPath.SelfIPs == nil || cl.Network.DataPath.External.CIDR == "" {
+		return nil, fmt.Errorf("render infra: network.dataPath external subnet and self IPs are required")
+	}
+	sel := cl.Network.DataPath.SelfIPs
+	if sel.External == "" {
+		return nil, fmt.Errorf("render infra: external self IP not derivable (external subnet must be /24)")
+	}
+	if hasInternal && sel.Internal == "" {
+		return nil, fmt.Errorf("render infra: internal self IP not derivable (internal subnet must be /24)")
+	}
+	extStart, extEnd, err := intent.SelfIPPoolRange(sel.External)
+	if err != nil {
+		return nil, fmt.Errorf("render infra: external self IP pool: %w", err)
+	}
+	var intStart, intEnd string
+	if hasInternal {
+		if intStart, intEnd, err = intent.SelfIPPoolRange(sel.Internal); err != nil {
+			return nil, fmt.Errorf("render infra: internal self IP pool: %w", err)
+		}
+	}
+	start, _ := intent.DeriveSelfIP(cl.Network.DataPath.External.CIDR, infraListenerFirst)
+	end, _ := intent.DeriveSelfIP(cl.Network.DataPath.External.CIDR, infraListenerLast)
+	if start == "" || end == "" {
+		return nil, fmt.Errorf("render infra: listener pool not derivable from external CIDR %q (must be /24)", cl.Network.DataPath.External.CIDR)
+	}
+	externalNAD := "external-netdevice"
+	if cl.DataplaneBinding() == "sriov" {
+		externalNAD = "external-sriov"
+	}
+	mtu := 1500
+	if cl.Bnk != nil && cl.Bnk.TmmMtu > 0 {
+		mtu = cl.Bnk.TmmMtu
+	}
+	// AWS puts the subnet router on the first host address of every subnet.
+	extGW, _ := intent.DeriveSelfIP(cl.Network.DataPath.External.CIDR, 1)
+	tunnelGW := extGW
+	if hasInternal {
+		tunnelGW, _ = intent.DeriveSelfIP(cl.Network.DataPath.Internal.CIDR, 1)
+	}
+	vars := InfraVars{
+		InfraName:       InfraName,
+		InstanceNS:      cneInstanceNamespace,
+		LabName:         cl.Metadata.Name,
+		TmmExtSelfIP:    extStart,
+		TmmExtSelfIPEnd: extEnd,
+		TmmIntSelfIP:    intStart,
+		TmmIntSelfIPEnd: intEnd,
+		ListenerPool:    InfraListenerPool,
+		ListenerStart:   start,
+		ListenerEnd:     end,
+		ExternalNAD:     externalNAD,
+		InternalNAD:     "internal-netdevice",
+		ExtNetwork:      InfraExtNetwork,
+		IntNetwork:      InfraIntNetwork,
+		Mtu:             mtu,
+		HasInternal:     hasInternal,
+		ExtAZ:           cl.Network.DataPath.External.AZ,
+		IntAZ:           cl.Network.DataPath.Internal.AZ,
+		TunnelNetwork:   InfraTunnelNetwork(hasInternal),
+		EgressSubnet:    InfraEgressSubnet,
+		EgressPort:      InfraEgressPort,
+		VpcCidr:         cl.Network.VPCCidr,
+		TunnelGateway:   tunnelGW,
+		ExtGateway:      extGW,
+		RouteVPC:        InfraRouteVPC,
+		RouteDefault:    InfraRouteDefault,
+	}
+	return Render(tmpl, vars)
+}
+
+// ─── cne-controller RBAC supplement (BNK 2.4 / FLO 2.30) ─────────────────────
+
+// CNEControllerServiceAccount is the ServiceAccount FLO creates for the
+// cne-controller Deployment.
+const CNEControllerServiceAccount = "f5-cne-controller"
+
+// CNEControllerRBACName is the ClusterRole/ClusterRoleBinding awsbnkctl adds
+// so the controller can read EndpointSlices (see shared/cne-controller-rbac.yaml.tmpl).
+func CNEControllerRBACName(cl *intent.Cluster) string {
+	return cl.Metadata.Name + "-cne-controller-endpointslices"
+}
+
+// CNEControllerRBACVars holds the substitution variables for
+// shared/cne-controller-rbac.yaml.tmpl.
+type CNEControllerRBACVars struct {
+	Name           string // <cluster>-cne-controller-endpointslices
+	LabName        string // cl.Metadata.Name
+	InstanceNS     string // f5-cne-system
+	ServiceAccount string // f5-cne-controller
+}
+
+// RenderCNEControllerRBAC renders the EndpointSlice ClusterRole + binding for
+// the cne-controller ServiceAccount.
+func RenderCNEControllerRBAC(tmpl []byte, cl *intent.Cluster) ([]byte, error) {
+	if cl == nil || cl.Metadata.Name == "" {
+		return nil, fmt.Errorf("render cne-controller rbac: cluster name is required")
+	}
+	return Render(tmpl, CNEControllerRBACVars{
+		Name:           CNEControllerRBACName(cl),
+		LabName:        cl.Metadata.Name,
+		InstanceNS:     cneInstanceNamespace,
+		ServiceAccount: CNEControllerServiceAccount,
+	})
 }

@@ -71,7 +71,7 @@ checks AWS credentials and local prerequisites before you start.
 
   BNK_EXT subnet                  BNK_INT subnet (dual-interface only)
   └─ TMM external ENI             └─ TMM internal ENI
-     SelfIP .240, Gateway VIP .100
+     SelfIP from pool .224-.254, Gateway VIP .100
 
   client ──► VIP ──► TMM ──► backend pods
 ```

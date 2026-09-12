@@ -107,7 +107,7 @@ func TestVerifyCallOrder(t *testing.T) {
 		"RunCurlProbes",
 	}
 
-	// The F5BnkGateway check uses ctx.Dynamic which is nil — it will be recorded
+	// The GatewaySettings check uses ctx.Dynamic which is nil — it will be recorded
 	// as a failed assertion but does not call any of our hooks, so we only
 	// check the hook calls, not every assertion.
 	if len(calls) != len(want) {

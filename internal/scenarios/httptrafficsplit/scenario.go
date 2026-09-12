@@ -4,7 +4,7 @@
 //
 // AWS-specific shape mirrors httproutee2e:
 //   - GatewayClass provisioned by Phase 23b (<cluster>-gatewayclass).
-//   - F5BnkGateway IP pool is owned by the scenario (02-f5bnkgateway.yaml);
+//   - GatewaySettings is owned by the scenario (02-gatewaysettings.yaml);
 //     pool is a single address (VIP only) so it does not collide with other
 //     scenarios' pools.
 //   - Verification curls through SSH+EICE from the jumphost's
@@ -127,7 +127,7 @@ func (s *scenario) Description() string {
 Weighted HTTPRoute scenario exercising the 70/30 traffic-split feature.
 
 Applies 5 templated manifests into the scenario namespace:
-  Namespace, F5BnkGateway IP pool (single-address, VIP only),
+  Namespace, GatewaySettings (listener context),
   two nginx Deployments+Services (backend-a / backend-b),
   Gateway (spec.addresses=[VIP]), HTTPRoute (host=awsbnkctl-split.local →
   backend-a:weight=70 + backend-b:weight=30).

@@ -9,6 +9,10 @@ spec:
   - type: IPAddress
     value: {{.VIP}}
   infrastructure:
+    parametersRef:
+      group: gateway.k8s.f5.com
+      kind: GatewaySettings
+      name: awsbnkctl-aitokens
     annotations:
       k8s.f5.com/ai-token-counting: |
         token_counting=enabled,

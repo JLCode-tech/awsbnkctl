@@ -509,6 +509,42 @@ func TestRenderCNEInstance_HappyPath(t *testing.T) {
 	}
 }
 
+// BNK 2.4 gates the Infra and GatewaySettings reconcilers behind
+// USE_GATEWAY_SETTINGS in the controller container. The template must set
+// it in advanced.cneController.env (not the TMM env block).
+func TestRenderCNEInstance_SetsUseGatewaySettings(t *testing.T) {
+	tmplBytes, err := manifests.FS.ReadFile("shared/cneinstance.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read cneinstance template: %v", err)
+	}
+	out, err := RenderCNEInstance(tmplBytes, cneInstanceCluster(), func(key string) string {
+		if key == "VPC_ID" {
+			return "vpc-0abc12345"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("RenderCNEInstance: %v", err)
+	}
+	rendered := string(out)
+
+	ctrlStart := strings.Index(rendered, "cneController:")
+	tmmStart := strings.Index(rendered, "    tmm:")
+	if ctrlStart < 0 || tmmStart < 0 || ctrlStart > tmmStart {
+		t.Fatalf("unexpected advanced block layout (cneController=%d tmm=%d):\n%s", ctrlStart, tmmStart, rendered)
+	}
+	ctrlEnv := rendered[ctrlStart:tmmStart]
+	if !strings.Contains(ctrlEnv, "- name: USE_GATEWAY_SETTINGS\n          value: \"true\"") {
+		t.Errorf("cneController.env missing USE_GATEWAY_SETTINGS=true:\n%s", ctrlEnv)
+	}
+	if strings.Count(rendered, "USE_GATEWAY_SETTINGS") != 1 {
+		t.Errorf("USE_GATEWAY_SETTINGS must appear exactly once, got %d", strings.Count(rendered, "USE_GATEWAY_SETTINGS"))
+	}
+	if !strings.Contains(ctrlEnv, "- name: MAX_ACTIVE_TMM_REPLICAS\n          value: \"32\"") {
+		t.Errorf("cneController.env missing MAX_ACTIVE_TMM_REPLICAS=32 (FLO 2.30 drops the chart default):\n%s", ctrlEnv)
+	}
+}
+
 func TestRenderCNEInstance_NilBnk_ReturnsError(t *testing.T) {
 	tmpl := []byte(`{{ .InstanceNameCR }}`)
 	cl := clusterFixture("syd-tracer")

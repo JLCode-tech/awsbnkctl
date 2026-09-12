@@ -12,7 +12,7 @@
 //  1. Wait diameter-responder Deployment Available.
 //  2. Wait Gateway diameter-gateway Programmed=True.
 //  3. Wait L4Route diameter-l4route Accepted=True.
-//  4. Best-effort F5BnkGateway demo-diameter get.
+//  4. Best-effort GatewaySettings demo-diameter get.
 //  5. Push diameter_client.py to the jumphost via CopyFileViaEICE.
 //  6. Run the client via RunStagingCommands; assert Result-Code=2001 DIAMETER_SUCCESS.
 //
@@ -67,11 +67,11 @@ var l4RouteGVR = schema.GroupVersionResource{
 	Resource: "l4routes",
 }
 
-// f5BnkGatewayGVR is the F5BnkGateway CR.
-var f5BnkGatewayGVR = schema.GroupVersionResource{
-	Group:    "k8s.f5net.com",
-	Version:  "v1",
-	Resource: "f5-bnkgateways",
+// gatewaySettingsGVR is the GatewaySettings CR.
+var gatewaySettingsGVR = schema.GroupVersionResource{
+	Group:    "gateway.k8s.f5.com",
+	Version:  "v1alpha1",
+	Resource: "gatewaysettings",
 }
 
 func init() { demo.Register(&scenario{}) }
@@ -123,7 +123,7 @@ Verify order (load-bearing, mirrors proxy-protocol-l4 — NOT httproutee2e):
   1. diameter-responder Deployment Available.
   2. Gateway diameter-gateway Programmed=True.
   3. L4Route diameter-l4route Accepted=True.
-  4. Best-effort F5BnkGateway demo-diameter present.
+  4. Best-effort GatewaySettings demo-diameter present.
   5. Push diameter_client.py to jumphost; run against VIP:3868.
   6. Assert stdout contains Result-Code=2001 AND DIAMETER_SUCCESS.
 
@@ -208,11 +208,11 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		Got:         scenarios.ErrString(err),
 	})
 
-	// --- Step 4: Best-effort F5BnkGateway present (skipped when Dynamic client is nil) ---
+	// --- Step 4: Best-effort GatewaySettings present (skipped when Dynamic client is nil) ---
 	if ctx.Dynamic != nil {
-		_, ferr := ctx.Dynamic.Resource(f5BnkGatewayGVR).Namespace(ns).Get(ctx.Ctx, "demo-diameter", metav1.GetOptions{})
+		_, ferr := ctx.Dynamic.Resource(gatewaySettingsGVR).Namespace(ns).Get(ctx.Ctx, "demo-diameter", metav1.GetOptions{})
 		res.Assertions = append(res.Assertions, scenarios.Assertion{
-			Description: "F5BnkGateway demo-diameter present",
+			Description: "GatewaySettings demo-diameter present",
 			OK:          ferr == nil,
 			Got:         scenarios.ErrString(ferr),
 		})

@@ -8,7 +8,9 @@ import (
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -18,17 +20,29 @@ import (
 )
 
 const (
-	f5spkvlanCRDName = "f5-spk-vlans.k8s.f5net.com"
+	// infraCRDName is the BNK 2.4 Infra CRD (VLANs, IPAM pools, listener
+	// context). Installed by FLO's crd-installer after the CNEInstance reconciles.
+	infraCRDName = "infras.gateway.k8s.f5.com"
 	// Why: CRD applies are typically sub-second once available; 3 minutes is a
 	// generous readiness budget on cold clusters.
-	f5spkvlanCRDWait     = 3 * time.Minute
-	f5spkvlanYAMLPath    = "host-device/f5spkvlan.yaml.tmpl"
-	gatewayClassYAMLPath = "host-device/gatewayclass.yaml.tmpl"
+	infraCRDWait  = 3 * time.Minute
+	infraYAMLPath = "host-device/infra.yaml.tmpl"
+	// infraProgrammedWait bounds the wait for Infra status Programmed=True, the
+	// signal that TMM has the VLANs and the controller has the listener context.
+	infraProgrammedWait = 5 * time.Minute
+	// gatewayClassAcceptedWait bounds the wait for GatewayClass Accepted=True; the
+	// Infra CR is only reconciled once the class exists.
+	gatewayClassAcceptedWait = 3 * time.Minute
+	gatewayClassYAMLPath     = "host-device/gatewayclass.yaml.tmpl"
 
 	gatewayClassCRDName = "gatewayclasses.gateway.networking.k8s.io"
 
+	// cneControllerRBACYAMLPath is the EndpointSlice ClusterRole + binding awsbnkctl
+	// adds for the controller ServiceAccount (FLO 2.30 grants no get).
+	cneControllerRBACYAMLPath = "shared/cne-controller-rbac.yaml.tmpl"
+
 	// cneControllerAvailableWait bounds the wait for the cne-controller
-	// Deployment to have an available replica before the F5SPKVlan apply. The
+	// Deployment to have an available replica before the Infra apply. The
 	// F5 validating webhook (f5-validation-svc) is served by that pod; applying
 	// before it is ready fails with "no endpoints available for service".
 	// The controller is in its first rollout (and phase 21 may have restarted
@@ -37,11 +51,15 @@ const (
 	// webhookRetryWait bounds the apply retries while the webhook endpoint is
 	// still registering after the pod reports Ready.
 	webhookRetryWait = 3 * time.Minute
-	// Why: installed by the same FLO crd-installer Job as the F5SPKVlan CRD; 3 min is generous.
+	// Why: installed by the same FLO crd-installer Job as the Infra CRD; 3 min is generous.
 	gatewayClassCRDWait = 3 * time.Minute
 )
 
-// f5spkvlanGVR is the GVR for the F5SPKVlan CR (used by Phase23bDown to delete).
+// f5spkvlanGVR is the 2.3.x F5SPKVlan CR. The 2.4 Infra CR replaces it (the
+// 2.4 release notes: Infra "consolidates F5SPKVlan, F5SPKStaticRoute, VRF and
+// VxLAN"; live 2026-09-12 the controller in GatewaySettings mode never
+// reconciled one), so it is no longer applied; Phase23bDown still deletes it so
+// a cluster built by an older awsbnkctl tears down cleanly.
 var f5spkvlanGVR = schema.GroupVersionResource{
 	Group:    "k8s.f5net.com",
 	Version:  "v1",
@@ -55,18 +73,42 @@ var gatewayClassGVR = schema.GroupVersionResource{
 	Resource: "gatewayclasses",
 }
 
-// Phase23bSPKVlanGatewayClass applies the F5SPKVlan + GatewayClass CRs that
+// ipamGVR is the F5 IPAM controller's IPAM CR. The cne-controller creates one
+// per Infra VLAN network and FIC writes the allocated self IP to its status.
+var ipamGVR = schema.GroupVersionResource{
+	Group:    "fic.f5.com",
+	Version:  "v1",
+	Resource: "ipams",
+}
+
+// clusterRoleGVR / clusterRoleBindingGVR name the RBAC supplement awsbnkctl
+// manages for the cne-controller.
+var (
+	clusterRoleGVR        = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}
+	clusterRoleBindingGVR = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}
+)
+
+// infraGVR is the BNK 2.4 Infra CR (singleton in the CNE namespace).
+var infraGVR = schema.GroupVersionResource{
+	Group:    "gateway.k8s.f5.com",
+	Version:  "v1alpha1",
+	Resource: "infras",
+}
+
+// Phase23bSPKVlanGatewayClass applies the GatewayClass + Infra CRs that
 // complete TMM data-plane plumbing (host-device pattern).
 //
-//   - F5SPKVlan binds TMM trunks 1.1 (external) / 1.2 (internal) to named
-//     virtual interfaces inside the TMM pod netns, announcing the SelfIPs
-//     that Phase 17 assigned as secondary IPs on the AWS ENIs.
+//   - Infra (BNK 2.4) binds TMM trunks 1.1 (external) / 1.2 (internal) to VLAN
+//     networks inside the TMM pod netns, carries the self-IP and listener IPAM
+//     pools the GatewaySettings reference, the egress tunnel defaults and the
+//     two static routes egress needs. The self IPs are allocated by the F5 IPAM
+//     controller and put on the ENIs here.
 //   - GatewayClass registers the BNK cne-controller as a Gateway API
 //     implementation so operator-facing Gateway CRs can target it via
 //     spec.gatewayClassName.
 //
 // Runs AFTER Phase 23 (License) and BEFORE Phase 24 (CWC heal). Both the
-// F5SPKVlan and GatewayClass CRDs are installed by FLO once the CNEInstance
+// Infra and GatewayClass CRDs are installed by FLO once the CNEInstance
 // reaches Reconciled, so we wait for BOTH CRDs before applying either CR
 // (FLO can take 10+ min on a cold cluster).
 //
@@ -83,15 +125,15 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 		return nil
 	}
 	hasInternal := cl.HasInternalInterface()
-	fmt.Fprintf(os.Stderr, "[phase 23b] F5SPKVlan + GatewayClass: cluster=%s\n", name)
+	fmt.Fprintf(os.Stderr, "[phase 23b] Infra + GatewayClass: cluster=%s\n", name)
 
 	if dryRun {
 		if hasInternal {
-			fmt.Fprintln(os.Stderr, "[phase 23b] dry-run: would wait for F5SPKVlan CRD then apply ext-vlan + int-vlan + GatewayClass")
+			fmt.Fprintln(os.Stderr, "[phase 23b] dry-run: would wait for the Infra CRD then apply Infra (ext-vlan + int-vlan, listener pool) + GatewayClass")
 		} else {
-			fmt.Fprintln(os.Stderr, "[phase 23b] dry-run: would wait for F5SPKVlan CRD then apply ext-vlan + GatewayClass (single-interface)")
+			fmt.Fprintln(os.Stderr, "[phase 23b] dry-run: would wait for the Infra CRD then apply Infra (ext-vlan, listener pool) + GatewayClass (single-interface)")
 		}
-		st.Set("F5SPKVLAN_APPLIED_AT", "dry-run")
+		st.Set("INFRA_APPLIED_AT", "dry-run")
 		st.Set("GATEWAYCLASS_NAME", name+"-gatewayclass")
 		return nil
 	}
@@ -110,12 +152,12 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 		return fmt.Errorf("phase23b: internal SelfIP not derivable — DataPath internal subnet must be /24 (see DeriveSelfIP)")
 	}
 
-	// Wait for the F5SPKVlan CRD (installed by FLO after CNEInstance reconciles).
-	fmt.Fprintf(os.Stderr, "[phase 23b] waiting for CRD %s (up to %s)\n", f5spkvlanCRDName, f5spkvlanCRDWait)
-	if err := k8swait.WaitForCRDExists(ctx, clients.Dynamic, f5spkvlanCRDName, f5spkvlanCRDWait); err != nil {
-		return fmt.Errorf("phase23b: waiting for F5SPKVlan CRD: %w", err)
+	// Wait for the Infra CRD (installed by FLO after CNEInstance reconciles).
+	fmt.Fprintf(os.Stderr, "[phase 23b] waiting for CRD %s (up to %s)\n", infraCRDName, infraCRDWait)
+	if err := k8swait.WaitForCRDExists(ctx, clients.Dynamic, infraCRDName, infraCRDWait); err != nil {
+		return fmt.Errorf("phase23b: waiting for Infra CRD: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "[phase 23b] CRD %s ready\n", f5spkvlanCRDName)
+	fmt.Fprintf(os.Stderr, "[phase 23b] CRD %s ready\n", infraCRDName)
 
 	// Wait for the GatewayClass CRD too (installed by the same FLO crd-installer
 	// Job). We wait for BOTH CRDs before applying EITHER CR: the GatewayClass
@@ -130,7 +172,7 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	fmt.Fprintf(os.Stderr, "[phase 23b] CRD %s ready\n", gatewayClassCRDName)
 
 	// Wait for the cne-controller to be available: its pod serves the F5
-	// validating webhook that admits F5SPKVlan. Seen live on BNK 2.4.0
+	// validating webhook that admits Infra. Seen live on BNK 2.4.0
 	// (2026-09-11): the CRDs were established while the controller pod was
 	// still starting and the apply failed with "no endpoints available for
 	// service f5-validation-svc".
@@ -142,30 +184,22 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 		fmt.Fprintf(os.Stderr, "[phase 23b] deploy %s/%s available\n", InstanceNamespace, h4DeploymentName)
 	}
 
-	// Render + apply F5SPKVlan.
-	spkTmpl, err := k8smanifests.FS.ReadFile(f5spkvlanYAMLPath)
+	// RBAC supplement: FLO 2.30's ClusterRole lets the controller list/watch
+	// EndpointSlices but not get them, and the 2.4.0 controller GETs the slice of
+	// every Gateway backend ("Error getting endpointSlice ... is forbidden", live
+	// 2026-09-11), so pools stayed empty. The 2.4 f5ingress chart grants get.
+	rbacTmpl, err := k8smanifests.FS.ReadFile(cneControllerRBACYAMLPath)
 	if err != nil {
-		return fmt.Errorf("phase23b: reading f5spkvlan template: %w", err)
+		return fmt.Errorf("phase23b: reading cne-controller rbac template: %w", err)
 	}
-	enableBGP := cl.IsBGPEnabled()
-	spkRendered, err := render.RenderF5SPKVlan(spkTmpl, selfIPs.External, selfIPs.Internal, selfIPs.PrefixLen, hasInternal, enableBGP)
+	rbacRendered, err := render.RenderCNEControllerRBAC(rbacTmpl, cl)
 	if err != nil {
-		return fmt.Errorf("phase23b: rendering f5spkvlan: %w", err)
+		return fmt.Errorf("phase23b: rendering cne-controller rbac: %w", err)
 	}
-	bgpMsg := ""
-	if enableBGP {
-		bgpMsg = " (bgp allowed_services: tcp:179, udp:3784)"
+	fmt.Fprintf(os.Stderr, "[phase 23b] applying ClusterRole/Binding %s (EndpointSlice get for %s/%s; FLO 2.30 omits it)\n", render.CNEControllerRBACName(cl), InstanceNamespace, render.CNEControllerServiceAccount)
+	if err := applyRawYAML(ctx, clients, rbacRendered); err != nil {
+		return fmt.Errorf("phase23b: applying cne-controller rbac: %w", err)
 	}
-	if hasInternal {
-		fmt.Fprintf(os.Stderr, "[phase 23b] applying F5SPKVlan ext-vlan (selfip=%s)%s + int-vlan (selfip=%s)\n",
-			selfIPs.External, bgpMsg, selfIPs.Internal)
-	} else {
-		fmt.Fprintf(os.Stderr, "[phase 23b] applying F5SPKVlan ext-vlan (selfip=%s)%s\n", selfIPs.External, bgpMsg)
-	}
-	if err := retryWhileWebhookUnavailable(ctx, webhookRetryWait, func() error { return applyRawYAML(ctx, clients, spkRendered) }); err != nil {
-		return fmt.Errorf("phase23b: applying F5SPKVlan: %w", err)
-	}
-	st.Set("F5SPKVLAN_APPLIED_AT", time.Now().UTC().Format(time.RFC3339))
 
 	// Render + apply GatewayClass.
 	gwcTmpl, err := k8smanifests.FS.ReadFile(gatewayClassYAMLPath)
@@ -182,11 +216,61 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 		return fmt.Errorf("phase23b: applying GatewayClass: %w", err)
 	}
 	st.Set("GATEWAYCLASS_NAME", gwcName)
+	fmt.Fprintf(os.Stderr, "[phase 23b] waiting for GatewayClass %s Accepted=True (up to %s)\n", gwcName, gatewayClassAcceptedWait)
+	if err := waitForConditionTrue(ctx, clients.Dynamic, gatewayClassGVR, "", gwcName, "Accepted", gatewayClassAcceptedWait); err != nil {
+		return fmt.Errorf("phase23b: GatewayClass %s did not reach Accepted=True: %w", gwcName, err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 23b] GatewayClass %s Accepted=True\n", gwcName)
+
+	// Render + apply Infra. The controller only reconciles the Infra CR once a
+	// GatewayClass names it (F5: "Install GatewayClass" before "Deploy the Infra
+	// CR"); applied first, Infra sits at "Accepted=Unknown Waiting for controller"
+	// (seen live 2026-09-11).
+	infraTmpl, err := k8smanifests.FS.ReadFile(infraYAMLPath)
+	if err != nil {
+		return fmt.Errorf("phase23b: reading infra template: %w", err)
+	}
+	infraRendered, err := render.RenderInfra(infraTmpl, cl, hasInternal)
+	if err != nil {
+		return fmt.Errorf("phase23b: rendering infra: %w", err)
+	}
+	if cl.IsBGPEnabled() {
+		fmt.Fprintln(os.Stderr, "[phase 23b] warning: bnk.bgp is set, but the BNK 2.4 Infra CR has no per-VLAN allowed-services; verify BGP reachability to the external self IP live")
+	}
+	if hasInternal {
+		fmt.Fprintf(os.Stderr, "[phase 23b] applying Infra %s: %s (self IP pool around %s) + %s (self IP pool around %s), listener pool %s, egress tunnel on %s, static routes\n",
+			render.InfraName, render.InfraExtNetwork, selfIPs.External, render.InfraIntNetwork, selfIPs.Internal, render.InfraListenerPool, render.InfraTunnelNetwork(hasInternal))
+	} else {
+		fmt.Fprintf(os.Stderr, "[phase 23b] applying Infra %s: %s (self IP pool around %s), listener pool %s, egress tunnel on %s, static routes\n",
+			render.InfraName, render.InfraExtNetwork, selfIPs.External, render.InfraListenerPool, render.InfraTunnelNetwork(hasInternal))
+	}
+	if err := retryWhileWebhookUnavailable(ctx, webhookRetryWait, func() error { return applyRawYAML(ctx, clients, infraRendered) }); err != nil {
+		return fmt.Errorf("phase23b: applying Infra: %w", err)
+	}
+	st.Set("INFRA_APPLIED_AT", time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(os.Stderr, "[phase 23b] waiting for Infra %s Programmed=True (up to %s)\n", render.InfraName, infraProgrammedWait)
+	if err := waitForConditionTrue(ctx, clients.Dynamic, infraGVR, InstanceNamespace, render.InfraName, "Programmed", infraProgrammedWait); err != nil {
+		return fmt.Errorf("phase23b: Infra %s did not reach Programmed=True: %w", render.InfraName, err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 23b] Infra %s Programmed=True\n", render.InfraName)
+
+	// Put the self IPs FIC allocated on the ENIs (AWS only delivers traffic
+	// for addresses the ENI owns, F5 Multi-AZ PDF p.9) and record them: the
+	// egress-snat SNAT check, the BGP how-to and the topology diagram need the
+	// address TMM really got, not the nominal value phase 17 stored.
+	if err := recordAllocatedSelfIP(ctx, clients, st, "TMM_EXT_SELFIP", "EXTERNAL_ENI", render.InfraExtNetwork); err != nil {
+		return fmt.Errorf("phase23b: %w", err)
+	}
+	if hasInternal {
+		if err := recordAllocatedSelfIP(ctx, clients, st, "TMM_INT_SELFIP", "INTERNAL_ENI", render.InfraIntNetwork); err != nil {
+			return fmt.Errorf("phase23b: %w", err)
+		}
+	}
 
 	return st.Save()
 }
 
-// Phase23bSPKVlanGatewayClassDown deletes the F5SPKVlan CRs (ext-vlan + int-vlan)
+// Phase23bSPKVlanGatewayClassDown deletes the Infra CR (and any 2.3.x F5SPKVlan CRs), the RBAC supplement
 // and the cluster-scoped GatewayClass. Tolerates NotFound everywhere.
 // Skipped silently when the cluster is not a BNK pattern. Deleting a
 // non-existent int-vlan (single-interface clusters) is tolerated via NotFound.
@@ -195,7 +279,7 @@ func Phase23bSPKVlanGatewayClassDown(ctx context.Context, cl *intent.Cluster, st
 	if !cl.IsBNKPattern() {
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "[phase 23b down] F5SPKVlan + GatewayClass: cluster=%s\n", cl.Metadata.Name)
+	fmt.Fprintf(os.Stderr, "[phase 23b down] Infra + GatewayClass: cluster=%s\n", cl.Metadata.Name)
 
 	if clients.Dynamic == nil {
 		fmt.Fprintln(os.Stderr, "[phase 23b down] warning: dynamic client unavailable, skipping CR deletes")
@@ -203,13 +287,30 @@ func Phase23bSPKVlanGatewayClassDown(ctx context.Context, cl *intent.Cluster, st
 		return st.Save()
 	}
 
-	// Delete F5SPKVlan CRs.
+	// Delete the Infra CR (BNK 2.4).
+	if err := clients.Dynamic.Resource(infraGVR).Namespace(InstanceNamespace).Delete(ctx, render.InfraName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+		fmt.Fprintf(os.Stderr, "[phase 23b down] warning: delete Infra %s: %v\n", render.InfraName, err)
+	} else if err == nil {
+		fmt.Fprintf(os.Stderr, "[phase 23b down] deleted Infra %s\n", render.InfraName)
+	}
+
+	// Delete 2.3.x F5SPKVlan CRs if an older awsbnkctl created them.
 	for _, vlan := range []string{"ext-vlan", "int-vlan"} {
 		err := clients.Dynamic.Resource(f5spkvlanGVR).Namespace(InstanceNamespace).Delete(ctx, vlan, metav1.DeleteOptions{})
 		if err != nil && !k8serrors.IsNotFound(err) {
 			fmt.Fprintf(os.Stderr, "[phase 23b down] warning: delete F5SPKVlan %s: %v\n", vlan, err)
 		} else if err == nil {
 			fmt.Fprintf(os.Stderr, "[phase 23b down] deleted F5SPKVlan %s\n", vlan)
+		}
+	}
+
+	// Delete the cne-controller RBAC supplement (cluster-scoped).
+	rbacName := render.CNEControllerRBACName(cl)
+	for _, gvr := range []schema.GroupVersionResource{clusterRoleBindingGVR, clusterRoleGVR} {
+		if err := clients.Dynamic.Resource(gvr).Delete(ctx, rbacName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+			fmt.Fprintf(os.Stderr, "[phase 23b down] warning: delete %s %s: %v\n", gvr.Resource, rbacName, err)
+		} else if err == nil {
+			fmt.Fprintf(os.Stderr, "[phase 23b down] deleted %s %s\n", gvr.Resource, rbacName)
 		}
 	}
 
@@ -227,7 +328,62 @@ func Phase23bSPKVlanGatewayClassDown(ctx context.Context, cl *intent.Cluster, st
 }
 
 func clearPhase23bState(st *state.State) {
-	for _, k := range []string{"F5SPKVLAN_APPLIED_AT", "GATEWAYCLASS_NAME"} {
+	// F5SPKVLAN_APPLIED_AT and TMM_*_INFRA_SELFIP are keys older builds wrote.
+	for _, k := range []string{"INFRA_APPLIED_AT", "F5SPKVLAN_APPLIED_AT", "GATEWAYCLASS_NAME", "TMM_EXT_INFRA_SELFIP", "TMM_INT_INFRA_SELFIP"} {
 		st.Set(k, "")
 	}
+}
+
+// infraVlanIPAMName is the IPAM CR the cne-controller creates for an Infra
+// VLAN network: vlan-<namespace>-<network>.<infra> (seen live on BNK 2.4.0).
+func infraVlanIPAMName(ns, network string) string {
+	return fmt.Sprintf("vlan-%s-%s.%s", ns, network, render.InfraName)
+}
+
+// allocatedSelfIP returns the address FIC allocated for an Infra VLAN network,
+// or "" when the IPAM CR has no allocation yet.
+func allocatedSelfIP(ctx context.Context, dyn dynamic.Interface, ns, network string) (string, error) {
+	obj, err := dyn.Resource(ipamGVR).Namespace(ns).Get(ctx, infraVlanIPAMName(ns, network), metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	entries, _, _ := unstructured.NestedSlice(obj.Object, "status", "IPStatus")
+	for _, e := range entries {
+		m, ok := e.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if ip, _ := m["ip"].(string); ip != "" {
+			return ip, nil
+		}
+	}
+	return "", nil
+}
+
+// recordAllocatedSelfIP puts the FIC-allocated self IP of an Infra VLAN
+// network on the ENI named by eniKey in state and writes it to state under
+// key. A missing allocation is a warning, not an error (the nominal value phase
+// 17 stored stays); a failed ENI assignment is an error because TMM would own
+// an address AWS never delivers to.
+func recordAllocatedSelfIP(ctx context.Context, clients *Clients, st *state.State, key, eniKey, network string) error {
+	ipamName := infraVlanIPAMName(InstanceNamespace, network)
+	ip, err := allocatedSelfIP(ctx, clients.Dynamic, InstanceNamespace, network)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[phase 23b] warning: reading IPAM %s: %v (keeping %s=%s)\n", ipamName, err, key, st.Get(key))
+		return nil
+	}
+	if ip == "" {
+		fmt.Fprintf(os.Stderr, "[phase 23b] warning: IPAM %s has no allocated address yet (keeping %s=%s)\n", ipamName, key, st.Get(key))
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "[phase 23b] %s self IP allocated by IPAM: %s=%s\n", network, key, ip)
+	if eniID := st.Get(eniKey); eniID != "" && clients.EC2 != nil {
+		if err := assignSelfIPIfNeeded(ctx, clients.EC2, eniID, ip, "[phase 23b]"); err != nil {
+			return fmt.Errorf("assigning allocated self IP %s to %s (%s): %w", ip, eniID, eniKey, err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "[phase 23b] warning: %s not in state or no EC2 client; %s not assigned to an ENI\n", eniKey, ip)
+	}
+	st.Set(key, ip)
+	return nil
 }

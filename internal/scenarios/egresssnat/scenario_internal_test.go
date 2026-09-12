@@ -7,21 +7,21 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
 )
 
-// TestTmmVlanFollowsPattern pins the default tunnel VLAN to the cluster's
-// interface pattern: single-interface clusters only have ext-vlan (the shape
-// examples/egress-demo validated), dual-interface keeps int-vlan, and an
-// explicit option always wins.
-func TestTmmVlanFollowsPattern(t *testing.T) {
+// TestTunnelNetworkFollowsPattern pins the default tunnel network to the
+// cluster's interface pattern, matching the Infra egressDefaults phase 23b
+// renders: single-interface clusters only have the external Infra VLAN,
+// dual-interface uses the internal one, and an explicit option always wins.
+func TestTunnelNetworkFollowsPattern(t *testing.T) {
 	cases := []struct {
 		name    string
 		pattern string
 		opt     string
 		want    string
 	}{
-		{"external-only", intent.PatternExternalOnly, "", "ext-vlan"},
-		{"sriov-external", intent.PatternSRIOVExternal, "", "ext-vlan"},
-		{"dual-interface", intent.PatternDualInterface, "", "int-vlan"},
-		{"host-device alias", intent.PatternHostDevice, "", "int-vlan"},
+		{"external-only", intent.PatternExternalOnly, "", "ext-vlan-infra"},
+		{"sriov-external", intent.PatternSRIOVExternal, "", "ext-vlan-infra"},
+		{"dual-interface", intent.PatternDualInterface, "", "int-vlan-infra"},
+		{"host-device alias", intent.PatternHostDevice, "", "int-vlan-infra"},
 		{"option wins", intent.PatternExternalOnly, "custom-vlan", "custom-vlan"},
 	}
 	for _, tc := range cases {
@@ -31,14 +31,14 @@ func TestTmmVlanFollowsPattern(t *testing.T) {
 				Options: map[string]string{},
 			}
 			if tc.opt != "" {
-				sctx.Options["tmm-int-vlan"] = tc.opt
+				sctx.Options["tunnel-network"] = tc.opt
 			}
-			if got := tmmIntVlan(sctx); got != tc.want {
-				t.Errorf("tmmIntVlan(%s) = %q, want %q", tc.pattern, got, tc.want)
+			if got := tunnelNetwork(sctx); got != tc.want {
+				t.Errorf("tunnelNetwork(%s) = %q, want %q", tc.pattern, got, tc.want)
 			}
 		})
 	}
-	if got := tmmIntVlan(&scenarios.Context{Options: map[string]string{}}); got != "int-vlan" {
-		t.Errorf("nil cluster fallback = %q, want int-vlan", got)
+	if got := tunnelNetwork(&scenarios.Context{Options: map[string]string{}}); got != "ext-vlan-infra" {
+		t.Errorf("nil cluster fallback = %q, want ext-vlan-infra", got)
 	}
 }

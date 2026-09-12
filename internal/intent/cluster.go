@@ -71,9 +71,9 @@ type BnkSpec struct {
 	PalCpuSet string `yaml:"palCpuSet,omitempty"`
 	// BGP enables BGP / dynamic routing on the TMM external VLAN.
 	// When true, Phase 07 admits tcp:179 (BGP) and udp:3784 (BFD) into
-	// SG_BNK_DATA from network.dataPath.external.cidr, and Phase 23b configures
-	// the matching allowed_services on the ext-vlan F5SPKVlan so TMM forwards
-	// the control-plane packets to the routing container (ZebOS). The peer
+	// SG_BNK_DATA from network.dataPath.external.cidr. (The 2.3 F5SPKVlan carried
+	// matching allowed_services; the BNK 2.4 Infra CR has no per-VLAN allowed
+	// services, so phase 23b only warns — verify BGP reachability live.) The peer
 	// itself (an AWS Route Server endpoint in the external subnet, or another
 	// router) and the RoutingTemplate / GlobalRoutingConfig CRs are supplied by
 	// the operator — see examples/*/bgp-route-server.yaml.
@@ -94,12 +94,14 @@ type DataPathSpec struct {
 	SelfIPs  *SelfIPsSpec `yaml:"selfIPs,omitempty"`
 }
 
-// SelfIPsSpec carries the TMM SelfIP addresses that get assigned as secondary
-// private IPs on each TMM data-plane ENI (Phase 17) and announced inside the
-// TMM pod netns via F5SPKVlan CRs (Phase 23b). Per F5 Multi-AZ PDF p.9, AWS
+// SelfIPsSpec carries the nominal TMM SelfIP addresses: the centre of the /27
+// self-IP pools in the BNK 2.4 Infra CR (Phase 23b), from which the F5 IPAM
+// controller allocates the address TMM gets and phase 23b puts on the ENI. Per F5 Multi-AZ PDF p.9, AWS
 // won't route SelfIPs to the ENI unless they're also listed as secondary IPs
 // on the ENI. Auto-derived to <subnet>.240/<prefix> from the data-path
-// subnets when omitted (e.g. 10.0.10.0/24 → 10.0.10.240).
+// subnets when omitted (e.g. 10.0.10.0/24 → 10.0.10.240). On BNK 2.4 this is
+// the nominal value: the Infra CR pool is the /27 around it (SelfIPPoolRange),
+// the F5 IPAM controller picks the address and phase 23b records it in state.
 type SelfIPsSpec struct {
 	External string `yaml:"external,omitempty"`
 	Internal string `yaml:"internal,omitempty"`
@@ -659,7 +661,7 @@ func (c *Cluster) IsBNKPattern() bool {
 }
 
 // HasInternalInterface reports whether a second (internal, server-side) ENI,
-// data-path subnet, NetworkAttachmentDefinition and F5SPKVlan should be
+// data-path subnet, NetworkAttachmentDefinition and Infra VLAN should be
 // provisioned. True only for dual-interface. Single-interface patterns reach
 // in-cluster backends over CNI and have no internal interface.
 func (c *Cluster) HasInternalInterface() bool {
@@ -1026,6 +1028,37 @@ func applyDefaults(c *Cluster) {
 	}
 }
 
+// SelfIPPoolPrefix is the size of the IPAM pool each TMM VLAN self IP is
+// allocated from on BNK 2.4. The Infra CR hands VLAN self IPs to the F5 IPAM
+// controller, which splits a pool into per-device CIDR blocks and rejects pools
+// that yield fewer than 3 blocks (a /32 and a /30 both failed live 2026-09-11
+// with "parent CIDR ... is too small for 1 devices (need at least 3 blocks)").
+// F5's own 2.4 example allocates the external self IP from an 11-address
+// range inside a /27, so awsbnkctl uses the /27 that contains the configured
+// self IP. FIC picks the address; phase 23b puts it on the ENI and records it.
+const SelfIPPoolPrefix = 27
+
+// selfIPPoolMask selects the host bits inside a /SelfIPPoolPrefix block.
+const selfIPPoolMask = byte(1<<(32-SelfIPPoolPrefix) - 1)
+
+// SelfIPPoolRange returns the rangeStart/rangeEnd of the self-IP pool for
+// selfIP: the /SelfIPPoolPrefix block that contains it, minus its last address
+// (FIC reserves the parent CIDR boundaries, and for the default .240 the last
+// address is the subnet broadcast). Example: 10.0.10.240 -> 10.0.10.224-.254.
+func SelfIPPoolRange(selfIP string) (start, end string, err error) {
+	ip := net.ParseIP(selfIP).To4()
+	if ip == nil {
+		return "", "", fmt.Errorf("self IP %q is not an IPv4 address", selfIP)
+	}
+	first := ip[3] &^ selfIPPoolMask
+	if first == 0 {
+		return "", "", fmt.Errorf("self IP %s falls in the first /%d of its subnet, which AWS reserves", selfIP, SelfIPPoolPrefix)
+	}
+	start = net.IPv4(ip[0], ip[1], ip[2], first).String()
+	end = net.IPv4(ip[0], ip[1], ip[2], first+selfIPPoolMask-1).String()
+	return start, end, nil
+}
+
 // DeriveSelfIP returns the host-offset IP and prefix length for a /24 CIDR.
 // For non-/24 CIDRs, returns "" and the actual prefix length.
 // Example: DeriveSelfIP("10.0.10.0/24", 240) -> ("10.0.10.240", 24).
@@ -1049,6 +1082,19 @@ func validate(c *Cluster) error {
 	}
 	if c.Metadata.Region == "" {
 		return fmt.Errorf("metadata.region is required")
+	}
+	if c.IsBNKPattern() && c.Network.DataPath != nil && c.Network.DataPath.SelfIPs != nil {
+		sip := c.Network.DataPath.SelfIPs
+		if sip.External != "" {
+			if _, _, err := SelfIPPoolRange(sip.External); err != nil {
+				return fmt.Errorf("network.dataPath.selfIPs.external: %w", err)
+			}
+		}
+		if sip.Internal != "" && c.HasInternalInterface() {
+			if _, _, err := SelfIPPoolRange(sip.Internal); err != nil {
+				return fmt.Errorf("network.dataPath.selfIPs.internal: %w", err)
+			}
+		}
 	}
 	if len(c.Network.AZs) == 0 {
 		return fmt.Errorf("network.azs must contain at least one availability zone")

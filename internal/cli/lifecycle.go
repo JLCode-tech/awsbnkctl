@@ -588,10 +588,11 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 	}); err != nil {
 		return err
 	}
-	// Phase 23b: F5SPKVlan + GatewayClass for host-device pattern.
+	// Phase 23b: GatewayClass + Infra for host-device pattern.
 	// Skipped silently when pattern != host-device. Completes TMM data-plane
-	// plumbing — binds trunks 1.1 / 1.2 to ext-vlan / int-vlan inside the
-	// TMM pod netns and announces SelfIPs assigned by Phase 17.
+	// plumbing — the Infra CR binds trunks 1.1 / 1.2 to ext-vlan-infra /
+	// int-vlan-infra inside the TMM pod netns; the F5 IPAM controller allocates
+	// the self IPs and phase 23b puts them on the ENIs.
 	if err := stage(4, "spk-vlan-gateway-class", func() error {
 		return phases.Phase23bSPKVlanGatewayClass(ctx, cl, st, clients, dryRun)
 	}); err != nil {
@@ -877,7 +878,7 @@ func printDownPlan(w io.Writer, cl *intent.Cluster, st *state.State, keepIRSA, k
 		{label: "demo use-cases", key: "DEMO_MODE"},
 		{label: "OTEL server cert", key: "OTEL_SVR_CERT_NAME"},
 		{label: "OTEL f5ing cert", key: "OTEL_F5ING_CERT_NAME"},
-		{label: "GatewayClass + F5SPKVlan", key: "GATEWAYCLASS_NAME"},
+		{label: "GatewayClass + Infra", key: "GATEWAYCLASS_NAME"},
 		{label: "License CR", key: "LICENSE_NAME"},
 		{label: "CNEInstance CR", key: "CNEINSTANCE_NAME"},
 		{label: "internal NAD", key: "INTERNAL_NAD"},

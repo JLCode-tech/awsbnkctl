@@ -1,8 +1,7 @@
 # BNK egress demo — THE TOGGLE. See examples/egress-demo/README.md.
 #
-#   BNK ON :  kubectl apply  -f examples/egress-demo/egress-toggle.yaml
-#   BNK OFF:  kubectl delete -f examples/egress-demo/egress-toggle.yaml
-#             (or: kubectl delete f5-spk-egresses.k8s.f5net.com bnk-egress-demo -n f5-cne-system)
+#   BNK ON :  awsbnkctl k apply --config examples/egress-demo/cluster.yaml -f examples/egress-demo/egress-toggle.yaml
+#   BNK OFF:  kubectl delete -n bnk-egress-demo egressgateway bnk-egress-demo
 #
 #   Watch from the pod:
 #     kubectl exec -it -n bnk-egress-demo deploy/agent -c nginx -- sh /demo/watch.sh
@@ -10,27 +9,37 @@
 #   ON  -> egress source IP = the BNK NAT EIP  (single controlled identity)
 #   OFF -> egress source IP = the pod's node public IP  (uncontrolled)
 #
-# Apply with `awsbnkctl k apply --config examples/egress-demo/cluster.yaml -f <this file>`:
-# it fills {{.NodeIfname}} (the worker's primary NIC, required on AWS) from the
-# cluster state. Apply static-routes.yaml once as well.
-# tmmInterfaceName: the F5SPKVlan the tunnel ends on (external-only => ext-vlan).
-apiVersion: k8s.f5net.com/v3
-kind: F5SPKEgress
+# BNK 2.4 egress model: a GatewaySettings with one egressConfigs entry and an
+# EgressGateway that references it (same namespace) and selects the captured
+# namespace. {{.GATEWAYCLASS_NAME}} is filled from the cluster state by
+# `awsbnkctl k apply --config`. The tunnel VLAN and the TMM static routes come
+# from the Infra CR phase 23b applied (external-only => ext-vlan-infra).
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
 metadata:
   name: bnk-egress-demo
-  namespace: f5-cne-system
+  namespace: bnk-egress-demo
 spec:
-  snatType: SRC_TRANS_AUTOMAP
-  firewallEnforcedPolicy: egress-demo-fw
-  pseudoCNIConfig:
+  egressConfigs:
+  - name: demo-egress
+    networkRef:
+      name: ext-vlan-infra
+    sourceNATConfig:
+      type: Automap
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: EgressGateway
+metadata:
+  name: bnk-egress-demo
+  namespace: bnk-egress-demo
+spec:
+  gatewayClassName: {{.GATEWAYCLASS_NAME}}
+  infrastructure:
+    parametersRef:
+      name: bnk-egress-demo
+      sectionName: demo-egress
+  sourceSelector:
+    selectionMode: NamespaceSelector
     namespaces:
+      matchNames:
       - bnk-egress-demo
-    appPodInterface: eth0
-    vxlan:
-      create: true
-      tmmInterfaceName: ext-vlan
-      nodeInterfaceName: {{.NodeIfname}}
-      ipv4Subnet: "192.168.0.0"
-      ipv4PrefixLen: 16
-      ipv6Subnet: "fd50::"
-      ipv6PrefixLen: 112

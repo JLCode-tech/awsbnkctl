@@ -8,7 +8,7 @@ import (
 func TestManifestFS(t *testing.T) {
 	expected := []string{
 		"manifests/01-namespace.yaml",
-		"manifests/02-f5bnkgateway.yaml",
+		"manifests/02-gatewaysettings.yaml",
 		"manifests/03-backend.yaml",
 		"manifests/04-ingresses.yaml",
 		"manifests/05-gateway.yaml",

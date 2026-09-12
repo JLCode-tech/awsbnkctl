@@ -49,7 +49,7 @@ internal/
 ├── forge/               # BNK Forge client (MCP preferred, REST fallback) — register/unregister/benchmark
 ├── intent/              # cluster.yaml schema (v1), strict loader, validation, pinned defaults (K8s floor, FLO, cert-manager)
 ├── jumphost/            # SSH-via-EICE probe utilities for the test jumphost
-├── k8s/                 # Embedded client-go wrapper (k verbs); manifests/ (cert-manager YAML) and render/ (F5SPKVlan etc.)
+├── k8s/                 # Embedded client-go wrapper (k verbs); manifests/ (cert-manager YAML) and render/ (CNEInstance, Infra etc.)
 ├── manifest/            # F5 release-manifest (BOM) fetch/probe; DefaultManifestVersion lives here
 ├── remote/              # Embedded SSH client and target plumbing
 ├── scenarios/           # 15 end-to-end validation scenarios (HTTP, L4, gRPC, AI, CWC, core files)
