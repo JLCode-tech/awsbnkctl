@@ -47,7 +47,7 @@
 - **`ebs-csi-hugepages`** (`Phase11bEBSCSIHugepages`): Deploys the EBS CSI managed addon, gp3 StorageClass, and configures node hugepages and proxy ARP.
 - **`k8s-foundation`** (`Phase12K8sFoundation`): Deploys foundational cluster components including cert-manager and the Multus CNI.
 - **`flo-helm`** (`Phase14FLOHelm`): Deploys the F5 Lifecycle Operator (FLO) via Helm.
-- **`lb-controller`** (`Phase14bLBController`): Installs the AWS Load Balancer Controller (opt-in).
+- **`lb-controller`** (`Phase14bLBController`): Installs the AWS Load Balancer Controller (opt-in). On `down`, if `LB_CONTROLLER_POLICY_ARN` is missing from state (a previous `down` failed mid-phase, e.g. on an expired SSO token), the deterministic policy `<cluster>-lb-controller-iam-policy` is looked up by name (account from an ARN in state or `sts:GetCallerIdentity`) and deleted; a failed `DeletePolicy` keeps the key in state so the next `down` retries.
 - **`otel-certs`** (`Phase15OTELCerts`): Deploys OpenTelemetry certificates for observability.
 - **`cloud-network-mapping`** (`Phase19CloudNetworkMapping`): Creates the CloudNetworkMapping ConfigMap required by FLO.
 - **`nads`** (`Phase20NADs`): Creates NetworkAttachmentDefinitions for host-device integration in the cluster.

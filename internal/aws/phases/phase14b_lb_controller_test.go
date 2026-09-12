@@ -868,3 +868,79 @@ func buildSubnetWithTags(subnetID string, tagMap map[string]string) *ec2.Describ
 		},
 	}
 }
+
+// TestPhase14b_Down_MissingPolicyARN_RecoversByName: when state lost
+// LB_CONTROLLER_POLICY_ARN but an ARN in state gives the account, down derives
+// arn:aws:iam::<account>:policy/<cluster>-lb-controller-iam-policy, finds the
+// policy and deletes it (live 2026-09-12: a down interrupted by an expired SSO
+// token cleared the key and the rerun orphaned the policy).
+func TestPhase14b_Down_MissingPolicyARN_RecoversByName(t *testing.T) {
+	awsmw.ResetForTest()
+	cl := lbcEnabledCluster()
+	policyName := cl.Metadata.Name + "-lb-controller-iam-policy"
+	arn := "arn:aws:iam::111122223333:policy/" + policyName
+	iamMock := newMockIAM()
+	iamMock.managedPolicies[arn] = &iamtypes.Policy{Arn: &arn, PolicyName: &policyName}
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	st.Set("OIDC_PROVIDER_ARN", "arn:aws:iam::111122223333:oidc-provider/oidc.eks.ap-southeast-1.amazonaws.com/id/TESTOIDC")
+
+	if err := Phase14bLBControllerDown(context.Background(), cl, st, &Clients{EC2: &mockEC2{}, IAM: iamMock, Profile: "test"}); err != nil {
+		t.Fatalf("Phase14bLBControllerDown: %v", err)
+	}
+	if iamMock.deletePolicyCalls != 1 {
+		t.Errorf("deletePolicyCalls = %d, want 1 (policy recovered by name)", iamMock.deletePolicyCalls)
+	}
+	if _, still := iamMock.managedPolicies[arn]; still {
+		t.Errorf("policy %s must be deleted", arn)
+	}
+	if got := st.Get("LB_CONTROLLER_POLICY_ARN"); got != "" {
+		t.Errorf("LB_CONTROLLER_POLICY_ARN = %q after a successful delete, want empty", got)
+	}
+}
+
+// TestPhase14b_Down_MissingPolicyARN_RecoversViaSTS: with no ARN left in state
+// the account comes from sts:GetCallerIdentity.
+func TestPhase14b_Down_MissingPolicyARN_RecoversViaSTS(t *testing.T) {
+	awsmw.ResetForTest()
+	cl := lbcEnabledCluster()
+	policyName := cl.Metadata.Name + "-lb-controller-iam-policy"
+	arn := "arn:aws:iam::111122223333:policy/" + policyName
+	iamMock := newMockIAM()
+	iamMock.managedPolicies[arn] = &iamtypes.Policy{Arn: &arn, PolicyName: &policyName}
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+
+	clients := &Clients{EC2: &mockEC2{}, IAM: iamMock, STS: &mockSTSImpl{accountID: "111122223333"}, Profile: "test"}
+	if err := Phase14bLBControllerDown(context.Background(), cl, st, clients); err != nil {
+		t.Fatalf("Phase14bLBControllerDown: %v", err)
+	}
+	if iamMock.deletePolicyCalls != 1 {
+		t.Errorf("deletePolicyCalls = %d, want 1 (account from STS)", iamMock.deletePolicyCalls)
+	}
+}
+
+// TestPhase14b_Down_DeletePolicyFails_KeepsARN: a failed DeletePolicy must leave
+// LB_CONTROLLER_POLICY_ARN in state so the next down retries instead of
+// orphaning the policy.
+func TestPhase14b_Down_DeletePolicyFails_KeepsARN(t *testing.T) {
+	awsmw.ResetForTest()
+	cl := lbcEnabledCluster()
+	arn := "arn:aws:iam::111122223333:policy/" + cl.Metadata.Name + "-lb-controller-iam-policy"
+	iamMock := newMockIAM()
+	iamMock.deletePolicyErr = &notFoundAPIError{code: "ExpiredToken"}
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	st.Set("LB_CONTROLLER_POLICY_ARN", arn)
+	st.Set("LB_CONTROLLER_RELEASE_NAME", "aws-load-balancer-controller")
+
+	if err := Phase14bLBControllerDown(context.Background(), cl, st, &Clients{EC2: &mockEC2{}, IAM: iamMock, Profile: "test"}); err != nil {
+		t.Fatalf("Phase14bLBControllerDown must stay best-effort: %v", err)
+	}
+	if got := st.Get("LB_CONTROLLER_POLICY_ARN"); got != arn {
+		t.Errorf("LB_CONTROLLER_POLICY_ARN = %q after a failed delete, want %q kept for the rerun", got, arn)
+	}
+	if got := st.Get("LB_CONTROLLER_RELEASE_NAME"); got != "" {
+		t.Errorf("other phase 14b keys must still be cleared, LB_CONTROLLER_RELEASE_NAME = %q", got)
+	}
+}

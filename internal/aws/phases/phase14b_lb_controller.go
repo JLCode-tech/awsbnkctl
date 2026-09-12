@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
@@ -315,12 +316,29 @@ func Phase14bLBControllerDown(ctx context.Context, cl *intent.Cluster, st *state
 	// ── Step 4: DetachRolePolicy + DeletePolicy ───────────────────────────────
 	policyARN := st.Get("LB_CONTROLLER_POLICY_ARN")
 	irsaRoleName := name + "-lb-controller-irsa"
+	policyName := name + "-lb-controller-iam-policy"
+
+	if policyARN == "" && clients.IAM != nil {
+		// State lost the ARN: a previous down cleared the key although DeletePolicy
+		// had failed (live 2026-09-12, the SSO token expired mid-run and the rerun
+		// orphaned bnk-bgp-test-lb-controller-iam-policy). The name is
+		// deterministic, so derive the ARN and check whether the policy exists.
+		if acct := accountIDForDown(ctx, st, clients); acct != "" {
+			candidate := "arn:aws:iam::" + acct + ":policy/" + policyName
+			if _, err := clients.IAM.GetPolicy(ctx, &iam.GetPolicyInput{PolicyArn: ptr(candidate)}); err == nil {
+				fmt.Fprintf(os.Stderr, "[phase 14b down] LB_CONTROLLER_POLICY_ARN not in state; found %s by name\n", candidate)
+				policyARN = candidate
+			} else if !isNoSuchEntity(err) {
+				fmt.Fprintf(os.Stderr, "[phase 14b down] warning: GetPolicy %s: %v\n", candidate, err)
+			}
+		}
+	}
+	policyDeleteFailed := false
 
 	if policyARN == "" {
-		// FIX 2: warn explicitly when state is absent so operator can find+delete
-		// the orphaned policy manually if needed. The deterministic name is
-		// <cluster>-lb-controller-iam-policy. Mirror Phase18's OIDC_PROVIDER_ARN log.
-		fmt.Fprintf(os.Stderr, "[phase 14b down] warning: LB_CONTROLLER_POLICY_ARN not in state — IAM policy %s-lb-controller-iam-policy may be orphaned; check AWS console\n", name)
+		// Nothing in state and nothing by name (or no way to learn the account):
+		// say so, so the operator can check. Mirror Phase18's OIDC_PROVIDER_ARN log.
+		fmt.Fprintf(os.Stderr, "[phase 14b down] warning: LB_CONTROLLER_POLICY_ARN not in state and IAM policy %s not found by name — check AWS console\n", policyName)
 	} else if clients.IAM != nil {
 		// Detach from role first.
 		if _, err := clients.IAM.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{
@@ -334,6 +352,7 @@ func Phase14bLBControllerDown(ctx context.Context, cl *intent.Cluster, st *state
 			PolicyArn: ptr(policyARN),
 		}); err != nil && !isNoSuchEntity(err) {
 			fmt.Fprintf(os.Stderr, "[phase 14b down] warning: DeletePolicy %s: %v\n", policyARN, err)
+			policyDeleteFailed = true
 		} else {
 			fmt.Fprintf(os.Stderr, "[phase 14b down] deleted IAM policy %s\n", policyARN)
 		}
@@ -349,7 +368,36 @@ func Phase14bLBControllerDown(ctx context.Context, cl *intent.Cluster, st *state
 	}
 
 	clearPhase14bState(st)
+	if policyDeleteFailed {
+		// Keep the ARN so the next down retries the delete instead of leaving the
+		// policy orphaned with an empty state key.
+		st.Set("LB_CONTROLLER_POLICY_ARN", policyARN)
+	}
 	return st.Save()
+}
+
+// accountIDForDown returns the AWS account ID for deriving deterministic IAM
+// ARNs during teardown: from an ARN still in state (the OIDC provider or the
+// LBC IRSA role), else from sts:GetCallerIdentity, else "".
+func accountIDForDown(ctx context.Context, st *state.State, clients *Clients) string {
+	for _, k := range []string{"OIDC_PROVIDER_ARN", "LB_CONTROLLER_IAM_ROLE_ARN"} {
+		if acct := extractAccountID(st.Get(k)); acct != "" {
+			return acct
+		}
+	}
+	for _, v := range st.All() {
+		if strings.HasPrefix(v, "arn:aws:iam::") {
+			if acct := extractAccountID(v); acct != "" {
+				return acct
+			}
+		}
+	}
+	if clients != nil && clients.STS != nil {
+		if out, err := clients.STS.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err == nil && out.Account != nil {
+			return *out.Account
+		}
+	}
+	return ""
 }
 
 // deleteLBCServices lists and deletes all type:LoadBalancer Services in kube-system,
