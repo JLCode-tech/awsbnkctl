@@ -77,6 +77,19 @@ spec:
           value: "{{ .CloudHostDeviceName }}"
         - name: CLOUD_HOST_DEVICE_TAG
           value: "{{ .CloudHostDeviceTag }}"
+        # BNK 2.4: the controller only runs the Infra and GatewaySettings
+        # reconcilers when this flag is set (env default false; neither FLO
+        # 2.30 nor the f5ingress chart sets it). Without it the Infra CR stays
+        # "Waiting for controller" and Gateways get no listener context.
+        - name: USE_GATEWAY_SETTINGS
+          value: "true"
+        # FLO 2.30 renders the controller Deployment itself and drops the chart's
+        # MAX_ACTIVE_TMM_REPLICAS (f5ingress values.yaml controller.maxActiveReplicas,
+        # default 32, "Maximum number of active TMM"). Without it the 2.4 controller
+        # keeps every TMM in standby ("maxActiveDevices=0", live 2026-09-11) and no
+        # Gateway gets a device context or virtual server. Same value as the chart.
+        - name: MAX_ACTIVE_TMM_REPLICAS
+          value: "32"
     demoMode:
       enabled: false
     maintenanceMode:
@@ -94,6 +107,10 @@ spec:
       env:
         - name: TMM_CALICO_ROUTER
           value: "default"
+        # BNK 2.4 keeps ZebOS as the routing container; F5's 2.4 examples set
+        # this explicitly, so the RoutingTemplate syntax stays ZebOS.
+        - name: ZEBOS_STATE
+          value: "legacy"
         - name: TMM_DEFAULT_MTU
           value: "{{ .TmmMtu }}"
         - name: PAL_CPU_SET

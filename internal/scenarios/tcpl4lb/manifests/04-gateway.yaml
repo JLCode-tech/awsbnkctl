@@ -5,6 +5,11 @@ metadata:
   namespace: {{.Namespace}}
 spec:
   gatewayClassName: {{.GatewayClassName}}
+  infrastructure:
+    parametersRef:
+      group: gateway.k8s.f5.com
+      kind: GatewaySettings
+      name: awsbnkctl-tcplb
   addresses:
   - type: IPAddress
     value: {{.VIP}}
@@ -16,4 +21,4 @@ spec:
       namespaces: {from: Same}
       kinds:
       - kind: L4Route
-        group: gateway.k8s.f5net.com
+        group: gateway.k8s.f5.com

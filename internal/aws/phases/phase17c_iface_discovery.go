@@ -156,9 +156,10 @@ func Phase17cIfaceDiscovery(ctx context.Context, cl *intent.Cluster, st *state.S
 		}
 	}
 
-	// The node's primary NIC (device index 0) is what the egress pseudo-CNI
-	// builds its worker-side VXLAN endpoint on (F5SPKEgress nodeInterfaceName);
-	// its Linux name is AMI-specific, so it is discovered the same way.
+	// The node's primary NIC (device index 0) is where the egress pseudo-CNI
+	// (CSRC) builds its worker-side VXLAN endpoint; its Linux name is
+	// AMI-specific, so it is discovered the same way and kept in state for
+	// diagnostics (the 2.4 EgressGateway model no longer needs it in a CR).
 	primaryIf, err := primaryIfname(ctx, clients.EC2, st.Get("TMM_INSTANCE_ID"), discovered)
 	if err != nil {
 		return fmt.Errorf("phase17c: %w", err)

@@ -170,7 +170,7 @@ awsbnkctl down -f examples/agentcore-demo/cluster.yaml --yes
 | `cluster.yaml` | the awsbnkctl intent |
 | `mcp-tool/` | the MCP finance tool: `mcp-server.py` and the Kustomize base that generates its ConfigMap and token Secret |
 | `gateway-deployment.yaml` | the BNK `Gateway` (80 and 443) and both `HTTPRoute`s |
-| `mcp-security-policy.yaml` | rate-limit iRule, per-listener `BNKNetPolicy`, `F5BigFwPolicy`, `BNKSecPolicy` |
+| `mcp-security-policy.yaml` | rate-limit iRule, per-listener `NetPolicy`, `F5BigFwPolicy`, `SecPolicy` |
 | `mcp-observability.yaml` | `llm-egress` namespace, Loki, the `bnkgov-collector` DaemonSet |
 | `mcp-bedrock-token-shipper.yaml` | IRSA ServiceAccount and the shipper that copies Bedrock token counts into Loki |
 | `bgp-route-server.yaml` | optional Route Server peering CRs |

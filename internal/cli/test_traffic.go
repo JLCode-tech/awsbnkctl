@@ -30,7 +30,7 @@ var testTrafficCmd = &cobra.Command{
   awsbnkctl scenarios run http-routing-e2e --config <config> [flags]
 
 It exercises the BNK data plane end-to-end:
-  1. Renders 5 manifests (Namespace, F5BnkGateway, nginx, Gateway, HTTPRoute).
+  1. Renders 5 manifests (Namespace, GatewaySettings, nginx, Gateway, HTTPRoute).
   2. Applies via SSA (live RESTMapper).
   3. Waits for control-plane conditions (nginx Available, Gateway Programmed,
      HTTPRoute Accepted + ResolvedRefs).

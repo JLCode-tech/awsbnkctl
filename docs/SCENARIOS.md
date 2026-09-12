@@ -110,9 +110,9 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 
 ### `egress-snat`
 - **Objective**: Validates outbound Source NAT (SNAT) and egress firewall inspection.
-- **Traffic Path**: pod $\to$ node $\to$ VXLAN over the pod network to TMM (`ext-vlan` on single-interface patterns, `int-vlan` on dual-interface) $\to$ AUTOMAP SNAT to the external SelfIP $\to$ `ext-vlan` $\to$ NAT gateway $\to$ external destination. Only traffic leaving the VPC takes this path; pod-to-VPC traffic stays on the node.
-- **Provisions**: the client pod, the `F5SPKEgress` CR with `nodeInterfaceName` set to the worker's primary NIC (`NODE_PRIMARY_IFNAME` from phase 17c), and two `F5SPKStaticRoute` CRs: the VPC via the tunnel VLAN's gateway and a default via the external VLAN's gateway.
-- **Assertions**: client pod Ready; `F5SPKEgress` present; then 3 curls from the pod to an out-of-VPC URL must raise TMM's egress virtual-server connections and SNAT-to-external-SelfIP connections by 3 (read with `tmctl`). Without an exec client that step is recorded as skipped.
+- **Traffic Path**: pod $\to$ node $\to$ VXLAN over the pod network to TMM (`ext-vlan-infra` on single-interface patterns, `int-vlan-infra` on dual-interface) $\to$ AUTOMAP SNAT to the external self IP $\to$ `ext-vlan-infra` $\to$ NAT gateway $\to$ external destination. Only traffic leaving the VPC takes this path; pod-to-VPC traffic stays on the node.
+- **Provisions** (BNK 2.4 egress model, all in the scenario namespace): the client pod, a `GatewaySettings` with one `egressConfigs` entry (`default-egress`, Automap, `networkRef` = the tunnel VLAN) and an `EgressGateway` that references that entry through `infrastructure.parametersRef` and selects the namespace with a `NamespaceSelector`. The tunnel VLAN (`Infra` `egressDefaults`) and the two TMM static routes (the VPC via the tunnel VLAN's gateway, a default via the external VLAN's) come from the `Infra` CR phase 23b applies, so nothing is left behind after cleanup.
+- **Assertions**: client pod Ready; `GatewaySettings` Accepted and ResolvedRefs; `EgressGateway` Programmed; then 3 curls from the pod to an out-of-VPC URL must raise TMM's egress virtual-server connections and SNAT-to-external-self-IP connections by 3 (read with `tmctl`). Without an exec client that step is recorded as skipped.
 - **Rating**: Green.
 
 ### `core-file-collection`
@@ -144,7 +144,7 @@ is real, and what else has to be true.
 | `ai-token-counting` | – | – | Amber: control plane only unless a vLLM-compatible backend is pointed at | all four; data path on `demo-ai` |
 | `ai-semantic-cache` | (probe) | – | Amber: control plane only unless a ModelCache backend is supplied | all four |
 | `ai-inference-e2e` | Yes | **Yes** | `HF_TOKEN` for the gated model; `--synthetic` runs a GPU-free simulator anywhere | `demo-ai` (real); others with `--synthetic` |
-| `egress-snat` | (proof) | – | Tunnel VLAN follows the pattern (`ext-vlan` / `int-vlan`); worker VTEP on the node's primary NIC; adds two TMM static routes. Data path proven from TMM's counters | all four; proven live on dual-interface, expected on `external-only` |
+| `egress-snat` | (proof) | – | Tunnel VLAN follows the pattern (`ext-vlan-infra` / `int-vlan-infra`), matching the `Infra` `egressDefaults`; the static routes live in the `Infra` CR. Data path proven from TMM's counters | all four; proven live on dual-interface, expected on `external-only` |
 | `core-file-collection` | – | – | Patches the CNEInstance `f5-cne-system/<cluster>-bnk`; FLO rolls TMM to add the crash mounts, so run it **last** | all four |
 
 Demo use-cases (`awsbnkctl demo run …`) are separate from scenarios: they need
@@ -157,7 +157,7 @@ a dual-interface pattern.
 
 Every scenario and demo owns one fixed last octet in the external data-path
 subnet (`network.dataPath.external.cidr`, `10.0.10.0/24` in every example), so
-`scenarios run --all` never has two F5BnkGateway pools claiming the same
+`scenarios run --all` never has two Gateways claiming the same
 address. `http-routing-e2e` alone uses the cluster default VIP (`<subnet>.100`,
 `intent.DefaultVIP`); the others replace the last octet. `--vip` moves the base
 address but keeps each scenario's octet. The three demo use-cases with a VIP
@@ -188,7 +188,7 @@ only inputs are `network.dataPath.external.cidr` and the per-scenario octet.
 | `.130` | `demo-ai` proxy shootout | example |
 | `.200` | Jumphost external ENI (`<subnet>.200`, Phase 17b) | infrastructure |
 | `.201`–`.202` | `local-zone` reference manifests | example |
-| `.240` | TMM external SelfIP (`<subnet>.240`, Phase 17) | infrastructure |
+| `.224`–`.254` | TMM external self-IP pool: the /27 around the nominal `<subnet>.240`. The F5 IPAM controller allocates one address to TMM; Phase 23b puts it on the ENI and records it as `TMM_EXT_SELFIP` | infrastructure |
 
 `cwc-admin-access`, `core-file-collection` and `egress-snat` allocate no VIP.
 
@@ -199,12 +199,11 @@ them. What differs is where the data-path steps are real.
 
 | Example | `ai-inference-e2e` | `egress-snat` data path | Demo use-cases | Notes |
 | --- | --- | --- | --- | --- |
-| `full-cluster` | `--synthetic` only | **real** (`int-vlan`) | uncomment `demo:` (and `bigipVE:` for `bigip-cis`) | the reference target for the suite |
-| `egress-demo` | `--synthetic` only | **real** (`ext-vlan`) | `up --demo` | the scenario and the demo each create their own `F5SPKEgress`; run one at a time |
+| `full-cluster` | `--synthetic` only | **real** (`int-vlan-infra`) | uncomment `demo:` (and `bigipVE:` for `bigip-cis`) | the reference target for the suite |
+| `egress-demo` | `--synthetic` only | **real** (`ext-vlan-infra`) | `up --demo` | the scenario and the demo each create their own `EgressGateway` for different namespaces; they can coexist |
 | `demo-ai` | **real** GPU node, `HF_TOKEN` | control plane only | on: `diameter`, `http2`, `ingress-migration` | `ai-token-counting` / `ai-semantic-cache` can point at the vLLM leg |
 | `agentcore-demo` | `--synthetic` only | control plane only | `up --demo` | demo Gateway on `.150`, clear of the scenario range |
 
 Run `core-file-collection` last: it patches the CNEInstance and FLO restarts
-TMM. `egress-snat` leaves its two TMM static routes in place until
-`scenarios clean egress-snat`; ingress is unaffected by them (http-routing-e2e
-re-verified with them present).
+TMM. `egress-snat` leaves nothing behind: the TMM static routes it needs are
+part of the `Infra` CR from phase 23b, and ingress is unaffected by them.

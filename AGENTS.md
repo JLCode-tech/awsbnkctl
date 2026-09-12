@@ -18,11 +18,11 @@
 
 ## 2. Pinned Ecosystem Versions
 
-- **BNK**: `2.3.3` (default, newest 2.3.x); 2.3.0–2.3.2 builds via `bnk.manifestVersion` in `cluster.yaml` — the release table in `internal/manifest/manifest.go` (`KnownReleases`) pairs each with its FLO chart
-- **CNE Release Manifest**: `2.3.3-3.2598.3-0.0.509` (`internal/manifest/manifest.go` `DefaultManifestVersion`); e.g. `2.3.2-3.2598.3-0.0.392` as an operator override
+- **BNK**: `2.4.0` (default); the 2.3.0–2.3.3 builds via `bnk.manifestVersion` in `cluster.yaml` — the release table in `internal/manifest/manifest.go` (`KnownReleases`) pairs each with its FLO chart
+- **CNE Release Manifest**: `2.4.0` (`internal/manifest/manifest.go` `DefaultManifestVersion`; F5 docs write it `2.4.0-3.3175.0+0.0.380`, the chart says `2.4.0`); e.g. `2.3.3-3.2598.3-0.0.509` as an operator override
 - **Kubernetes (EKS)**: floor `1.34` (`intent.MinKubernetesVersion`), default `1.35` (`intent.DefaultKubernetesVersion`); `1.35` is the newest tested minor, `1.36+` warns
 - **cert-manager**: `v1.21.1` (`intent.EmbeddedCertManagerVersion`), embedded upstream YAML in `internal/k8s/manifests/cert-manager/` applied via client-go (not Helm)
-- **FLO Chart**: `v2.21.13-0.0.28` (`intent.DefaultFLOVersion`)
+- **FLO Chart**: `v2.30.0-0.5.2` (`intent.DefaultFLOVersion`, paired per release in `manifest.KnownReleases`)
 - **Go**: `1.26` (`go.mod`); **AWS SDK for Go v2**: `github.com/aws/aws-sdk-go-v2 v1.42.0`
 
 ---

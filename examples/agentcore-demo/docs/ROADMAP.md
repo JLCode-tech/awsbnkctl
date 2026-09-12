@@ -123,7 +123,7 @@ is copied into Loki.
 | Rate-limit window never rolls over | `table incr` + `table lifetime` refreshes the idle timer on every hit; use `table set KEY VALUE TIMEOUT LIFETIME` once, then `-notouch` on reads |
 | `HSL::send` from an iRule delivers nothing | not wired in BNK 2.3; `log local0.` works and is what the collector tails |
 | Pinned pip versions fail and the pod crash-loops | read versions off a working pod (`kubectl exec deploy/mcp-financial-tool -- pip list`) instead of guessing |
-| Forge shows no iRule on a Gateway-scoped policy | Forge renders attachments only when `BNKNetPolicy` names a listener via `sectionName` |
+| Forge shows no iRule on a Gateway-scoped policy | Forge renders attachments only when `NetPolicy` names a listener via `sectionName` |
 | `up` run from the example directory | state lands in a second, empty `.awsbnkctl/` and `down` falls back to tag discovery; always run from the repository root |
 | `mcp-tool/deployment.yaml` applied as a file | the pod exits 1 by design without the Kustomize-generated token Secret; apply the directory |
 | Migrating from the old single-file manifest | first apply fails with a server-side-apply field conflict; re-run once with `--force`, then delete the orphaned `mcp-server-code` ConfigMap |

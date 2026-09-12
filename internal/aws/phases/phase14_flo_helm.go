@@ -41,7 +41,8 @@ const (
 	// f5-lifecycle-operator Helm chart. Verified live on 2026-05-21
 	// against chart v2.21.13-0.0.28: the Deployment is named
 	// "f5-lifecycle-operator" (matches the Helm release name; no
-	// chart-subchart suffix). Builder's initial guess included a
+	// chart-subchart suffix). The v2.30.0-0.5.2 chart (BNK 2.4.0) uses the
+	// same fullname template, so the name is unchanged. Builder's initial guess included a
 	// "-f5-spk-cnf-flo" suffix which produced a not-found error in
 	// Phase 13 postflight.
 	floDeployName = "f5-lifecycle-operator"

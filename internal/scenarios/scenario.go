@@ -136,7 +136,7 @@ type Scenario interface {
 
 	// Apply pushes the rendered manifests into the cluster. Called
 	// AFTER Manifests; Apply must use internal/k8s.ApplyOptions so that
-	// Gateway / HTTPRoute / F5BnkGateway CRDs are resolved via live
+	// Gateway / HTTPRoute / GatewaySettings CRDs are resolved via live
 	// RESTMapper and not a static GVR map.
 	Apply(*Context) error
 

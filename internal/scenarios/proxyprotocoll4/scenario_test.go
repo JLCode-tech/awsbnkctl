@@ -134,13 +134,13 @@ func TestManifestsRendered(t *testing.T) {
 				t.Errorf("04-irule.yaml missing 'PROXY TCP4' iRule body:\n%s", content)
 			}
 		}
-		// The BNKNetPolicy must reference the iRule + Gateway.
-		if strings.HasSuffix(p, "05-bnknetpolicy.yaml") {
-			if !strings.Contains(content, "kind: BNKNetPolicy") {
-				t.Errorf("05-bnknetpolicy.yaml missing 'kind: BNKNetPolicy':\n%s", content)
+		// The NetPolicy must reference the iRule + Gateway.
+		if strings.HasSuffix(p, "05-netpolicy.yaml") {
+			if !strings.Contains(content, "kind: NetPolicy") {
+				t.Errorf("05-netpolicy.yaml missing 'kind: NetPolicy':\n%s", content)
 			}
 			if !strings.Contains(content, "F5BigCneIrule") {
-				t.Errorf("05-bnknetpolicy.yaml missing F5BigCneIrule extensionRef:\n%s", content)
+				t.Errorf("05-netpolicy.yaml missing F5BigCneIrule extensionRef:\n%s", content)
 			}
 		}
 		// The backend nginx conf must enable proxy_protocol.

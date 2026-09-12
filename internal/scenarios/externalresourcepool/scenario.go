@@ -11,7 +11,7 @@
 //
 // AWS-specific shape mirrors httptrafficsplit:
 //   - GatewayClass provisioned by Phase 23b (<cluster>-gatewayclass).
-//   - F5BnkGateway IP pool is owned by the scenario (02-f5bnkgateway.yaml);
+//   - GatewaySettings is owned by the scenario (02-gatewaysettings.yaml);
 //     single address (VIP only, .102) so it does not collide with other
 //     scenarios' pools (.100 e2e / .101 split).
 //   - The "external" backend is a tiny python3 http.server started on the
@@ -152,7 +152,7 @@ jumphost's BNK_EXT ENI (JUMPHOST_BNK_EXT_ENI_IP), which is on the VIP's L2 and
 directly TMM-reachable.
 
 Applies 5 templated manifests into the scenario namespace:
-  Namespace, F5BnkGateway IP pool (single-address, VIP=.102 only),
+  Namespace, GatewaySettings (listener context),
   Gateway (spec.addresses=[VIP]), selectorless Service ext-backend +
   EndpointSlice ext-backend-1 (endpoint = jumphost BNK_EXT IP:8080),
   HTTPRoute (host=awsbnkctl-extpool.local → backendRef Service ext-backend).

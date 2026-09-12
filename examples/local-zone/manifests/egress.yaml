@@ -1,22 +1,41 @@
-apiVersion: k8s.f5net.com/v3
-kind: F5SPKEgress
+# BNK 2.4 egress for the three local-zone test namespaces: one GatewaySettings
+# egressConfigs entry (Automap on the dual-interface tunnel VLAN
+# int-vlan-infra) and an EgressGateway that selects the namespaces. Both live
+# in their own namespace; the tunnel VLAN and TMM static routes come from the
+# Infra CR phase 23b applies. Replaces the 2.3 F5SPKEgress (perth-test-egress).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: local-zone-egress
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
 metadata:
   name: perth-test-egress
-  namespace: f5-cne-system
+  namespace: local-zone-egress
 spec:
-  snatType: SRC_TRANS_AUTOMAP
-  pseudoCNIConfig:
+  egressConfigs:
+  - name: default-egress
+    networkRef:
+      name: int-vlan-infra
+    sourceNATConfig:
+      type: Automap
+---
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: EgressGateway
+metadata:
+  name: perth-test-egress
+  namespace: local-zone-egress
+spec:
+  gatewayClassName: <cluster-name>-gatewayclass   # the GatewayClass phase 23b registered (state GATEWAYCLASS_NAME)
+  infrastructure:
+    parametersRef:
+      name: perth-test-egress
+      sectionName: default-egress
+  sourceSelector:
+    selectionMode: NamespaceSelector
     namespaces:
-    - http2-scenario
-    - diameter-scenario
-    - sctp-scenario
-    appPodInterface: eth0
-    vxlan:
-      create: true
-      tmmInterfaceName: int-vlan
-      # nodeInterfaceName: ens5   # the 2.3 F5SPKEgress reference says CSRC sets this itself;
-                                 # it was pinned during the failed validation, kept for the record
-      ipv4Subnet: "192.168.0.0"
-      ipv4PrefixLen: 16
-      ipv6Subnet: "fd50::"
-      ipv6PrefixLen: 112
+      matchNames:
+      - http2-scenario
+      - diameter-scenario
+      - sctp-scenario

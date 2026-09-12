@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) and AI coding agents
 
 ## What this binary is
 
-`awsbnkctl` is a single-binary Go CLI that drives a full F5 BIG-IP Next for Kubernetes (BNK) 2.3 deployment onto an AWS EKS cluster with secondary Elastic Network Interfaces (ENIs) dedicated to the Traffic Management Microkernel (TMM). The default CNE release manifest is `2.3.3-3.2598.3-0.0.509` (BNK 2.3.3, the newest 2.3.x; `internal/manifest/manifest.go`); operators pin an older 2.3.x build per cluster via `bnk.manifestVersion` in `cluster.yaml`, and `manifest.KnownReleases` pairs every 2.3.x build with the FLO chart F5 shipped with it.
+`awsbnkctl` is a single-binary Go CLI that drives a full F5 BIG-IP Next for Kubernetes (BNK) 2.4 deployment onto an AWS EKS cluster with secondary Elastic Network Interfaces (ENIs) dedicated to the Traffic Management Microkernel (TMM). The default CNE release manifest is `2.4.0` (BNK 2.4.0; `internal/manifest/manifest.go`); operators pin an older 2.3.x build per cluster via `bnk.manifestVersion` in `cluster.yaml`, and `manifest.KnownReleases` pairs every supported build with the FLO chart F5 shipped with it.
 
-It executes a deterministic 39-phase provisioning lifecycle (two phases, `sagemaker-lmi` and `demo-stage`, are conditional) implemented directly in Go using the AWS SDK for Go v2 and client-go — **no Terraform, no host `kubectl`, no host `helm`**. cert-manager `v1.21.1` is applied from embedded upstream YAML via client-go; the EKS floor is Kubernetes `1.34` (`intent.MinKubernetesVersion`), the default is `1.35` (`intent.DefaultKubernetesVersion`, the minor F5 lists for BNK 2.3.x), 1.36+ warns.
+It executes a deterministic 39-phase provisioning lifecycle (two phases, `sagemaker-lmi` and `demo-stage`, are conditional) implemented directly in Go using the AWS SDK for Go v2 and client-go — **no Terraform, no host `kubectl`, no host `helm`**. cert-manager `v1.21.1` is applied from embedded upstream YAML via client-go; the EKS floor is Kubernetes `1.34` (`intent.MinKubernetesVersion`), the default is `1.35` (`intent.DefaultKubernetesVersion`, the minor F5 lists for BNK 2.3.x and 2.4.0), 1.36+ warns.
 
 ## Key Commands & Development Workflows
 
@@ -49,7 +49,7 @@ internal/
 ├── forge/               # BNK Forge client (MCP preferred, REST fallback) — register/unregister/benchmark
 ├── intent/              # cluster.yaml schema (v1), strict loader, validation, pinned defaults (K8s floor, FLO, cert-manager)
 ├── jumphost/            # SSH-via-EICE probe utilities for the test jumphost
-├── k8s/                 # Embedded client-go wrapper (k verbs); manifests/ (cert-manager YAML) and render/ (F5SPKVlan etc.)
+├── k8s/                 # Embedded client-go wrapper (k verbs); manifests/ (cert-manager YAML) and render/ (CNEInstance, Infra etc.)
 ├── manifest/            # F5 release-manifest (BOM) fetch/probe; DefaultManifestVersion lives here
 ├── remote/              # Embedded SSH client and target plumbing
 ├── scenarios/           # 15 end-to-end validation scenarios (HTTP, L4, gRPC, AI, CWC, core files)
