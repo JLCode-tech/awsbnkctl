@@ -458,6 +458,14 @@ const (
 	InfraRouteDefault = "default"
 )
 
+// ZebOSConfigMapName is the ConfigMap the ZebOS routing container reads its
+// BGP configuration from (key ZebOS.conf; F5 "Set up dynamic routing with
+// BGP"). FLO creates it empty; the operator fills it in for BGP peering
+// (examples/*/bgp-route-server.yaml, docs/BGP-ROUTE-SERVER.md). BNK 2.4.0 as
+// FLO 2.30 installs it runs ZebOS (ZEBOS_STATE=legacy), so this — not the
+// OcNOS-only GlobalRoutingConfig/RoutingTemplate CRs — is the 2.4 BGP config.
+const ZebOSConfigMapName = "f5-tmm-dynamic-routing-template"
+
 // InfraTunnelNetwork is the Infra network the egress tunnel terminates on
 // (Infra egressDefaults.networkRef and the GatewaySettings egressConfigs
 // networkRef): the internal VLAN on dual-interface clusters, the external VLAN

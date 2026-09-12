@@ -150,9 +150,10 @@ func Phase07IAM(ctx context.Context, cl *intent.Cluster, st *state.State, client
 }
 
 // BGP / BFD control-plane ports opened on SG_BNK_DATA when bnk.bgp is set.
-// They mirror the allowed_services Phase 23b renders on the external F5SPKVlan:
-// the VLAN rule lets TMM hand the packets to the routing container, this SG
-// rule lets them reach the ENI at all. Both are needed for a session to form.
+// On BNK 2.3 they mirrored the allowed_services Phase 23b rendered on the
+// external F5SPKVlan; the 2.4 Infra CR has no such list and the routing
+// container accepts them by default, so this SG rule is what lets a peer in the
+// external subnet reach the self IP at all.
 const (
 	bgpPort = int32(179)  // BGP (RFC 4271), TCP
 	bfdPort = int32(3784) // BFD single-hop control (RFC 5881), UDP
