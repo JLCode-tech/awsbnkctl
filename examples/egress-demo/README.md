@@ -13,15 +13,13 @@ node's own path. The pod is never changed.
 
 ## How it works
 
-The `GatewaySettings` holds one `egressConfigs` entry (Automap SNAT on the
-external VLAN `ext-vlan-infra`); the `EgressGateway` references it and selects
-the captured namespace. The tunnel from the worker nodes and the two TMM routes
-egress needs come from the `Infra` CR `up` applies, so nothing else is set by
-hand. Captured traffic is SNATed to TMM's external self IP and leaves the VPC
-through the NAT gateway; pod-to-VPC traffic stays on the node.
+- `GatewaySettings`: one `egressConfigs` entry, Automap SNAT on `ext-vlan-infra`.
+- `EgressGateway`: references that entry and selects the captured namespace.
+- Tunnel and TMM routes: already in the `Infra` CR `up` applies.
+- Firewall: `F5BigFwPolicy` attached to the `EgressGateway` by a `SecPolicy`; drops `1.1.1.1`, logs the rest.
 
-The firewall is a `F5BigFwPolicy` attached to the `EgressGateway` with a
-`SecPolicy`. It drops `1.1.1.1` for captured pods and logs everything else.
+Captured traffic is SNATed to TMM's external self IP and leaves through the NAT
+gateway. Pod-to-VPC traffic stays on the node.
 
 ## Files
 

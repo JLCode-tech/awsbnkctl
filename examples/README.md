@@ -11,7 +11,7 @@ one, point the two F5 credential paths at your own files, and run it.
 | [`egress-demo`](egress-demo/) | `external-only` | 3 | A pod's outbound traffic flips to a BNK-controlled path with an egress firewall by applying one `EgressGateway` |
 | [`demo-ai`](demo-ai/) | `dual-interface` | 12 (6 as the lean rig) | `full-cluster` plus a GPU node group and a disposable SageMaker endpoint: the protocol demos and AI inference in one cluster |
 | [`agentcore-demo`](agentcore-demo/) | `dual-interface` | 4 | An Amazon Bedrock AgentCore agent calls an MCP tool through BNK; BNK authenticates, rate-limits and logs every call |
-| [`local-zone`](local-zone/) | none | 0 | Telco/edge CRs (SCTP, Diameter, HTTP/2, SNAT) from an AWS Local Zone trial that did **not** reach a working data path; kept as a reference |
+| [`local-zone`](local-zone/) | none | 0 | Telco/edge reference manifests (SCTP, Diameter, HTTP/2, egress) for an AWS Local Zone; apply them to a cluster you already have |
 
 Costs are rough `ap-southeast-2` on-demand rates for the whole footprint,
 excluding data transfer and EBS. Nothing here scales to zero, so tear clusters

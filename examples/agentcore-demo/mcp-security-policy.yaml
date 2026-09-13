@@ -23,7 +23,7 @@
 ---
 # Governance iRule for the MCP tool route: rate limit + telemetry.
 #
-# GOTCHA: the iRule body below carries no `#` comments on purpose. BNK's
+# The iRule body below carries no `#` comments on purpose. BNK's
 # `f5validate.f5net.com` admission webhook rejects any F5BigCneIrule whose
 # script contains a comment line, with the misleading message
 # `braces are required around the expression`. Keep explanation out here.
@@ -34,9 +34,9 @@
 # the 429 record has to be emitted at the point the limiter fires.
 #
 # Path matching: the route matches /v1/mcp/forecast, and the HTTPRoute
-# URLRewrite filter rewrites it to `/` BEFORE this iRule runs (confirmed live —
-# the URI the iRule observes is `/`). Both spellings are matched so the policy
-# holds either way. /.well-known/agent-card.json (discovery) stays exempt.
+# URLRewrite filter rewrites it to `/` before this iRule runs, so the iRule
+# observes `/`. Both spellings are matched so the policy holds either way.
+# /.well-known/agent-card.json (discovery) stays exempt.
 #
 # Window mechanics: `table set KEY VALUE TIMEOUT LIFETIME` stamps BOTH the idle
 # timeout and the absolute lifetime at creation, and every later hit uses

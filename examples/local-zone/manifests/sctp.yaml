@@ -1,6 +1,5 @@
 # SCTP (9000) reference: GatewaySettings, echo backend, Gateway with a static
-# VIP inside the Infra listener pool, L4Route. The Gateway listener rejected
-# `protocol: SCTP` in the trial this comes from; kept as the reproduction case.
+# VIP inside the Infra listener pool, L4Route.
 # Apply with the cluster config so {{.GATEWAYCLASS_NAME}} is filled from state:
 #   awsbnkctl k apply --config <cluster.yaml> -f examples/local-zone/manifests/sctp.yaml
 apiVersion: v1

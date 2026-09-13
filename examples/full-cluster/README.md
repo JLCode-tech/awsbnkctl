@@ -31,7 +31,7 @@ awsbnkctl down -f cluster.yaml --yes
 | Toggle | Default | Turn it on by |
 | --- | --- | --- |
 | Single-interface pattern | off (dual-interface) | `pattern: external-only` **and** delete the `internal:` block under `network.dataPath`. Same cost, one ENI fewer. Needed for transparent egress ([`egress-demo`](../egress-demo/)) |
-| SR-IOV / DPDK data plane | off | the two edits above, then `pattern: sriov-external`. **Experimental**; use a fresh cluster |
+| SR-IOV / DPDK data plane | off | the two edits above, then `pattern: sriov-external` |
 | Demo mode | off | uncomment `demo:` (or `up --demo`). Enables `awsbnkctl demo run` for the Diameter, HTTP/2 and ingress-migration demos |
 | BIG-IP VE appliance | off | uncomment `bigipVE:` with demo mode on. Adds a chargeable c5n.2xlarge for the `bigip-cis` demo; password via `AWSBNKCTL_BIGIP_PASSWORD` |
 | BNK release | 2.4.0 | `bnk.manifestVersion` (a 2.3.3 pin is shown commented) |
@@ -47,9 +47,6 @@ is the same topology with TMM driving the NIC over DPDK instead of the kernel:
 | Data-plane driver | kernel socket | DPDK over `vfio-pci` |
 | Node preparation | none | a DaemonSet rebinds the external ENA (phase 20b) |
 | Network attachment | `external` | `external-sriov` (type `passthru`) |
-
-Both are validated end to end; both stay under CI as fixtures in
-`internal/intent/testdata/`.
 
 ## Demo mode
 

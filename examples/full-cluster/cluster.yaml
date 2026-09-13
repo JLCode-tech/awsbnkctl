@@ -49,13 +49,12 @@ metadata:
 #     applies only ext-vlan, the CNEInstance lists one networkAttachment.
 #     This is the pattern transparent egress (examples/egress-demo) needs.
 #
-#   sriov-external — EXPERIMENTAL. Same topology and cost as external-only,
-#     but TMM drives the ENA over DPDK/vfio-pci instead of the kernel socket:
-#     the vfio-node-prep DaemonSet (Phase 20b) rebinds the external ENA, the
+#   sriov-external — same topology and cost as external-only, but TMM drives
+#     the ENA over DPDK/vfio-pci instead of the kernel socket: the
+#     vfio-node-prep DaemonSet (Phase 20b) rebinds the external ENA, the
 #     sriov-network-device-plugin exposes it as intel.com/ens8, the NAD becomes
 #     external-sriov (type passthru), and the CNEInstance drops
-#     TMM_GENERIC_SOCKET_DRIVER. Validated live (HTTP 200 through TMM-on-vfio);
-#     prefer a dedicated cluster. Apply the external-only swap above, then set
+#     TMM_GENERIC_SOCKET_DRIVER. Apply the external-only swap above, then set
 #     `pattern: sriov-external`.
 pattern: host-device
 
