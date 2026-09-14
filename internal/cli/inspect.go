@@ -120,18 +120,34 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	defer tw.Flush()
 
 	fmt.Fprintf(tw, "Workspace:\t%s\n", cctx.WorkspaceName)
-	if cctx.Workspace == nil {
-		fmt.Fprintln(tw, "Status:\t(not initialised — run `awsbnkctl init`)")
-		return nil
-	}
 
-	// AWS is the only first-class cloud block.
-	region := cctx.Workspace.AWS.Region
-	fmt.Fprintf(tw, "Region:\t%s\n", or(region, "(unset)"))
-	if cctx.Workspace.AWS.Profile != "" {
-		fmt.Fprintf(tw, "AWS profile:\t%s\n", cctx.Workspace.AWS.Profile)
+	// --config <cluster.yaml> is self-sufficient: region and cluster name come
+	// from the intent, so status works without an initialised workspace.
+	var cl *intent.Cluster
+	if flagStatusConfig != "" {
+		if cl, err = intent.Load(flagStatusConfig); err != nil {
+			return fmt.Errorf("loading --config %s: %w", flagStatusConfig, err)
+		}
 	}
-	fmt.Fprintf(tw, "Cluster:\t%s\t%s\n", or(cctx.Workspace.Cluster.Name, "(unset)"), createOrAttach(cctx.Workspace.Cluster.Create))
+	clusterName := ""
+	switch {
+	case cl != nil:
+		fmt.Fprintf(tw, "Config:\t%s\n", flagStatusConfig)
+		fmt.Fprintf(tw, "Region:\t%s\n", or(cl.Metadata.Region, "(unset)"))
+		fmt.Fprintf(tw, "Cluster:\t%s\n", or(cl.Metadata.Name, "(unset)"))
+		clusterName = cl.Metadata.Name
+	case cctx.Workspace == nil:
+		fmt.Fprintln(tw, "Status:\t(not initialised — run `awsbnkctl init`, or pass --config <cluster.yaml>)")
+		return nil
+	default:
+		// AWS is the only first-class cloud block.
+		fmt.Fprintf(tw, "Region:\t%s\n", or(cctx.Workspace.AWS.Region, "(unset)"))
+		if cctx.Workspace.AWS.Profile != "" {
+			fmt.Fprintf(tw, "AWS profile:\t%s\n", cctx.Workspace.AWS.Profile)
+		}
+		fmt.Fprintf(tw, "Cluster:\t%s\t%s\n", or(cctx.Workspace.Cluster.Name, "(unset)"), createOrAttach(cctx.Workspace.Cluster.Create))
+		clusterName = cctx.Workspace.Cluster.Name
+	}
 
 	// Deploy state, read from the AWS-SDK phased path's state.env IDs
 	// cache (per D-001…D-007). Locate it via the
@@ -140,7 +156,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	// .awsbnkctl/<name>/state.env under the working directory. Best-effort
 	// by convention: a missing / unreadable / empty state.env degrades to
 	// "not deployed" rather than failing the command.
-	st, _ := loadStatusState(flagStatusConfig, cctx.Workspace.Cluster.Name)
+	st, _ := loadStatusState(flagStatusConfig, clusterName)
 	writeStatusDemoBanner(tw, st)
 	writeStatusDeployStateFromState(tw, st)
 
