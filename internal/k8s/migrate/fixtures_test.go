@@ -184,6 +184,7 @@ func parseFixture(t *testing.T, stream string) []*unstructured.Unstructured {
 // gvrByKind maps fixture kinds to the GVRs Inspect lists.
 var gvrByKind = map[string]schema.GroupVersionResource{
 	"CNEInstance":              CNEInstanceGVR,
+	"CNEController":            CNEControllerGVR,
 	"F5SPKVlan":                VlanGVR,
 	"F5SPKStaticRoute":         StaticRouteGVR,
 	"Vrf":                      VrfGVR,

@@ -71,7 +71,7 @@ one before it.
 | 2 | `awsbnkctl k apply -f mcp-tool/` | the directory, not a file: Kustomize generates the ConfigMap and the bearer-token Secret |
 | 3 | `awsbnkctl k apply --config cluster.yaml -f gateway-deployment.yaml` | the `GatewaySettings`, the Gateway with listeners on 80 and 443 and both `HTTPRoute`s; `--config` fills in the GatewayClass name from state |
 | 4 | `scripts/setup-agentcore-network.sh` | reads the VIP off the live Gateway; creates the agent security group, SG-to-SG ingress and the private Route 53 zone |
-| 5 | `awsbnkctl k apply -f mcp-persistence.yaml` | the passphrase Secret and the `MODEL_CONTEXT_PROTOCOL` persistence profile the NetPolicies reference |
+| 5 | `awsbnkctl k apply -f mcp-persistence.yaml` | the passphrase Secret and the `MODEL_CONTEXT_PROTOCOL` persistence profile the NetPolicies reference. BNK 2.4.0 programs an `F5BigPersistenceProfile` only in the instance namespace (`f5-cne-system`) while a `NetPolicy` looks it up in its own namespace, so the profile in `default` stays unprogrammed and the iRules still attach; `awsbnkctl doctor --backend k8s` reports it |
 | 6 | `awsbnkctl k apply -f mcp-security-policy.yaml` | the rate-limit iRule, persistence and firewall attach to listeners that must already exist |
 | 7 | `awsbnkctl k apply -f mcp-observability.yaml` | Loki and the log collector in `llm-egress` |
 | 8 | `cd agent && npx agentcore deploy --target demo-v2` | the AgentCore runtime, VPC mode, in the private subnets |

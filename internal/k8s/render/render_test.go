@@ -446,6 +446,9 @@ func TestRenderCNEInstance_HappyPath(t *testing.T) {
 		if key == "VPC_ID" {
 			return "vpc-0abc12345"
 		}
+		if key == ServiceCIDRStateKey {
+			return "172.20.0.0/16"
+		}
 		return ""
 	}
 
@@ -468,6 +471,8 @@ func TestRenderCNEInstance_HappyPath(t *testing.T) {
 		"value: \"ap-southeast-2\"",
 		"value: \"ens8\"",          // CLOUD_HOST_DEVICE_NAME
 		"value: \"f5-cne-device\"", // CLOUD_HOST_DEVICE_TAG
+		"- name: TMM_K8S_ROUTES",   // the f5-tmm chart's add_k8s_routes, fed from EKS_SERVICE_CIDR
+		"value: \"172.20.0.0/16\"",
 	}
 	for _, want := range stateChecks {
 		if !strings.Contains(rendered, want) {
@@ -829,5 +834,26 @@ func TestRenderNvidiaDevicePlugin_EmbeddedTemplate(t *testing.T) {
 	// No leftover template tokens.
 	if strings.Contains(rendered, "{{") || strings.Contains(rendered, "}}") {
 		t.Errorf("rendered output still contains template tokens:\n%s", rendered)
+	}
+}
+
+// Without the EKS service range in state the CNEInstance carries no
+// TMM_K8S_ROUTES entry: an empty value would make TMM parse "" as a route.
+func TestRenderCNEInstance_OmitsK8sRoutesWithoutServiceCIDR(t *testing.T) {
+	tmplBytes, err := manifests.FS.ReadFile("shared/cneinstance.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read cneinstance template: %v", err)
+	}
+	out, err := RenderCNEInstance(tmplBytes, cneInstanceCluster(), func(key string) string {
+		if key == "VPC_ID" {
+			return "vpc-0abc12345"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("RenderCNEInstance: %v", err)
+	}
+	if strings.Contains(string(out), TMMK8sRoutesEnv) {
+		t.Errorf("rendered CNEInstance must not carry %s without %s in state:\n%s", TMMK8sRoutesEnv, ServiceCIDRStateKey, out)
 	}
 }

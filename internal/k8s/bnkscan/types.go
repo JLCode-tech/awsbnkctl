@@ -150,8 +150,10 @@ type Legacy struct {
 }
 
 // Any reports whether any legacy CR exists.
-func (l Legacy) Any() bool {
-	return l.BnkGateways+l.BNKSecPolicy+l.BNKNetPolicy+l.F5SPKVlans+l.F5SPKEgresses > 0
+func (l Legacy) Any() bool { return l.count() > 0 }
+
+func (l Legacy) count() int {
+	return l.BnkGateways + l.BNKSecPolicy + l.BNKNetPolicy + l.F5SPKVlans + l.F5SPKEgresses
 }
 
 // PersistenceInfo describes the F5BigPersistenceProfile attached to a Gateway.
@@ -267,13 +269,18 @@ func (idx *Index) Ready() bool {
 }
 
 // Problems lists the readiness failures, one line each.
-func (idx *Index) Problems() []string {
+func (idx *Index) Problems() []string { return idx.problems(false) }
+
+// problems is Problems with the AcceptLegacy relaxation (see Options).
+func (idx *Index) problems(acceptLegacy bool) []string {
 	var out []string
 	switch idx.Generation {
 	case GenNone:
 		out = append(out, "no BNK policy CRD group served (gateway.k8s.f5.com missing)")
 	case Gen23:
-		out = append(out, "cluster serves the 2.3 API (gateway.k8s.f5net.com); run awsbnkctl bnk upgrade")
+		if !acceptLegacy {
+			out = append(out, "cluster serves the 2.3 API (gateway.k8s.f5net.com); run awsbnkctl bnk upgrade")
+		}
 	}
 	if !idx.Controller.Found {
 		out = append(out, fmt.Sprintf("deployment %s/%s not found", idx.Controller.Namespace, idx.Controller.Name))
@@ -298,7 +305,11 @@ func (idx *Index) Problems() []string {
 	}
 	for _, o := range idx.PersistenceProfiles {
 		if !o.Ready {
-			out = append(out, fmt.Sprintf("F5BigPersistenceProfile %s: %s", o.ID(), o.Detail))
+			msg := fmt.Sprintf("F5BigPersistenceProfile %s: %s", o.ID(), o.Detail)
+			if idx.Controller.Found && o.Namespace != "" && o.Namespace != idx.Controller.Namespace {
+				msg += fmt.Sprintf("; the BNK 2.4.0 controller reconciles F5BigPersistenceProfile only in its own namespace (%s) and a NetPolicy resolves the profile in its own namespace, so MCP session persistence needs the Gateway, NetPolicy and profile in %s", idx.Controller.Namespace, idx.Controller.Namespace)
+			}
+			out = append(out, msg)
 		}
 	}
 	return out

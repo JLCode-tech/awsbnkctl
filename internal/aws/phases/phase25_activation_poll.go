@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -11,8 +12,13 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 	"github.com/JLCode-tech/awsbnkctl/pkg/bnk"
 )
+
+// phase25Readiness is the shared cluster readiness check (bnkscan), the same
+// one status, doctor, bnk upgrade and forge scan run. Tests replace it.
+var phase25Readiness = bnkscan.CheckReadiness
 
 const (
 	// phase25InitialSleep is the initial wait before the first poll iteration.
@@ -28,12 +34,14 @@ const (
 
 // Phase25ActivationPoll polls the CNEInstance and License CRs until both reach
 // their ready states (CNEInstance.status.state ∈ {Ready, Running} and
-// License.status.state = Active). Reports pod counts each iteration.
+// License.status.state = Active), then requires the shared bnkscan readiness
+// verdict (Infra Programmed on 2.4, every Gateway Accepted+Programmed,
+// f5-cne-controller rolled out). Reports pod counts each iteration.
 //
 // If skipPoll is true, the function returns nil immediately (for reviewer use
 // to avoid burning a real license per round).
 //
-// On success: sets CNEINSTANCE_READY_AT in state.
+// On success: sets CNEINSTANCE_READY_AT and BNK_API_GENERATION in state.
 // On timeout (9 min): dumps pod diagnostics to stderr then returns a hard error.
 //
 // D-005: CheckAuthOrDie called at entry.
@@ -67,7 +75,7 @@ func Phase25ActivationPoll(ctx context.Context, cl *intent.Cluster, st *state.St
 	case <-time.After(phase25InitialSleep):
 	}
 
-	var lastCNEState, lastLicState string
+	var lastCNEState, lastLicState, lastReadiness string
 	var kicked bool
 
 	for i := 1; i <= phase25MaxIter; i++ {
@@ -117,11 +125,19 @@ func Phase25ActivationPoll(ctx context.Context, cl *intent.Cluster, st *state.St
 			"[phase 25] [%d/%d] cne=state=%q,ready=%v lic=%s pods running=%d pending=%d failed=%d total=%d\n",
 			i, phase25MaxIter, cneState, cneReady, licState, running, pending, failed, total)
 
-		// Success: CNEInstance is functionally ready AND License is Active.
+		// Success: CNEInstance is functionally ready AND License is Active AND
+		// the shared readiness verdict passes.
 		if cneReady && licState == "Active" {
-			fmt.Fprintf(os.Stderr, "[phase 25] activation complete: cne=state=%q,ready=true lic=%s\n", cneState, licState)
-			st.Set("CNEINSTANCE_READY_AT", time.Now().UTC().Format(time.RFC3339))
-			return st.Save()
+			rd, _, rdErr := phase25Readiness(ctx, clients.Dynamic, clients.K8s, bnkscan.Options{ControllerNamespace: InstanceNamespace, AcceptLegacy: true})
+			ok, detail := activationReady(rd, rdErr)
+			lastReadiness = detail
+			if ok {
+				fmt.Fprintf(os.Stderr, "[phase 25] activation complete: cne=state=%q,ready=true lic=%s; %s\n", cneState, licState, detail)
+				st.Set("CNEINSTANCE_READY_AT", time.Now().UTC().Format(time.RFC3339))
+				st.Set("BNK_API_GENERATION", string(rd.Generation))
+				return st.Save()
+			}
+			fmt.Fprintf(os.Stderr, "[phase 25] [%d/%d] activation done, readiness pending: %s\n", i, phase25MaxIter, detail)
 		}
 
 		// After iter 6 (~3 min of polling), if all pods are Running but the
@@ -142,8 +158,25 @@ func Phase25ActivationPoll(ctx context.Context, cl *intent.Cluster, st *state.St
 	}
 
 	dumpPodDiagnostics(ctx, clients, InstanceNamespace)
+	if lastReadiness != "" {
+		return fmt.Errorf("phase25: timeout after %d iterations (9 min): activation done but %s — see [phase 25] FAIL diag lines above",
+			phase25MaxIter, lastReadiness)
+	}
 	return fmt.Errorf("phase25: timeout after %d iterations (9 min): last cne=%q lic=%q — see [phase 25] FAIL diag lines above for stuck pod state",
 		phase25MaxIter, lastCNEState, lastLicState)
+}
+
+// activationReady turns the shared readiness verdict into the phase gate. A
+// scan error is not ready (the API server may still be settling); the detail
+// names the problems so the poll log and the timeout error explain the wait.
+func activationReady(rd bnkscan.Readiness, err error) (bool, string) {
+	if err != nil {
+		return false, "readiness scan failed: " + err.Error()
+	}
+	if rd.Ready {
+		return true, rd.Summary()
+	}
+	return false, rd.Summary() + ": " + strings.Join(rd.Problems, "; ")
 }
 
 // isCNEReady returns true if state is "Ready" or "Running". Kept for

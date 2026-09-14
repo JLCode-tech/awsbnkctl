@@ -117,6 +117,18 @@ spec:
           value: "{{ .PalCpuSet }}"
         - name: TMM_MAPRES_ADDL_VETHS_ON_DP
           value: "TRUE"
+{{- if .ServiceCIDR }}
+        # TMM_K8S_ROUTES (the f5-tmm chart's add_k8s_routes): the Kubernetes
+        # networks TMM keeps reachable over eth0 once the Infra CR gives it a
+        # default route on the data plane. F5's pre-install hook derives them
+        # from kubeadm-config or the OpenShift Network CR; EKS has neither, so
+        # awsbnkctl passes the cluster's serviceIpv4Cidr (pods are VPC
+        # addresses and stay reachable through the vpc route). Without it the
+        # Infra default route takes DNS, dSSM (iRule table commands, persistence)
+        # and log forwarding off the cluster network inside the TMM pod.
+        - name: TMM_K8S_ROUTES
+          value: "{{ .ServiceCIDR }}"
+{{- end }}
 {{- if not .Sriov }}
         # host-device binding: TMM drives the dataplane over a kernel generic
         # socket on the Multus-delivered netdev. This is the SOCK driver and is

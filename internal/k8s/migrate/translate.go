@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
 )
 
 // Options tunes Translate.
@@ -52,6 +53,7 @@ type translator struct {
 	vrfs         []map[string]any                      // Infra spec.vrfs
 	networks     []map[string]any                      // Infra spec.networks
 	routes       []map[string]any                      // Infra spec.staticRoutes
+	extGateway   string                                // first host of the external VLAN subnet (default route next hop)
 	egressDef    map[string]any                        // Infra spec.egressDefaults
 	settings     map[string]*unstructured.Unstructured // key ns/name
 	warned       map[string]bool
@@ -147,6 +149,11 @@ func (t *translator) vlans() {
 
 		// Self IPs -> IPAM pool.
 		selfIPs, _, _ := unstructured.NestedStringSlice(v.Object, "spec", "selfip_v4s")
+		if !internal && t.extGateway == "" && len(selfIPs) > 0 {
+			if plen, ok := intAt(v.Object, "spec", "prefixlen_v4"); ok {
+				t.extGateway = firstHost(selfIPs[0], int(plen))
+			}
+		}
 		var pools []map[string]any
 		for _, ip := range selfIPs {
 			pool := map[string]any{}
@@ -281,7 +288,10 @@ func (t *translator) vxlans() {
 	}
 }
 
-// staticRoutes copies gateway-type F5SPKStaticRoutes.
+// staticRoutes copies gateway-type F5SPKStaticRoutes. A cluster without any
+// gets the default route the fresh 2.4 path always renders (0.0.0.0/0 via the
+// external VLAN gateway, the first host of its subnet on AWS): without it TMM
+// can only answer clients on the external subnet itself.
 func (t *translator) staticRoutes() {
 	for _, r := range t.inv.StaticRoutes {
 		name := r.GetName()
@@ -306,6 +316,14 @@ func (t *translator) staticRoutes() {
 			"destinations": []any{fmt.Sprintf("%s/%d", dest, prefix)},
 			"nextHop":      gw,
 		})
+	}
+	if len(t.routes) == 0 && t.extGateway != "" {
+		t.routes = append(t.routes, map[string]any{
+			"name":         render.InfraRouteDefault,
+			"destinations": []any{"0.0.0.0/0"},
+			"nextHop":      t.extGateway,
+		})
+		t.warn("no F5SPKStaticRoute: Infra staticRoutes gets the default route 0.0.0.0/0 via %s (external VLAN gateway), as awsbnkctl up renders it; without it TMM answers only clients on the external subnet", t.extGateway)
 	}
 }
 
@@ -790,9 +808,23 @@ func (t *translator) buildInfra() {
 	if len(t.routes) > 0 {
 		spec["staticRoutes"] = toAnySlice(t.routes)
 	}
-	if t.egressDef != nil {
-		spec["egressDefaults"] = t.egressDef
+	// The Infra always carries egressDefaults, as the fresh 2.4 path renders
+	// it: without the block the controller defaults the tunnel subnet to
+	// 10.0.0.0/16, which overlaps the self-IP pools of every 10.x VPC and
+	// leaves the Infra Programmed=False (PartiallyInvalid,
+	// EgressDefaultsSubnetConflict). Seen live 2026-09-14.
+	if t.egressDef == nil {
+		t.egressDef = map[string]any{}
+		if net := t.defaultTunnelNetwork(); net != "" {
+			t.egressDef["networkRef"] = map[string]any{"name": net}
+		}
+		t.egressDef["port"] = int64(render.InfraEgressPort)
+		t.warn("no F5SPKEgress: Infra egressDefaults set to the awsbnkctl defaults (subnet %s, port %d); the controller default 10.0.0.0/16 would overlap the VPC self-IP pools", render.InfraEgressSubnet, render.InfraEgressPort)
 	}
+	if _, ok := t.egressDef["subnet"]; !ok {
+		t.egressDef["subnet"] = render.InfraEgressSubnet
+	}
+	spec["egressDefaults"] = t.egressDef
 	t.plan.Infra = &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": GatewayF5Group + "/" + GatewayF5Version,
 		"kind":       "Infra",
@@ -893,3 +925,16 @@ func bytesCompare(a, b net.IP) int {
 }
 
 func joinStrings(s []string, sep string) string { return strings.Join(s, sep) }
+
+// firstHost returns the first usable address of the subnet ip/plen (the
+// subnet router on AWS), or "" when the input is not IPv4.
+func firstHost(ip string, plen int) string {
+	addr := net.ParseIP(ip).To4()
+	if addr == nil || plen < 0 || plen > 30 {
+		return ""
+	}
+	mask := net.CIDRMask(plen, 32)
+	network := addr.Mask(mask)
+	network[3]++
+	return network.String()
+}

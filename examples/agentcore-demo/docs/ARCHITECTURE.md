@@ -92,7 +92,7 @@ The annotation block is kept, commented out, in `gateway-deployment.yaml`.
 ```
   caller ──► BNK (TMM)  iRule: HTTP_REQUEST  → allow or 429, one JSON line
                         HTTP_RESPONSE → status, latency
-             │ f5-fluentbit sidecar stdout
+             │ f5-fluentbit sidecar → f5-toda-fluentd (f5-cne-core) stdout
              ▼
   bnkgov-collector DaemonSet (llm-egress)  tail, grep BNKGOV, parse
              ▼

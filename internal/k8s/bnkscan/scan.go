@@ -20,6 +20,10 @@ type Options struct {
 	// Deployment. Empty values use the awsbnkctl defaults.
 	ControllerNamespace string
 	ControllerName      string
+	// AcceptLegacy makes CheckReadiness treat a 2.3 cluster as ready when its
+	// controller is up (an Infra CR is only required on 2.4). Lifecycle gates
+	// that run on either generation set it; operator surfaces leave it false.
+	AcceptLegacy bool
 }
 
 func (o Options) withDefaults() Options {

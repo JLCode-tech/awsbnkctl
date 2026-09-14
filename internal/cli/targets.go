@@ -1,14 +1,20 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/forge"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 )
 
@@ -24,7 +30,7 @@ var (
 
 var targetsCmd = &cobra.Command{
 	Use:   "targets",
-	Short: "Manage SSH targets used by --on",
+	Short: "Manage SSH targets used by --on; discover MCP endpoints for Forge",
 	Long: `Targets are named SSH endpoints stored under the workspace's
 ` + "`targets:`" + ` block. They become reachable via the persistent --on flag
 on commands like ` + "`awsbnkctl exec`" + `, ` + "`awsbnkctl shell`" + `, ` + "`awsbnkctl kubectl`" + `, etc.
@@ -170,4 +176,116 @@ func hostPort(t *remote.Target) string {
 		return t.Host
 	}
 	return fmt.Sprintf("%s:%d", t.Host, t.Port)
+}
+
+// ── targets scan: zero-config MCP endpoint discovery ─────────────────
+
+var (
+	flagTargetsScanConfig   string
+	flagTargetsScanRegister bool
+)
+
+var targetsScanCmd = &cobra.Command{
+	Use:   "scan",
+	Short: "Discover the MCP endpoints a BNK cluster exposes and register them as Forge targets",
+	Long: `targets scan indexes the cluster (the same bnkscan pass as forge scan and
+status), lists every HTTPRoute that fronts an MCP tool server through a BNK
+Gateway with its VIP URLs, auth, persistence profile and tools, and registers
+each one in Forge's Target Catalog. Registration is idempotent: a target is
+reused by name (mcp-<namespace>-<route>).
+
+Registration needs the cluster's forge_link.json (awsbnkctl forge register).
+Without it the endpoints are listed and a hint is printed; --register=false
+skips Forge entirely.
+
+Kubeconfig: --kubeconfig, else the cluster.yaml state (-f), else the kubectl
+default. The unified flags (--probe, --bearer-env, --forge-rest-url, ...) are
+the ones forge scan takes.`,
+	Args: cobra.NoArgs,
+	RunE: runTargetsScan,
+}
+
+func init() {
+	f := targetsScanCmd.Flags()
+	f.StringVarP(&flagTargetsScanConfig, "config", "f", "", "path to cluster.yaml (kubeconfig, forge link and Forge URL come from its state)")
+	f.BoolVar(&flagTargetsScanRegister, "register", true, "register the discovered endpoints in Forge's Target Catalog")
+	addScanFlags(f)
+	targetsCmd.AddCommand(targetsScanCmd)
+}
+
+// targetsScanOutput is the -o json document.
+type targetsScanOutput struct {
+	Cluster   string                `json:"cluster,omitempty"`
+	Endpoints []bnkscan.MCPEndpoint `json:"endpoints"`
+	Targets   []forgeScanTarget     `json:"targets,omitempty"`
+	Probes    map[string]string     `json:"probeErrors,omitempty"`
+	Hint      string                `json:"hint,omitempty"`
+}
+
+func runTargetsScan(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, flagForgeScanTimeout)
+	defer cancel()
+
+	cl, idx, probes, err := discoverMCP(ctx, flagTargetsScanConfig, flagForgeScanProbe)
+	if err != nil {
+		return fmt.Errorf("targets scan: %w", err)
+	}
+	out := targetsScanOutput{Endpoints: idx.MCP, Probes: probes}
+	if cl != nil {
+		out.Cluster = cl.Metadata.Name
+	}
+	if flagTargetsScanRegister && len(idx.MCP) > 0 {
+		if link := forgeScanLink(cl); link != nil {
+			out.Targets = registerDiscoveredTargets(ctx, cl, link, "", forge.RestCreds{}, idx.MCP)
+		} else {
+			out.Hint = "cluster is not registered with Forge (no forge_link.json); run `awsbnkctl forge register` to enable target registration"
+		}
+	}
+
+	if flagOutput == "json" {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	w := cmd.OutOrStdout()
+	if out.Cluster != "" {
+		fmt.Fprintf(w, "cluster: %s\n", out.Cluster)
+	}
+	writeMCPEndpointTable(w, idx)
+	for name, perr := range out.Probes {
+		fmt.Fprintf(w, "probe %s: %s\n", name, perr)
+	}
+	writeTargetResults(w, out.Targets)
+	if out.Hint != "" {
+		fmt.Fprintln(w, out.Hint)
+	}
+	return nil
+}
+
+// writeMCPEndpointTable prints one row per MCP endpoint.
+func writeMCPEndpointTable(w io.Writer, idx *bnkscan.Index) {
+	if len(idx.MCP) == 0 {
+		fmt.Fprintf(w, "no MCP endpoints (BNK %s, %d HTTPRoute(s)); annotate a route with %s=mcp or serve an /mcp path\n",
+			idx.Generation, len(idx.HTTPRoutes), bnkscan.AnnotationProtocol)
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tGATEWAY\tREADY\tURL\tAUTH\tPERSISTENCE\tTOOLS")
+	for _, e := range idx.MCP {
+		persistence := "-"
+		if e.Persistence != nil {
+			persistence = e.Persistence.Type
+		}
+		tools := "-"
+		if names := e.ToolNames(); len(names) > 0 {
+			tools = strings.Join(names, ",")
+		}
+		fmt.Fprintf(tw, "%s\t%s/%s\t%v\t%s\t%s\t%s\t%s\n",
+			e.Name(), e.GatewayNamespace, e.Gateway, e.GatewayReady, or(e.PrimaryURL(), "-"), e.Auth, persistence, tools)
+	}
+	_ = tw.Flush()
 }

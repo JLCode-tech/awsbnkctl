@@ -20,6 +20,7 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/doctor"
 	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 	"github.com/JLCode-tech/awsbnkctl/internal/remote"
 	"github.com/JLCode-tech/awsbnkctl/internal/test"
 )
@@ -52,6 +53,9 @@ func runBackendChecks(ctx context.Context, cctx *config.Context, spec string) []
 // runK8sBackendChecks probes the k8s execution backend's prerequisites.
 //
 //   - apiserver reachable (clientset construction succeeds)
+//   - BNK API generation, Infra Programmed, Gateway Accepted+Programmed,
+//     f5-cne-controller rollout (bnkscan), with a warning and
+//     `awsbnkctl bnk migrate-2.4` hint when 2.3 CRDs or CRs remain
 //   - ops pod Ready
 //   - ServiceAccount + ClusterRole + ClusterRoleBinding present
 //   - IRSA shape probe: the ops SA must carry the
@@ -84,6 +88,14 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 		restCfg = nil
 	}
 	add("k8s cluster reachable", doctor.StatusOK, "kubeconfig loaded")
+
+	// BNK readiness from the shared bnkscan index: API generation, Infra,
+	// Gateways, controller, and a migrate-2.4 hint when 2.3 objects remain.
+	idx, scanErr := scanBNK(ctx, "", bnkscan.DefaultControllerNamespace, statusScanTimeout)
+	out = append(out, bnkDoctorChecks(idx, scanErr)...)
+	out = append(out, multusDoctorCheck(ctx, cs))
+	out = append(out, tmmLogStreamDoctorCheck(ctx, cs))
+	out = append(out, cneIRSADoctorCheck(ctx, cs, bnkscan.DefaultControllerNamespace))
 
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

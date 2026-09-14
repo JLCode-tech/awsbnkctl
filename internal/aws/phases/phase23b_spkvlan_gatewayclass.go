@@ -37,9 +37,10 @@ const (
 
 	gatewayClassCRDName = "gatewayclasses.gateway.networking.k8s.io"
 
-	// cneControllerRBACYAMLPath is the EndpointSlice ClusterRole + binding awsbnkctl
+	// CNEControllerRBACYAMLPath is the EndpointSlice ClusterRole + binding awsbnkctl
+	// (exported: bnk upgrade applies the same supplement after the rollout)
 	// adds for the controller ServiceAccount (FLO 2.30 grants no get).
-	cneControllerRBACYAMLPath = "shared/cne-controller-rbac.yaml.tmpl"
+	CNEControllerRBACYAMLPath = "shared/cne-controller-rbac.yaml.tmpl"
 
 	// cneControllerAvailableWait bounds the wait for the cne-controller
 	// Deployment to have an available replica before the Infra apply. The
@@ -207,7 +208,7 @@ func Phase23bSPKVlanGatewayClass(ctx context.Context, cl *intent.Cluster, st *st
 	// EndpointSlices but not get them, and the 2.4.0 controller GETs the slice of
 	// every Gateway backend ("Error getting endpointSlice ... is forbidden", live
 	// 2026-09-11), so pools stayed empty. The 2.4 f5ingress chart grants get.
-	rbacTmpl, err := k8smanifests.FS.ReadFile(cneControllerRBACYAMLPath)
+	rbacTmpl, err := k8smanifests.FS.ReadFile(CNEControllerRBACYAMLPath)
 	if err != nil {
 		return fmt.Errorf("phase23b: reading cne-controller rbac template: %w", err)
 	}

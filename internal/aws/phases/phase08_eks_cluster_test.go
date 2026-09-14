@@ -7,6 +7,7 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
 )
 
 func testClusterWithEKS() *intent.Cluster {
@@ -86,6 +87,9 @@ func TestPhase08EKSCluster_CreatesClusterWithCorrectSubnets(t *testing.T) {
 	}
 	if st.Get("EKS_CLUSTER_NAME") != cl.Metadata.Name {
 		t.Errorf("EKS_CLUSTER_NAME = %q, want %q", st.Get("EKS_CLUSTER_NAME"), cl.Metadata.Name)
+	}
+	if st.Get(render.ServiceCIDRStateKey) != "172.20.0.0/16" {
+		t.Errorf("%s = %q, want 172.20.0.0/16 (TMM_K8S_ROUTES source)", render.ServiceCIDRStateKey, st.Get(render.ServiceCIDRStateKey))
 	}
 }
 

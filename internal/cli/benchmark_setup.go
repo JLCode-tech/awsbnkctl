@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	flagBenchSetupPreflight bool
-	flagBenchSetupDaemon    bool
+	flagBenchSetupPreflight    bool
+	flagBenchSetupDaemon       bool
+	flagBenchSetupAutoDiscover bool
 )
 
 var benchmarkSetupCmd = &cobra.Command{
@@ -28,6 +29,8 @@ var benchmarkSetupCmd = &cobra.Command{
   4. Registers the jumphost as a BenchmarkAgent in forge with 'aiperf' capability.
   5. Registers the cluster Gateway VIP / model as a BenchmarkTarget in forge.
   6. Optionally validates connectivity to the model endpoint via preflight probe.
+  7. With --auto-discover, scans the cluster for MCP endpoints (bnkscan) and
+     registers each one as a Forge target, idempotently.
 
 After setup, run benchmarks with:
   awsbnkctl benchmark run -f cluster.yaml --scenario baseline`,
@@ -39,6 +42,8 @@ func init() {
 		"run preflight probe against the served model endpoint to verify end-to-end data path")
 	benchmarkSetupCmd.Flags().BoolVar(&flagBenchSetupDaemon, "daemon", false,
 		"start the persistent benchmark agent daemon immediately after setup")
+	benchmarkSetupCmd.Flags().BoolVar(&flagBenchSetupAutoDiscover, "auto-discover", false,
+		"scan the cluster for MCP endpoints and register them as Forge targets")
 }
 
 // ensureAiperfFn is the injectable seam for EnsureAiperf.
@@ -116,6 +121,13 @@ func runBenchmarkSetup(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stderr, "→ 3/4 Registering forge benchmark graph (agent & target)...\n")
 	graph := resolveForgeGraph(ctx, forgeCreds, agentName)
 
+	// Step 3b: MCP endpoint discovery (best-effort).
+	var discovered []forgeScanTarget
+	if flagBenchSetupAutoDiscover {
+		fmt.Fprintf(os.Stderr, "→ 3b/4 Discovering MCP endpoints through BNK Gateways...\n")
+		discovered = autoDiscoverTargets(ctx, forgeCreds)
+	}
+
 	// Step 4: Optional Preflight Check if VIP & Model are available
 	preflightStatus := "SKIPPED"
 	if flagBenchSetupPreflight && flagBenchVIP != "" && flagBenchModel != "" {
@@ -158,6 +170,9 @@ func runBenchmarkSetup(cmd *cobra.Command, _ []string) error {
 	if graph.proxyDeploymentID > 0 {
 		fmt.Fprintf(tw, "  Forge Proxy Deployment ID:\t%d\n", graph.proxyDeploymentID)
 	}
+	if flagBenchSetupAutoDiscover {
+		fmt.Fprintf(tw, "  MCP Targets Discovered:\t%s\n", summarizeTargets(discovered))
+	}
 	if flagBenchVIP != "" {
 		fmt.Fprintf(tw, "  Target VIP:\t%s\n", flagBenchVIP)
 	}
@@ -174,4 +189,53 @@ func runBenchmarkSetup(cmd *cobra.Command, _ []string) error {
 		return runBenchmarkDaemon(cmd, nil)
 	}
 	return nil
+}
+
+// autoDiscoverTargets scans the cluster behind -f cluster.yaml (or the
+// workspace) for MCP endpoints and registers them in Forge's Target Catalog
+// with the benchmark Forge URL and credentials. Best-effort: every failure is
+// a warning, never an error, so setup still completes.
+func autoDiscoverTargets(ctx context.Context, creds forge.RestCreds) []forgeScanTarget {
+	cl, idx, _, err := discoverMCP(ctx, flagBenchConfig, false)
+	if err != nil {
+		warnf("MCP discovery failed (non-fatal): %v", err)
+		return nil
+	}
+	if len(idx.MCP) == 0 {
+		fmt.Fprintf(os.Stderr, "→ no MCP endpoints found (BNK %s, %d HTTPRoute(s))\n", idx.Generation, len(idx.HTTPRoutes))
+		return nil
+	}
+	link := forgeScanLink(cl)
+	if link == nil {
+		warnf("%d MCP endpoint(s) found but the cluster is not registered with Forge (no forge_link.json); run `awsbnkctl forge register`", len(idx.MCP))
+		return nil
+	}
+	targets := registerDiscoveredTargets(ctx, cl, link, flagBenchForgeURL, creds, idx.MCP)
+	for _, t := range targets {
+		if t.Error != "" {
+			warnf("forge target %s: %s", t.Endpoint, t.Error)
+		} else {
+			fmt.Fprintf(os.Stderr, "✓ forge target registered: id=%d name=%s\n", t.ID, t.Name)
+		}
+	}
+	return targets
+}
+
+// summarizeTargets renders "n registered, m failed" for the setup summary.
+func summarizeTargets(targets []forgeScanTarget) string {
+	if len(targets) == 0 {
+		return "none"
+	}
+	ok, failed := 0, 0
+	for _, t := range targets {
+		if t.Error != "" {
+			failed++
+		} else {
+			ok++
+		}
+	}
+	if failed == 0 {
+		return fmt.Sprintf("%d registered", ok)
+	}
+	return fmt.Sprintf("%d registered, %d failed", ok, failed)
 }

@@ -299,12 +299,60 @@ the persistence profile pinning its sessions.
 `sec_policies`, `persistence_profile`, `persistence_type`, `tools` and
 `tool_schemas` (JSON). Registration is idempotent.
 
+### One readiness verdict everywhere
+
+`forge scan`, `status`, `doctor --backend k8s`, `up` (phase 25) and `bnk upgrade`
+all read the same `bnkscan` index. `status` prints the API generation, `Infra`
+and `Gateway` tallies, the controller rollout and the verdict; `doctor` turns
+them into rows and warns with `awsbnkctl bnk migrate-2.4` when 2.3 CRDs or CRs
+remain on a 2.4 cluster; phase 25 waits for the verdict after the license
+activates and records `BNK_API_GENERATION` in `state.env`; `bnk upgrade`
+reports it after the rollout (the Infra CR is missing until `migrate-2.4`).
+
+### `awsbnkctl targets scan`
+
+```bash
+awsbnkctl targets scan -f clusters/<name>/cluster.yaml          # list endpoints, register them in Forge
+awsbnkctl targets scan -f ... --register=false                  # list only
+awsbnkctl targets scan -f ... --probe --bearer-env MCP_TOKEN    # with tools/list
+awsbnkctl benchmark setup -f ... --auto-discover                # same registration during setup
+```
+
+One row per endpoint (`mcp-<namespace>-<route>`, Gateway, URL, auth,
+persistence type, tools). Registration uses the cluster's `forge_link.json`
+and is idempotent; without a link the endpoints are listed and a hint points
+at `forge register`.
+
+### `awsbnkctl logs tmm --governance`
+
+```bash
+awsbnkctl logs tmm --governance -f          # every BNKGOV decision, live
+awsbnkctl logs tmm --mcp --since 10m        # only MCP JSON-RPC calls
+```
+
+Reads the TMM log stream: on BNK 2.4 the TMM pod's `f5-fluentbit` sidecar
+only forwards to `f5-toda-fluentd`, so `awsbnkctl up` (phase 24d) and
+`awsbnkctl bnk upgrade` turn on the `@type stdout` store in F5's
+`f5-toda-fluentd-custom` ConfigMap and `logs tmm` tails that pod. Plain
+`logs tmm` prints the TMM pod's lines; `--governance` prints one line per
+record:
+
+```text
+[GOV] 200 tools/call tool=forecast session=s1 latency=12ms action=allow
+[GOV] 403 tools/call tool=delete_all session=s1 latency=1ms action=tool_forbidden
+```
+
 ### `awsbnkctl bnk mcp-session`
 
 Renders (or `--apply`s) the objects that pin an MCP session to one backend on
 BNK 2.4: the passphrase `Secret`, an `F5BigPersistenceProfile` with
 `persistenceType: MODEL_CONTEXT_PROTOCOL` and `mcpEncryptionPassphrase.secretRef`,
 and one `NetPolicy` per `--listener` attaching the profile to the Gateway.
+BNK 2.4.0 programs an `F5BigPersistenceProfile` only in the controller's namespace
+(`f5-cne-system`) and a `NetPolicy` resolves the profile in its own namespace, so
+the Gateway, the NetPolicy and the profile have to live there for the session to
+pin; `doctor --backend k8s` and `forge scan` say so when a profile elsewhere
+stays unprogrammed.
 Pass `--irule` for every iRule the listener already carries so the single
 NetPolicy keeps both. `--type AGENT2AGENT` renders the A2A equivalent.
 

@@ -223,7 +223,10 @@ func TestParseRoleSpec(t *testing.T) {
 		{"prefill=http://10.0.0.1:8000/metrics", "prefill", "http://10.0.0.1:8000/metrics", false},
 		{"Decode=/tmp/after.prom", "decode", "/tmp/after.prom", false},
 		{"http://h/metrics?x=1", "", "http://h/metrics?x=1", false},
-		{"gpu=http://h/metrics", "", "", true},
+		{"gpu=http://h/metrics", "", "gpu=http://h/metrics", false},
+		{"app=vllm", "", "app=vllm", false}, // --metrics-pod-selector label selector
+		{"prefill=app=vllm", "prefill", "app=vllm", false},
+		{"PREFILL=app in (vllm)", "prefill", "app in (vllm)", false},
 	}
 	for _, c := range cases {
 		role, val, err := genai.ParseRoleSpec(c.in)

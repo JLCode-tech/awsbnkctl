@@ -135,11 +135,13 @@ func scrapePodMetricsViaAPI(ctx context.Context, kubeconfigPath, namespace, sele
 		return nil, fmt.Errorf("list pods %s/%s: %w", namespace, selector, err)
 	}
 	var out []genai.Scrape
+	running := 0
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		if pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
+		running++
 		body, err := cs.CoreV1().RESTClient().Get().
 			Namespace(namespace).Resource("pods").
 			Name(fmt.Sprintf("%s:%d", pod.Name, port)).
@@ -155,8 +157,11 @@ func scrapePodMetricsViaAPI(ctx context.Context, kubeconfigPath, namespace, sele
 			Text:     string(body),
 		})
 	}
-	if len(out) == 0 {
+	switch {
+	case len(out) == 0 && running == 0:
 		return nil, fmt.Errorf("no running pod matched %q in %s", selector, namespace)
+	case len(out) == 0:
+		return nil, fmt.Errorf("%d running pod(s) matched %q in %s but none served /metrics on port %d", running, selector, namespace, port)
 	}
 	return out, nil
 }

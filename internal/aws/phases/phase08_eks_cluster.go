@@ -14,6 +14,7 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
 )
 
 // Phase08EKSCluster creates the EKS control plane and waits until ACTIVE.
@@ -43,6 +44,7 @@ func Phase08EKSCluster(ctx context.Context, cl *intent.Cluster, st *state.State,
 		st.Set("EKS_OIDC_URL", "https://oidc.eks.dry-run/id/dry-run")
 		st.Set("EKS_SECURITY_GROUP", "sg-dry-run")
 		st.Set("EKS_VERSION", k8sVersion)
+		st.Set(render.ServiceCIDRStateKey, "172.20.0.0/16")
 		return nil
 	}
 
@@ -238,6 +240,11 @@ func populateClusterState(st *state.State, c *ekstypes.Cluster) error {
 	if c.Version != nil {
 		st.Set("EKS_VERSION", *c.Version)
 	}
+	// The service range TMM must keep reachable over eth0 (render.ServiceCIDRStateKey,
+	// TMM_K8S_ROUTES in the CNEInstance): EKS assigns it at create time.
+	if c.KubernetesNetworkConfig != nil && c.KubernetesNetworkConfig.ServiceIpv4Cidr != nil {
+		st.Set(render.ServiceCIDRStateKey, *c.KubernetesNetworkConfig.ServiceIpv4Cidr)
+	}
 	return st.Save()
 }
 
@@ -249,6 +256,7 @@ func clearClusterState(st *state.State) {
 	st.Set("EKS_OIDC_URL", "")
 	st.Set("EKS_SECURITY_GROUP", "")
 	st.Set("EKS_VERSION", "")
+	st.Set(render.ServiceCIDRStateKey, "")
 }
 
 func oidcURL(c *ekstypes.Cluster) string {
