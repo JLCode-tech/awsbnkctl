@@ -154,9 +154,10 @@ func (s Spec) Objects() []*unstructured.Unstructured {
 		}})
 	}
 
-	passphraseKey := "mcpEncryptionPassphrase"
+	// CRD spec field holding the secretRef; the value is a field name, not a credential.
+	refField := "mcpEncryptionPassphrase"
 	if s.Type == TypeA2A {
-		passphraseKey = "a2aEncryptionPassphrase"
+		refField = "a2aEncryptionPassphrase"
 	}
 	secretRef := map[string]any{"name": s.SecretName}
 	if s.PassphraseField != DefaultPassphraseField {
@@ -169,7 +170,7 @@ func (s Spec) Objects() []*unstructured.Unstructured {
 		"spec": map[string]any{
 			"persistenceType": s.Type,
 			"timeout":         s.Timeout,
-			passphraseKey:     map[string]any{"secretRef": secretRef},
+			refField:          map[string]any{"secretRef": secretRef},
 		},
 	}})
 
