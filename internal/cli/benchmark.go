@@ -252,6 +252,9 @@ Caution: a redeploy failure mid-flight may leave the endpoint deleted or in Fail
 	// Synthetic inference simulation (llm-d-inference-sim)
 	f.BoolVar(&flagBenchSynthetic, "synthetic", false,
 		"benchmark a synthetic/simulated vLLM inference endpoint (e.g. llm-d-inference-sim on CPU) without requiring GPU hardware")
+
+	// GenAI metrics: prefix workload knobs, metrics scrapes, --genai-out.
+	bindGenAIFlags(f)
 }
 
 func init() {
@@ -270,7 +273,21 @@ func init() {
 // out the real SSH call without replacing the jumphost package's internal seam.
 var runAiperfFn = jumphost.RunAiperf
 
+// executeBenchmarkRun scrapes the configured metrics endpoints, runs aiperf
+// (falling back to a synthetic result with --synthetic), scrapes again and
+// attaches the GenAI metrics of the run to the result.
 func executeBenchmarkRun(ctx context.Context, runOpts jumphost.AiperfRunOptions) (*jumphost.AiperfResult, error) {
+	before := collectGenAIScrapes(ctx, runOpts.ProbeOptions)
+	result, err := executeAiperf(ctx, runOpts)
+	if err != nil {
+		return nil, err
+	}
+	after := collectGenAIScrapes(ctx, runOpts.ProbeOptions)
+	attachGenAI(result, before, after)
+	return result, nil
+}
+
+func executeAiperf(ctx context.Context, runOpts jumphost.AiperfRunOptions) (*jumphost.AiperfResult, error) {
 	result, err := runAiperfFn(ctx, runOpts)
 	if err == nil {
 		return result, nil
@@ -951,16 +968,19 @@ func runBenchmarkSingle(cmd *cobra.Command, probOpts jumphost.ProbeOptions, cred
 	runOpts := jumphost.AiperfRunOptions{
 		ProbeOptions: probOpts,
 		Config: jumphost.AiperfConfig{
-			Model:        flagBenchModel,
-			EndpointPath: flagBenchEndpoint,
-			Concurrency:  flagBenchConcurrency,
-			NumRequests:  flagBenchNumRequests,
-			ISL:          flagBenchISL,
-			OSL:          flagBenchOSL,
-			Streaming:    flagBenchStreaming,
-			Tokenizer:    flagBenchTokenizer,
-			HostHeader:   flagBenchHostHeader,
-			Timeout:      flagBenchTimeout,
+			Model:              flagBenchModel,
+			EndpointPath:       flagBenchEndpoint,
+			Concurrency:        flagBenchConcurrency,
+			NumRequests:        flagBenchNumRequests,
+			ISL:                flagBenchISL,
+			OSL:                flagBenchOSL,
+			Streaming:          flagBenchStreaming,
+			Tokenizer:          flagBenchTokenizer,
+			HostHeader:         flagBenchHostHeader,
+			PrefixPromptLength: flagBenchPrefixPromptLength,
+			NumPrefixPrompts:   flagBenchNumPrefixPrompts,
+			RandomSeed:         flagBenchRandomSeed,
+			Timeout:            flagBenchTimeout,
 		},
 		RunLabel: flagBenchRunLabel,
 		ResultID: flagBenchResultID,
@@ -980,6 +1000,7 @@ func runBenchmarkSingle(cmd *cobra.Command, probOpts jumphost.ProbeOptions, cred
 		RestURL:           flagBenchForgeURL,
 		Creds:             creds,
 		RawJSON:           []byte(result.RawJSON),
+		GenAI:             result.GenAI,
 		Proxy:             flagBenchProxy,
 		Model:             flagBenchModel,
 		URL:               llmBaseURL(flagBenchVIP),
@@ -1271,6 +1292,7 @@ func pushAiperfResult(
 		RestURL:           flagBenchForgeURL,
 		Creds:             creds,
 		RawJSON:           []byte(result.RawJSON),
+		GenAI:             result.GenAI,
 		Proxy:             effectiveProxy,
 		Model:             flagBenchModel,
 		URL:               llmBaseURL(effectiveVIP),
@@ -1943,16 +1965,19 @@ func runShootoutFrontEnd(
 		runOpts := jumphost.AiperfRunOptions{
 			ProbeOptions: probOpts,
 			Config: jumphost.AiperfConfig{
-				Model:        flagBenchModel,
-				EndpointPath: flagBenchEndpoint,
-				Concurrency:  flagBenchConcurrency,
-				NumRequests:  flagBenchNumRequests,
-				ISL:          flagBenchISL,
-				OSL:          flagBenchOSL,
-				Streaming:    flagBenchStreaming,
-				Tokenizer:    flagBenchTokenizer,
-				HostHeader:   flagBenchHostHeader,
-				Timeout:      flagBenchTimeout,
+				Model:              flagBenchModel,
+				EndpointPath:       flagBenchEndpoint,
+				Concurrency:        flagBenchConcurrency,
+				NumRequests:        flagBenchNumRequests,
+				ISL:                flagBenchISL,
+				OSL:                flagBenchOSL,
+				Streaming:          flagBenchStreaming,
+				Tokenizer:          flagBenchTokenizer,
+				HostHeader:         flagBenchHostHeader,
+				PrefixPromptLength: flagBenchPrefixPromptLength,
+				NumPrefixPrompts:   flagBenchNumPrefixPrompts,
+				RandomSeed:         flagBenchRandomSeed,
+				Timeout:            flagBenchTimeout,
 			},
 			RunLabel: flagBenchRunLabel,
 			ResultID: flagBenchResultID,

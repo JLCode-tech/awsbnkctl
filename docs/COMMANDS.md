@@ -66,10 +66,11 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 |---|---|
 | `benchmark` | Runs the default `benchmark run` workflow |
 | `benchmark setup` | Prepare the jumphost (aiperf) and register the benchmark agent and target in Forge |
-| `benchmark run` | Drive an aiperf run, preset (`--scenarios`), native Forge scenario sweep (`--scenario`), or proxy shootout (`--proxies`) |
+| `benchmark run` | Drive an aiperf run, preset (`--scenarios`), native Forge scenario sweep (`--scenario`), or proxy shootout (`--proxies`); `--prefix-prompt-length`, `--num-prefix-prompts`, `--random-seed` for shared-prefix workloads; `--metrics-pod-selector` / `--metrics-url` scrape vLLM or EPP metrics for the prefix-cache hit rate; `--genai-out` |
 | `benchmark list` | List native Forge scenarios and smoke presets |
 | `benchmark status` | Check the benchmark environment, jumphost and Forge linkage |
 | `benchmark daemon` | Run the persistent Forge benchmark agent daemon |
+| `benchmark ingest` | Parse aiperf artifacts offline into TTFT/ITL percentiles, token throughput and prefix-cache hit rate; compare TTFT between runs (`--expect-ttft-drop`), `--metrics-before`/`--metrics-after` scrape files, `--push` to Forge |
 | `forge register` | Register the workspace's EKS cluster with Forge (idempotent); `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
 | `forge status` | Show this workspace's Forge registration state |
 | `forge unregister` | Remove this workspace's Forge registration |

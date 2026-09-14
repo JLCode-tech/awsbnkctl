@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/JLCode-tech/awsbnkctl/internal/genai"
 )
 
 // AiperfConfig holds the parameters for a single aiperf benchmark run.
@@ -151,6 +153,7 @@ type DistributionStats struct {
 	Avg  float64 `json:"avg"`
 	P50  float64 `json:"p50"`
 	P90  float64 `json:"p90"`
+	P95  float64 `json:"p95"`
 	P99  float64 `json:"p99"`
 	Min  float64 `json:"min"`
 	Max  float64 `json:"max"`
@@ -208,6 +211,11 @@ type AiperfResult struct {
 
 	// Total tokens across all requests
 	TotalOutputTokens float64 `json:"total_output_tokens_sum"`
+
+	// GenAI carries the TTFT/ITL percentiles, token throughput and, when the
+	// run scraped model-server metrics, the prefix-cache hit rate and worker
+	// utilization. Filled by the CLI after RunAiperf; nil when not computed.
+	GenAI *genai.Metrics `json:"genai_metrics,omitempty"`
 }
 
 // sshExecFn is the injectable seam for running a remote command over
@@ -716,6 +724,7 @@ func parseAiperfJSON(raw string) (*AiperfResult, error) {
 			Avg:  raw0.RequestLatency.Avg,
 			P50:  raw0.RequestLatency.P50,
 			P90:  raw0.RequestLatency.P90,
+			P95:  raw0.RequestLatency.P95,
 			P99:  raw0.RequestLatency.P99,
 			Min:  raw0.RequestLatency.Min,
 			Max:  raw0.RequestLatency.Max,
@@ -725,6 +734,7 @@ func parseAiperfJSON(raw string) (*AiperfResult, error) {
 			Avg:  raw0.TimeToFirstToken.Avg,
 			P50:  raw0.TimeToFirstToken.P50,
 			P90:  raw0.TimeToFirstToken.P90,
+			P95:  raw0.TimeToFirstToken.P95,
 			P99:  raw0.TimeToFirstToken.P99,
 			Min:  raw0.TimeToFirstToken.Min,
 			Max:  raw0.TimeToFirstToken.Max,
@@ -734,6 +744,7 @@ func parseAiperfJSON(raw string) (*AiperfResult, error) {
 			Avg:  raw0.InterTokenLatency.Avg,
 			P50:  raw0.InterTokenLatency.P50,
 			P90:  raw0.InterTokenLatency.P90,
+			P95:  raw0.InterTokenLatency.P95,
 			P99:  raw0.InterTokenLatency.P99,
 			Min:  raw0.InterTokenLatency.Min,
 			Max:  raw0.InterTokenLatency.Max,

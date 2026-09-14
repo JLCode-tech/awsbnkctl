@@ -53,6 +53,9 @@ Gateway in front of the SageMaker endpoint (via a shared SigV4 hop) and prints
 the Forge benchmark commands to run. It reads the cluster name, region and its
 `.130` VIP from `cluster.yaml`. Run `shootout/teardown.sh` before `awsbnkctl
 down`, otherwise the LoadBalancer Services leak NLBs.
+`shootout/prefix-cache.sh` runs a unique-prompt baseline and an 80 % shared-prefix
+workload through the BNK VIP and compares TTFT; `awsbnkctl benchmark ingest`
+prints the table and the prefix-cache hit rate.
 
 ## BGP
 

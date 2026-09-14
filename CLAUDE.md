@@ -47,6 +47,7 @@ internal/
 ├── embedded/            # Agentic-mode scaffolding (AGENTS.md, personas/, journal/) shipped in the binary
 ├── exec/                # Execution backends: local, docker, k8s, ssh:<target>
 ├── forge/               # BNK Forge client (MCP preferred, REST fallback) — register/unregister/benchmark, typed scan/health, MCP target registration, governance telemetry schema
+├── genai/               # GenAI benchmark metrics: aiperf artifact percentiles, Prometheus scrape parsing, prefix-cache hit rate, prefill/decode utilization (no internal deps)
 ├── intent/              # cluster.yaml schema (v1), strict loader, validation, pinned defaults (K8s floor, FLO, cert-manager)
 ├── jumphost/            # SSH-via-EICE probe utilities for the test jumphost
 ├── k8s/                 # Embedded client-go wrapper (k verbs); manifests/ (cert-manager YAML), render/ (CNEInstance, Infra etc.), migrate/ (2.3→2.4), bnkscan/ (2.4 readiness index + MCP discovery), mcpsession/ (MODEL_CONTEXT_PROTOCOL persistence)
