@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s/migrate"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
@@ -310,6 +312,12 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 		Timeout:         flagBnkUpgradeTimeout,
 		Log:             os.Stderr,
 	})
+	if err == nil && !flagBnkUpgradeDryRun {
+		// The same readiness verdict awsbnkctl up, status, doctor and forge scan
+		// use. Informational here: right after an upgrade from 2.3 the Infra CR
+		// does not exist yet, and migrate-2.4 is the next step.
+		res.Readiness = upgradeReadiness(ctx, deps, flagBnkUpgradeNamespace, os.Stderr)
+	}
 	if res != nil && flagOutput == "json" {
 		if encErr := json.NewEncoder(cmd.OutOrStdout()).Encode(res); encErr != nil && err == nil {
 			err = encErr
@@ -319,6 +327,28 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("bnk upgrade: %w", err)
 	}
 	return nil
+}
+
+// upgradeReadiness runs the shared bnkscan readiness check after an upgrade
+// and logs the summary, the problems and the migrate-2.4 advice. Never fails
+// the command.
+func upgradeReadiness(ctx context.Context, deps migrate.UpgradeDeps, ns string, log io.Writer) *bnkscan.Readiness {
+	if deps.Dyn == nil {
+		return nil
+	}
+	rd, _, err := bnkscan.CheckReadiness(ctx, deps.Dyn, deps.K8s, bnkscan.Options{ControllerNamespace: ns})
+	if err != nil {
+		fmt.Fprintf(log, "[upgrade] readiness: %v\n", err)
+		return nil
+	}
+	fmt.Fprintf(log, "[upgrade] %s\n", rd.Summary())
+	for _, p := range rd.Problems {
+		fmt.Fprintf(log, "[upgrade]   %s\n", p)
+	}
+	if advice := rd.MigrationAdvice(); advice != "" {
+		fmt.Fprintf(log, "[upgrade] next: %s\n", advice)
+	}
+	return &rd
 }
 
 // floUpgradeInputs reads the FAR key and renders the FLO Helm values from

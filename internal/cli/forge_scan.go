@@ -11,46 +11,20 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
-	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 )
 
-// Flags of forge scan.
+// Flags of forge scan (the discovery flags are shared, see addScanFlags).
 var (
-	flagForgeScanKubeconfig string
-	flagForgeScanProbe      bool
-	flagForgeScanBearerEnv  string
-	flagForgeScanRegister   bool
-	flagForgeScanRemote     bool
-	flagForgeScanRestURL    string
-	flagForgeScanUser       string
-	flagForgeScanPass       string
-	flagForgeScanCtrlNS     string
-	flagForgeScanTimeout    time.Duration
+	flagForgeScanRegister bool
+	flagForgeScanRemote   bool
 )
 
-// Client constructors, replaced by tests.
+// Seams replaced by tests.
 var (
-	forgeScanClients = func(kubeconfigPath string) (dynamic.Interface, kubernetes.Interface, error) {
-		cfg, err := k8s.BuildRESTConfig(kubeconfigPath)
-		if err != nil {
-			return nil, nil, err
-		}
-		dyn, err := dynamic.NewForConfig(cfg)
-		if err != nil {
-			return nil, nil, fmt.Errorf("dynamic client: %w", err)
-		}
-		cs, err := kubernetes.NewForConfig(cfg)
-		if err != nil {
-			return nil, nil, fmt.Errorf("clientset: %w", err)
-		}
-		return dyn, cs, nil
-	}
 	forgeScanProbe = bnkscan.ProbeTools
 	// forgeScanLink finds the registered forge link for the cluster: the
 	// cluster.yaml state dir, else the legacy workspace dir.
@@ -107,16 +81,9 @@ kubectl default. Forge identity: forge_link.json in the state dir.`,
 
 func init() {
 	f := forgeScanCmd.Flags()
-	f.StringVar(&flagForgeScanKubeconfig, "kubeconfig", "", "explicit kubeconfig path (default: cluster.yaml state, then $KUBECONFIG / ~/.kube/config)")
-	f.BoolVar(&flagForgeScanProbe, "probe", false, "call initialize + tools/list on every MCP endpoint and record its tools")
-	f.StringVar(&flagForgeScanBearerEnv, "bearer-env", "", "environment variable holding the bearer token for --probe")
+	addScanFlags(f)
 	f.BoolVar(&flagForgeScanRegister, "register-targets", false, "register every MCP endpoint in Forge's Target Catalog")
 	f.BoolVar(&flagForgeScanRemote, "remote", false, "also run Forge's scan_cluster + bnk_health for the linked cluster")
-	f.StringVar(&flagForgeScanRestURL, "forge-rest-url", "", "Forge REST base URL for --register-targets (default: cluster.yaml forge.url, forge_link.json, "+intent.DefaultForgeRESTURL+")")
-	f.StringVar(&flagForgeScanUser, "forge-user", "", "Forge username (default: $AWSBNKCTL_FORGE_USERNAME, cluster.yaml forge.username, admin)")
-	f.StringVar(&flagForgeScanPass, "forge-pass", "", "Forge password (default: $AWSBNKCTL_FORGE_PASSWORD, cluster.yaml forge.password)")
-	f.StringVar(&flagForgeScanCtrlNS, "controller-namespace", bnkscan.DefaultControllerNamespace, "namespace of the f5-cne-controller Deployment")
-	f.DurationVar(&flagForgeScanTimeout, "timeout", 2*time.Minute, "bound for the whole scan")
 	forgeCmd.AddCommand(forgeScanCmd)
 }
 
@@ -140,13 +107,6 @@ type forgeRemoteScan struct {
 	Generation bnkscan.Generation  `json:"generation,omitempty"`
 }
 
-type forgeScanTarget struct {
-	Endpoint string `json:"endpoint"`
-	ID       int    `json:"id,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Error    string `json:"error,omitempty"`
-}
-
 func runForgeScan(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -155,33 +115,13 @@ func runForgeScan(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(ctx, flagForgeScanTimeout)
 	defer cancel()
 
-	var cl *intent.Cluster
-	if flagForgeConfig != "" {
-		var err error
-		if cl, err = intent.Load(flagForgeConfig); err != nil {
-			return fmt.Errorf("forge scan: loading --config: %w", err)
-		}
-	}
-	kubeconfigPath, err := resolveKubeconfigFlags(flagForgeScanKubeconfig, flagForgeConfig)
+	cl, idx, probes, err := discoverMCP(ctx, flagForgeConfig, flagForgeScanProbe)
 	if err != nil {
 		return fmt.Errorf("forge scan: %w", err)
 	}
-	dyn, cs, err := forgeScanClients(kubeconfigPath)
-	if err != nil {
-		return fmt.Errorf("forge scan: building kube client: %w", err)
-	}
-
-	idx, err := bnkscan.Scan(ctx, dyn, cs, bnkscan.Options{ControllerNamespace: flagForgeScanCtrlNS})
-	if err != nil {
-		return fmt.Errorf("forge scan: %w", err)
-	}
-	out := forgeScanOutput{Index: idx}
+	out := forgeScanOutput{Index: idx, Probes: probes}
 	if cl != nil {
 		out.Cluster = cl.Metadata.Name
-	}
-
-	if flagForgeScanProbe {
-		out.Probes = probeEndpoints(ctx, idx)
 	}
 
 	// Forge identity (optional): only needed for --remote and --register-targets.
@@ -194,20 +134,7 @@ func runForgeScan(cmd *cobra.Command, _ []string) error {
 		if link == nil {
 			return errors.New("forge scan --register-targets: the cluster is not registered with Forge (no forge_link.json); run `awsbnkctl forge register` first")
 		}
-		opts := forge.MCPTargetOptions{
-			RestURL:        resolveForgeScanRestURL(cl, link),
-			Creds:          resolveForgeScanCreds(cl),
-			ClusterID:      link.ClusterID,
-			ClusterName:    link.ClusterName,
-			ProxyNamespace: flagForgeScanCtrlNS,
-		}
-		for _, r := range forge.RegisterMCPTargets(ctx, opts, idx.MCP) {
-			t := forgeScanTarget{Endpoint: r.Endpoint.Name(), ID: r.Target.ID, Name: r.Target.Name}
-			if r.Err != nil {
-				t.Error = r.Err.Error()
-			}
-			out.Targets = append(out.Targets, t)
-		}
+		out.Targets = registerDiscoveredTargets(ctx, cl, link, "", forge.RestCreds{}, idx.MCP)
 	}
 
 	if flagOutput == "json" {
@@ -239,16 +166,7 @@ func runForgeScan(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(w, "  warning: %s\n", r.Warning)
 		}
 	}
-	if len(out.Targets) > 0 {
-		fmt.Fprintln(w, "forge targets")
-		for _, t := range out.Targets {
-			if t.Error != "" {
-				fmt.Fprintf(w, "  %-40s FAILED %s\n", t.Endpoint, t.Error)
-			} else {
-				fmt.Fprintf(w, "  %-40s id=%d\n", t.Name, t.ID)
-			}
-		}
-	}
+	writeTargetResults(w, out.Targets)
 	if !idx.Ready() {
 		return errors.New("forge scan: cluster is not ready (see above)")
 	}

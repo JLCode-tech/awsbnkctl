@@ -137,11 +137,11 @@ func resetForgeScanFlags() {
 
 func withScanSeams(t *testing.T, dyn dynamic.Interface, cs kubernetes.Interface, link *forge.Link) {
 	t.Helper()
-	origClients, origLink, origProbe := forgeScanClients, forgeScanLink, forgeScanProbe
-	forgeScanClients = func(string) (dynamic.Interface, kubernetes.Interface, error) { return dyn, cs, nil }
+	origClients, origLink, origProbe := scanClients, forgeScanLink, forgeScanProbe
+	scanClients = func(string) (dynamic.Interface, kubernetes.Interface, error) { return dyn, cs, nil }
 	forgeScanLink = func(*intent.Cluster) *forge.Link { return link }
 	t.Cleanup(func() {
-		forgeScanClients, forgeScanLink, forgeScanProbe = origClients, origLink, origProbe
+		scanClients, forgeScanLink, forgeScanProbe = origClients, origLink, origProbe
 		resetForgeScanFlags()
 	})
 	resetForgeScanFlags()

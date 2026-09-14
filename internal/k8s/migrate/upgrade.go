@@ -18,6 +18,7 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 	"github.com/JLCode-tech/awsbnkctl/internal/manifest"
 )
 
@@ -103,6 +104,9 @@ type UpgradeResult struct {
 	TMMReady        int    `json:"tmmReady"`
 	TMMTotal        int    `json:"tmmTotal"`
 	DryRun          bool   `json:"dryRun"`
+	// Readiness is the shared bnkscan verdict taken after the rollout (nil on
+	// dry-run or when the scan failed).
+	Readiness *bnkscan.Readiness `json:"readiness,omitempty"`
 }
 
 // Upgrade performs the in-place 2.3.x -> 2.4 move:

@@ -8,6 +8,8 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,8 @@ import (
 	"time"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	"github.com/JLCode-tech/awsbnkctl/internal/forge"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 )
 
 // TestResolveKubeconfigForStatus verifies that resolveKubeconfigForStatus
@@ -318,4 +322,134 @@ func TestWriteStatusDemoBannerNilState(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Errorf("expected no output for nil state, got: %q", buf.String())
 	}
+}
+
+// ── BNK block of status (bnkscan) ────────────────────────────────────
+
+func TestWriteStatusBNK(t *testing.T) {
+	t.Run("scan error is one line", func(t *testing.T) {
+		var out bytes.Buffer
+		writeStatusBNK(&out, nil, errors.New("connection refused"))
+		if got := out.String(); got != "BNK API:\t(scan failed: connection refused)\n" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("programmed 2.4 cluster", func(t *testing.T) {
+		dyn, cs := fakeScanClients(t, scanFixture, 1)
+		idx, err := bnkscan.Scan(context.Background(), dyn, cs, bnkscan.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		writeStatusBNK(&out, idx, nil)
+		for _, want := range []string{
+			"BNK API:\t2.4 (CRD groups: gateway.k8s.f5.com)",
+			"Infra:\t1/1 Programmed",
+			"Gateways:\t1/1 Accepted+Programmed",
+			"CNE controller:\tf5-cne-system/f5-cne-controller 1/1 available",
+			"MCP endpoints:\t1",
+			"BNK readiness:\tready",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("missing %q in\n%s", want, out.String())
+			}
+		}
+		if strings.Contains(out.String(), "BNK migration") {
+			t.Errorf("no migration line on a clean 2.4 cluster:\n%s", out.String())
+		}
+	})
+
+	t.Run("controller down is not ready", func(t *testing.T) {
+		dyn, cs := fakeScanClients(t, scanFixture, 0)
+		idx, err := bnkscan.Scan(context.Background(), dyn, cs, bnkscan.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		writeStatusBNK(&out, idx, nil)
+		if !strings.Contains(out.String(), "BNK readiness:\tnot ready — deployment f5-cne-system/f5-cne-controller: 0/1 replicas available") {
+			t.Errorf("output:\n%s", out.String())
+		}
+	})
+
+	t.Run("no BNK", func(t *testing.T) {
+		dyn, cs := fakeScanClients(t, "", 0)
+		idx, err := bnkscan.Scan(context.Background(), dyn, cs, bnkscan.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		writeStatusBNK(&out, idx, nil)
+		if got := out.String(); got != "BNK API:\tnone\nBNK readiness:\tnot installed\n" {
+			t.Errorf("got %q", got)
+		}
+	})
+}
+
+// ── logs --governance ────────────────────────────────────────────────
+
+func TestLogsGovernanceFlagsAndTMMComponent(t *testing.T) {
+	for _, flag := range []string{"governance", "mcp"} {
+		if logsCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("logs --%s missing", flag)
+		}
+	}
+	comp := lookupComponent("tmm")
+	if comp == nil {
+		t.Fatal("tmm component missing")
+	}
+	if comp.Ns != bnkscan.DefaultControllerNamespace || comp.Selector != "app=f5-tmm" {
+		t.Errorf("tmm component = %+v", comp)
+	}
+}
+
+func TestFormatGovernance(t *testing.T) {
+	rec := forge.GovernanceRecord{Status: "200", RPCMethod: "tools/call", Tool: "forecast", Session: "abc-123", LatencyMS: 42, Action: forge.ActionAllow}
+	if got := formatGovernance(rec); got != "[GOV] 200 tools/call tool=forecast session=abc-123 latency=42ms action=allow" {
+		t.Errorf("got %q", got)
+	}
+	if got := formatGovernance(forge.GovernanceRecord{Status: "429", Action: forge.ActionRateLimited}); got != "[GOV] 429 - tool=- session=- latency=0ms action=rate_limited" {
+		t.Errorf("empty fields: %q", got)
+	}
+}
+
+func TestGovernanceFilter(t *testing.T) {
+	const rec1 = `BNKGOV {"job":"llm-gateway","model":"mcp","status":"200","latency_ms":12,"client":"c","action":"allow","rpc_method":"tools/call","tool":"forecast","session":"s1"}`
+	const rec2 = `BNKGOV {"job":"llm-gateway","model":"mcp","status":"403","latency_ms":3,"client":"c","action":"tool_forbidden"}`
+
+	t.Run("filters, formats and survives split writes", func(t *testing.T) {
+		var out bytes.Buffer
+		g := newGovernanceFilter(&out, false)
+		stream := "plain tmm line\n" + rec1 + "\n" + "<134>Sep 14 tmm[1]: " + rec2 + "\nno newline tail"
+		for i := 0; i < len(stream); i += 7 {
+			end := i + 7
+			if end > len(stream) {
+				end = len(stream)
+			}
+			if _, err := g.Write([]byte(stream[i:end])); err != nil {
+				t.Fatal(err)
+			}
+		}
+		g.Flush()
+		want := "[GOV] 200 tools/call tool=forecast session=s1 latency=12ms action=allow\n" +
+			"[GOV] 403 - tool=- session=- latency=3ms action=tool_forbidden\n"
+		if out.String() != want {
+			t.Errorf("got:\n%s\nwant:\n%s", out.String(), want)
+		}
+		if g.Records != 2 || g.Dropped != 2 {
+			t.Errorf("records=%d dropped=%d", g.Records, g.Dropped)
+		}
+	})
+
+	t.Run("mcp only keeps records with rpc_method", func(t *testing.T) {
+		var out bytes.Buffer
+		g := newGovernanceFilter(&out, true)
+		if _, err := g.Write([]byte(rec1 + "\n" + rec2 + "\n")); err != nil {
+			t.Fatal(err)
+		}
+		if g.Records != 1 || g.Dropped != 1 || !strings.HasPrefix(out.String(), "[GOV] 200 tools/call") {
+			t.Errorf("records=%d dropped=%d out=%q", g.Records, g.Dropped, out.String())
+		}
+	})
 }
