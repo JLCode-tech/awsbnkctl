@@ -287,13 +287,13 @@ func multusDoctorCheck(ctx context.Context, cs kubernetes.Interface) doctor.Chec
 	case !st.Installed:
 		c.Status, c.Detail = doctor.StatusOK, "Multus not installed"
 	case !st.WatchEnabled && st.Unauthorized != "":
-		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("pod %s failed its network sandbox: Multus Unauthorized (expired kubeconfig token); the DaemonSet lacks %s%s", st.Unauthorized, k8s.MultusTokenWatchArg, fix)
+		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("pod %s failed its network sandbox: Multus Unauthorized (expired kubeconfig token); the DaemonSet lacks %s%s", st.Unauthorized, k8s.MultusWatchFlag, fix)
 	case !st.WatchEnabled:
-		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("DaemonSet %s/%s writes its kubeconfig once at pod start (no %s): the token expires and new pods fail with Multus Unauthorized%s", k8s.MultusNamespace, k8s.MultusDaemonSet, k8s.MultusTokenWatchArg, fix)
+		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("DaemonSet %s/%s writes its kubeconfig once at pod start (no %s): the token expires and new pods fail with Multus Unauthorized%s", k8s.MultusNamespace, k8s.MultusDaemonSet, k8s.MultusWatchFlag, fix)
 	case st.Unauthorized != "":
 		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("pod %s failed its network sandbox: Multus Unauthorized although the token watch is on%s", st.Unauthorized, fix)
 	default:
-		c.Status, c.Detail = doctor.StatusOK, "kubeconfig follows the service-account token ("+k8s.MultusTokenWatchArg+"), no Unauthorized sandbox events"
+		c.Status, c.Detail = doctor.StatusOK, "kubeconfig follows the service-account token ("+k8s.MultusWatchFlag+"), no Unauthorized sandbox events"
 	}
 	return c
 }

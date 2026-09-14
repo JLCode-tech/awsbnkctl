@@ -36,11 +36,11 @@ const (
 	MultusContainer = "kube-multus"
 	// MultusPodSelector selects the Multus pods.
 	MultusPodSelector = "app=multus"
-	// MultusTokenWatchArg turns on the entrypoint loop that rewrites the
+	// MultusWatchFlag turns on the entrypoint loop that rewrites the
 	// kubeconfig whenever the projected service-account token rotates.
-	MultusTokenWatchArg = "--cleanup-config-on-exit=true"
-	// multusSkipWatchArg disables that loop again.
-	multusSkipWatchArg = "--skip-config-watch"
+	MultusWatchFlag = "--cleanup-config-on-exit=true" // #nosec G101 -- CLI flag, not a credential
+	// multusSkipWatchFlag disables that loop again.
+	multusSkipWatchFlag = "--skip-config-watch" // #nosec G101 -- CLI flag, not a credential
 	// multusRestartAnnotation marks the DaemonSet template to roll its pods.
 	multusRestartAnnotation = "awsbnkctl.f5.com/restartedAt"
 	multusRolloutWait       = 3 * time.Minute
@@ -83,11 +83,11 @@ func MultusWatchEnabled(ds *appsv1.DaemonSet) bool {
 		cleanup, skip, auto := false, false, true
 		for _, a := range c.Args {
 			switch {
-			case a == "--cleanup-config-on-exit" || a == MultusTokenWatchArg:
+			case a == "--cleanup-config-on-exit" || a == MultusWatchFlag:
 				cleanup = true
 			case a == "--cleanup-config-on-exit=false":
 				cleanup = false
-			case a == multusSkipWatchArg || a == multusSkipWatchArg+"=true":
+			case a == multusSkipWatchFlag || a == multusSkipWatchFlag+"=true":
 				skip = true
 			case strings.HasPrefix(a, "--multus-conf-file=") && a != "--multus-conf-file=auto":
 				auto = false
@@ -149,7 +149,7 @@ func MultusUnauthorizedEvent(ev *corev1.Event) bool {
 	return ev.Reason == "FailedCreatePodSandBox" && strings.Contains(ev.Message, "multus") && strings.Contains(ev.Message, "Unauthorized")
 }
 
-// EnableMultusTokenWatch appends MultusTokenWatchArg to the entrypoint
+// EnableMultusTokenWatch appends MultusWatchFlag to the entrypoint
 // container and waits for the rollout, which also gives every pod a fresh
 // token. No-op when the flag is already present.
 func EnableMultusTokenWatch(ctx context.Context, cs kubernetes.Interface, ds *appsv1.DaemonSet) (bool, error) {
@@ -162,7 +162,7 @@ func EnableMultusTokenWatch(ctx context.Context, cs kubernetes.Interface, ds *ap
 		if c.Name == MultusContainer {
 			found = true
 			for _, a := range c.Args {
-				if a == "--cleanup-config-on-exit" || strings.HasPrefix(a, "--cleanup-config-on-exit=") || a == multusSkipWatchArg || a == multusSkipWatchArg+"=true" {
+				if a == "--cleanup-config-on-exit" || strings.HasPrefix(a, "--cleanup-config-on-exit=") || a == multusSkipWatchFlag || a == multusSkipWatchFlag+"=true" {
 					continue
 				}
 				args = append(args, a)
@@ -172,7 +172,7 @@ func EnableMultusTokenWatch(ctx context.Context, cs kubernetes.Interface, ds *ap
 	if !found {
 		return false, fmt.Errorf("daemonset %s/%s has no container %q", MultusNamespace, MultusDaemonSet, MultusContainer)
 	}
-	args = append(args, MultusTokenWatchArg)
+	args = append(args, MultusWatchFlag)
 	quoted := make([]string, len(args))
 	for i, a := range args {
 		quoted[i] = fmt.Sprintf("%q", a)
@@ -210,7 +210,7 @@ func EnsureMultusTokenWatch(ctx context.Context, cs kubernetes.Interface, dryRun
 	}
 	switch {
 	case !st.WatchEnabled:
-		res.Reason = fmt.Sprintf("DaemonSet %s/%s writes its kubeconfig once at pod start (no %s); adding the flag so the entrypoint rewrites it on every token rotation", MultusNamespace, MultusDaemonSet, MultusTokenWatchArg)
+		res.Reason = fmt.Sprintf("DaemonSet %s/%s writes its kubeconfig once at pod start (no %s); adding the flag so the entrypoint rewrites it on every token rotation", MultusNamespace, MultusDaemonSet, MultusWatchFlag)
 		if st.Unauthorized != "" {
 			res.Reason = fmt.Sprintf("pod %s failed its network sandbox with Multus Unauthorized (expired kubeconfig token); %s", st.Unauthorized, res.Reason)
 		}

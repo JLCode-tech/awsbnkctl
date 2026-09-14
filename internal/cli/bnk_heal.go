@@ -82,7 +82,7 @@ func runBnkHeal(cmd *cobra.Command, _ []string) error {
 	case !mh.Installed:
 		fmt.Fprintln(os.Stdout, "multus   not installed")
 	case mh.Patched:
-		fmt.Fprintf(os.Stdout, "multus   %s added to %s/%s; DaemonSet rolled\n", k8s.MultusTokenWatchArg, k8s.MultusNamespace, k8s.MultusDaemonSet)
+		fmt.Fprintf(os.Stdout, "multus   %s added to %s/%s; DaemonSet rolled\n", k8s.MultusWatchFlag, k8s.MultusNamespace, k8s.MultusDaemonSet)
 	case mh.Restarted:
 		fmt.Fprintf(os.Stdout, "multus   %s/%s rolled\n", k8s.MultusNamespace, k8s.MultusDaemonSet)
 	case flagBnkHealDryRun && (!mh.WatchEnabled || mh.Unauthorized):

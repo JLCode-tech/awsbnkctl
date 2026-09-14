@@ -50,11 +50,11 @@ func TestMultusWatchEnabled(t *testing.T) {
 		want bool
 	}{
 		{"quickstart", quickstartArgs, false},
-		{"flag", append(append([]string{}, quickstartArgs...), MultusTokenWatchArg), true},
+		{"flag", append(append([]string{}, quickstartArgs...), MultusWatchFlag), true},
 		{"bare flag", append(append([]string{}, quickstartArgs...), "--cleanup-config-on-exit"), true},
 		{"flag off", append(append([]string{}, quickstartArgs...), "--cleanup-config-on-exit=false"), false},
-		{"skip watch", append(append([]string{}, quickstartArgs...), MultusTokenWatchArg, "--skip-config-watch"), false},
-		{"static conf", []string{"--multus-conf-file=/tmp/multus-conf/70-multus.conf", MultusTokenWatchArg}, false},
+		{"skip watch", append(append([]string{}, quickstartArgs...), MultusWatchFlag, "--skip-config-watch"), false},
+		{"static conf", []string{"--multus-conf-file=/tmp/multus-conf/70-multus.conf", MultusWatchFlag}, false},
 	}
 	for _, c := range cases {
 		if got := MultusWatchEnabled(multusDaemonSet(c.args...)); got != c.want {
@@ -109,7 +109,7 @@ func TestEnsureMultusTokenWatch(t *testing.T) {
 		if err != nil || res.Patched || res.Restarted || res.WatchEnabled || !res.Unauthorized {
 			t.Fatalf("res=%+v err=%v", res, err)
 		}
-		if !strings.Contains(res.Reason, "f5-cne-system/f5-tmm-x") || !strings.Contains(res.Reason, MultusTokenWatchArg) {
+		if !strings.Contains(res.Reason, "f5-cne-system/f5-tmm-x") || !strings.Contains(res.Reason, MultusWatchFlag) {
 			t.Errorf("reason %q", res.Reason)
 		}
 		ds, _ := cs.AppsV1().DaemonSets(MultusNamespace).Get(ctx, MultusDaemonSet, metav1.GetOptions{})
@@ -125,7 +125,7 @@ func TestEnsureMultusTokenWatch(t *testing.T) {
 		}
 		ds, _ := cs.AppsV1().DaemonSets(MultusNamespace).Get(ctx, MultusDaemonSet, metav1.GetOptions{})
 		got := ds.Spec.Template.Spec.Containers[0].Args
-		want := append(append([]string{}, quickstartArgs...), MultusTokenWatchArg)
+		want := append(append([]string{}, quickstartArgs...), MultusWatchFlag)
 		if strings.Join(got, " ") != strings.Join(want, " ") {
 			t.Errorf("args %v", got)
 		}
@@ -134,7 +134,7 @@ func TestEnsureMultusTokenWatch(t *testing.T) {
 		}
 	})
 	t.Run("watch on and healthy is a no-op", func(t *testing.T) {
-		args := append(append([]string{}, quickstartArgs...), MultusTokenWatchArg)
+		args := append(append([]string{}, quickstartArgs...), MultusWatchFlag)
 		cs := k8sfake.NewClientset(multusDaemonSet(args...), multusPod(now))
 		res, err := EnsureMultusTokenWatch(ctx, cs, false, nil)
 		if err != nil || res.Patched || res.Restarted || !res.WatchEnabled {
@@ -142,7 +142,7 @@ func TestEnsureMultusTokenWatch(t *testing.T) {
 		}
 	})
 	t.Run("watch on but unauthorized rolls the pods", func(t *testing.T) {
-		args := append(append([]string{}, quickstartArgs...), MultusTokenWatchArg)
+		args := append(append([]string{}, quickstartArgs...), MultusWatchFlag)
 		cs := k8sfake.NewClientset(multusDaemonSet(args...), multusPod(now.Add(-time.Hour)), unauthorizedEvent(now))
 		res, err := EnsureMultusTokenWatch(ctx, cs, false, nil)
 		if err != nil || res.Patched || !res.Restarted {
