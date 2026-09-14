@@ -614,6 +614,15 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 	}); err != nil {
 		return err
 	}
+	// Phase 24d: TMM log stream. FLO 2.30 gives the TMM fluentbit sidecar no
+	// stdout output; enabling F5's stdout store in f5-toda-fluentd-custom puts
+	// the TMM lines (governance records included) on the fluentd pod's stdout
+	// for `awsbnkctl logs tmm` and the collectors. Idempotent.
+	if err := stage(4, "tmm-log-stream", func() error {
+		return phases.Phase24dTMMLogStream(ctx, cl, st, clients, dryRun)
+	}); err != nil {
+		return err
+	}
 	// Phase 24c: f5-tmm-pod-manager cold-start race heal (best-effort).
 	// pod-manager v1.6.x can time out hitting the EKS API ClusterIP before
 	// kube-proxy converges on a cold node; restart-once breaks the loop.

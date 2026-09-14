@@ -3,6 +3,8 @@ package phases
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 )
 
 // p25Scheme returns a scheme with both CNEInstance and License kinds registered.
@@ -285,5 +288,35 @@ func TestPhase25_CtxCancel_ReturnsError(t *testing.T) {
 	err := Phase25ActivationPoll(ctx, cl, st, clients, false, false)
 	if err == nil {
 		t.Fatal("expected error from ctx cancellation, got nil")
+	}
+}
+
+// ─── activationReady: the shared bnkscan gate ────────────────────────────────
+
+func TestActivationReady(t *testing.T) {
+	ok, detail := activationReady(bnkscan.Readiness{}, errors.New("boom"))
+	if ok || detail != "readiness scan failed: boom" {
+		t.Errorf("error case = %v %q", ok, detail)
+	}
+
+	ready := bnkscan.Readiness{Generation: bnkscan.Gen24, Ready: true,
+		Infras: bnkscan.Tally{Total: 1, Ready: 1}, Controller: bnkscan.Controller{Found: true, Desired: 1, Available: 1, Ready: true}}
+	ok, detail = activationReady(ready, nil)
+	if !ok || !strings.Contains(detail, "; ready") {
+		t.Errorf("ready case = %v %q", ok, detail)
+	}
+
+	pending := ready
+	pending.Ready = false
+	pending.Problems = []string{"Infra f5-cne-system/infra: Programmed=False (Pending)"}
+	ok, detail = activationReady(pending, nil)
+	if ok || !strings.Contains(detail, "not ready (1 problem(s)): Infra f5-cne-system/infra") {
+		t.Errorf("pending case = %v %q", ok, detail)
+	}
+}
+
+func TestPhase25ReadinessSeamDefault(t *testing.T) {
+	if phase25Readiness == nil {
+		t.Fatal("phase25Readiness seam is nil")
 	}
 }

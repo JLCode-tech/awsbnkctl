@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -17,17 +19,21 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
+	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 )
 
 var (
-	flagFollow        bool
-	flagLogsNamespace string
-	flagLogsContainer string
-	flagLogsPrevious  bool
-	flagLogsSince     string
-	flagLogsTailLines int64
+	flagFollow         bool
+	flagLogsNamespace  string
+	flagLogsContainer  string
+	flagLogsPrevious   bool
+	flagLogsSince      string
+	flagLogsTailLines  int64
+	flagLogsGovernance bool
+	flagLogsMCP        bool
 
 	// flagStatusConfig points status at a cluster.yaml so it can locate
 	// the AWS-SDK phased path's state.env IDs cache
@@ -49,6 +55,9 @@ var statusCmd = &cobra.Command{
     TMM node / jumphost, BNK activation, forge link, last phase applied
   - kubeconfig path (if any)
   - cluster reachability (node count + ready count)
+  - BNK API generation (2.4, 2.3, mixed, none), Infra Programmed, Gateway
+    Accepted+Programmed, CNE controller rollout and the readiness verdict
+    (the same bnkscan index forge scan and doctor use)
 
 Pass --config <cluster.yaml> to point status at a specific cluster's
 state.env. Without it, status uses the current workspace's cluster name
@@ -61,7 +70,7 @@ to "not deployed" rather than failing the command.`,
 
 var logsCmd = &cobra.Command{
 	Use:   "logs <component>",
-	Short: "Tail logs for a BNK component (flo, cis, cert-manager, cneinstance)",
+	Short: "Tail logs for a BNK component (flo, cis, cert-manager, cneinstance, tmm)",
 	Long: `Looks up the named BNK component, finds its pod(s) by label, and
 streams logs to stdout. With --follow, streams live. With multiple
 matching pods, tails the first and prints a hint about using
@@ -71,7 +80,16 @@ The component → namespace/selector map is hardcoded for v1 against the
 upstream TF chart's default labels; if your install renamed namespaces
 or relabelled, fall back to:
 
-  awsbnkctl kubectl logs -n <ns> <pod>`,
+  awsbnkctl kubectl logs -n <ns> <pod>
+
+--governance filters the stream to the BNKGOV records the governance iRule
+writes (tmm component, f5-fluentbit sidecar by default) and prints one line
+per decision:
+
+  [GOV] <status> <rpc_method> tool=<tool> session=<session> latency=<ms>ms action=<action>
+
+--mcp keeps only records with an MCP rpc_method (initialize, tools/list,
+tools/call). Both work with --follow.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runLogs,
 }
@@ -84,6 +102,8 @@ func init() {
 	logsCmd.Flags().BoolVar(&flagLogsPrevious, "previous", false, "fetch logs from the previous container instance")
 	logsCmd.Flags().StringVar(&flagLogsSince, "since", "", "only return logs newer than this duration (e.g. 5s, 2m, 1h)")
 	logsCmd.Flags().Int64Var(&flagLogsTailLines, "tail", -1, "tail the last N lines (-1 = full log)")
+	logsCmd.Flags().BoolVar(&flagLogsGovernance, "governance", false, "print only BNKGOV governance records, one formatted line each (tmm component)")
+	logsCmd.Flags().BoolVar(&flagLogsMCP, "mcp", false, "like --governance, but only records of MCP JSON-RPC calls (rpc_method set)")
 	rootCmd.AddCommand(statusCmd, logsCmd)
 }
 
@@ -101,18 +121,34 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	defer tw.Flush()
 
 	fmt.Fprintf(tw, "Workspace:\t%s\n", cctx.WorkspaceName)
-	if cctx.Workspace == nil {
-		fmt.Fprintln(tw, "Status:\t(not initialised — run `awsbnkctl init`)")
-		return nil
-	}
 
-	// AWS is the only first-class cloud block.
-	region := cctx.Workspace.AWS.Region
-	fmt.Fprintf(tw, "Region:\t%s\n", or(region, "(unset)"))
-	if cctx.Workspace.AWS.Profile != "" {
-		fmt.Fprintf(tw, "AWS profile:\t%s\n", cctx.Workspace.AWS.Profile)
+	// --config <cluster.yaml> is self-sufficient: region and cluster name come
+	// from the intent, so status works without an initialised workspace.
+	var cl *intent.Cluster
+	if flagStatusConfig != "" {
+		if cl, err = intent.Load(flagStatusConfig); err != nil {
+			return fmt.Errorf("loading --config %s: %w", flagStatusConfig, err)
+		}
 	}
-	fmt.Fprintf(tw, "Cluster:\t%s\t%s\n", or(cctx.Workspace.Cluster.Name, "(unset)"), createOrAttach(cctx.Workspace.Cluster.Create))
+	clusterName := ""
+	switch {
+	case cl != nil:
+		fmt.Fprintf(tw, "Config:\t%s\n", flagStatusConfig)
+		fmt.Fprintf(tw, "Region:\t%s\n", or(cl.Metadata.Region, "(unset)"))
+		fmt.Fprintf(tw, "Cluster:\t%s\n", or(cl.Metadata.Name, "(unset)"))
+		clusterName = cl.Metadata.Name
+	case cctx.Workspace == nil:
+		fmt.Fprintln(tw, "Status:\t(not initialised — run `awsbnkctl init`, or pass --config <cluster.yaml>)")
+		return nil
+	default:
+		// AWS is the only first-class cloud block.
+		fmt.Fprintf(tw, "Region:\t%s\n", or(cctx.Workspace.AWS.Region, "(unset)"))
+		if cctx.Workspace.AWS.Profile != "" {
+			fmt.Fprintf(tw, "AWS profile:\t%s\n", cctx.Workspace.AWS.Profile)
+		}
+		fmt.Fprintf(tw, "Cluster:\t%s\t%s\n", or(cctx.Workspace.Cluster.Name, "(unset)"), createOrAttach(cctx.Workspace.Cluster.Create))
+		clusterName = cctx.Workspace.Cluster.Name
+	}
 
 	// Deploy state, read from the AWS-SDK phased path's state.env IDs
 	// cache (per D-001…D-007). Locate it via the
@@ -121,7 +157,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	// .awsbnkctl/<name>/state.env under the working directory. Best-effort
 	// by convention: a missing / unreadable / empty state.env degrades to
 	// "not deployed" rather than failing the command.
-	st, _ := loadStatusState(flagStatusConfig, cctx.Workspace.Cluster.Name)
+	st, _ := loadStatusState(flagStatusConfig, clusterName)
 	writeStatusDemoBanner(tw, st)
 	writeStatusDeployStateFromState(tw, st)
 
@@ -144,7 +180,12 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 
 	clusterStatus := probeCluster(cmd.Context(), kcPath)
 	fmt.Fprintf(os.Stdout, "Cluster:        %s\n", clusterStatus)
-	return nil
+
+	// BNK state, from the shared bnkscan index. Best-effort like the rest.
+	idx, scanErr := scanBNK(cmd.Context(), kcPath, bnkscan.DefaultControllerNamespace, statusScanTimeout)
+	tw2 := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	writeStatusBNK(tw2, idx, scanErr)
+	return tw2.Flush()
 }
 
 // writeStatusDemoBanner emits the demo banner and a warn-only expiry notice
@@ -482,11 +523,41 @@ var bnkComponents = []bnkComponent{
 	{"cis", "F5 BNK CIS controller", "f5-bnk", "app=f5-bnk-cis"},
 	{"cert-manager", "cert-manager", "cert-manager", "app.kubernetes.io/instance=cert-manager"},
 	{"cneinstance", "BIG-IP TMM data plane (CNEInstance pods)", "f5-bnk", "app.kubernetes.io/component=tmm"},
+	// BNK 2.4: the TMM pod's f5-fluentbit sidecar only forwards; the TMM lines
+	// (governance records included) are read from the f5-toda-fluentd stdout
+	// store awsbnkctl up (phase 24d) and bnk upgrade enable (k8s.EnableTMMLogStream).
+	{"tmm", "BIG-IP TMM data plane (TMM log stream on f5-toda-fluentd stdout, BNK 2.4)", k8s.TMMLogNamespace, k8s.TMMLogPodSelector},
 }
 
 func runLogs(cmd *cobra.Command, args []string) error {
 	component := args[0]
 	comp := lookupComponent(component)
+
+	// --governance / --mcp: every log line goes through the BNKGOV filter.
+	var out io.Writer = os.Stdout
+	var gov *governanceFilter
+	if flagLogsGovernance || flagLogsMCP {
+		gov = newGovernanceFilter(os.Stdout, flagLogsMCP)
+		out = gov
+		defer func() {
+			gov.Flush()
+			fmt.Fprintf(os.Stderr, "→ %d governance record(s), %d other line(s) dropped\n", gov.Records, gov.Dropped)
+		}()
+		if comp != nil && comp.Name == "tmm" && flagLogsContainer == "" {
+			flagLogsContainer = tmmLogContainer
+		}
+	}
+	// Plain `logs tmm`: the fluentd stdout stream carries every CNE component;
+	// keep the TMM pod's lines and print the syslog text they wrap.
+	var tmmFilter *tmmLineFilter
+	if comp != nil && comp.Name == "tmm" && gov == nil {
+		tmmFilter = &tmmLineFilter{w: out}
+		out = tmmFilter
+		defer tmmFilter.Flush()
+		if flagLogsContainer == "" {
+			flagLogsContainer = tmmLogContainer
+		}
+	}
 	if comp == nil {
 		// Not a known component. Fall through to the raw pod-name path
 		// (kubectl-style) — same as `awsbnkctl k logs <pod>`. This
@@ -506,7 +577,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 			TailLines:    flagLogsTailLines,
 			IOStreams: genericiooptions.IOStreams{
 				In:     os.Stdin,
-				Out:    os.Stdout,
+				Out:    out,
 				ErrOut: os.Stderr,
 			},
 		}
@@ -530,6 +601,13 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	ns := comp.Ns
+	if comp.Name == "tmm" {
+		// The stream only exists once the stdout store is on (awsbnkctl up phase
+		// 24d, bnk upgrade step 5).
+		if on, err := k8s.TMMLogStreamEnabled(cmd.Context(), kc.Clientset()); err == nil && !on {
+			return fmt.Errorf("the TMM log stream is off: the %s/%s ConfigMap has no `@type stdout` store; run `awsbnkctl up` or `awsbnkctl bnk upgrade` (phase 24d) to enable it", k8s.TMMLogNamespace, k8s.TMMLogCustomConfigMap)
+		}
+	}
 	if flagLogsNamespace != "" {
 		ns = flagLogsNamespace
 	}
@@ -576,7 +654,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("opening log stream: %w", err)
 	}
 	defer stream.Close()
-	_, err = io.Copy(os.Stdout, stream)
+	_, err = io.Copy(out, stream)
 	return err
 }
 
@@ -587,4 +665,133 @@ func lookupComponent(name string) *bnkComponent {
 		}
 	}
 	return nil
+}
+
+// ── governance stream filter ─────────────────────────────────────────
+
+// tmmLogContainer is the fluentd container whose stdout carries the TMM
+// log stream (k8s.EnableTMMLogStream; examples/agentcore-demo/mcp-observability.yaml
+// tails the same container log).
+const tmmLogContainer = k8s.TMMLogContainer
+
+// tmmLineFilter keeps only the TMM pod's lines of the fluentd stdout stream
+// (every CNE component forwards to the same fluentd) and prints the wrapped
+// syslog line. Partial writes are buffered until the newline arrives.
+type tmmLineFilter struct {
+	w   io.Writer
+	buf []byte
+}
+
+func (f *tmmLineFilter) Write(p []byte) (int, error) {
+	f.buf = append(f.buf, p...)
+	for {
+		i := bytes.IndexByte(f.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := string(f.buf[:i])
+		f.buf = f.buf[i+1:]
+		if err := f.emit(line); err != nil {
+			return len(p), err
+		}
+	}
+	return len(p), nil
+}
+
+// Flush emits a trailing line without a newline.
+func (f *tmmLineFilter) Flush() {
+	if len(f.buf) > 0 {
+		_ = f.emit(string(f.buf))
+		f.buf = nil
+	}
+}
+
+func (f *tmmLineFilter) emit(line string) error {
+	if !strings.Contains(line, k8s.TMMLogPodMarker) {
+		return nil
+	}
+	_, err := fmt.Fprintln(f.w, tmmLogText(line))
+	return err
+}
+
+// tmmLogText returns the TMM syslog line wrapped in a fluentd stdout record
+// (`<ts> <tag>: {"log":"..."}`), or the line unchanged when it has no wrapper.
+func tmmLogText(line string) string {
+	i := strings.Index(line, "{")
+	if i < 0 {
+		return line
+	}
+	var rec struct {
+		Log string `json:"log"`
+	}
+	if err := json.Unmarshal([]byte(line[i:]), &rec); err != nil || rec.Log == "" {
+		return line
+	}
+	return strings.TrimRight(rec.Log, "\n")
+}
+
+// governanceFilter is an io.Writer that keeps only the BNKGOV records of a log
+// stream and prints each as one formatted line. Partial writes are buffered
+// until the newline arrives, so it works on a followed stream.
+type governanceFilter struct {
+	w       io.Writer
+	buf     []byte
+	mcpOnly bool
+	// Records counts the lines printed; Dropped the lines without a record
+	// (or filtered out by mcpOnly).
+	Records int
+	Dropped int
+}
+
+// newGovernanceFilter writes formatted records to w. mcpOnly keeps only
+// records with an rpc_method.
+func newGovernanceFilter(w io.Writer, mcpOnly bool) *governanceFilter {
+	return &governanceFilter{w: w, mcpOnly: mcpOnly}
+}
+
+// Write implements io.Writer.
+func (g *governanceFilter) Write(p []byte) (int, error) {
+	g.buf = append(g.buf, p...)
+	for {
+		i := bytes.IndexByte(g.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := g.buf[:i]
+		g.buf = g.buf[i+1:]
+		if err := g.emit(string(line)); err != nil {
+			return len(p), err
+		}
+	}
+	return len(p), nil
+}
+
+// Flush emits a trailing line without a newline.
+func (g *governanceFilter) Flush() {
+	if len(g.buf) > 0 {
+		_ = g.emit(string(g.buf))
+		g.buf = nil
+	}
+}
+
+func (g *governanceFilter) emit(line string) error {
+	if strings.TrimSpace(line) == "" {
+		return nil
+	}
+	rec, err := forge.ParseGovernanceLine(line)
+	if err != nil || (g.mcpOnly && rec.RPCMethod == "") {
+		g.Dropped++
+		return nil
+	}
+	g.Records++
+	_, werr := fmt.Fprintln(g.w, formatGovernance(rec))
+	return werr
+}
+
+// formatGovernance renders one record as
+// `[GOV] <status> <rpc_method> tool=<tool> session=<session> latency=<ms>ms action=<action>`.
+// Empty fields print as "-".
+func formatGovernance(rec forge.GovernanceRecord) string {
+	return fmt.Sprintf("[GOV] %s %s tool=%s session=%s latency=%dms action=%s",
+		or(rec.Status, "-"), or(rec.RPCMethod, "-"), or(rec.Tool, "-"), or(rec.Session, "-"), rec.LatencyMS, or(rec.Action, "-"))
 }

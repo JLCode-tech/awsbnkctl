@@ -148,8 +148,19 @@ note "reads the VIP off the live Gateway, which is why it runs after step 3"
 "$DEMO_DIR/scripts/setup-agentcore-network.sh" "$CLUSTER" || die "setup-agentcore-network.sh failed"
 ok "network seam in place"
 
-# ── 5. governance policy ─────────────────────────────────────────────────────
-step "Governance policy  (iRule, NetPolicies, firewall, SecPolicy)"
+# ── 5. session persistence + governance policy ──────────────────────────────
+step "MCP session persistence  (passphrase Secret, F5BigPersistenceProfile MODEL_CONTEXT_PROTOCOL)"
+kubectl apply -f "$DEMO_DIR/mcp-persistence.yaml" || die "persistence apply failed"
+for i in $(seq 1 40); do
+  PP=$(kubectl get f5-big-persistence-profiles mcp-session -n default \
+       -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
+  [ "$PP" = "True" ] && break
+  sleep 5
+done
+[ "$PP" = "True" ] && ok "persistence profile programmed" \
+  || warn "persistence profile not Programmed yet — it may settle; forge scan will confirm"
+
+step "Governance policy  (iRule, NetPolicies with persistence, firewall, SecPolicy)"
 kubectl apply -f "$DEMO_DIR/mcp-security-policy.yaml" || die "policy apply failed"
 for i in $(seq 1 40); do
   IR=$(kubectl get f5-big-cne-irules mcp-rate-limit-irule -n default \

@@ -32,7 +32,10 @@ var bnkCmd = &cobra.Command{
 cluster management.
 
 Subcommands:
-  resync   Force the F5 cne-controller to re-resolve stale TMM pool members`,
+  resync       Force the F5 cne-controller to re-resolve stale TMM pool members
+  migrate-2.4  Translate 2.3.x CRs into the 2.4 Infra / GatewaySettings model
+  upgrade      In-place FLO + CNEInstance upgrade to BNK 2.4
+  mcp-session  Pin MCP sessions: F5BigPersistenceProfile MODEL_CONTEXT_PROTOCOL + NetPolicy`,
 }
 
 var bnkResyncCmd = &cobra.Command{

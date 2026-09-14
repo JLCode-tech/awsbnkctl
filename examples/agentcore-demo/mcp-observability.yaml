@@ -1,15 +1,28 @@
 # Live observability sink for BNK governance telemetry.
 #
-#   BNK TMM  --(iRule: log local0.)-->  f5-fluentbit sidecar stdout
+#   BNK TMM  --(iRule: log local0.)-->  f5-fluentbit sidecar (forward only)
+#                                            |
+#                              f5-toda-fluentd (f5-cne-core) stdout
 #                                            |
 #                          Fluent Bit DaemonSet tails the container log
 #                                            |
 #                                          Loki  <-- BNK Forge reads
 #                                  http://loki.llm-egress:3100
 #
+# BNK 2.4: the TMM pod's f5-fluentbit sidecar has no stdout output; it forwards
+# every TMM line to f5-toda-fluentd, which prints it when the stdout store in
+# the f5-toda-fluentd-custom ConfigMap is on (`awsbnkctl up` phase 24d and
+# `awsbnkctl bnk upgrade` enable it). Each stdout line wraps the TMM syslog
+# line in JSON: `<ts> kube.f5.log: {"pod_name":"f5-tmm",...,"log":"<134>... Rule
+# ...: BNKGOV {...}"}`, so the collector parses the wrapper first and the
+# governance record out of its `log` field second.
+#
 # Namespace, service name and port are NOT arbitrary: Forge's LLM Observability
 # panel queries `http://loki.llm-egress:3100` and expects Loki streams labelled
 # `job="llm-gateway"` with `model` and `status`. Deviate and the panel is empty.
+# `action` and `rpc_method` are added as labels too (four values each) so the
+# 429 throttling and tools/call rates can be selected without parsing lines;
+# `awsbnkctl forge telemetry` reads the same stream and checks every record.
 #
 # Shape borrowed from the bnk-forge-modules catalog: `app/demo-observability`
 # (Loki 3.0) and `modules/live-observability-collector` (Fluent Bit DaemonSet
@@ -150,12 +163,13 @@ data:
         Log_Level    info
         Parsers_File parsers.conf
 
-    # The iRule's `log local0.` output surfaces on stdout of the f5-fluentbit
-    # sidecar inside the TMM pod, so that is the container log we tail.
+    # The iRule's `log local0.` output reaches stdout of the f5-toda-fluentd
+    # pod (f5-cne-core) once its stdout store is on, so that is the container
+    # log we tail. Each line wraps the TMM syslog line in a JSON object.
     [INPUT]
         Name              tail
         Tag               bnkgov
-        Path              /var/log/containers/f5-tmm-*_f5-cne-system_f5-fluentbit-*.log
+        Path              /var/log/containers/f5-toda-fluentd-*_f5-cne-core_f5-fluentd-*.log
         Parser            cri
         Refresh_Interval  5
         Skip_Long_Lines   On
@@ -167,11 +181,31 @@ data:
         Match   bnkgov
         Regex   message BNKGOV
 
-    # Pull our JSON payload out of the surrounding fluentd/syslog wrapper.
+    # Unwrap the fluentd stdout line: `<ts> <tag>: {json}`, then the JSON, then
+    # keep only TMM pod lines and pull the governance record out of `log`.
     [FILTER]
         Name         parser
         Match        bnkgov
         Key_Name     message
+        Parser       fluentd_stdout
+        Reserve_Data Off
+
+    [FILTER]
+        Name         parser
+        Match        bnkgov
+        Key_Name     wrapper
+        Parser       bnkgov_json
+        Reserve_Data Off
+
+    [FILTER]
+        Name    grep
+        Match   bnkgov
+        Regex   pod_name f5-tmm
+
+    [FILTER]
+        Name         parser
+        Match        bnkgov
+        Key_Name     log
         Parser       bnkgov_extract
         Reserve_Data Off
 
@@ -200,7 +234,7 @@ data:
         Host         loki
         Port         3100
         labels       job=llm-gateway
-        label_keys   $model,$status
+        label_keys   $model,$status,$action,$rpc_method
         line_format  json
   parsers.conf: |
     # containerd/CRI log line: <ts> <stream> <flags> <message>
@@ -212,6 +246,10 @@ data:
         Time_Format %Y-%m-%dT%H:%M:%S.%L%z
 
     # ... Rule default-mcp-rate-limit-irule <HTTP_RESPONSE>: BNKGOV {"job":...}
+    [PARSER]
+        Name        fluentd_stdout
+        Format      regex
+        Regex       ^(?<ftime>\S+ \S+ \S+) (?<ftag>[^:]+): (?<wrapper>\{.*\})\s*$
     [PARSER]
         Name        bnkgov_extract
         Format      regex

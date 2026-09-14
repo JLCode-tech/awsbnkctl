@@ -182,6 +182,12 @@ CNEInstance `manifestVersion` against that file, so awsbnkctl uses `2.4.0`.
 | `2.3.1-3.2598.3-0.0.304` | `v2.21.13-0.0.53` | supported |
 | `2.3.0-3.2598.3-0.0.170` | `v2.21.13-0.0.28` | supported (original release awsbnkctl was built against) |
 
+A cluster built on a 2.3.x manifest moves to 2.4 in place with `awsbnkctl bnk
+upgrade` (FLO chart + CNEInstance) followed by `awsbnkctl bnk migrate-2.4`
+(F5SPKVlan, F5SPKEgress, F5BnkGateway and the policies into Infra,
+GatewaySettings, EgressGateway, SecPolicy and NetPolicy); see
+[`UPGRADE-2.4.md`](UPGRADE-2.4.md).
+
 The table is `manifest.KnownReleases`. It exists because the F5 Lifecycle
 Operator is installed by Phase 14 *before* the release manifest is available in
 the cluster, so the operator/manifest pairing has to be known up front.
@@ -201,6 +207,11 @@ phase 23b applies an `Infra` CR instead of `F5SPKVlan` (the 2.4 release notes: I
 the Infra also carries the TMM self-IP pools (tagged with the data-path availability zone,
 which is what lets the controller count the zone's self IPs and activate the TMM), the VIP
 listener pool, the egress tunnel defaults and the two static routes egress needs;
+the TMM container gets `TMM_K8S_ROUTES=<EKS service range>` (the f5-tmm chart's `add_k8s_routes`, live 2026-09-14): once
+the Infra default route exists, TMM would otherwise send the cluster service range out the external VLAN and lose DNS,
+dSSM (iRule `table` commands time out and reset the connection, persistence profiles) and log forwarding inside its pod;
+F5's chart derives the value from kubeadm-config or the OpenShift Network CR, EKS has neither, so phase 08 records
+`serviceIpv4Cidr` as `EKS_SERVICE_CIDR` and the CNEInstance passes it;
 the controller container gets `USE_GATEWAY_SETTINGS=true` from the CNEInstance, because the
 2.4.0 f5ingress binary only starts the Infra and GatewaySettings reconcilers when that
 env flag is set and neither FLO 2.30 nor the f5ingress chart sets it;

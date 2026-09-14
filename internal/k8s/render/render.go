@@ -291,6 +291,21 @@ const cneInstanceNamespace = bnkconst.InstanceNamespace
 //   - Operator-knobs: sourced from cl.Bnk.* (set by cluster.yaml, defaults applied).
 //   - State-derived: sourced from st.Get() (written by earlier phases).
 //   - Hardcoded constants: baked into the template, NOT templated.
+//
+// ServiceCIDRStateKey is the state.env key phase 08 fills with the EKS
+// cluster's serviceIpv4Cidr. RenderCNEInstance turns it into the TMM env
+// TMMK8sRoutesEnv (the f5-tmm chart's add_k8s_routes): the Kubernetes networks
+// TMM keeps reachable over eth0 once the Infra CR programs a default route on
+// the data plane. F5's chart derives them from kubeadm-config or the OpenShift
+// Network CR; EKS has neither, so awsbnkctl passes the service range itself
+// (pods are VPC addresses). Without it DNS, dSSM (iRule table commands and
+// persistence) and log forwarding fail inside the TMM pod as soon as the Infra
+// default route is programmed.
+const (
+	ServiceCIDRStateKey = "EKS_SERVICE_CIDR"
+	TMMK8sRoutesEnv     = "TMM_K8S_ROUTES"
+)
+
 type CNEInstanceVars struct {
 	// Operator-knobs (cluster.yaml bnk:)
 	DeploymentSize   string // default "Small"
@@ -322,6 +337,7 @@ type CNEInstanceVars struct {
 	CloudHostDeviceTag  string // f5-cne-device
 	HasInternal         bool   // list the internal NAD + internal ROBIN/PCIDEVICE env (dual-interface only)
 	Sriov               bool   // sriov-external: drop TMM_GENERIC_SOCKET_DRIVER + let the device plugin inject PCIDEVICE_INTEL_COM
+	ServiceCIDR         string // EKS serviceIpv4Cidr (state ServiceCIDRStateKey); rendered as TMM_K8S_ROUTES
 }
 
 // RenderCNEInstance renders the CNEInstance CR template with vars derived
@@ -376,6 +392,7 @@ func RenderCNEInstance(tmpl []byte, cl *intent.Cluster, getter func(string) stri
 		CloudHostDeviceTag:  "f5-cne-device",
 		HasInternal:         cl.HasInternalInterface(),
 		Sriov:               sriov,
+		ServiceCIDR:         getter(ServiceCIDRStateKey),
 	}
 	return Render(tmpl, vars)
 }

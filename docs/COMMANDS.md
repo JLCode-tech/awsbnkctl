@@ -13,8 +13,8 @@ Every command accepts `--help`. Global flags on every command: `-w/--workspace`,
 | `validate <path>` | Parse and validate a `cluster.yaml` (no AWS API calls) |
 | `up -f <config>` | Provision the EKS cluster and BNK stack (flags: `--dry-run`, `--auto`, `--demo`, `--no-kubeconfig`, `--register-with-forge`, `--skip-activation-poll`) |
 | `down -f <config>` | Destroy everything `up` provisioned (flags: `--dry-run`, `--yes`, `--auto`, `--keep-irsa`, `--keep-forge-link`) |
-| `status` | Summary of the workspace: cluster, components, deploy state (`-f` locates the phased path's `state.env`) |
-| `doctor` | Check prerequisites and report missing pieces (`--backend k8s|ssh:<target>`, `--target <name>` add per-backend probes) |
+| `status` | Summary of the workspace: cluster, components, deploy state (`-f` locates the phased path's `state.env`), BNK API generation, Infra / Gateway / controller readiness (bnkscan) |
+| `doctor` | Check prerequisites and report missing pieces (`--backend k8s|ssh:<target>`, `--target <name>` add per-backend probes); `--backend k8s` also reports BNK readiness and warns when 2.3 CRDs or CRs remain on a 2.4 cluster |
 | `topology -f <config>` | Render the data-path topology as `--format ascii` or `mermaid` |
 | `version` | Print version, commit and build date |
 
@@ -53,8 +53,11 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `k logs` | Stream pod logs |
 | `k port-forward` | Forward local ports to a pod via SPDY |
 | `get <resource> [name]` | Top-level alias of `k get` (`-n`, `-A`, `-l`, `-o yaml|json|wide|name|jsonpath=…`) |
-| `logs <component>` | Tail logs for a BNK component (`flo`, `cis`, `cert-manager`, `cneinstance`); `-f`, `--since`, `--tail`, `--previous`, `-c` |
+| `logs <component>` | Tail logs for a BNK component (`flo`, `cis`, `cert-manager`, `cneinstance`, `tmm`); `-f`, `--since`, `--tail`, `--previous`, `-c`; `--governance` / `--mcp` print only BNKGOV records as `[GOV] <status> <rpc_method> tool= session= latency= action=` |
 | `bnk resync` | Force the F5 cne-controller to re-resolve stale TMM pool members |
+| `bnk migrate-2.4` | Translate the 2.3.x CRs of a running cluster into the 2.4 Infra / GatewaySettings model (`--dry-run` prints the manifests, `--apply` server-side-applies them; `-f`, `--kubeconfig`, `-n`, `--gateway-class`) |
+| `bnk upgrade -f <config>` | In-place upgrade: helm upgrade FLO, patch the CNEInstance (`manifestVersion`, `USE_GATEWAY_SETTINGS`), watch the controller and TMM come back (`--manifest-version`, `--flo-version`, `--dry-run`) |
+| `bnk mcp-session` | Render or `--apply` an `F5BigPersistenceProfile` (`MODEL_CONTEXT_PROTOCOL` or `AGENT2AGENT`), its passphrase `Secret` and the `NetPolicy` per listener that pins MCP sessions to one backend (`--name`, `--gateway`, `--listener`, `--irule`, `--passphrase-env`) |
 | `manifest probe [version]` | Pull a BNK release manifest from `repo.f5.com` with the helm SDK (no host helm) and print its charts and images (`--all`, `--far <path>`) |
 
 ## AI benchmarking and BNK Forge
@@ -62,15 +65,18 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | Command | Description |
 |---|---|
 | `benchmark` | Runs the default `benchmark run` workflow |
-| `benchmark setup` | Prepare the jumphost (aiperf) and register the benchmark agent and target in Forge |
-| `benchmark run` | Drive an aiperf run, preset (`--scenarios`), native Forge scenario sweep (`--scenario`), or proxy shootout (`--proxies`) |
+| `benchmark setup` | Prepare the jumphost (aiperf) and register the benchmark agent and target in Forge; `--auto-discover` also registers every MCP endpoint the cluster exposes |
+| `benchmark run` | Drive an aiperf run, preset (`--scenarios`), native Forge scenario sweep (`--scenario`), or proxy shootout (`--proxies`); `--prefix-prompt-length`, `--num-prefix-prompts`, `--random-seed` for shared-prefix workloads; `--metrics-pod-selector` / `--metrics-url` scrape vLLM or EPP metrics for the prefix-cache hit rate; `--genai-out` |
 | `benchmark list` | List native Forge scenarios and smoke presets |
 | `benchmark status` | Check the benchmark environment, jumphost and Forge linkage |
 | `benchmark daemon` | Run the persistent Forge benchmark agent daemon |
+| `benchmark ingest` | Parse aiperf artifacts offline into TTFT/ITL percentiles, token throughput and prefix-cache hit rate; compare TTFT between runs (`--expect-ttft-drop`), `--metrics-before`/`--metrics-after` scrape files, `--push` to Forge |
 | `forge register` | Register the workspace's EKS cluster with Forge (idempotent); `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
 | `forge status` | Show this workspace's Forge registration state |
 | `forge unregister` | Remove this workspace's Forge registration |
 | `forge cleanup` | Delete all awsbnkctl benchmark artifacts from Forge for a workspace |
+| `forge scan` | Index the cluster's BNK 2.4 resources, check readiness (Infra, Gateway, controller) and discover MCP endpoints; `--probe`, `--register-targets`, `--remote`, `-o json` |
+| `forge telemetry` | Validate the MCP governance records in Loki against the schema Forge's LLM Observability panel reads; `--loki-url`, `--since`, `--file`, `--show` |
 | `forge benchmark` | Alias for `benchmark run` |
 
 `awsbnkctl up --register-with-forge` registers after a successful apply; `down`
@@ -101,6 +107,7 @@ The binary embeds no LLM; bring your own coding-agent CLI.
 | `workspaces use <name>` | Set the current workspace pointer |
 | `workspaces delete <name>` | Delete a workspace (refuses if state is non-empty unless `--force`) |
 | `targets {add,list,remove,show}` | Manage the SSH targets used by `--on` / `--backend ssh:<target>` |
+| `targets scan` | Discover the MCP endpoints behind BNK Gateways and register them in Forge's Target Catalog (idempotent); `-f`, `--register=false`, `--probe`, `-o json` |
 | `install` | Copy the running binary into a directory on `PATH` (`--dir`, `--force`) |
 | `self update` | Pull the latest release matching the host OS/arch |
 | `completion <shell>` | Generate the shell completion script |

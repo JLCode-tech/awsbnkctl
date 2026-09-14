@@ -21,7 +21,16 @@ bash examples/demo-ai/shootout/bringup.sh
 ```
 Follow the printed `forge-benchmark` commands once the endpoint is `InService`.
 
-### 3. Teardown
+### 3. Prefix cache
+```bash
+# baseline vs 80 % shared prefix through the BNK VIP; TTFT p50 must drop >= 20 %
+bash examples/demo-ai/shootout/prefix-cache.sh
+# in-cluster vLLM leg, scraped for prefix_cache_hit_rate (after `awsbnkctl scenarios run ai-inference-e2e`)
+LEG=vllm bash examples/demo-ai/shootout/prefix-cache.sh
+```
+Both runs are pushed to Forge with `ttft_*`, `itl_*`, token throughput and `prefix_cache_hit_rate`.
+
+### 4. Teardown
 ```bash
 # Safely tears down NLBs, EIP, cluster, and IAM policies
 bash examples/demo-ai/shootout/teardown.sh

@@ -215,3 +215,173 @@ AWS_PROFILE=<your-profile> awsbnkctl benchmark run \
   --scenarios latency,throughput
 ```
 
+### GenAI inference metrics
+
+Every run carries a GenAI metric set, flattened into both Forge payloads
+(`POST /api/benchmarks/results` and `POST /api/benchmarks/results/aiperf`)
+and mirrored under `aiperf_metrics.genai` and `throughput` in `result_json`:
+
+| Field | Source |
+|---|---|
+| `ttft_p50_ms`, `ttft_p90_ms`, `ttft_p95_ms`, `ttft_p99_ms` | aiperf `time_to_first_token` |
+| `itl_p50_ms`, `itl_p95_ms`, `itl_p99_ms` | aiperf `inter_token_latency` |
+| `input_tokens_per_sec`, `output_tokens_per_sec`, `total_tokens_per_sec` | aiperf `input_sequence_length.sum` / duration, `output_token_throughput` |
+| `prefix_cache_hit_rate` (0.0–1.0), `prefix_cache_source` | delta of `vllm:prefix_cache_hits_total` / `vllm:prefix_cache_queries_total` (vLLM, LMI) or `inference_extension_prefix_indexer_hit_ratio` (EPP) between the scrapes before and after the run |
+| `prefill_worker_utilization`, `decode_worker_utilization` (0.0–1.0) | `vllm:kv_cache_usage_perc` / `inference_pool_average_kv_cache_utilization` of the pods scraped with role `prefill` / `decode` at the end of the run |
+
+The pointer fields are omitted when no metrics source was scraped. Sources:
+
+```bash
+# vLLM pods through the Kubernetes API pod proxy (role from the llm-d.ai/role label)
+awsbnkctl benchmark run -f clusters/cluster.yaml --scenario prefix-cache \
+  --metrics-pod-selector app=vllm --metrics-namespace awsbnkctl-scn-aiinference --metrics-port 8000
+
+# disaggregated pools, scraped from the jumphost
+awsbnkctl benchmark run -f clusters/cluster.yaml --scenario prefix-cache \
+  --metrics-url prefill=http://10.0.20.11:8000/metrics --metrics-url decode=http://10.0.20.12:8000/metrics
+
+# offline: artifacts and saved scrapes
+awsbnkctl benchmark ingest baseline.json prefix-shared.json \
+  --metrics-before before.prom --metrics-after after.prom --expect-ttft-drop 20
+```
+
+`--prefix-prompt-length`, `--num-prefix-prompts` and `--random-seed` build a
+shared-prefix workload on a single run; `--genai-out` writes the metric set to
+a file `benchmark ingest` reads back.
+
+
+---
+
+## 8. BNK 2.4 Scan, MCP Targets and Governance Telemetry
+
+Forge's `scan_cluster` and `bnk_health` tools take a cluster ID and index the
+cluster server-side. `awsbnkctl` reads the CRD groups Forge saw to tell a 2.3
+cluster (`gateway.k8s.f5net.com`) from a 2.4 one (`gateway.k8s.f5.com`), and
+reads the cluster directly for what Forge does not index yet.
+
+### `awsbnkctl forge scan`
+
+```bash
+awsbnkctl forge scan -f clusters/<name>/cluster.yaml             # readiness + MCP endpoints
+awsbnkctl forge scan -f ... --remote                              # plus Forge's own scan_cluster / bnk_health
+awsbnkctl forge scan -f ... --probe --bearer-env MCP_TOKEN        # tools/list on every endpoint
+awsbnkctl forge scan -f ... --register-targets                    # write endpoints to the Target Catalog
+awsbnkctl forge scan -f ... -o json
+```
+
+| Check | Passes when |
+|---|---|
+| API generation | `gateway.k8s.f5.com` served (`2.4`); `mixed` while 2.3 CRDs remain; `2.3` fails with a pointer to `bnk upgrade` |
+| `Infra` | `Programmed=True` |
+| `Gateway` (BNK class) | `Accepted=True` and `Programmed=True` |
+| `f5-cne-controller` | every desired replica available |
+| `F5BigPersistenceProfile` | `Programmed=True` |
+
+`GatewaySettings`, `EgressGateway`, `SecPolicy`, `NetPolicy` and `HTTPRoute` are
+listed with their conditions. Legacy `F5BnkGateway`, `BNKSecPolicy`,
+`BNKNetPolicy`, `F5SPKVlan` and `F5SPKEgress` objects are counted, never
+required. `--remote` warns when Forge indexed a 2.4 cluster without the
+`gateway.k8s.f5.com` group: that Forge predates BNK 2.4 and its Fleet view
+misses the 2.4 kinds.
+
+An `HTTPRoute` is an MCP endpoint when it carries the annotation
+`bnk.f5.com/protocol: mcp` or a path match containing `/mcp`. Optional
+annotations: `bnk.f5.com/auth` (recorded as the endpoint's auth method) and
+`bnk.f5.com/mcp-tools` (comma-separated tool names when the endpoint cannot be
+probed). Each endpoint reports its Gateway VIP URLs, hostnames, backends,
+iRules and `SecPolicy` objects attached through `NetPolicy`/`SecPolicy`, and
+the persistence profile pinning its sessions.
+
+`--register-targets` creates one `BenchmarkTarget` per endpoint (name
+`mcp-<namespace>-<route>`, `llm_base_url` the HTTPS VIP URL, `llm_model`
+`mcp:<route>`) with the MCP metadata in `tags`: `protocol=mcp`, `route`,
+`gateway`, `hostnames`, `paths`, `urls`, `backends`, `auth`, `irules`,
+`sec_policies`, `persistence_profile`, `persistence_type`, `tools` and
+`tool_schemas` (JSON). Registration is idempotent.
+
+### One readiness verdict everywhere
+
+`forge scan`, `status`, `doctor --backend k8s`, `up` (phase 25) and `bnk upgrade`
+all read the same `bnkscan` index. `status` prints the API generation, `Infra`
+and `Gateway` tallies, the controller rollout and the verdict; `doctor` turns
+them into rows and warns with `awsbnkctl bnk migrate-2.4` when 2.3 CRDs or CRs
+remain on a 2.4 cluster; phase 25 waits for the verdict after the license
+activates and records `BNK_API_GENERATION` in `state.env`; `bnk upgrade`
+reports it after the rollout (the Infra CR is missing until `migrate-2.4`).
+
+### `awsbnkctl targets scan`
+
+```bash
+awsbnkctl targets scan -f clusters/<name>/cluster.yaml          # list endpoints, register them in Forge
+awsbnkctl targets scan -f ... --register=false                  # list only
+awsbnkctl targets scan -f ... --probe --bearer-env MCP_TOKEN    # with tools/list
+awsbnkctl benchmark setup -f ... --auto-discover                # same registration during setup
+```
+
+One row per endpoint (`mcp-<namespace>-<route>`, Gateway, URL, auth,
+persistence type, tools). Registration uses the cluster's `forge_link.json`
+and is idempotent; without a link the endpoints are listed and a hint points
+at `forge register`.
+
+### `awsbnkctl logs tmm --governance`
+
+```bash
+awsbnkctl logs tmm --governance -f          # every BNKGOV decision, live
+awsbnkctl logs tmm --mcp --since 10m        # only MCP JSON-RPC calls
+```
+
+Reads the TMM log stream: on BNK 2.4 the TMM pod's `f5-fluentbit` sidecar
+only forwards to `f5-toda-fluentd`, so `awsbnkctl up` (phase 24d) and
+`awsbnkctl bnk upgrade` turn on the `@type stdout` store in F5's
+`f5-toda-fluentd-custom` ConfigMap and `logs tmm` tails that pod. Plain
+`logs tmm` prints the TMM pod's lines; `--governance` prints one line per
+record:
+
+```text
+[GOV] 200 tools/call tool=forecast session=s1 latency=12ms action=allow
+[GOV] 403 tools/call tool=delete_all session=s1 latency=1ms action=tool_forbidden
+```
+
+### `awsbnkctl bnk mcp-session`
+
+Renders (or `--apply`s) the objects that pin an MCP session to one backend on
+BNK 2.4: the passphrase `Secret`, an `F5BigPersistenceProfile` with
+`persistenceType: MODEL_CONTEXT_PROTOCOL` and `mcpEncryptionPassphrase.secretRef`,
+and one `NetPolicy` per `--listener` attaching the profile to the Gateway.
+BNK 2.4.0 programs an `F5BigPersistenceProfile` only in the controller's namespace
+(`f5-cne-system`) and a `NetPolicy` resolves the profile in its own namespace, so
+the Gateway, the NetPolicy and the profile have to live there for the session to
+pin; `doctor --backend k8s` and `forge scan` say so when a profile elsewhere
+stays unprogrammed.
+Pass `--irule` for every iRule the listener already carries so the single
+NetPolicy keeps both. `--type AGENT2AGENT` renders the A2A equivalent.
+
+### Governance telemetry schema
+
+The governance iRule writes one `BNKGOV {json}` record per decision; the Fluent
+Bit collector ships it to Loki as stream `job="llm-gateway"` with labels
+`model`, `status`, `action` and `rpc_method`. Forge's LLM Observability panel
+reads that stream.
+
+| Field | Value |
+|---|---|
+| `job` | `llm-gateway` |
+| `model` | `mcp:<tool server>` |
+| `status` | HTTP status as a string (`200`, `403`, `429`) |
+| `latency_ms` | request latency; `0` for decisions made before the backend |
+| `prompt_tk`, `comp_tk`, `total_tk`, `cached`, `cost` | `0` on the MCP hop |
+| `userq` | `<rpc_method> <tool>` when the body was read, else the URI |
+| `client`, `caller` | client address and resolved identity (`agent`, `external`, `anonymous`) |
+| `action` | `allow`, `rate_limited`, `tool_forbidden`, `backend_refused` |
+| `req_body`, `resp_body` | payloads clipped to 280 characters |
+| `rpc_method` | `initialize`, `tools/list`, `tools/call` |
+| `tool` | `params.name` of a `tools/call` |
+| `session` | `Mcp-Session-Id` presented by the client (36 characters max) |
+| `transport` | `http`, `sse`, `ws` |
+
+`awsbnkctl forge telemetry` reads the stream (`--loki-url`, default
+`http://localhost:3100` behind `awsbnkctl k port-forward -n llm-egress svc/loki 3100:3100`,
+or `--file` for exported lines), validates every record against this table,
+and prints counts by status, action, method, tool and caller, the 429 and 403
+totals, distinct sessions and latency percentiles. It exits non-zero when a
+record violates the schema.
