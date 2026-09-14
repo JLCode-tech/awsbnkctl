@@ -25,7 +25,7 @@ func TestStdoutStoreOn(t *testing.T) {
 }
 
 func TestEnableTMMLogStream_PatchesAndBounces(t *testing.T) {
-	cs := fake.NewSimpleClientset(
+	cs := fake.NewClientset(
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: TMMLogCustomConfigMap, Namespace: TMMLogNamespace}, Data: map[string]string{TMMLogStdoutKey: shippedStdoutConf}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "f5-toda-fluentd-old", Namespace: TMMLogNamespace, Labels: map[string]string{"app": "toda-fluentd"}}},
 	)
@@ -57,7 +57,7 @@ func TestEnableTMMLogStream_PatchesAndBounces(t *testing.T) {
 }
 
 func TestEnableTMMLogStream_WaitsForReadyPod(t *testing.T) {
-	cs := fake.NewSimpleClientset(
+	cs := fake.NewClientset(
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: TMMLogCustomConfigMap, Namespace: TMMLogNamespace}, Data: map[string]string{TMMLogStdoutKey: shippedStdoutConf}},
 	)
 	go func() {

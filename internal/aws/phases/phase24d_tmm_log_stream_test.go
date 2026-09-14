@@ -26,7 +26,7 @@ func phase24dObjects() []runtime.Object {
 func TestPhase24d_EnablesStoreAndBouncesFluentd(t *testing.T) {
 	awsmw.ResetForTest()
 	st, _ := state.Load(t.TempDir())
-	cs := k8sfake.NewSimpleClientset(phase24dObjects()...)
+	cs := k8sfake.NewClientset(phase24dObjects()...)
 	old := phase24dWait
 	phase24dWait = 0 // no replacement pod in the fake; skip the wait
 	defer func() { phase24dWait = old }()
@@ -60,7 +60,7 @@ func TestPhase24d_EnablesStoreAndBouncesFluentd(t *testing.T) {
 func TestPhase24d_DryRun_NoMutation(t *testing.T) {
 	awsmw.ResetForTest()
 	st, _ := state.Load(t.TempDir())
-	cs := k8sfake.NewSimpleClientset(phase24dObjects()...)
+	cs := k8sfake.NewClientset(phase24dObjects()...)
 	if err := Phase24dTMMLogStream(context.Background(), dssmHostDeviceCluster(), st, &Clients{K8s: cs, Profile: "test"}, true); err != nil {
 		t.Fatalf("dry-run: %v", err)
 	}

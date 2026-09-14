@@ -118,15 +118,16 @@ const (
 	RoleDecode  = "decode"
 )
 
-// ParseRoleSpec splits "[role=]value" into role and value and validates the
-// role.
+// ParseRoleSpec splits "[role=]value" into role and value. Only the prefixes
+// prefill= and decode= name a role; anything else is the value itself, so a
+// plain label selector such as app=vllm (--metrics-pod-selector) passes
+// through unchanged.
 func ParseRoleSpec(spec string) (role, value string, err error) {
-	if i := strings.Index(spec, "="); i > 0 && !strings.Contains(spec[:i], "/") && !strings.Contains(spec[:i], ":") {
-		role, value = strings.ToLower(strings.TrimSpace(spec[:i])), strings.TrimSpace(spec[i+1:])
-		if role != RolePrefill && role != RoleDecode {
-			return "", "", fmt.Errorf("metrics role %q: want prefill or decode", role)
+	if i := strings.Index(spec, "="); i > 0 {
+		switch r := strings.ToLower(strings.TrimSpace(spec[:i])); r {
+		case RolePrefill, RoleDecode:
+			return r, strings.TrimSpace(spec[i+1:]), nil
 		}
-		return role, value, nil
 	}
 	return "", strings.TrimSpace(spec), nil
 }
