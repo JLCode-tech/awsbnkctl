@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
 )
 
 // Options tunes Translate.
@@ -790,9 +791,23 @@ func (t *translator) buildInfra() {
 	if len(t.routes) > 0 {
 		spec["staticRoutes"] = toAnySlice(t.routes)
 	}
-	if t.egressDef != nil {
-		spec["egressDefaults"] = t.egressDef
+	// The Infra always carries egressDefaults, as the fresh 2.4 path renders
+	// it: without the block the controller defaults the tunnel subnet to
+	// 10.0.0.0/16, which overlaps the self-IP pools of every 10.x VPC and
+	// leaves the Infra Programmed=False (PartiallyInvalid,
+	// EgressDefaultsSubnetConflict). Seen live 2026-09-14.
+	if t.egressDef == nil {
+		t.egressDef = map[string]any{}
+		if net := t.defaultTunnelNetwork(); net != "" {
+			t.egressDef["networkRef"] = map[string]any{"name": net}
+		}
+		t.egressDef["port"] = int64(render.InfraEgressPort)
+		t.warn("no F5SPKEgress: Infra egressDefaults set to the awsbnkctl defaults (subnet %s, port %d); the controller default 10.0.0.0/16 would overlap the VPC self-IP pools", render.InfraEgressSubnet, render.InfraEgressPort)
 	}
+	if _, ok := t.egressDef["subnet"]; !ok {
+		t.egressDef["subnet"] = render.InfraEgressSubnet
+	}
+	spec["egressDefaults"] = t.egressDef
 	t.plan.Infra = &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": GatewayF5Group + "/" + GatewayF5Version,
 		"kind":       "Infra",

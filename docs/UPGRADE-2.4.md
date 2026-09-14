@@ -21,9 +21,10 @@ awsbnkctl bnk upgrade -f clusters/lab/cluster.yaml
 
 | Step | What happens |
 |---|---|
+| 0 | Multus check: a Multus pod older than a day, or a recent `FailedCreatePodSandBox ... Multus ... Unauthorized` event, means its kubeconfig token expired and no new pod can start; the DaemonSet is rolled first (`awsbnkctl doctor --backend k8s` reports the same as `multus kubeconfig token`) |
 | 1 | `helm upgrade f5-lifecycle-operator` to the chart paired with the target manifest (`v2.30.0-0.5.2` for `2.4.0`), values rendered from `cluster.yaml` as `up` renders them |
 | 2 | JSON merge patch on the CNEInstance: `spec.manifestVersion`, controller env `USE_GATEWAY_SETTINGS=true`; `MAX_ACTIVE_TMM_REPLICAS=32` and the TMM env `ZEBOS_STATE=legacy` are added when absent; every other env entry is kept |
-| 3 | Wait for the `Infra` CRD, the CNEInstance conditions `CNEControllerAvailable` and `F5TmmAvailable`, the `f5-cne-controller` rollout with the flag in its pods, and Ready `app=f5-tmm` pods |
+| 3 | Wait for the `Infra` CRD, then for FLO to render `USE_GATEWAY_SETTINGS=true` into the `f5-cne-controller` Deployment (3 min, `--timeout` for the rest). FLO 2.30 cannot update a CNEController created by FLO 2.21 (its payload carries `null` for `spec.crdUpdater.resources` and `f5CsmQkview`, which the 2.4 CRD rejects), so when the env does not appear the CNEController CR is deleted and FLO recreates it and the Deployment through its create path (`controllerRecreated` in `-o json`; about a minute without the controller, TMM keeps forwarding). Then the Deployment rollout, the CNEInstance conditions `CNEControllerAvailable` and `F5TmmAvailable`, and Ready `app=f5-tmm` pods |
 
 `--manifest-version` defaults to `2.4.0`. The string F5's docs print,
 `2.4.0-3.3175.0+0.0.380`, is accepted and rewritten to `2.4.0`: that is the tag
@@ -33,7 +34,10 @@ release already on the chart and a CNEInstance already on the version are
 reported and skipped.
 
 `-o json` prints the result (`floFrom`, `floTo`, `manifestFrom`, `manifestTo`,
-`tmmReady`, `tmmTotal`).
+`tmmReady`, `tmmTotal`, `controllerRecreated`, `multus`, `readiness`). The
+`readiness` block is the shared bnkscan verdict `status`, `doctor` and
+`forge scan` print; right after an upgrade it reports `mixed` with no Infra CR
+and points at `bnk migrate-2.4`.
 
 ## Step 2: `bnk migrate-2.4`
 

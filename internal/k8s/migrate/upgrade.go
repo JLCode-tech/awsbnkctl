@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -43,6 +44,7 @@ const (
 	zebosStateLegacy     = "legacy"
 	defaultUpgradeWait   = 20 * time.Minute
 	defaultUpgradePoll   = 10 * time.Second
+	defaultRenderWait    = 3 * time.Minute
 	upgradeFieldManager  = "awsbnkctl-bnk-upgrade"
 	documentedSuffixExpr = `^(\d+\.\d+\.\d+)-3\.3175\.0[-+]0\.0\.380$`
 )
@@ -79,6 +81,13 @@ type UpgradeOptions struct {
 	Timeout time.Duration
 	// Poll is the wait interval (default 10 s).
 	Poll time.Duration
+	// RenderWait bounds how long FLO gets to render the controller env into the
+	// f5-cne-controller Deployment before the CNEController CR is recreated
+	// (default 3 min). FLO 2.30 cannot update a CNEController created by 2.21
+	// (its payload carries null for spec.crdUpdater.resources and
+	// f5CsmQkview, which the 2.4 CRD rejects); deleting the CR makes FLO
+	// recreate it through the create path fresh installs use.
+	RenderWait time.Duration
 	// Log receives progress lines.
 	Log io.Writer
 }
@@ -104,6 +113,12 @@ type UpgradeResult struct {
 	TMMReady        int    `json:"tmmReady"`
 	TMMTotal        int    `json:"tmmTotal"`
 	DryRun          bool   `json:"dryRun"`
+	// ControllerRecreated is true when the CNEController CR had to be deleted
+	// so FLO would render the 2.4 controller env.
+	ControllerRecreated bool `json:"controllerRecreated"`
+	// Multus reports the Multus kubeconfig-token heal that ran before FLO
+	// was upgraded (nil without a typed client or on dry-run).
+	Multus *k8swait.MultusHealResult `json:"multus,omitempty"`
 	// Readiness is the shared bnkscan verdict taken after the rollout (nil on
 	// dry-run or when the scan failed).
 	Readiness *bnkscan.Readiness `json:"readiness,omitempty"`
@@ -132,6 +147,9 @@ func Upgrade(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (*Upgra
 	if opts.Poll <= 0 {
 		opts.Poll = defaultUpgradePoll
 	}
+	if opts.RenderWait <= 0 {
+		opts.RenderWait = defaultRenderWait
+	}
 	target, note := CanonicalManifestVersion(opts.ManifestVersion)
 	if target == "" {
 		target = manifest.DefaultManifestVersion
@@ -148,6 +166,17 @@ func Upgrade(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (*Upgra
 		floChart = chart
 	}
 	res := &UpgradeResult{Schema: "awsbnkctl.bnk-upgrade/v1", FLOTo: floChart, ManifestTo: target, DryRun: opts.DryRun}
+
+	// Step 0: Multus. The FLO and controller pods this upgrade creates need a
+	// Multus whose kubeconfig token is still valid.
+	if deps.K8s != nil && !opts.DryRun {
+		mh, err := k8swait.HealMultusToken(ctx, deps.K8s, 0, prefixWriter{opts.Log, "[upgrade] "})
+		if err != nil {
+			fmt.Fprintf(opts.Log, "[upgrade] warning: multus heal: %v\n", err)
+		} else {
+			res.Multus = &mh
+		}
+	}
 
 	// Step 1: FLO.
 	if deps.Helm == nil {
@@ -225,13 +254,25 @@ func Upgrade(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (*Upgra
 	if err := k8swait.WaitForCRDExists(ctx, deps.Dyn, InfraCRDName, opts.Timeout); err != nil {
 		return res, fmt.Errorf("the Infra CRD did not appear (FLO did not roll the 2.4 manifest): %w", err)
 	}
-	for _, cond := range []string{"CNEControllerAvailable", "F5TmmAvailable"} {
-		fmt.Fprintf(opts.Log, "[upgrade] step 3: waiting for CNEInstance %s %s=True\n", cne.GetName(), cond)
-		if err := WaitConditionTrue(ctx, deps.Dyn, CNEInstanceGVR, opts.Namespace, cne.GetName(), cond, opts.Timeout, opts.Poll); err != nil {
-			return res, err
-		}
-	}
 	if deps.K8s != nil {
+		// 3a: FLO must render the env into the Deployment template. The
+		// template, not the pods, is the signal: the pre-upgrade pods are
+		// still Ready while FLO works, and the stale CNEInstance conditions
+		// stay True, so nothing else distinguishes "not yet" from "done".
+		fmt.Fprintf(opts.Log, "[upgrade] step 3: waiting for deploy %s/%s to carry %s=true (up to %s)\n", opts.Namespace, ControllerDeployment, UseGatewaySettingsEnv, opts.RenderWait)
+		if err := waitControllerRendered(ctx, deps.K8s, opts.Namespace, opts.RenderWait, opts.Poll); err != nil {
+			if !errors.Is(err, errControllerNotRendered) {
+				return res, err
+			}
+			fmt.Fprintf(opts.Log, "[upgrade] step 3: FLO did not render the controller env in %s: recreating the CNEController CR so FLO takes the create path (the 2.3-era object rejects FLO 2.30 updates: spec.crdUpdater.resources/f5CsmQkview null)\n", opts.RenderWait)
+			if err := recreateCNEController(ctx, deps.Dyn, opts.Namespace, cne.GetName()); err != nil {
+				return res, err
+			}
+			res.ControllerRecreated = true
+			if err := waitControllerRendered(ctx, deps.K8s, opts.Namespace, opts.Timeout, opts.Poll); err != nil {
+				return res, fmt.Errorf("after recreating the CNEController: %w", err)
+			}
+		}
 		fmt.Fprintf(opts.Log, "[upgrade] step 3: waiting for deploy %s/%s\n", opts.Namespace, ControllerDeployment)
 		if err := k8swait.WaitForDeploymentReady(ctx, deps.K8s, opts.Namespace, ControllerDeployment, opts.Timeout); err != nil {
 			return res, err
@@ -241,18 +282,24 @@ func Upgrade(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (*Upgra
 			return res, err
 		}
 		if !ok {
-			return res, fmt.Errorf("deploy %s/%s rolled out but its pods do not carry %s=true; FLO did not render the CNEInstance env", opts.Namespace, ControllerDeployment, UseGatewaySettingsEnv)
+			return res, fmt.Errorf("deploy %s/%s rolled out but its pods do not carry %s=true", opts.Namespace, ControllerDeployment, UseGatewaySettingsEnv)
 		}
 		res.ControllerReady = true
-		ready, total, err := tmmReady(ctx, deps.K8s, opts.Namespace)
+	}
+	for _, cond := range []string{"CNEControllerAvailable", "F5TmmAvailable"} {
+		fmt.Fprintf(opts.Log, "[upgrade] step 3: waiting for CNEInstance %s %s=True\n", cne.GetName(), cond)
+		if err := WaitConditionTrue(ctx, deps.Dyn, CNEInstanceGVR, opts.Namespace, cne.GetName(), cond, opts.Timeout, opts.Poll); err != nil {
+			return res, err
+		}
+	}
+	if deps.K8s != nil {
+		fmt.Fprintf(opts.Log, "[upgrade] step 3: waiting for Ready TMM pods (%s)\n", TMMLabelSelector)
+		ready, total, err := waitTMMReady(ctx, deps.K8s, opts.Namespace, opts.Timeout, opts.Poll)
+		res.TMMReady, res.TMMTotal = ready, total
 		if err != nil {
 			return res, err
 		}
-		res.TMMReady, res.TMMTotal = ready, total
 		fmt.Fprintf(opts.Log, "[upgrade] step 3: controller carries %s=true; TMM pods ready %d/%d\n", UseGatewaySettingsEnv, ready, total)
-		if total == 0 || ready < total {
-			return res, fmt.Errorf("TMM data plane not ready: %d/%d pods (%s) have every container Ready", ready, total, TMMLabelSelector)
-		}
 	} else {
 		res.ControllerReady = true
 	}
@@ -403,4 +450,116 @@ func tmmReady(ctx context.Context, cs kubernetes.Interface, ns string) (ready, t
 		}
 	}
 	return ready, total, nil
+}
+
+// errControllerNotRendered is returned by waitControllerRendered on timeout.
+var errControllerNotRendered = errors.New("controller Deployment does not carry " + UseGatewaySettingsEnv + "=true")
+
+// deploymentHasFlag reports whether the controller Deployment template has
+// USE_GATEWAY_SETTINGS=true. found is false when the Deployment is absent.
+func deploymentHasFlag(ctx context.Context, cs kubernetes.Interface, ns string) (found, has bool, err error) {
+	dep, err := cs.AppsV1().Deployments(ns).Get(ctx, ControllerDeployment, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("get deploy %s/%s: %w", ns, ControllerDeployment, err)
+	}
+	for _, c := range dep.Spec.Template.Spec.Containers {
+		for _, e := range c.Env {
+			if e.Name == UseGatewaySettingsEnv && e.Value == "true" {
+				return true, true, nil
+			}
+		}
+	}
+	return true, false, nil
+}
+
+// waitControllerRendered polls until the controller Deployment template
+// carries the flag. Timeout returns errControllerNotRendered.
+func waitControllerRendered(ctx context.Context, cs kubernetes.Interface, ns string, timeout, poll time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		_, has, err := deploymentHasFlag(ctx, cs, ns)
+		if err != nil {
+			return err
+		}
+		if has {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return errControllerNotRendered
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+}
+
+// recreateCNEController deletes the CNEController CR FLO owns for the
+// instance (f5-cne-controller-<instance>, falling back to the one owned by
+// the CNEInstance). FLO recreates it, and the Deployment it owns, from the
+// 2.4 manifest.
+func recreateCNEController(ctx context.Context, dyn dynamic.Interface, ns, cneName string) error {
+	name := ControllerDeployment + "-" + cneName
+	err := dyn.Resource(CNEControllerGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete CNEController %s/%s: %w", ns, name, err)
+	}
+	list, lerr := dyn.Resource(CNEControllerGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
+	if lerr != nil {
+		return fmt.Errorf("list CNEControllers in %s: %w", ns, lerr)
+	}
+	for i := range list.Items {
+		for _, o := range list.Items[i].GetOwnerReferences() {
+			if o.Kind == "CNEInstance" && o.Name == cneName {
+				if err := dyn.Resource(CNEControllerGVR).Namespace(ns).Delete(ctx, list.Items[i].GetName(), metav1.DeleteOptions{}); err != nil {
+					return fmt.Errorf("delete CNEController %s/%s: %w", ns, list.Items[i].GetName(), err)
+				}
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("no CNEController for CNEInstance %s/%s found to recreate", ns, cneName)
+}
+
+// waitTMMReady polls tmmReady until every TMM pod has all containers Ready.
+func waitTMMReady(ctx context.Context, cs kubernetes.Interface, ns string, timeout, poll time.Duration) (ready, total int, err error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		ready, total, err = tmmReady(ctx, cs, ns)
+		if err != nil {
+			return ready, total, err
+		}
+		if total > 0 && ready == total {
+			return ready, total, nil
+		}
+		if time.Now().After(deadline) {
+			return ready, total, fmt.Errorf("TMM data plane not ready: %d/%d pods (%s) have every container Ready after %s", ready, total, TMMLabelSelector, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ready, total, ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+}
+
+// prefixWriter prefixes every write with a tag; it is used to route helper
+// logs into the upgrade log.
+type prefixWriter struct {
+	w      io.Writer
+	prefix string
+}
+
+func (p prefixWriter) Write(b []byte) (int, error) {
+	if _, err := io.WriteString(p.w, p.prefix); err != nil {
+		return 0, err
+	}
+	return p.w.Write(b)
 }

@@ -45,9 +45,12 @@ var (
 
 // GVRs of the resources shared by 2.3 and 2.4.
 var (
-	CNEInstanceGVR  = schema.GroupVersionResource{Group: "k8s.f5.com", Version: "v1", Resource: "cneinstances"}
-	GatewayGVR      = schema.GroupVersionResource{Group: GatewayAPIGroup, Version: "v1", Resource: "gateways"}
-	GatewayClassGVR = schema.GroupVersionResource{Group: GatewayAPIGroup, Version: "v1", Resource: "gatewayclasses"}
+	CNEInstanceGVR = schema.GroupVersionResource{Group: "k8s.f5.com", Version: "v1", Resource: "cneinstances"}
+	// CNEControllerGVR is the FLO-owned component CR that renders the
+	// f5-cne-controller Deployment.
+	CNEControllerGVR = schema.GroupVersionResource{Group: "k8s.f5.com", Version: "v1", Resource: "cnecontrollers"}
+	GatewayGVR       = schema.GroupVersionResource{Group: GatewayAPIGroup, Version: "v1", Resource: "gateways"}
+	GatewayClassGVR  = schema.GroupVersionResource{Group: GatewayAPIGroup, Version: "v1", Resource: "gatewayclasses"}
 )
 
 // GVRs of the 2.4 resources this package writes.

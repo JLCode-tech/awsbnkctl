@@ -12,10 +12,12 @@ import (
 	"helm.sh/helm/v3/pkg/release"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 // fakeHelm implements phases.HelmInstaller for the upgrade tests.
@@ -96,8 +98,11 @@ func controllerObjects(withFlag bool, tmm int) []runtime.Object {
 	objs := []runtime.Object{
 		&appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{Name: ControllerDeployment, Namespace: DefaultInstanceNamespace},
-			Spec:       appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: sel}},
-			Status:     appsv1.DeploymentStatus{Replicas: 1, AvailableReplicas: 1},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: sel},
+				Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "f5-cne-controller", Env: env}}}},
+			},
+			Status: appsv1.DeploymentStatus{Replicas: 1, AvailableReplicas: 1},
 		},
 		&corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "f5-cne-controller-abc", Namespace: DefaultInstanceNamespace, Labels: sel},
@@ -256,11 +261,11 @@ func TestUpgrade_Errors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no CNEInstance") {
 		t.Errorf("no instance: %v", err)
 	}
-	// Controller rolled out without the flag.
+	// Controller never rendered with the flag and no CNEController to recreate.
 	dyn := newFakeDynamic(t, cneReady(t), infraCRD())
 	cs := k8sfake.NewClientset(controllerObjects(false, 1)...)
-	_, err = Upgrade(ctx, UpgradeDeps{Helm: &fakeHelm{deployed: "v2.30.0-0.5.2"}, Dyn: dyn, K8s: cs}, UpgradeOptions{Timeout: time.Second, Poll: time.Millisecond})
-	if err == nil || !strings.Contains(err.Error(), "do not carry USE_GATEWAY_SETTINGS=true") {
+	_, err = Upgrade(ctx, UpgradeDeps{Helm: &fakeHelm{deployed: "v2.30.0-0.5.2"}, Dyn: dyn, K8s: cs}, UpgradeOptions{Timeout: time.Second, Poll: time.Millisecond, RenderWait: 10 * time.Millisecond})
+	if err == nil || !strings.Contains(err.Error(), "no CNEController for CNEInstance f5-cne-system/lab-bnk found to recreate") {
 		t.Errorf("missing flag: %v", err)
 	}
 	// No TMM pods.
@@ -319,5 +324,89 @@ func TestUpsertEnv(t *testing.T) {
 	}
 	if len(out) != 4 {
 		t.Errorf("entries = %d (order and count preserved)", len(out))
+	}
+}
+
+// cneControllerCR is the FLO-owned component object for the lab instance.
+func cneControllerCR() *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "k8s.f5.com/v1", "kind": "CNEController",
+		"metadata": map[string]any{
+			"name": ControllerDeployment + "-lab-bnk", "namespace": DefaultInstanceNamespace,
+			"ownerReferences": []any{map[string]any{"apiVersion": "k8s.f5.com/v1", "kind": "CNEInstance", "name": "lab-bnk", "uid": "u1"}},
+		},
+		"spec": map[string]any{"crdUpdater": map[string]any{"enabled": true}},
+	}}
+}
+
+// TestUpgrade_RecreatesController reproduces the live 2026-09-14 upgrade: FLO
+// 2.30 cannot update the 2.3-era CNEController, so the Deployment never gets
+// USE_GATEWAY_SETTINGS. Deleting the CR (which FLO then recreates) is what
+// makes the env land; the fake FLO here is a reactor on the delete.
+func TestUpgrade_RecreatesController(t *testing.T) {
+	helm := &fakeHelm{deployed: "v2.21.13-0.0.64"}
+	dyn := newFakeDynamic(t, cneReady(t), infraCRD(), cneControllerCR())
+	cs := k8sfake.NewClientset(controllerObjects(false, 1)...)
+
+	deleted := 0
+	dyn.PrependReactor("delete", "cnecontrollers", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		deleted++
+		// FLO recreates the Deployment with the 2.4 env.
+		dep, err := cs.AppsV1().Deployments(DefaultInstanceNamespace).Get(context.Background(), ControllerDeployment, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		flag := corev1.EnvVar{Name: UseGatewaySettingsEnv, Value: "true"}
+		dep.Spec.Template.Spec.Containers[0].Env = append(dep.Spec.Template.Spec.Containers[0].Env, flag)
+		if _, err := cs.AppsV1().Deployments(DefaultInstanceNamespace).Update(context.Background(), dep, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		pod, err := cs.CoreV1().Pods(DefaultInstanceNamespace).Get(context.Background(), "f5-cne-controller-abc", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, flag)
+		if _, err := cs.CoreV1().Pods(DefaultInstanceNamespace).Update(context.Background(), pod, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		return false, nil, nil
+	})
+
+	var log bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeDeps{Helm: helm, Dyn: dyn, K8s: cs}, UpgradeOptions{
+		Timeout:    2 * time.Second,
+		Poll:       5 * time.Millisecond,
+		RenderWait: 30 * time.Millisecond,
+		Log:        &log,
+	})
+	if err != nil {
+		t.Fatalf("Upgrade: %v\n%s", err, log.String())
+	}
+	if deleted != 1 || !res.ControllerRecreated || !res.ControllerReady || res.TMMReady != 1 {
+		t.Errorf("deleted=%d result=%+v\n%s", deleted, res, log.String())
+	}
+	if !strings.Contains(log.String(), "recreating the CNEController CR") {
+		t.Errorf("log:\n%s", log.String())
+	}
+	if _, err := dyn.Resource(CNEControllerGVR).Namespace(DefaultInstanceNamespace).Get(context.Background(), ControllerDeployment+"-lab-bnk", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("CNEController still present (err=%v); FLO would have recreated it", err)
+	}
+}
+
+// TestUpgrade_NeverRenderedFails: when even the recreate does not make FLO
+// render the env, the upgrade fails naming the Deployment.
+func TestUpgrade_NeverRenderedFails(t *testing.T) {
+	helm := &fakeHelm{deployed: "v2.30.0-0.5.2"}
+	dyn := newFakeDynamic(t, cneReady(t), infraCRD(), cneControllerCR())
+	cs := k8sfake.NewClientset(controllerObjects(false, 1)...)
+	var log bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeDeps{Helm: helm, Dyn: dyn, K8s: cs}, UpgradeOptions{
+		Timeout: 60 * time.Millisecond, Poll: 5 * time.Millisecond, RenderWait: 20 * time.Millisecond, Log: &log,
+	})
+	if err == nil || !strings.Contains(err.Error(), "after recreating the CNEController") {
+		t.Fatalf("err = %v", err)
+	}
+	if !res.ControllerRecreated {
+		t.Errorf("result = %+v", res)
 	}
 }

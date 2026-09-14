@@ -271,3 +271,22 @@ func writeTargetResults(w io.Writer, targets []forgeScanTarget) {
 func warnf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "⚠ "+format+"\n", args...)
 }
+
+// multusDoctorCheck reports whether the Multus pods still hold a valid
+// kubeconfig token (see k8s.HealMultusToken). Detect only: doctor never
+// changes the cluster.
+func multusDoctorCheck(ctx context.Context, cs kubernetes.Interface) doctor.Check {
+	c := doctor.Check{Name: "multus kubeconfig token", BackendName: "k8s"}
+	installed, stale, reason, err := k8s.MultusTokenStale(ctx, cs, 0, time.Now())
+	switch {
+	case err != nil:
+		c.Status, c.Detail = doctor.StatusWarning, "could not inspect Multus: "+err.Error()
+	case !installed:
+		c.Status, c.Detail = doctor.StatusOK, "Multus not installed"
+	case stale:
+		c.Status, c.Detail = doctor.StatusWarning, reason+" — `awsbnkctl bnk upgrade` and `awsbnkctl up` restart it; or `kubectl -n kube-system rollout restart ds kube-multus-ds`"
+	default:
+		c.Status, c.Detail = doctor.StatusOK, "pods younger than "+k8s.MultusMaxPodAge.String()+", no Unauthorized sandbox events"
+	}
+	return c
+}

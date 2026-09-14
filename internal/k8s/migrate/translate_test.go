@@ -512,3 +512,28 @@ func TestWriteJSON(t *testing.T) {
 		}
 	}
 }
+
+// TestTranslate_NoEgressStillSetsEgressDefaults: a 2.3 cluster without any
+// F5SPKEgress still gets Infra egressDefaults, or the controller defaults the
+// tunnel subnet to 10.0.0.0/16 and rejects the Infra (seen live 2026-09-14).
+func TestTranslate_NoEgressStillSetsEgressDefaults(t *testing.T) {
+	inv := inventoryFromFixture(t, fixture23)
+	inv.Egresses = nil
+	plan, err := Translate(inv, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	infra := plan.Infra.Object
+	if got := str(t, infra, "spec", "egressDefaults", "subnet"); got != "192.168.0.0/16" {
+		t.Errorf("egressDefaults.subnet = %q", got)
+	}
+	if got := str(t, infra, "spec", "egressDefaults", "networkRef", "name"); got != "int-vlan" {
+		t.Errorf("egressDefaults.networkRef = %q", got)
+	}
+	if port, _, _ := unstructured.NestedFieldNoCopy(infra, "spec", "egressDefaults", "port"); port != int64(4789) {
+		t.Errorf("egressDefaults.port = %v", port)
+	}
+	if !strings.Contains(strings.Join(plan.Warnings, "\n"), "no F5SPKEgress: Infra egressDefaults set to the awsbnkctl defaults") {
+		t.Errorf("warnings = %v", plan.Warnings)
+	}
+}

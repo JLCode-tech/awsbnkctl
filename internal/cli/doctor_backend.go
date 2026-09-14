@@ -93,6 +93,7 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 	// Gateways, controller, and a migrate-2.4 hint when 2.3 objects remain.
 	idx, scanErr := scanBNK(ctx, "", bnkscan.DefaultControllerNamespace, statusScanTimeout)
 	out = append(out, bnkDoctorChecks(idx, scanErr)...)
+	out = append(out, multusDoctorCheck(ctx, cs))
 
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
