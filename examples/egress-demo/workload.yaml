@@ -1,7 +1,7 @@
 # BNK egress demo — workloads.
 #
 # Applies:
-#   - namespace bnk-egress-demo      (CAPTURED by the F5SPKEgress CR)
+#   - namespace bnk-egress-demo      (captured by the EgressGateway)
 #   - configmap  egress-probe        (probe.sh + watch.sh, mounted at /demo)
 #   - deploy     agent               (the captured app pod; mounts the probe)
 #   - namespace bnk-egress-control   (NOT captured — the "unaffected workload")
@@ -26,7 +26,7 @@ data:
     #!/bin/sh
     # BNK egress probe — run inside the agent pod. Shows the identity the
     # outside world sees + reachability. The result FLIPS depending on whether
-    # BNK egress capture is ON (F5SPKEgress present) or OFF.
+    # BNK egress capture is ON (EgressGateway present) or OFF.
     LINE="------------------------------------------------------------"
     echo "$LINE"
     echo " BNK EGRESS PROBE   pod=$(hostname)  ns=${POD_NS:-?}  podIP=$(hostname -i 2>/dev/null)"

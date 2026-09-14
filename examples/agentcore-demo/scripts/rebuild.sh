@@ -20,7 +20,7 @@ set -uo pipefail
 #   * the Gateway must exist before setup-agentcore-network.sh, which reads the
 #     VIP off the live Gateway object.
 #   * the Gateway must also exist before mcp-security-policy.yaml, whose
-#     BNKNetPolicies attach to named listeners.
+#     NetPolicies attach to named listeners.
 #   * the HTTPS listener needs the mcp-tls Secret, which cert-manager issues
 #     from the in-cluster CA that phase 12 of `up` creates. That is a wait, not
 #     an instant, so this script waits for it.
@@ -120,7 +120,7 @@ ok "tool pod ready"
 
 # ── 3. gateway + routes + cert ───────────────────────────────────────────────
 step "Gateway, HTTPRoutes and the TLS certificate"
-./awsbnkctl k apply -f examples/agentcore-demo/gateway-deployment.yaml \
+./awsbnkctl k apply --config "$CONFIG" -f examples/agentcore-demo/gateway-deployment.yaml \
   || die "gateway apply failed"
 note "waiting for cert-manager to issue mcp-tls from the in-cluster CA..."
 # NB: do not name this R — R is the ANSI reset used by the helpers above.
@@ -149,7 +149,7 @@ note "reads the VIP off the live Gateway, which is why it runs after step 3"
 ok "network seam in place"
 
 # ── 5. governance policy ─────────────────────────────────────────────────────
-step "Governance policy  (iRule, BNKNetPolicies, firewall, BNKSecPolicy)"
+step "Governance policy  (iRule, NetPolicies, firewall, SecPolicy)"
 kubectl apply -f "$DEMO_DIR/mcp-security-policy.yaml" || die "policy apply failed"
 for i in $(seq 1 40); do
   IR=$(kubectl get f5-big-cne-irules mcp-rate-limit-irule -n default \
@@ -158,9 +158,9 @@ for i in $(seq 1 40); do
   sleep 5
 done
 [ "$IR" = "True" ] || warn "iRule not Programmed yet — it may settle; demo.sh will confirm"
-POL=$(kubectl get bnknetpolicies -n default --no-headers 2>/dev/null | wc -l | tr -d ' ')
-[ "${POL:-0}" -ge 2 ] && ok "iRule + $POL BNKNetPolicies attached" \
-  || warn "expected 2 BNKNetPolicies, found ${POL:-0}"
+POL=$(kubectl get netpolicies.gateway.k8s.f5.com -n default --no-headers 2>/dev/null | wc -l | tr -d ' ')
+[ "${POL:-0}" -ge 2 ] && ok "iRule + $POL NetPolicies attached" \
+  || warn "expected 2 NetPolicies, found ${POL:-0}"
 
 # ── 6. observability ─────────────────────────────────────────────────────────
 step "Observability  (Loki + Fluent Bit, ns llm-egress)"

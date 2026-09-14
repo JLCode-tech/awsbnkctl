@@ -2,7 +2,7 @@
 #
 # This is the complete topology: VPC + subnets, the BNK external/internal TMM
 # data-plane subnets, an EKS control plane + 3-node managed node group, the full
-# BNK 2.3 stack, and an optional test jumphost.
+# BNK 2.4 stack, and an optional test jumphost.
 #
 # It is also the demo cluster: uncomment the `demo:` block below (or pass --demo)
 # to unlock the curated protocol walkthroughs, `awsbnkctl demo run …`.
@@ -49,13 +49,12 @@ metadata:
 #     applies only ext-vlan, the CNEInstance lists one networkAttachment.
 #     This is the pattern transparent egress (examples/egress-demo) needs.
 #
-#   sriov-external — EXPERIMENTAL. Same topology and cost as external-only,
-#     but TMM drives the ENA over DPDK/vfio-pci instead of the kernel socket:
-#     the vfio-node-prep DaemonSet (Phase 20b) rebinds the external ENA, the
+#   sriov-external — same topology and cost as external-only, but TMM drives
+#     the ENA over DPDK/vfio-pci instead of the kernel socket: the
+#     vfio-node-prep DaemonSet (Phase 20b) rebinds the external ENA, the
 #     sriov-network-device-plugin exposes it as intel.com/ens8, the NAD becomes
 #     external-sriov (type passthru), and the CNEInstance drops
-#     TMM_GENERIC_SOCKET_DRIVER. Validated live (HTTP 200 through TMM-on-vfio);
-#     prefer a dedicated cluster. Apply the external-only swap above, then set
+#     TMM_GENERIC_SOCKET_DRIVER. Apply the external-only swap above, then set
 #     `pattern: sriov-external`.
 pattern: host-device
 
@@ -120,7 +119,7 @@ cluster:
   kubernetesVersion: "1.35"
   nodeGroups:
     - name: default
-      # m6i.4xlarge x 3 is the documented BNK 2.3 Small minimum:
+      # m6i.4xlarge x 3 is the documented BNK Small minimum:
       #   - 3+ ENIs: primary + 2 BNK secondaries (dual-interface). The EKS CNI stays
       #     on the primary via prefix delegation (phase 08b) and is not counted.
       #   - 16 vCPU + 64 GB: fits the full BNK control plane + TMM (2 vCPU / 8 GiB)
@@ -155,9 +154,9 @@ bnk:
   # chart along (see docs/ARCHITECTURE.md, "BNK release policy").
   # manifestVersion: "2.3.3-3.2598.3-0.0.509"
   # bgp: open TCP 179 (BGP) + UDP 3784 (BFD) from the external subnet on the
-  # data-plane security group and the external F5SPKVlan, so TMM can peer with
-  # an AWS Route Server endpoint there. Harmless with no peer. The peer and the
-  # routing CRs are yours to add: see bgp-route-server.yaml in this directory.
+  # data-plane security group, so TMM can peer with an AWS Route Server endpoint
+  # there. Harmless with no peer. The peer and the BGP stanza (a ZebOS ConfigMap)
+  # are yours to add: see bgp-route-server.yaml in this directory.
   bgp: true
   # certManagerVersion: "1.21.1"     # optional; defaults to 1.21.1 (the embedded version)
 

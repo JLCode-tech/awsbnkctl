@@ -8,10 +8,10 @@ one, point the two F5 credential paths at your own files, and run it.
 | Example | Pattern | ~US$/hr | What it shows |
 | --- | --- | --- | --- |
 | [`full-cluster`](full-cluster/) | `dual-interface` (two edits give `external-only` or `sriov-external`) | 3 | **Start here.** The reference cluster: VPC, TMM data-path subnets, EKS, BNK, jumphost. Uncomment `demo:` for the protocol demos, `bigipVE:` for the BIG-IP migration demo |
-| [`egress-demo`](egress-demo/) | `external-only` | 3 | A pod's outbound traffic flips to a BNK-controlled identity with a firewall ACL by applying one CR |
+| [`egress-demo`](egress-demo/) | `external-only` | 3 | A pod's outbound traffic flips to a BNK-controlled path with an egress firewall by applying one `EgressGateway` |
 | [`demo-ai`](demo-ai/) | `dual-interface` | 12 (6 as the lean rig) | `full-cluster` plus a GPU node group and a disposable SageMaker endpoint: the protocol demos and AI inference in one cluster |
 | [`agentcore-demo`](agentcore-demo/) | `dual-interface` | 4 | An Amazon Bedrock AgentCore agent calls an MCP tool through BNK; BNK authenticates, rate-limits and logs every call |
-| [`local-zone`](local-zone/) | none | 0 | Telco/edge CRs (SCTP, Diameter, HTTP/2, SNAT) from an AWS Local Zone trial that did **not** reach a working data path; kept as a reference |
+| [`local-zone`](local-zone/) | none | 0 | Telco/edge reference manifests (SCTP, Diameter, HTTP/2, egress) for an AWS Local Zone; apply them to a cluster you already have |
 
 Costs are rough `ap-southeast-2` on-demand rates for the whole footprint,
 excluding data transfer and EBS. Nothing here scales to zero, so tear clusters
@@ -28,17 +28,19 @@ data-path ENI or two.
   └─ jumphost mgmt ENI (EICE)                      └─ BNK_EXT / BNK_INT route here too (TMM egress via NAT)
 
   BNK_EXT 10.0.10.0/24  (every pattern)            BNK_INT 10.0.20.0/24  (dual-interface only)
-  ├─ TMM external ENI · SelfIP .240 · VIP .100     └─ TMM internal ENI · SelfIP .240
+  ├─ TMM external ENI · self IP · VIP .100         └─ TMM internal ENI · self IP
   ├─ jumphost data ENI — the test client
-  └─ optional Route Server endpoint ──tcp/179, udp/3784──► TMM .240   (bnk.bgp: true opens the ports)
+  └─ optional Route Server endpoint ──tcp/179, udp/3784──► TMM self IP   (bnk.bgp: true opens the ports)
 
   client ──► VIP 10.0.10.100 ──► TMM ──► backend pods over the CNI
 ```
 
 The Gateway VIP is a secondary IP on the TMM external ENI, assigned by the BNK
-controller, so anything in the VPC reaches it without BGP. Scenario and demo
-VIPs are allocated from `.100` upward; the plan is in
-[`docs/SCENARIOS.md`](../docs/SCENARIOS.md#7-vip-plan).
+controller, so anything in the VPC reaches it without BGP. VIPs come from the
+Infra listener pool (`.100`–`.199`); the plan is in
+[`docs/SCENARIOS.md`](../docs/SCENARIOS.md#7-vip-plan). TMM's self IP is
+allocated by IPAM from `.224`–`.254` and recorded as `TMM_EXT_SELFIP` in
+`state.env`.
 
 ## Rules every `cluster.yaml` follows
 
@@ -54,6 +56,11 @@ VIPs are allocated from `.100` upward; the plan is in
   registration phase warns and `up` still succeeds.
 - **`bnk.bgp: true` is on.** It only opens the BGP/BFD ports; nothing peers until
   you build a Route Server ([`docs/BGP-ROUTE-SERVER.md`](../docs/BGP-ROUTE-SERVER.md)).
+- **Every Gateway is BNK 2.4 shaped.** A `GatewaySettings` next to it,
+  `infrastructure.parametersRef` pointing at it, and a static address inside the
+  listener pool. Manifests that carry `{{.GATEWAYCLASS_NAME}}` are applied with
+  `awsbnkctl k apply --config <cluster.yaml> -f <file>`, which fills the value
+  from the cluster state.
 
 ## Before you build one
 

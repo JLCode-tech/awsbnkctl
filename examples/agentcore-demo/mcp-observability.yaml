@@ -20,9 +20,9 @@
 #   * app/demo-irules "token counting" iRule — despite the name it only stamps
 #     X-BNK-* headers and logs to local0; it counts nothing.
 #
-# Why a log tail and not HSL: BNK 2.3 accepts an F5BigLogHslpub CR, but
+# Why a log tail and not HSL: BNK accepts an F5BigLogHslpub CR, but
 # `HSL::open`/`HSL::send` from an F5BigCneIrule produced no datagrams at the
-# receiver (tested live 2026-08-19 against a Fluent Bit UDP listener, with the
+# receiver (tested against a Fluent Bit UDP listener, with the
 # publisher named /Common/<cr>, <cr> and /default/<cr>). `log local0.` from the
 # same iRule works and is what this pipeline consumes.
 #

@@ -121,7 +121,7 @@ is copied into Loki.
 | Symptom | Cause |
 | --- | --- |
 | Rate-limit window never rolls over | `table incr` + `table lifetime` refreshes the idle timer on every hit; use `table set KEY VALUE TIMEOUT LIFETIME` once, then `-notouch` on reads |
-| `HSL::send` from an iRule delivers nothing | not wired in BNK 2.3; `log local0.` works and is what the collector tails |
+| `HSL::send` from an iRule delivers nothing | not wired; `log local0.` works and is what the collector tails |
 | Pinned pip versions fail and the pod crash-loops | read versions off a working pod (`kubectl exec deploy/mcp-financial-tool -- pip list`) instead of guessing |
 | Forge shows no iRule on a Gateway-scoped policy | Forge renders attachments only when `NetPolicy` names a listener via `sectionName` |
 | `up` run from the example directory | state lands in a second, empty `.awsbnkctl/` and `down` falls back to tag discovery; always run from the repository root |

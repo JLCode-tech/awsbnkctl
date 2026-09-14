@@ -9,7 +9,7 @@
 
 Start here. This `cluster.yaml` builds the complete stack: VPC and subnets, the
 two TMM data-path subnets, EKS with a three-node group sized for BNK, the BNK
-2.3 control plane and TMM on dedicated ENIs, and a jumphost that can send test
+2.4 control plane and TMM on dedicated ENIs, and a jumphost that can send test
 traffic into the external data path. Every other example is this file plus a few
 toggles.
 
@@ -31,7 +31,7 @@ awsbnkctl down -f cluster.yaml --yes
 | Toggle | Default | Turn it on by |
 | --- | --- | --- |
 | Single-interface pattern | off (dual-interface) | `pattern: external-only` **and** delete the `internal:` block under `network.dataPath`. Same cost, one ENI fewer. Needed for transparent egress ([`egress-demo`](../egress-demo/)) |
-| SR-IOV / DPDK data plane | off | the two edits above, then `pattern: sriov-external`. **Experimental**; use a fresh cluster |
+| SR-IOV / DPDK data plane | off | the two edits above, then `pattern: sriov-external` |
 | Demo mode | off | uncomment `demo:` (or `up --demo`). Enables `awsbnkctl demo run` for the Diameter, HTTP/2 and ingress-migration demos |
 | BIG-IP VE appliance | off | uncomment `bigipVE:` with demo mode on. Adds a chargeable c5n.2xlarge for the `bigip-cis` demo; password via `AWSBNKCTL_BIGIP_PASSWORD` |
 | BNK release | 2.4.0 | `bnk.manifestVersion` (a 2.3.3 pin is shown commented) |
@@ -47,9 +47,6 @@ is the same topology with TMM driving the NIC over DPDK instead of the kernel:
 | Data-plane driver | kernel socket | DPDK over `vfio-pci` |
 | Node preparation | none | a DaemonSet rebinds the external ENA (phase 20b) |
 | Network attachment | `external` | `external-sriov` (type `passthru`) |
-
-Both are validated end to end; both stay under CI as fixtures in
-`internal/intent/testdata/`.
 
 ## Demo mode
 
@@ -79,7 +76,7 @@ Run `core-file-collection` last: it patches the CNEInstance and TMM restarts.
 ## BGP
 
 `bnk.bgp: true` opens TCP 179 and UDP 3784 from the external subnet on the
-data-plane security group and the external VLAN. To actually peer, build a
+data-plane security group. To actually peer, build a
 Route Server endpoint in that subnet and apply
 [`bgp-route-server.yaml`](bgp-route-server.yaml) with the endpoint's address in
 place of `10.0.10.31`. Procedure, verification and the teardown order (the
