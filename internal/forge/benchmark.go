@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/genai"
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
 )
 
@@ -76,6 +77,13 @@ type BenchmarkResultPayload struct {
 	TargetID          *int `json:"target_id,omitempty"`
 	ConfigID          *int `json:"config_id,omitempty"`
 	ProxyDeploymentID *int `json:"proxy_deployment_id,omitempty"`
+
+	// GenAI inference metrics, flattened into the payload: ttft_p50_ms …
+	// ttft_p99_ms, itl_p50_ms/p95/p99, prefix_cache_hit_rate, input/output/
+	// total_tokens_per_sec, prefill/decode_worker_utilization. Always set by
+	// MapAiperfResultToPayload; also mirrored under aiperf_metrics["genai"] and
+	// throughput so Forge keeps them in result_json.
+	*genai.Metrics
 }
 
 // BenchmarkPushResponse is the shape forge returns on success.
@@ -114,6 +122,10 @@ type BenchmarkPushOptions struct {
 	ConfigID int
 	// ProxyDeploymentID links the result to a forge ProxyDeployment record (0 = unset, omitted).
 	ProxyDeploymentID int
+	// GenAI carries the run's GenAI metrics. When nil, result.GenAI is used,
+	// and when that is nil too the percentiles and token throughput are derived
+	// from the AiperfResult (no prefix-cache or utilization fields).
+	GenAI *genai.Metrics
 }
 
 // MapAiperfResultToPayload converts an AiperfResult + options into the
@@ -188,6 +200,7 @@ func MapAiperfResultToPayload(result *jumphost.AiperfResult, opts BenchmarkPushO
 			"avg": d.Avg,
 			"p50": d.P50,
 			"p90": d.P90,
+			"p95": d.P95,
 			"p99": d.P99,
 			"min": d.Min,
 			"max": d.Max,
@@ -199,6 +212,18 @@ func MapAiperfResultToPayload(result *jumphost.AiperfResult, opts BenchmarkPushO
 		"osl":  map[string]any{"avg": result.AvgOutputTokens},
 		"isl":  map[string]any{"avg": result.AvgInputTokens},
 	}
+
+	g := opts.GenAI
+	if g == nil {
+		g = result.GenAI
+	}
+	if g == nil {
+		g = DeriveGenAIMetrics(result)
+	}
+	aiperfMetrics["genai"] = g.ToMap()
+	throughput["input_tokens_per_sec"] = g.InputTokensPerSec
+	throughput["output_tokens_per_sec"] = g.OutputTokensPerSec
+	throughput["total_tokens_per_sec"] = g.TotalTokensPerSec
 
 	// Compute success_rate_pct from counts.
 	successRatePct := 0.0
@@ -232,6 +257,7 @@ func MapAiperfResultToPayload(result *jumphost.AiperfResult, opts BenchmarkPushO
 		Throughput:        throughput,
 		AiperfMetrics:     aiperfMetrics,
 		Phases:            map[string]any{},
+		Metrics:           g,
 	}
 
 	if opts.AgentName != "" {
@@ -318,6 +344,10 @@ type RawAiperfPushOptions struct {
 	ConfigID int
 	// ProxyDeploymentID forwarded as ?proxy_deployment_id= when non-zero.
 	ProxyDeploymentID int
+	// GenAI, when non-nil, is merged into the raw body as flat fields (see
+	// AIPerfResultPayload). Forge's canonical transform ignores unknown keys, so
+	// an older Forge accepts the body unchanged.
+	GenAI *genai.Metrics
 }
 
 // RawAiperfPushResponse is the shape forge returns on success from
@@ -362,7 +392,16 @@ func PushRawAiperfResult(ctx context.Context, opts RawAiperfPushOptions) (RawAip
 	// and query parameters carry the metadata that forge uses to link the run.
 	rawURL := base + BenchmarkRawAiperfEndpoint
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, strings.NewReader(string(opts.RawJSON)))
+	body := opts.RawJSON
+	if opts.GenAI != nil {
+		merged, mErr := AIPerfResultPayload{Raw: opts.RawJSON, GenAI: opts.GenAI}.MarshalJSON()
+		if mErr != nil {
+			return RawAiperfPushResponse{}, fmt.Errorf("forge raw aiperf push: %w", mErr)
+		}
+		body = merged
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, strings.NewReader(string(body)))
 	if err != nil {
 		return RawAiperfPushResponse{}, fmt.Errorf("forge raw aiperf push: build request: %w", err)
 	}

@@ -162,6 +162,9 @@ func executeDispatchedRun(ctx context.Context, runID int, config map[string]any)
 	if result.RawJSON != "" {
 		var rawMap map[string]any
 		if err := json.Unmarshal([]byte(result.RawJSON), &rawMap); err == nil {
+			if result.GenAI != nil {
+				result.GenAI.MergeInto(rawMap)
+			}
 			return rawMap, nil
 		}
 	}

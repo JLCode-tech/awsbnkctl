@@ -215,6 +215,40 @@ AWS_PROFILE=<your-profile> awsbnkctl benchmark run \
   --scenarios latency,throughput
 ```
 
+### GenAI inference metrics
+
+Every run carries a GenAI metric set, flattened into both Forge payloads
+(`POST /api/benchmarks/results` and `POST /api/benchmarks/results/aiperf`)
+and mirrored under `aiperf_metrics.genai` and `throughput` in `result_json`:
+
+| Field | Source |
+|---|---|
+| `ttft_p50_ms`, `ttft_p90_ms`, `ttft_p95_ms`, `ttft_p99_ms` | aiperf `time_to_first_token` |
+| `itl_p50_ms`, `itl_p95_ms`, `itl_p99_ms` | aiperf `inter_token_latency` |
+| `input_tokens_per_sec`, `output_tokens_per_sec`, `total_tokens_per_sec` | aiperf `input_sequence_length.sum` / duration, `output_token_throughput` |
+| `prefix_cache_hit_rate` (0.0–1.0), `prefix_cache_source` | delta of `vllm:prefix_cache_hits_total` / `vllm:prefix_cache_queries_total` (vLLM, LMI) or `inference_extension_prefix_indexer_hit_ratio` (EPP) between the scrapes before and after the run |
+| `prefill_worker_utilization`, `decode_worker_utilization` (0.0–1.0) | `vllm:kv_cache_usage_perc` / `inference_pool_average_kv_cache_utilization` of the pods scraped with role `prefill` / `decode` at the end of the run |
+
+The pointer fields are omitted when no metrics source was scraped. Sources:
+
+```bash
+# vLLM pods through the Kubernetes API pod proxy (role from the llm-d.ai/role label)
+awsbnkctl benchmark run -f clusters/cluster.yaml --scenario prefix-cache \
+  --metrics-pod-selector app=vllm --metrics-namespace awsbnkctl-scn-aiinference --metrics-port 8000
+
+# disaggregated pools, scraped from the jumphost
+awsbnkctl benchmark run -f clusters/cluster.yaml --scenario prefix-cache \
+  --metrics-url prefill=http://10.0.20.11:8000/metrics --metrics-url decode=http://10.0.20.12:8000/metrics
+
+# offline: artifacts and saved scrapes
+awsbnkctl benchmark ingest baseline.json prefix-shared.json \
+  --metrics-before before.prom --metrics-after after.prom --expect-ttft-drop 20
+```
+
+`--prefix-prompt-length`, `--num-prefix-prompts` and `--random-seed` build a
+shared-prefix workload on a single run; `--genai-out` writes the metric set to
+a file `benchmark ingest` reads back.
+
 
 ---
 
