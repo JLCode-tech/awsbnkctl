@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -522,7 +523,10 @@ var bnkComponents = []bnkComponent{
 	{"cis", "F5 BNK CIS controller", "f5-bnk", "app=f5-bnk-cis"},
 	{"cert-manager", "cert-manager", "cert-manager", "app.kubernetes.io/instance=cert-manager"},
 	{"cneinstance", "BIG-IP TMM data plane (CNEInstance pods)", "f5-bnk", "app.kubernetes.io/component=tmm"},
-	{"tmm", "BIG-IP TMM data plane (f5-tmm pods, BNK 2.4 CNE namespace)", bnkscan.DefaultControllerNamespace, tmmPodSelector},
+	// BNK 2.4: the TMM pod's f5-fluentbit sidecar only forwards; the TMM lines
+	// (governance records included) are read from the f5-toda-fluentd stdout
+	// store awsbnkctl up (phase 24d) and bnk upgrade enable (k8s.EnableTMMLogStream).
+	{"tmm", "BIG-IP TMM data plane (TMM log stream on f5-toda-fluentd stdout, BNK 2.4)", k8s.TMMLogNamespace, k8s.TMMLogPodSelector},
 }
 
 func runLogs(cmd *cobra.Command, args []string) error {
@@ -540,6 +544,17 @@ func runLogs(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "→ %d governance record(s), %d other line(s) dropped\n", gov.Records, gov.Dropped)
 		}()
 		if comp != nil && comp.Name == "tmm" && flagLogsContainer == "" {
+			flagLogsContainer = tmmLogContainer
+		}
+	}
+	// Plain `logs tmm`: the fluentd stdout stream carries every CNE component;
+	// keep the TMM pod's lines and print the syslog text they wrap.
+	var tmmFilter *tmmLineFilter
+	if comp != nil && comp.Name == "tmm" && gov == nil {
+		tmmFilter = &tmmLineFilter{w: out}
+		out = tmmFilter
+		defer tmmFilter.Flush()
+		if flagLogsContainer == "" {
 			flagLogsContainer = tmmLogContainer
 		}
 	}
@@ -586,6 +601,13 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	ns := comp.Ns
+	if comp.Name == "tmm" {
+		// The stream only exists once the stdout store is on (awsbnkctl up phase
+		// 24d, bnk upgrade step 5).
+		if on, err := k8s.TMMLogStreamEnabled(cmd.Context(), kc.Clientset()); err == nil && !on {
+			return fmt.Errorf("the TMM log stream is off: the %s/%s ConfigMap has no `@type stdout` store; run `awsbnkctl up` or `awsbnkctl bnk upgrade` (phase 24d) to enable it", k8s.TMMLogNamespace, k8s.TMMLogCustomConfigMap)
+		}
+	}
 	if flagLogsNamespace != "" {
 		ns = flagLogsNamespace
 	}
@@ -647,12 +669,66 @@ func lookupComponent(name string) *bnkComponent {
 
 // ── governance stream filter ─────────────────────────────────────────
 
-// tmmPodSelector selects the TMM pods FLO 2.30 creates in the CNE namespace.
-const tmmPodSelector = "app=f5-tmm"
+// tmmLogContainer is the fluentd container whose stdout carries the TMM
+// log stream (k8s.EnableTMMLogStream; examples/agentcore-demo/mcp-observability.yaml
+// tails the same container log).
+const tmmLogContainer = k8s.TMMLogContainer
 
-// tmmLogContainer is the TMM sidecar where the governance iRule's
-// `log local0.` lines surface (examples/agentcore-demo/mcp-observability.yaml).
-const tmmLogContainer = "f5-fluentbit"
+// tmmLineFilter keeps only the TMM pod's lines of the fluentd stdout stream
+// (every CNE component forwards to the same fluentd) and prints the wrapped
+// syslog line. Partial writes are buffered until the newline arrives.
+type tmmLineFilter struct {
+	w   io.Writer
+	buf []byte
+}
+
+func (f *tmmLineFilter) Write(p []byte) (int, error) {
+	f.buf = append(f.buf, p...)
+	for {
+		i := bytes.IndexByte(f.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := string(f.buf[:i])
+		f.buf = f.buf[i+1:]
+		if err := f.emit(line); err != nil {
+			return len(p), err
+		}
+	}
+	return len(p), nil
+}
+
+// Flush emits a trailing line without a newline.
+func (f *tmmLineFilter) Flush() {
+	if len(f.buf) > 0 {
+		_ = f.emit(string(f.buf))
+		f.buf = nil
+	}
+}
+
+func (f *tmmLineFilter) emit(line string) error {
+	if !strings.Contains(line, k8s.TMMLogPodMarker) {
+		return nil
+	}
+	_, err := fmt.Fprintln(f.w, tmmLogText(line))
+	return err
+}
+
+// tmmLogText returns the TMM syslog line wrapped in a fluentd stdout record
+// (`<ts> <tag>: {"log":"..."}`), or the line unchanged when it has no wrapper.
+func tmmLogText(line string) string {
+	i := strings.Index(line, "{")
+	if i < 0 {
+		return line
+	}
+	var rec struct {
+		Log string `json:"log"`
+	}
+	if err := json.Unmarshal([]byte(line[i:]), &rec); err != nil || rec.Log == "" {
+		return line
+	}
+	return strings.TrimRight(rec.Log, "\n")
+}
 
 // governanceFilter is an io.Writer that keeps only the BNKGOV records of a log
 // stream and prints each as one formatted line. Partial writes are buffered

@@ -70,6 +70,7 @@ func (m *mockEKS) CreateCluster(_ context.Context, in *eks.CreateClusterInput, _
 	ca := "dGVzdC1jYQ==" // base64 "test-ca"
 	issuer := "https://oidc.eks.ap-southeast-2.amazonaws.com/id/TESTOIDC"
 	sgID := "sg-" + name
+	serviceCIDR := "172.20.0.0/16"
 	version := "1.30"
 	if in.Version != nil {
 		version = *in.Version
@@ -91,8 +92,9 @@ func (m *mockEKS) CreateCluster(_ context.Context, in *eks.CreateClusterInput, _
 			SubnetIds:              in.ResourcesVpcConfig.SubnetIds,
 			ClusterSecurityGroupId: &sgID,
 		},
-		Tags:    in.Tags,
-		Version: &version,
+		Tags:                    in.Tags,
+		Version:                 &version,
+		KubernetesNetworkConfig: &ekstypes.KubernetesNetworkConfigResponse{ServiceIpv4Cidr: &serviceCIDR},
 	}
 	m.clusters[name] = c
 	return &eks.CreateClusterOutput{Cluster: c}, nil

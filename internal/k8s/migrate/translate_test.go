@@ -537,3 +537,32 @@ func TestTranslate_NoEgressStillSetsEgressDefaults(t *testing.T) {
 		t.Errorf("warnings = %v", plan.Warnings)
 	}
 }
+
+// TestTranslate_NoStaticRoutesGetsDefault: a 2.3 cluster without any
+// F5SPKStaticRoute gets the fresh-path default route via the external VLAN
+// gateway, so TMM can answer clients beyond the external subnet.
+func TestTranslate_NoStaticRoutesGetsDefault(t *testing.T) {
+	inv := inventoryFromFixture(t, fixture23)
+	inv.StaticRoutes = nil
+	plan, err := Translate(inv, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes := slice(t, plan.Infra.Object, "spec", "staticRoutes")
+	if len(routes) != 1 {
+		t.Fatalf("staticRoutes = %v", routes)
+	}
+	def := entry(t, routes, "default")
+	if def["destinations"].([]any)[0] != "0.0.0.0/0" || def["nextHop"] != "10.0.10.1" {
+		t.Errorf("default route = %v", def)
+	}
+	if !strings.Contains(strings.Join(plan.Warnings, "\n"), "no F5SPKStaticRoute") {
+		t.Errorf("warnings = %v", plan.Warnings)
+	}
+	if got := firstHost("10.0.20.240", 24); got != "10.0.20.1" {
+		t.Errorf("firstHost = %q", got)
+	}
+	if got := firstHost("bad", 24); got != "" {
+		t.Errorf("firstHost(bad) = %q", got)
+	}
+}

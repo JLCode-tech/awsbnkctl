@@ -330,7 +330,11 @@ awsbnkctl logs tmm --governance -f          # every BNKGOV decision, live
 awsbnkctl logs tmm --mcp --since 10m        # only MCP JSON-RPC calls
 ```
 
-Reads the `f5-fluentbit` sidecar of the TMM pods and prints one line per
+Reads the TMM log stream: on BNK 2.4 the TMM pod's `f5-fluentbit` sidecar
+only forwards to `f5-toda-fluentd`, so `awsbnkctl up` (phase 24d) and
+`awsbnkctl bnk upgrade` turn on the `@type stdout` store in F5's
+`f5-toda-fluentd-custom` ConfigMap and `logs tmm` tails that pod. Plain
+`logs tmm` prints the TMM pod's lines; `--governance` prints one line per
 record:
 
 ```text
@@ -344,6 +348,11 @@ Renders (or `--apply`s) the objects that pin an MCP session to one backend on
 BNK 2.4: the passphrase `Secret`, an `F5BigPersistenceProfile` with
 `persistenceType: MODEL_CONTEXT_PROTOCOL` and `mcpEncryptionPassphrase.secretRef`,
 and one `NetPolicy` per `--listener` attaching the profile to the Gateway.
+BNK 2.4.0 programs an `F5BigPersistenceProfile` only in the controller's namespace
+(`f5-cne-system`) and a `NetPolicy` resolves the profile in its own namespace, so
+the Gateway, the NetPolicy and the profile have to live there for the session to
+pin; `doctor --backend k8s` and `forge scan` say so when a profile elsewhere
+stays unprogrammed.
 Pass `--irule` for every iRule the listener already carries so the single
 NetPolicy keeps both. `--type AGENT2AGENT` renders the A2A equivalent.
 

@@ -305,7 +305,11 @@ func (idx *Index) problems(acceptLegacy bool) []string {
 	}
 	for _, o := range idx.PersistenceProfiles {
 		if !o.Ready {
-			out = append(out, fmt.Sprintf("F5BigPersistenceProfile %s: %s", o.ID(), o.Detail))
+			msg := fmt.Sprintf("F5BigPersistenceProfile %s: %s", o.ID(), o.Detail)
+			if idx.Controller.Found && o.Namespace != "" && o.Namespace != idx.Controller.Namespace {
+				msg += fmt.Sprintf("; the BNK 2.4.0 controller reconciles F5BigPersistenceProfile only in its own namespace (%s) and a NetPolicy resolves the profile in its own namespace, so MCP session persistence needs the Gateway, NetPolicy and profile in %s", idx.Controller.Namespace, idx.Controller.Namespace)
+			}
+			out = append(out, msg)
 		}
 	}
 	return out

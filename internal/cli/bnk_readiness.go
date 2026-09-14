@@ -320,3 +320,20 @@ func cneIRSADoctorCheck(ctx context.Context, cs kubernetes.Interface, ns string)
 	c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("serviceaccount %s/%s has no eks.amazonaws.com/role-arn; the controller runs without a cloud provider — `awsbnkctl bnk upgrade` re-binds it (phase 21)", ns, saName)
 	return c
 }
+
+// tmmLogStreamDoctorCheck reports whether the f5-toda-fluentd stdout store
+// that carries the TMM log stream is on (k8s.TMMLogStreamEnabled). Detect
+// only: doctor never changes the cluster.
+func tmmLogStreamDoctorCheck(ctx context.Context, cs kubernetes.Interface) doctor.Check {
+	c := doctor.Check{Name: "bnk tmm log stream", BackendName: "k8s"}
+	on, err := k8s.TMMLogStreamEnabled(ctx, cs)
+	switch {
+	case err != nil:
+		c.Status, c.Detail = doctor.StatusWarning, "could not read "+k8s.TMMLogNamespace+"/"+k8s.TMMLogCustomConfigMap+": "+err.Error()
+	case !on:
+		c.Status, c.Detail = doctor.StatusWarning, "stdout store off in "+k8s.TMMLogNamespace+"/"+k8s.TMMLogCustomConfigMap+": `awsbnkctl logs tmm` and the governance collector see nothing — `awsbnkctl up` (phase 24d) or `awsbnkctl bnk upgrade` enable it"
+	default:
+		c.Status, c.Detail = doctor.StatusOK, "f5-toda-fluentd prints the TMM lines (`awsbnkctl logs tmm --governance`)"
+	}
+	return c
+}

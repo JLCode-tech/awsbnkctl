@@ -94,6 +94,7 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 	idx, scanErr := scanBNK(ctx, "", bnkscan.DefaultControllerNamespace, statusScanTimeout)
 	out = append(out, bnkDoctorChecks(idx, scanErr)...)
 	out = append(out, multusDoctorCheck(ctx, cs))
+	out = append(out, tmmLogStreamDoctorCheck(ctx, cs))
 	out = append(out, cneIRSADoctorCheck(ctx, cs, bnkscan.DefaultControllerNamespace))
 
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

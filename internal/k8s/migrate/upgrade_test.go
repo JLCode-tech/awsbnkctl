@@ -11,10 +11,13 @@ import (
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/release"
 	appsv1 "k8s.io/api/apps/v1"
+	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -408,5 +411,97 @@ func TestUpgrade_NeverRenderedFails(t *testing.T) {
 	}
 	if !res.ControllerRecreated {
 		t.Errorf("result = %+v", res)
+	}
+}
+
+type recordApplier struct{ applied []string }
+
+func (r *recordApplier) Apply(_ context.Context, obj *unstructured.Unstructured) error {
+	r.applied = append(r.applied, obj.GetKind()+"/"+obj.GetName())
+	return nil
+}
+
+const rbacSupplement = `
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: lab-cne-controller-endpointslices}
+rules:
+- apiGroups: [discovery.k8s.io]
+  resources: [endpointslices]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: lab-cne-controller-endpointslices}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: lab-cne-controller-endpointslices}
+subjects: [{kind: ServiceAccount, name: f5-cne-controller, namespace: f5-cne-system}]
+`
+
+// TestUpgrade_AppliesEndpointSliceRBAC: the fake API server denies the
+// SubjectAccessReview (zero status), so the supplement is applied and the
+// controller restarted; with the review allowed nothing is applied.
+func TestUpgrade_AppliesEndpointSliceRBAC(t *testing.T) {
+	helm := &fakeHelm{deployed: "v2.30.0-0.5.2"}
+	dyn := newFakeDynamic(t, cneReady(t), infraCRD())
+	cs := k8sfake.NewClientset(controllerObjects(true, 1)...)
+	cs.PrependReactor("create", "subjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.SubjectAccessReview{Status: authv1.SubjectAccessReviewStatus{Allowed: false}}, nil
+	})
+	applier := &recordApplier{}
+	var log bytes.Buffer
+	res, err := Upgrade(context.Background(), UpgradeDeps{Helm: helm, Dyn: dyn, K8s: cs, Applier: applier}, UpgradeOptions{
+		Timeout: 2 * time.Second, Poll: 5 * time.Millisecond, RenderWait: 20 * time.Millisecond,
+		ControllerRBAC: []byte(rbacSupplement), Log: &log,
+	})
+	if err != nil {
+		t.Fatalf("Upgrade: %v\n%s", err, log.String())
+	}
+	if !res.RBACApplied || strings.Join(applier.applied, ",") != "ClusterRole/lab-cne-controller-endpointslices,ClusterRoleBinding/lab-cne-controller-endpointslices" {
+		t.Errorf("rbac applied=%v objects=%v", res.RBACApplied, applier.applied)
+	}
+	dep, _ := cs.AppsV1().Deployments(DefaultInstanceNamespace).Get(context.Background(), ControllerDeployment, metav1.GetOptions{})
+	if dep.Spec.Template.Annotations["awsbnkctl.f5.com/restartedAt"] == "" {
+		t.Errorf("controller not restarted after the RBAC supplement")
+	}
+
+	// Allowed: nothing applied.
+	cs2 := k8sfake.NewClientset(controllerObjects(true, 1)...)
+	cs2.PrependReactor("create", "subjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.SubjectAccessReview{Status: authv1.SubjectAccessReviewStatus{Allowed: true}}, nil
+	})
+	applier2 := &recordApplier{}
+	res, err = Upgrade(context.Background(), UpgradeDeps{Helm: helm, Dyn: newFakeDynamic(t, cneReady(t), infraCRD()), K8s: cs2, Applier: applier2}, UpgradeOptions{
+		Timeout: 2 * time.Second, Poll: 5 * time.Millisecond, ControllerRBAC: []byte(rbacSupplement), Log: &log,
+	})
+	if err != nil || res.RBACApplied || len(applier2.applied) != 0 {
+		t.Errorf("allowed: err=%v applied=%v objs=%v", err, res.RBACApplied, applier2.applied)
+	}
+}
+
+// Step 2 carries the EKS service range into the TMM env as TMM_K8S_ROUTES
+// (the f5-tmm chart's add_k8s_routes) and leaves an operator-set value alone.
+func TestCNEInstancePatch_TMMK8sRoutes(t *testing.T) {
+	cne := &unstructured.Unstructured{Object: map[string]any{
+		"spec": map[string]any{"manifestVersion": "2.3.0-3.2598.3-0.0.170"},
+	}}
+	patch, changed := cneInstancePatch(cne, "2.4.0", "172.20.0.0/16")
+	if !changed {
+		t.Fatal("patch must report a change")
+	}
+	tmmEnv := patch["spec"].(map[string]any)["advanced"].(map[string]any)["tmm"].(map[string]any)["env"].([]any)
+	if got := envMap(tmmEnv)[render.TMMK8sRoutesEnv]; got != "172.20.0.0/16" {
+		t.Errorf("%s = %q, want 172.20.0.0/16", render.TMMK8sRoutesEnv, got)
+	}
+	// Existing value kept; no service range → no entry.
+	cne.Object["spec"].(map[string]any)["advanced"] = map[string]any{"tmm": map[string]any{"env": []any{map[string]any{"name": render.TMMK8sRoutesEnv, "value": "10.100.0.0/16,10.0.0.0/16"}}}}
+	patch, _ = cneInstancePatch(cne, "2.4.0", "172.20.0.0/16")
+	tmmEnv = patch["spec"].(map[string]any)["advanced"].(map[string]any)["tmm"].(map[string]any)["env"].([]any)
+	if got := envMap(tmmEnv)[render.TMMK8sRoutesEnv]; got != "10.100.0.0/16,10.0.0.0/16" {
+		t.Errorf("operator value overwritten: %q", got)
+	}
+	patch, _ = cneInstancePatch(&unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{}}}, "2.4.0", "")
+	tmmEnv = patch["spec"].(map[string]any)["advanced"].(map[string]any)["tmm"].(map[string]any)["env"].([]any)
+	if _, ok := envMap(tmmEnv)[render.TMMK8sRoutesEnv]; ok {
+		t.Errorf("empty service range must not add %s", render.TMMK8sRoutesEnv)
 	}
 }

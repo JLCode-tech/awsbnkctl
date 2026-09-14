@@ -18,6 +18,7 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
 )
 
@@ -399,7 +400,8 @@ func TestLogsGovernanceFlagsAndTMMComponent(t *testing.T) {
 	if comp == nil {
 		t.Fatal("tmm component missing")
 	}
-	if comp.Ns != bnkscan.DefaultControllerNamespace || comp.Selector != "app=f5-tmm" {
+	// BNK 2.4: the stream is the f5-toda-fluentd stdout store (k8s.EnableTMMLogStream).
+	if comp.Ns != k8s.TMMLogNamespace || comp.Selector != k8s.TMMLogPodSelector {
 		t.Errorf("tmm component = %+v", comp)
 	}
 }

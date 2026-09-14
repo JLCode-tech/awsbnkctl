@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 	"time"
 
+	authv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -16,10 +18,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"sigs.k8s.io/yaml"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
 	"github.com/JLCode-tech/awsbnkctl/internal/manifest"
 )
 
@@ -88,6 +92,18 @@ type UpgradeOptions struct {
 	// f5CsmQkview, which the 2.4 CRD rejects); deleting the CR makes FLO
 	// recreate it through the create path fresh installs use.
 	RenderWait time.Duration
+	// ControllerRBAC is the rendered EndpointSlice ClusterRole + binding
+	// (render.RenderCNEControllerRBAC). FLO 2.30 grants the controller only
+	// list/watch on endpointslices; without get no pool ever gets members, so
+	// every Gateway resets connections. Applied when the controller SA cannot
+	// get endpointslices, followed by a controller restart. Nil skips the step.
+	ControllerRBAC []byte
+	// ServiceCIDR is the cluster's Kubernetes service range (EKS serviceIpv4Cidr,
+	// state render.ServiceCIDRStateKey). Step 2 adds it to the TMM env as
+	// render.TMMK8sRoutesEnv (the f5-tmm chart's add_k8s_routes) so TMM keeps
+	// DNS, dSSM and log forwarding reachable over eth0 after the Infra CR gives
+	// it a default route. Empty leaves the env alone.
+	ServiceCIDR string
 	// Log receives progress lines.
 	Log io.Writer
 }
@@ -97,6 +113,8 @@ type UpgradeDeps struct {
 	Helm phases.HelmInstaller
 	Dyn  dynamic.Interface
 	K8s  kubernetes.Interface
+	// Applier server-side-applies the RBAC supplement (nil skips it).
+	Applier Applier
 }
 
 // UpgradeResult summarises what changed.
@@ -116,6 +134,12 @@ type UpgradeResult struct {
 	// ControllerRecreated is true when the CNEController CR had to be deleted
 	// so FLO would render the 2.4 controller env.
 	ControllerRecreated bool `json:"controllerRecreated"`
+	// RBACApplied is true when the EndpointSlice ClusterRole supplement had to
+	// be applied (and the controller restarted to pick it up).
+	RBACApplied bool `json:"rbacApplied"`
+	// LogStreamEnabled is true when the CLI had to turn on the f5-toda-fluentd
+	// stdout store (k8s.EnableTMMLogStream) after the rollout.
+	LogStreamEnabled bool `json:"logStreamEnabled"`
 	// Multus reports the Multus kubeconfig-token heal that ran before FLO
 	// was upgraded (nil without a typed client or on dry-run).
 	Multus *k8swait.MultusHealResult `json:"multus,omitempty"`
@@ -226,7 +250,7 @@ func Upgrade(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (*Upgra
 	}
 	res.CNEInstance = cne.GetName()
 	res.ManifestFrom = stringAt(cne.Object, "spec", "manifestVersion")
-	patch, changed := cneInstancePatch(cne, target)
+	patch, changed := cneInstancePatch(cne, target, opts.ServiceCIDR)
 	patchJSON, err := json.Marshal(patch)
 	if err != nil {
 		return res, fmt.Errorf("marshal CNEInstance patch: %w", err)
@@ -285,6 +309,16 @@ func Upgrade(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (*Upgra
 			return res, fmt.Errorf("deploy %s/%s rolled out but its pods do not carry %s=true", opts.Namespace, ControllerDeployment, UseGatewaySettingsEnv)
 		}
 		res.ControllerReady = true
+
+		// 3b: EndpointSlice RBAC. Same supplement awsbnkctl up applies in phase
+		// 23b; a cluster upgraded in place never ran it.
+		if len(opts.ControllerRBAC) > 0 && deps.Applier != nil {
+			applied, err := ensureControllerRBAC(ctx, deps, opts)
+			if err != nil {
+				return res, err
+			}
+			res.RBACApplied = applied
+		}
 	}
 	for _, cond := range []string{"CNEControllerAvailable", "F5TmmAvailable"} {
 		fmt.Fprintf(opts.Log, "[upgrade] step 3: waiting for CNEInstance %s %s=True\n", cne.GetName(), cond)
@@ -341,7 +375,9 @@ func findCNEInstance(ctx context.Context, dyn dynamic.Interface, ns, name string
 // cneInstancePatch builds the JSON merge patch for the target version and
 // the env flags. Env lists are replaced whole (merge-patch semantics), so the
 // existing entries are carried over. changed is false when nothing differs.
-func cneInstancePatch(cne *unstructured.Unstructured, target string) (map[string]any, bool) {
+// serviceCIDR, when set, becomes the TMM env render.TMMK8sRoutesEnv (kept when
+// already present).
+func cneInstancePatch(cne *unstructured.Unstructured, target, serviceCIDR string) (map[string]any, bool) {
 	changed := stringAt(cne.Object, "spec", "manifestVersion") != target
 
 	ctrlEnv, _, _ := unstructured.NestedSlice(cne.Object, "spec", "advanced", "cneController", "env")
@@ -349,7 +385,11 @@ func cneInstancePatch(cne *unstructured.Unstructured, target string) (map[string
 	ctrlEnv, c2 := upsertEnv(ctrlEnv, MaxActiveTMMEnv, maxActiveTMMDefault, false)
 	tmmEnv, _, _ := unstructured.NestedSlice(cne.Object, "spec", "advanced", "tmm", "env")
 	tmmEnv, c3 := upsertEnv(tmmEnv, zebosStateEnv, zebosStateLegacy, false)
-	changed = changed || c1 || c2 || c3
+	c4 := false
+	if serviceCIDR != "" {
+		tmmEnv, c4 = upsertEnv(tmmEnv, render.TMMK8sRoutesEnv, serviceCIDR, false)
+	}
+	changed = changed || c1 || c2 || c3 || c4
 
 	return map[string]any{
 		"spec": map[string]any{
@@ -562,4 +602,80 @@ func (p prefixWriter) Write(b []byte) (int, error) {
 		return 0, err
 	}
 	return p.w.Write(b)
+}
+
+// controllerCanGetEndpointSlices asks the API server whether the controller
+// Deployment's ServiceAccount may get discovery.k8s.io endpointslices.
+func controllerCanGetEndpointSlices(ctx context.Context, cs kubernetes.Interface, ns string) (bool, error) {
+	dep, err := cs.AppsV1().Deployments(ns).Get(ctx, ControllerDeployment, metav1.GetOptions{})
+	if err != nil {
+		return false, fmt.Errorf("get deploy %s/%s: %w", ns, ControllerDeployment, err)
+	}
+	sa := dep.Spec.Template.Spec.ServiceAccountName
+	if sa == "" {
+		sa = "default"
+	}
+	sar := &authv1.SubjectAccessReview{Spec: authv1.SubjectAccessReviewSpec{
+		User: "system:serviceaccount:" + ns + ":" + sa,
+		ResourceAttributes: &authv1.ResourceAttributes{
+			Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "get", Namespace: "default",
+		},
+	}}
+	resp, err := cs.AuthorizationV1().SubjectAccessReviews().Create(ctx, sar, metav1.CreateOptions{})
+	if err != nil {
+		return false, fmt.Errorf("SubjectAccessReview for %s: %w", sa, err)
+	}
+	return resp.Status.Allowed, nil
+}
+
+// ensureControllerRBAC applies opts.ControllerRBAC when the controller SA
+// cannot get endpointslices, then restarts the controller so its informers
+// re-list with the new permission. Returns whether anything was applied.
+func ensureControllerRBAC(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (bool, error) {
+	ok, err := controllerCanGetEndpointSlices(ctx, deps.K8s, opts.Namespace)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		fmt.Fprintf(opts.Log, "[upgrade] step 3: controller ServiceAccount can get endpointslices\n")
+		return false, nil
+	}
+	objs, err := decodeYAMLDocs(opts.ControllerRBAC)
+	if err != nil {
+		return false, fmt.Errorf("controller rbac: %w", err)
+	}
+	for _, obj := range objs {
+		if err := deps.Applier.Apply(ctx, obj); err != nil {
+			return false, err
+		}
+		fmt.Fprintf(opts.Log, "[upgrade] step 3: applied %s (EndpointSlice get for the controller; FLO 2.30 omits it)\n", describe(obj))
+	}
+	patch := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"awsbnkctl.f5.com/restartedAt":%q}}}}}`, time.Now().UTC().Format(time.RFC3339))
+	if _, err := deps.K8s.AppsV1().Deployments(opts.Namespace).Patch(ctx, ControllerDeployment, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{}); err != nil {
+		return true, fmt.Errorf("restart deploy %s/%s: %w", opts.Namespace, ControllerDeployment, err)
+	}
+	fmt.Fprintf(opts.Log, "[upgrade] step 3: restarted deploy %s/%s so the controller re-lists EndpointSlices\n", opts.Namespace, ControllerDeployment)
+	if err := k8swait.WaitForDeploymentReady(ctx, deps.K8s, opts.Namespace, ControllerDeployment, opts.Timeout); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+// decodeYAMLDocs splits a YAML stream into unstructured objects.
+func decodeYAMLDocs(data []byte) ([]*unstructured.Unstructured, error) {
+	var out []*unstructured.Unstructured
+	for _, doc := range strings.Split(string(data), "\n---") {
+		if strings.TrimSpace(doc) == "" {
+			continue
+		}
+		m := map[string]any{}
+		if err := yaml.Unmarshal([]byte(doc), &m); err != nil {
+			return nil, err
+		}
+		if len(m) == 0 {
+			continue
+		}
+		out = append(out, &unstructured.Unstructured{Object: m})
+	}
+	return out, nil
 }

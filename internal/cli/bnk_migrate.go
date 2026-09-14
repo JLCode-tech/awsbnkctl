@@ -16,6 +16,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 
+	"github.com/aws/aws-sdk-go-v2/service/eks"
+
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -42,14 +44,15 @@ var (
 
 // Flags of bnk upgrade.
 var (
-	flagBnkUpgradeConfig     string
-	flagBnkUpgradeKubeconfig string
-	flagBnkUpgradeManifest   string
-	flagBnkUpgradeFLO        string
-	flagBnkUpgradeNamespace  string
-	flagBnkUpgradeInstance   string
-	flagBnkUpgradeDryRun     bool
-	flagBnkUpgradeTimeout    time.Duration
+	flagBnkUpgradeConfig      string
+	flagBnkUpgradeKubeconfig  string
+	flagBnkUpgradeManifest    string
+	flagBnkUpgradeFLO         string
+	flagBnkUpgradeNamespace   string
+	flagBnkUpgradeInstance    string
+	flagBnkUpgradeDryRun      bool
+	flagBnkUpgradeTimeout     time.Duration
+	flagBnkUpgradeServiceCIDR string
 )
 
 // Client constructors, replaced by tests.
@@ -92,11 +95,15 @@ var (
 		if err != nil {
 			return migrate.UpgradeDeps{}, fmt.Errorf("dynamic client: %w", err)
 		}
+		applier, err := bnkMigrateApplier(kubeconfigPath)
+		if err != nil {
+			return migrate.UpgradeDeps{}, fmt.Errorf("applier: %w", err)
+		}
 		cs, err := kubernetes.NewForConfig(cfg)
 		if err != nil {
 			return migrate.UpgradeDeps{}, fmt.Errorf("clientset: %w", err)
 		}
-		return migrate.UpgradeDeps{Helm: helm, Dyn: dyn, K8s: cs}, nil
+		return migrate.UpgradeDeps{Helm: helm, Dyn: dyn, K8s: cs, Applier: applier}, nil
 	}
 )
 
@@ -175,6 +182,7 @@ func init() {
 	u.StringVar(&flagBnkUpgradeInstance, "instance", "", "CNEInstance name (default: the only one in the namespace)")
 	u.BoolVar(&flagBnkUpgradeDryRun, "dry-run", false, "print the three steps without changing anything")
 	u.DurationVar(&flagBnkUpgradeTimeout, "timeout", 20*time.Minute, "bound for each rollout wait")
+	u.StringVar(&flagBnkUpgradeServiceCIDR, "service-cidr", "", "Kubernetes service range TMM keeps reachable over eth0 (TMM env TMM_K8S_ROUTES); default: EKS_SERVICE_CIDR from state.env, else the EKS cluster's serviceIpv4Cidr")
 
 	bnkCmd.AddCommand(bnkMigrateCmd)
 	bnkCmd.AddCommand(bnkUpgradeCmd)
@@ -316,9 +324,21 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("bnk upgrade: %w", err)
 	}
+	rbacTmpl, err := k8smanifests.FS.ReadFile(phases.CNEControllerRBACYAMLPath)
+	if err != nil {
+		return fmt.Errorf("bnk upgrade: reading cne-controller rbac template: %w", err)
+	}
+	rbacYAML, err := render.RenderCNEControllerRBAC(rbacTmpl, cl)
+	if err != nil {
+		return fmt.Errorf("bnk upgrade: %w", err)
+	}
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	serviceCIDR, cidrNote := bnkUpgradeServiceCIDR(ctx, cl, flagBnkUpgradeServiceCIDR)
+	if cidrNote != "" {
+		fmt.Fprintf(os.Stderr, "[upgrade] %s\n", cidrNote)
 	}
 	res, err := migrate.Upgrade(ctx, deps, migrate.UpgradeOptions{
 		Namespace:       flagBnkUpgradeNamespace,
@@ -328,6 +348,8 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 		Values:          values,
 		DryRun:          flagBnkUpgradeDryRun,
 		Timeout:         flagBnkUpgradeTimeout,
+		ControllerRBAC:  rbacYAML,
+		ServiceCIDR:     serviceCIDR,
 		Log:             os.Stderr,
 	})
 	if err == nil && !flagBnkUpgradeDryRun {
@@ -339,6 +361,20 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 			}
 		} else {
 			fmt.Fprintln(os.Stderr, "[upgrade] step 4: no CNE_IRSA_ROLE_ARN in state.env (cluster not provisioned by awsbnkctl up); on AWS the 2.4 controller needs IRSA on the f5-cne-controller ServiceAccount to allocate Gateway VIPs")
+		}
+		// Step 5: the TMM log stream. FLO 2.30 gives the TMM fluentbit sidecar no
+		// stdout output; the f5-toda-fluentd stdout store carries the TMM lines
+		// (governance records included) for `logs tmm` and the collectors.
+		if err == nil && deps.K8s != nil {
+			switch changed, lerr := k8s.EnableTMMLogStream(ctx, deps.K8s, flagBnkUpgradeTimeout); {
+			case lerr != nil:
+				err = fmt.Errorf("TMM log stream: %w", lerr)
+			case changed:
+				res.LogStreamEnabled = true
+				fmt.Fprintf(os.Stderr, "[upgrade] step 5: enabled the stdout store in %s/%s and bounced the fluentd pod (TMM log stream for `awsbnkctl logs tmm`)\n", k8s.TMMLogNamespace, k8s.TMMLogCustomConfigMap)
+			default:
+				fmt.Fprintln(os.Stderr, "[upgrade] step 5: TMM log stream already on")
+			}
 		}
 		// The same readiness verdict awsbnkctl up, status, doctor and forge scan
 		// use. Informational here: right after an upgrade from 2.3 the Infra CR
@@ -414,4 +450,38 @@ func resolveClusterPath(sourcePath, path string) string {
 		return path
 	}
 	return filepath.Join(filepath.Dir(sourcePath), path)
+}
+
+// bnkUpgradeServiceCIDR resolves the Kubernetes service range step 2 writes
+// into the TMM env (render.TMMK8sRoutesEnv): the --service-cidr flag, else
+// state.env (phase 08 records it for clusters awsbnkctl provisioned), else
+// the EKS cluster's serviceIpv4Cidr. The note explains an empty result.
+var bnkUpgradeServiceCIDR = func(ctx context.Context, cl *intent.Cluster, flag string) (cidr, note string) {
+	if flag != "" {
+		return flag, ""
+	}
+	if st, err := state.Load(cl.StateDir()); err == nil && st.Get(render.ServiceCIDRStateKey) != "" {
+		return st.Get(render.ServiceCIDRStateKey), ""
+	}
+	if cidr, err := eksServiceCIDR(ctx, cl); err == nil && cidr != "" {
+		return cidr, fmt.Sprintf("service range %s read from the EKS cluster (TMM env %s)", cidr, render.TMMK8sRoutesEnv)
+	}
+	return "", fmt.Sprintf("no Kubernetes service range known (pass --service-cidr): without the TMM env %s the Infra default route takes DNS, dSSM and log forwarding off the cluster network inside the TMM pod", render.TMMK8sRoutesEnv)
+}
+
+// eksServiceCIDR reads the cluster's serviceIpv4Cidr from EKS (the source
+// phase 08 records for clusters awsbnkctl provisioned).
+var eksServiceCIDR = func(ctx context.Context, cl *intent.Cluster) (string, error) {
+	clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
+	if err != nil {
+		return "", err
+	}
+	out, err := clients.EKS.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: &cl.Metadata.Name})
+	if err != nil {
+		return "", err
+	}
+	if out.Cluster == nil || out.Cluster.KubernetesNetworkConfig == nil || out.Cluster.KubernetesNetworkConfig.ServiceIpv4Cidr == nil {
+		return "", fmt.Errorf("cluster %s: no serviceIpv4Cidr in DescribeCluster", cl.Metadata.Name)
+	}
+	return *out.Cluster.KubernetesNetworkConfig.ServiceIpv4Cidr, nil
 }

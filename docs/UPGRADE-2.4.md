@@ -1,4 +1,3 @@
-# Upgrading a 2.3.x cluster to BNK 2.4
 
 Two commands move a running BNK 2.3.x cluster to 2.4 without rebuilding it:
 
@@ -23,9 +22,11 @@ awsbnkctl bnk upgrade -f clusters/lab/cluster.yaml
 |---|---|
 | 0 | Multus check: a Multus pod older than a day, or a recent `FailedCreatePodSandBox ... Multus ... Unauthorized` event, means its kubeconfig token expired and no new pod can start; the DaemonSet is rolled first (`awsbnkctl doctor --backend k8s` reports the same as `multus kubeconfig token`) |
 | 1 | `helm upgrade f5-lifecycle-operator` to the chart paired with the target manifest (`v2.30.0-0.5.2` for `2.4.0`), values rendered from `cluster.yaml` as `up` renders them |
-| 2 | JSON merge patch on the CNEInstance: `spec.manifestVersion`, controller env `USE_GATEWAY_SETTINGS=true`; `MAX_ACTIVE_TMM_REPLICAS=32` and the TMM env `ZEBOS_STATE=legacy` are added when absent; every other env entry is kept |
+| 2 | JSON merge patch on the CNEInstance: `spec.manifestVersion`, controller env `USE_GATEWAY_SETTINGS=true`; `MAX_ACTIVE_TMM_REPLICAS=32` and the TMM env `ZEBOS_STATE=legacy` are added when absent; every other env entry is kept; the TMM env `TMM_K8S_ROUTES=<service range>` is added when absent (`--service-cidr`, else `EKS_SERVICE_CIDR` from `state.env`, else the EKS cluster) so DNS, dSSM (iRule `table`, persistence) and log forwarding stay reachable over eth0 once the `Infra` default route exists |
 | 3 | Wait for the `Infra` CRD, then for FLO to render `USE_GATEWAY_SETTINGS=true` into the `f5-cne-controller` Deployment (3 min, `--timeout` for the rest). FLO 2.30 cannot update a CNEController created by FLO 2.21 (its payload carries `null` for `spec.crdUpdater.resources` and `f5CsmQkview`, which the 2.4 CRD rejects), so when the env does not appear the CNEController CR is deleted and FLO recreates it and the Deployment through its create path (`controllerRecreated` in `-o json`; about a minute without the controller, TMM keeps forwarding). Then the Deployment rollout, the CNEInstance conditions `CNEControllerAvailable` and `F5TmmAvailable`, and Ready `app=f5-tmm` pods |
+| 3b | EndpointSlice RBAC: FLO 2.30 grants the controller only list/watch on `discovery.k8s.io` endpointslices; the 2.4 controller also gets them, and without `get` no pool ever has members (every connection to a VIP is reset). When a SubjectAccessReview for the controller SA denies `get`, the same ClusterRole + binding `awsbnkctl up` applies in phase 23b is applied and the controller restarted (`rbacApplied` in `-o json`) |
 | 4 | IRSA: the 2.3.x controller ran as `f5-cne-controller-<instance>-serviceaccount`, the 2.4 controller as `f5-cne-controller`. When `state.env` has `CNE_IRSA_ROLE_ARN` the trust policy is scoped to the new SA, the SA is annotated and the controller restarted (phase 21). Without it the controller logs `IRSA env not found`, has no cloud provider and cannot allocate Gateway VIPs; `doctor --backend k8s` reports it as `bnk controller IRSA` |
+| 5 | TMM log stream: the f5-fluentbit sidecar only forwards, so the `@type stdout` store in `f5-toda-fluentd-custom` is enabled and the fluentd pod bounced once; `awsbnkctl logs tmm --governance` and the governance collector read that stream (`logStreamEnabled` in `-o json`) |
 
 `--manifest-version` defaults to `2.4.0`. The string F5's docs print,
 `2.4.0-3.3175.0+0.0.380`, is accepted and rewritten to `2.4.0`: that is the tag
@@ -59,6 +60,7 @@ model has no field for. Read the warnings before applying.
 | `Vxlan` | `Infra` network (`type: vxlan`) with a VTEP pool |
 | `F5SPKSnatpool` | `Infra` IPAM pool `<name>-snat`, referenced by `GatewaySettings.sourceNATPools` |
 | `F5SPKEgress` | `Infra` `egressDefaults` (tunnel subnet and VLAN), one `GatewaySettings` with `egressConfigs` and one `EgressGateway` per `pseudoCNIConfig.namespaces` entry; `snatType` becomes `sourceNATConfig` (`Automap`, `None`, `Pool`); `firewallEnforcedPolicy` becomes a `SecPolicy` targeting the `EgressGateway` |
+| none | A cluster without any `F5SPKEgress` still gets `Infra` `egressDefaults` (`192.168.0.0/16`, port 4789, the internal VLAN); without the block the controller defaults the tunnel subnet to `10.0.0.0/16`, which overlaps the VPC self-IP pools and leaves the Infra `Programmed=False` (`EgressDefaultsSubnetConflict`) |
 | `F5BnkGateway` + `Gateway` | a listener IPAM pool in `Infra`, a `GatewaySettings` per BNK Gateway (`ipamRefs`, external `networkRefs`, `Automap`), and a server-side-apply patch adding `spec.infrastructure.parametersRef` to the Gateway; a Gateway without an `F5BnkGateway` gets a pool from its static address |
 | `BNKSecPolicy`, `BNKNetPolicy` | `SecPolicy`, `NetPolicy` in `gateway.k8s.f5.com/v1alpha1`, same name, namespace, labels and spec |
 

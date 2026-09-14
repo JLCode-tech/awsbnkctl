@@ -155,3 +155,31 @@ func TestScanMCP(t *testing.T) {
 		t.Errorf("eps = %+v", eps)
 	}
 }
+
+// A persistence profile outside the controller namespace that never gets
+// Programmed is reported with the 2.4.0 namespace rule, so the operator
+// knows why a NetPolicy in an application namespace cannot resolve it.
+func TestReadiness_PersistenceProfileNamespaceHint(t *testing.T) {
+	// Drop the profile's Programmed condition.
+	fixture := strings.Replace(fixture24, "mcpEncryptionPassphrase: {secretRef: {name: mcp-session-passphrase}}\nstatus:\n  conditions:\n  - {type: Programmed, status: \"True\"}", "mcpEncryptionPassphrase: {secretRef: {name: mcp-session-passphrase}}\nstatus:\n  conditions:\n  - {type: Accepted, status: \"True\"}", 1)
+	if fixture == fixture24 {
+		t.Fatal("fixture edit did not apply")
+	}
+	dyn := newFakeDynamic(t, fixture)
+	rd, _, err := CheckReadiness(context.Background(), dyn, k8sfake.NewClientset(controllerDeployment(1)), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rd.Ready {
+		t.Fatalf("an unprogrammed profile must fail readiness: %+v", rd)
+	}
+	var hit bool
+	for _, p := range rd.Problems {
+		if strings.Contains(p, "F5BigPersistenceProfile default/mcp-session") && strings.Contains(p, "only in its own namespace ("+DefaultControllerNamespace+")") {
+			hit = true
+		}
+	}
+	if !hit {
+		t.Errorf("problems lack the namespace hint: %v", rd.Problems)
+	}
+}
