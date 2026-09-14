@@ -303,10 +303,32 @@ func runForgeRegister(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("  link:      %s\n", forge.LinkPath(t.linkDir))
 	fmt.Printf("  mcp:       %s\n", res.ForgeURL)
 	if flagForgeScan {
-		fmt.Printf("  scan:      %s\n", oneLine(res.ScanOutput))
-		fmt.Printf("  health:    %s\n", oneLine(res.HealthCheck))
+		fmt.Printf("  scan:      %s\n", forgeScanSummary(res.ScanOutput))
+		fmt.Printf("  health:    %s\n", forgeHealthSummary(res.HealthCheck))
+		fmt.Printf("  next:      awsbnkctl forge scan --config <cluster.yaml> --remote  (2.4 readiness + MCP endpoints)\n")
 	}
 	return nil
+}
+
+// forgeScanSummary renders scan_cluster output as one line: the typed summary
+// (BNK status, API generation, versions) when it parses, the raw text otherwise.
+func forgeScanSummary(raw string) string {
+	if res, err := forge.ParseScanResult(raw); err == nil {
+		s := res.Summary()
+		if res.Generation() == "2.3" {
+			s += "  (2.3 API: run awsbnkctl bnk upgrade before Forge can manage 2.4 resources)"
+		}
+		return s
+	}
+	return oneLine(raw)
+}
+
+// forgeHealthSummary renders bnk_health output as one line.
+func forgeHealthSummary(raw string) string {
+	if res, err := forge.ParseHealthResult(raw); err == nil && res.Overall != "" {
+		return res.Summary()
+	}
+	return oneLine(raw)
 }
 
 func runForgeStatus(cmd *cobra.Command, _ []string) error {

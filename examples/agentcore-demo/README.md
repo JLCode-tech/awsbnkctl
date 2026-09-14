@@ -71,10 +71,11 @@ one before it.
 | 2 | `awsbnkctl k apply -f mcp-tool/` | the directory, not a file: Kustomize generates the ConfigMap and the bearer-token Secret |
 | 3 | `awsbnkctl k apply --config cluster.yaml -f gateway-deployment.yaml` | the `GatewaySettings`, the Gateway with listeners on 80 and 443 and both `HTTPRoute`s; `--config` fills in the GatewayClass name from state |
 | 4 | `scripts/setup-agentcore-network.sh` | reads the VIP off the live Gateway; creates the agent security group, SG-to-SG ingress and the private Route 53 zone |
-| 5 | `awsbnkctl k apply -f mcp-security-policy.yaml` | the rate-limit iRule and firewall attach to listeners that must already exist |
-| 6 | `awsbnkctl k apply -f mcp-observability.yaml` | Loki and the log collector in `llm-egress` |
-| 7 | `cd agent && npx agentcore deploy --target demo-v2` | the AgentCore runtime, VPC mode, in the private subnets |
-| 8 | `scripts/setup-stranger.sh` (optional) | an EC2 caller with one NIC inside `10.0.0.0/16` and one outside, so the firewall's reject branch can be shown |
+| 5 | `awsbnkctl k apply -f mcp-persistence.yaml` | the passphrase Secret and the `MODEL_CONTEXT_PROTOCOL` persistence profile the NetPolicies reference |
+| 6 | `awsbnkctl k apply -f mcp-security-policy.yaml` | the rate-limit iRule, persistence and firewall attach to listeners that must already exist |
+| 7 | `awsbnkctl k apply -f mcp-observability.yaml` | Loki and the log collector in `llm-egress` |
+| 8 | `cd agent && npx agentcore deploy --target demo-v2` | the AgentCore runtime, VPC mode, in the private subnets |
+| 9 | `scripts/setup-stranger.sh` (optional) | an EC2 caller with one NIC inside `10.0.0.0/16` and one outside, so the firewall's reject branch can be shown |
 
 ## What you should see
 
@@ -117,8 +118,15 @@ for i in $(seq 1 12); do curl -s -o /dev/null -w '%{http_code} ' -X POST http://
 
 The decisions, in Forge: **Gateway Topology** shows the iRule under each
 listener and the firewall under Security Policies; **LLM Observability** for
-cluster `bnk-agentcore-demo` shows request counts, the 429s and latency. Without
-Forge, query Loki directly:
+cluster `bnk-agentcore-demo` shows request counts, the 429s and latency. Every
+record also carries `rpc_method`, `tool`, `session` and `transport`.
+
+From the CLI, `awsbnkctl forge scan -f cluster.yaml` lists the 2.4 readiness
+checks and the MCP endpoint with its persistence profile and iRule;
+`--register-targets` writes the endpoint into Forge's Target Catalog and
+`--probe` records its tools. `awsbnkctl forge telemetry` (after
+`awsbnkctl k port-forward -n llm-egress svc/loki 3100:3100`) checks every
+record against the schema the panel reads. Without Forge, query Loki directly:
 
 ```bash
 kubectl run lq --rm -i --restart=Never -n llm-egress --image=curlimages/curl:8.8.0 -- \
@@ -170,7 +178,8 @@ awsbnkctl down -f examples/agentcore-demo/cluster.yaml --yes
 | `cluster.yaml` | the awsbnkctl intent |
 | `mcp-tool/` | the MCP finance tool: `mcp-server.py` and the Kustomize base that generates its ConfigMap and token Secret |
 | `gateway-deployment.yaml` | the `GatewaySettings`, the BNK `Gateway` (80 and 443) and both `HTTPRoute`s |
-| `mcp-security-policy.yaml` | rate-limit iRule, per-listener `NetPolicy`, `F5BigFwPolicy`, `SecPolicy` |
+| `mcp-persistence.yaml` | passphrase `Secret` and the `F5BigPersistenceProfile` (`MODEL_CONTEXT_PROTOCOL`) that pins each MCP session to one pod |
+| `mcp-security-policy.yaml` | rate-limit iRule, per-listener `NetPolicy` (iRule + persistence profile), `F5BigFwPolicy`, `SecPolicy` |
 | `mcp-observability.yaml` | `llm-egress` namespace, Loki, the `bnkgov-collector` DaemonSet |
 | `mcp-bedrock-token-shipper.yaml` | IRSA ServiceAccount and the shipper that copies Bedrock token counts into Loki |
 | `bgp-route-server.yaml` | optional BGP stanza (a ZebOS ConfigMap) for Route Server peering |

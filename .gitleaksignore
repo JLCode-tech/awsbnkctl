@@ -33,3 +33,6 @@ b538685cbf69d424fd1e897d2873841791775c47:internal/aws/phases/phase17f_bigip_onbo
 c769e3b5008faeb5067a377cf44f98221a618826:internal/jumphost/staging_test.go:private-key:316
 b538685cbf69d424fd1e897d2873841791775c47:internal/aws/phases/mock_ec2_test.go:private-key:452
 b538685cbf69d424fd1e897d2873841791775c47:internal/aws/phases/phase17f_bigip_onboard_test.go:generic-api-key:109
+# mcpsession.go names the CRD spec field (mcpEncryptionPassphrase) that holds a
+# secretRef; the string is a field name, not a credential. Variable renamed later.
+344aca9bdb699db4cc93d9105fa9c11ddbeb9b46:internal/k8s/mcpsession/mcpsession.go:generic-api-key:159

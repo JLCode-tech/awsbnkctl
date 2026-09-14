@@ -46,10 +46,10 @@ internal/
 ├── doctor/              # Prerequisite checks behind `awsbnkctl doctor`
 ├── embedded/            # Agentic-mode scaffolding (AGENTS.md, personas/, journal/) shipped in the binary
 ├── exec/                # Execution backends: local, docker, k8s, ssh:<target>
-├── forge/               # BNK Forge client (MCP preferred, REST fallback) — register/unregister/benchmark
+├── forge/               # BNK Forge client (MCP preferred, REST fallback) — register/unregister/benchmark, typed scan/health, MCP target registration, governance telemetry schema
 ├── intent/              # cluster.yaml schema (v1), strict loader, validation, pinned defaults (K8s floor, FLO, cert-manager)
 ├── jumphost/            # SSH-via-EICE probe utilities for the test jumphost
-├── k8s/                 # Embedded client-go wrapper (k verbs); manifests/ (cert-manager YAML) and render/ (CNEInstance, Infra etc.)
+├── k8s/                 # Embedded client-go wrapper (k verbs); manifests/ (cert-manager YAML), render/ (CNEInstance, Infra etc.), migrate/ (2.3→2.4), bnkscan/ (2.4 readiness index + MCP discovery), mcpsession/ (MODEL_CONTEXT_PROTOCOL persistence)
 ├── manifest/            # F5 release-manifest (BOM) fetch/probe; DefaultManifestVersion lives here
 ├── remote/              # Embedded SSH client and target plumbing
 ├── scenarios/           # 15 end-to-end validation scenarios (HTTP, L4, gRPC, AI, CWC, core files)
@@ -67,7 +67,7 @@ There is no `internal/bnk` and no `internal/version` package.
 - `awsbnkctl agent init` — Scaffolds `AGENTS.md`, `personas/`, and `journal/`.
 - `awsbnkctl agent <cli>` — Prints the invocation to launch one of `claude`, `gemini`, `aider`, `openai`, `pi`, `opencode` against the workspace (no other names are accepted).
 - `awsbnkctl journal {add, list, report}` — Maintains an append-only markdown log of operational decisions and execution events.
-- There is **no** `awsbnkctl mcp` command and no embedded MCP server. The binary is only an MCP *client* to BNK Forge (`internal/forge`, used by `forge register`, `up --register-with-forge`, and `benchmark`).
+- There is **no** `awsbnkctl mcp` command and no embedded MCP server. The binary is only an MCP *client*: to BNK Forge (`internal/forge`, used by `forge register`, `forge scan`, `up --register-with-forge`, and `benchmark`) and, with `forge scan --probe`, to the MCP tool servers behind BNK Gateways (`internal/k8s/bnkscan`).
 
 ## Coding Standards & Rules
 1. **File and directory permissions**: Keep directory permissions `0o750` and file write permissions `0o600`.

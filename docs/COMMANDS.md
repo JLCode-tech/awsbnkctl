@@ -57,6 +57,7 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `bnk resync` | Force the F5 cne-controller to re-resolve stale TMM pool members |
 | `bnk migrate-2.4` | Translate the 2.3.x CRs of a running cluster into the 2.4 Infra / GatewaySettings model (`--dry-run` prints the manifests, `--apply` server-side-applies them; `-f`, `--kubeconfig`, `-n`, `--gateway-class`) |
 | `bnk upgrade -f <config>` | In-place upgrade: helm upgrade FLO, patch the CNEInstance (`manifestVersion`, `USE_GATEWAY_SETTINGS`), watch the controller and TMM come back (`--manifest-version`, `--flo-version`, `--dry-run`) |
+| `bnk mcp-session` | Render or `--apply` an `F5BigPersistenceProfile` (`MODEL_CONTEXT_PROTOCOL` or `AGENT2AGENT`), its passphrase `Secret` and the `NetPolicy` per listener that pins MCP sessions to one backend (`--name`, `--gateway`, `--listener`, `--irule`, `--passphrase-env`) |
 | `manifest probe [version]` | Pull a BNK release manifest from `repo.f5.com` with the helm SDK (no host helm) and print its charts and images (`--all`, `--far <path>`) |
 
 ## AI benchmarking and BNK Forge
@@ -73,6 +74,8 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `forge status` | Show this workspace's Forge registration state |
 | `forge unregister` | Remove this workspace's Forge registration |
 | `forge cleanup` | Delete all awsbnkctl benchmark artifacts from Forge for a workspace |
+| `forge scan` | Index the cluster's BNK 2.4 resources, check readiness (Infra, Gateway, controller) and discover MCP endpoints; `--probe`, `--register-targets`, `--remote`, `-o json` |
+| `forge telemetry` | Validate the MCP governance records in Loki against the schema Forge's LLM Observability panel reads; `--loki-url`, `--since`, `--file`, `--show` |
 | `forge benchmark` | Alias for `benchmark run` |
 
 `awsbnkctl up --register-with-forge` registers after a successful apply; `down`

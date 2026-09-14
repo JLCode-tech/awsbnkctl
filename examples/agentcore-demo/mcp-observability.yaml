@@ -10,6 +10,9 @@
 # Namespace, service name and port are NOT arbitrary: Forge's LLM Observability
 # panel queries `http://loki.llm-egress:3100` and expects Loki streams labelled
 # `job="llm-gateway"` with `model` and `status`. Deviate and the panel is empty.
+# `action` and `rpc_method` are added as labels too (four values each) so the
+# 429 throttling and tools/call rates can be selected without parsing lines;
+# `awsbnkctl forge telemetry` reads the same stream and checks every record.
 #
 # Shape borrowed from the bnk-forge-modules catalog: `app/demo-observability`
 # (Loki 3.0) and `modules/live-observability-collector` (Fluent Bit DaemonSet
@@ -200,7 +203,7 @@ data:
         Host         loki
         Port         3100
         labels       job=llm-gateway
-        label_keys   $model,$status
+        label_keys   $model,$status,$action,$rpc_method
         line_format  json
   parsers.conf: |
     # containerd/CRI log line: <ts> <stream> <flags> <message>
