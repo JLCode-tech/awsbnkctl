@@ -6,7 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/portforward"
@@ -62,6 +68,13 @@ func (o *PortForwardOptions) Run(ctx context.Context) error {
 	if ns == "" {
 		ns = "default"
 	}
+	podName, ports, err := ResolvePortForwardTarget(ctx, cs, ns, o.PodName, o.Ports)
+	if err != nil {
+		return err
+	}
+	if podName != o.PodName {
+		fmt.Fprintf(o.IOStreams.ErrOut, "Forwarding to pod %s/%s for %s\n", ns, podName, o.PodName)
+	}
 
 	roundTripper, upgrader, err := spdy.RoundTripperFor(cfg)
 	if err != nil {
@@ -71,7 +84,7 @@ func (o *PortForwardOptions) Run(ctx context.Context) error {
 	req := cs.CoreV1().RESTClient().
 		Post().
 		Resource("pods").
-		Name(o.PodName).
+		Name(podName).
 		Namespace(ns).
 		SubResource("portforward")
 
@@ -97,9 +110,90 @@ func (o *PortForwardOptions) Run(ctx context.Context) error {
 		}
 	}()
 
-	fwd, err := portforward.New(dialer, o.Ports, stopCh, readyCh, o.IOStreams.Out, o.IOStreams.ErrOut)
+	fwd, err := portforward.New(dialer, ports, stopCh, readyCh, o.IOStreams.Out, o.IOStreams.ErrOut)
 	if err != nil {
 		return fmt.Errorf("creating port forwarder: %w", err)
 	}
 	return fwd.ForwardPorts()
+}
+
+// ResolvePortForwardTarget turns a kubectl-style target into the pod the
+// tunnel must dial. "pod/<name>" and a bare name are the pod itself;
+// "svc/<name>" or "service/<name>" picks a Ready pod behind the Service and
+// rewrites each remote port that names a Service port to that port's numeric
+// targetPort, as kubectl port-forward does.
+func ResolvePortForwardTarget(ctx context.Context, cs kubernetes.Interface, ns, target string, ports []string) (string, []string, error) {
+	switch {
+	case strings.HasPrefix(target, "pod/"):
+		return strings.TrimPrefix(target, "pod/"), ports, nil
+	case strings.HasPrefix(target, "svc/"), strings.HasPrefix(target, "service/"):
+	default:
+		return target, ports, nil
+	}
+	name := target[strings.Index(target, "/")+1:]
+	svc, err := cs.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return "", nil, fmt.Errorf("service %s/%s: %w", ns, name, err)
+	}
+	if len(svc.Spec.Selector) == 0 {
+		return "", nil, fmt.Errorf("service %s/%s has no selector; port-forward needs a pod-backed Service", ns, name)
+	}
+	pods, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: labels.SelectorFromSet(svc.Spec.Selector).String()})
+	if err != nil {
+		return "", nil, fmt.Errorf("list pods for service %s/%s: %w", ns, name, err)
+	}
+	var pick *corev1.Pod
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.Status.Phase != corev1.PodRunning || p.DeletionTimestamp != nil {
+			continue
+		}
+		for _, c := range p.Status.Conditions {
+			if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+				pick = p
+			}
+		}
+		if pick != nil {
+			break
+		}
+	}
+	if pick == nil {
+		return "", nil, fmt.Errorf("service %s/%s has no Ready pod", ns, name)
+	}
+	mapped := make([]string, len(ports))
+	for i, spec := range ports {
+		local, remote := spec, spec
+		if j := strings.Index(spec, ":"); j >= 0 {
+			local, remote = spec[:j], spec[j+1:]
+		}
+		for _, sp := range svc.Spec.Ports {
+			if strconv.Itoa(int(sp.Port)) == remote || sp.Name == remote {
+				if tp := sp.TargetPort; tp.Type == intstr.Int && tp.IntVal > 0 {
+					remote = strconv.Itoa(int(tp.IntVal))
+				} else if tp.Type == intstr.String && tp.StrVal != "" {
+					remote = containerPortByName(pick, tp.StrVal, remote)
+				}
+				break
+			}
+		}
+		if strings.Contains(spec, ":") {
+			mapped[i] = local + ":" + remote
+		} else {
+			mapped[i] = spec + ":" + remote
+		}
+	}
+	return pick.Name, mapped, nil
+}
+
+// containerPortByName resolves a named container port on pod; fallback when
+// absent.
+func containerPortByName(pod *corev1.Pod, name, fallback string) string {
+	for _, c := range pod.Spec.Containers {
+		for _, p := range c.Ports {
+			if p.Name == name {
+				return strconv.Itoa(int(p.ContainerPort))
+			}
+		}
+	}
+	return fallback
 }

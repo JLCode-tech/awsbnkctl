@@ -112,7 +112,7 @@ python3 external-agent.py --tool get_account_balance --account ACC-1001 --token 
 python3 external-agent.py --prompt "forecast NVDA" --token ""                       # exit 1, 401
 for i in $(seq 1 12); do curl -s -o /dev/null -w '%{http_code} ' -X POST http://10.0.10.150/v1/mcp/forecast \
   -H 'Host: bnk-ingress.bnk-demo.internal' -H 'Authorization: Bearer demo-external-token-4b9e2d' \
-  -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"forecast","arguments":{"symbol":"NVDA"}}}'; done
+  -H 'Content-Type: application/json' -H 'Accept: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"forecast","arguments":{"symbol":"NVDA"}}}'; done
 # → 200 ×10 then 429 429
 ```
 

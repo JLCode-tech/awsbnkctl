@@ -51,7 +51,7 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `k exec` | Exec into a pod via SPDY |
 | `k get` | Get one or more resources |
 | `k logs` | Stream pod logs |
-| `k port-forward` | Forward local ports to a pod via SPDY |
+| `k port-forward` | Forward local ports to a pod, or to a Ready pod behind `svc/<name>`, via SPDY |
 | `get <resource> [name]` | Top-level alias of `k get` (`-n`, `-A`, `-l`, `-o yaml|json|wide|name|jsonpath=…`) |
 | `logs <component>` | Tail logs for a BNK component (`flo`, `cis`, `cert-manager`, `cneinstance`, `tmm`); `-f`, `--since`, `--tail`, `--previous`, `-c`; `--governance` / `--mcp` print only BNKGOV records as `[GOV] <status> <rpc_method> tool= session= latency= action=` |
 | `bnk heal` | Repair the cluster plumbing `up` (phase 12) and `bnk upgrade` (step 0) also fix, on 2.3 or 2.4: adds `--cleanup-config-on-exit=true` to the Multus DaemonSet so its kubeconfig follows the service-account token, rolls it when a pod hit `Multus ... Unauthorized` (`-f`, `--kubeconfig`, `--dry-run`, `-o json`) |
