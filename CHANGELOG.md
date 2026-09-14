@@ -4,6 +4,14 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [2.2.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.1.0...v2.2.0) (2026-09-14)
+
+
+### Features
+
+* **examples:** port every example to the BNK 2.4 Gateway shape ([21676f7](https://github.com/JLCode-tech/awsbnkctl/commit/21676f7432e6860f8c6f10a1788400ee30ff4531))
+* **examples:** port every example to the BNK 2.4 Gateway shape ([00666a7](https://github.com/JLCode-tech/awsbnkctl/commit/00666a75dded54b3a216b85228bfd84e94b403b4))
+
 ## [2.1.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.0.0...v2.1.0) (2026-09-12)
 
 
