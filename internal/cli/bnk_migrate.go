@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s/bnkscan"
@@ -60,6 +61,23 @@ var (
 			return nil, err
 		}
 		return migrate.NewDynamicApplier(cfg)
+	}
+	// bnkUpgradeIRSA re-binds the CNE controller IRSA role after the rollout
+	// (phase 21): the 2.3.x controller ran as
+	// f5-cne-controller-<instance>-serviceaccount, the 2.4 controller as
+	// f5-cne-controller, so the trust policy and the SA annotation must move or
+	// the controller starts without a cloud provider ("IRSA env not found") and
+	// cannot allocate Gateway VIPs. Only for clusters awsbnkctl provisioned
+	// (CNE_IRSA_ROLE_ARN in state.env).
+	bnkUpgradeIRSA = func(ctx context.Context, cl *intent.Cluster, st *state.State, kubeconfigPath string) error {
+		clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
+		if err != nil {
+			return fmt.Errorf("aws clients: %w", err)
+		}
+		if err := clients.AttachK8s(kubeconfigPath); err != nil {
+			return err
+		}
+		return phases.Phase21IRSASA(ctx, cl, st, clients, false)
 	}
 	bnkUpgradeDeps = func(kubeconfigPath, farKeyB64 string) (migrate.UpgradeDeps, error) {
 		helm, err := phases.NewHelmInstaller(kubeconfigPath, farKeyB64)
@@ -313,10 +331,22 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 		Log:             os.Stderr,
 	})
 	if err == nil && !flagBnkUpgradeDryRun {
+		// Step 4: IRSA. The controller SA changed name between 2.3.x and 2.4.
+		if st, lerr := state.Load(cl.StateDir()); lerr == nil && st.Get("CNE_IRSA_ROLE_ARN") != "" {
+			fmt.Fprintf(os.Stderr, "[upgrade] step 4: re-binding IRSA role %s to the controller ServiceAccount (phase 21)\n", st.Get("CNE_IRSA_ROLE_NAME"))
+			if ierr := bnkUpgradeIRSA(ctx, cl, st, kubeconfigPath); ierr != nil {
+				err = fmt.Errorf("IRSA re-bind: %w", ierr)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "[upgrade] step 4: no CNE_IRSA_ROLE_ARN in state.env (cluster not provisioned by awsbnkctl up); on AWS the 2.4 controller needs IRSA on the f5-cne-controller ServiceAccount to allocate Gateway VIPs")
+		}
 		// The same readiness verdict awsbnkctl up, status, doctor and forge scan
 		// use. Informational here: right after an upgrade from 2.3 the Infra CR
 		// does not exist yet, and migrate-2.4 is the next step.
 		res.Readiness = upgradeReadiness(ctx, deps, flagBnkUpgradeNamespace, os.Stderr)
+	}
+	if err == nil && flagBnkUpgradeDryRun {
+		fmt.Fprintln(os.Stderr, "[upgrade] step 4: dry-run: would re-bind the CNE controller IRSA role to the f5-cne-controller ServiceAccount (phase 21) when CNE_IRSA_ROLE_ARN is in state.env")
 	}
 	if res != nil && flagOutput == "json" {
 		if encErr := json.NewEncoder(cmd.OutOrStdout()).Encode(res); encErr != nil && err == nil {

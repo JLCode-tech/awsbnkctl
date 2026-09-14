@@ -17,6 +17,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/JLCode-tech/awsbnkctl/internal/doctor"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -288,5 +290,33 @@ func multusDoctorCheck(ctx context.Context, cs kubernetes.Interface) doctor.Chec
 	default:
 		c.Status, c.Detail = doctor.StatusOK, "pods younger than "+k8s.MultusMaxPodAge.String()+", no Unauthorized sandbox events"
 	}
+	return c
+}
+
+// cneIRSADoctorCheck reports whether the ServiceAccount the f5-cne-controller
+// Deployment runs as carries the IRSA role annotation. Without it the 2.4
+// controller starts with no cloud provider and cannot allocate Gateway VIPs
+// on AWS (seen live after a 2.3.0 -> 2.4 upgrade, where the SA name changed).
+func cneIRSADoctorCheck(ctx context.Context, cs kubernetes.Interface, ns string) doctor.Check {
+	c := doctor.Check{Name: "bnk controller IRSA", BackendName: "k8s"}
+	dep, err := cs.AppsV1().Deployments(ns).Get(ctx, bnkscan.DefaultControllerName, metav1.GetOptions{})
+	if err != nil {
+		c.Status, c.Detail = doctor.StatusOK, fmt.Sprintf("deployment %s/%s not found; skipped", ns, bnkscan.DefaultControllerName)
+		return c
+	}
+	saName := dep.Spec.Template.Spec.ServiceAccountName
+	if saName == "" {
+		saName = "default"
+	}
+	sa, err := cs.CoreV1().ServiceAccounts(ns).Get(ctx, saName, metav1.GetOptions{})
+	if err != nil {
+		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("serviceaccount %s/%s: %v", ns, saName, err)
+		return c
+	}
+	if arn := sa.Annotations["eks.amazonaws.com/role-arn"]; arn != "" {
+		c.Status, c.Detail = doctor.StatusOK, saName+" → "+arn
+		return c
+	}
+	c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("serviceaccount %s/%s has no eks.amazonaws.com/role-arn; the controller runs without a cloud provider — `awsbnkctl bnk upgrade` re-binds it (phase 21)", ns, saName)
 	return c
 }
