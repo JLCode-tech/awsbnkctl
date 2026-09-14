@@ -215,3 +215,91 @@ AWS_PROFILE=<your-profile> awsbnkctl benchmark run \
   --scenarios latency,throughput
 ```
 
+
+---
+
+## 8. BNK 2.4 Scan, MCP Targets and Governance Telemetry
+
+Forge's `scan_cluster` and `bnk_health` tools take a cluster ID and index the
+cluster server-side. `awsbnkctl` reads the CRD groups Forge saw to tell a 2.3
+cluster (`gateway.k8s.f5net.com`) from a 2.4 one (`gateway.k8s.f5.com`), and
+reads the cluster directly for what Forge does not index yet.
+
+### `awsbnkctl forge scan`
+
+```bash
+awsbnkctl forge scan -f clusters/<name>/cluster.yaml             # readiness + MCP endpoints
+awsbnkctl forge scan -f ... --remote                              # plus Forge's own scan_cluster / bnk_health
+awsbnkctl forge scan -f ... --probe --bearer-env MCP_TOKEN        # tools/list on every endpoint
+awsbnkctl forge scan -f ... --register-targets                    # write endpoints to the Target Catalog
+awsbnkctl forge scan -f ... -o json
+```
+
+| Check | Passes when |
+|---|---|
+| API generation | `gateway.k8s.f5.com` served (`2.4`); `mixed` while 2.3 CRDs remain; `2.3` fails with a pointer to `bnk upgrade` |
+| `Infra` | `Programmed=True` |
+| `Gateway` (BNK class) | `Accepted=True` and `Programmed=True` |
+| `f5-cne-controller` | every desired replica available |
+| `F5BigPersistenceProfile` | `Programmed=True` |
+
+`GatewaySettings`, `EgressGateway`, `SecPolicy`, `NetPolicy` and `HTTPRoute` are
+listed with their conditions. Legacy `F5BnkGateway`, `BNKSecPolicy`,
+`BNKNetPolicy`, `F5SPKVlan` and `F5SPKEgress` objects are counted, never
+required. `--remote` warns when Forge indexed a 2.4 cluster without the
+`gateway.k8s.f5.com` group: that Forge predates BNK 2.4 and its Fleet view
+misses the 2.4 kinds.
+
+An `HTTPRoute` is an MCP endpoint when it carries the annotation
+`bnk.f5.com/protocol: mcp` or a path match containing `/mcp`. Optional
+annotations: `bnk.f5.com/auth` (recorded as the endpoint's auth method) and
+`bnk.f5.com/mcp-tools` (comma-separated tool names when the endpoint cannot be
+probed). Each endpoint reports its Gateway VIP URLs, hostnames, backends,
+iRules and `SecPolicy` objects attached through `NetPolicy`/`SecPolicy`, and
+the persistence profile pinning its sessions.
+
+`--register-targets` creates one `BenchmarkTarget` per endpoint (name
+`mcp-<namespace>-<route>`, `llm_base_url` the HTTPS VIP URL, `llm_model`
+`mcp:<route>`) with the MCP metadata in `tags`: `protocol=mcp`, `route`,
+`gateway`, `hostnames`, `paths`, `urls`, `backends`, `auth`, `irules`,
+`sec_policies`, `persistence_profile`, `persistence_type`, `tools` and
+`tool_schemas` (JSON). Registration is idempotent.
+
+### `awsbnkctl bnk mcp-session`
+
+Renders (or `--apply`s) the objects that pin an MCP session to one backend on
+BNK 2.4: the passphrase `Secret`, an `F5BigPersistenceProfile` with
+`persistenceType: MODEL_CONTEXT_PROTOCOL` and `mcpEncryptionPassphrase.secretRef`,
+and one `NetPolicy` per `--listener` attaching the profile to the Gateway.
+Pass `--irule` for every iRule the listener already carries so the single
+NetPolicy keeps both. `--type AGENT2AGENT` renders the A2A equivalent.
+
+### Governance telemetry schema
+
+The governance iRule writes one `BNKGOV {json}` record per decision; the Fluent
+Bit collector ships it to Loki as stream `job="llm-gateway"` with labels
+`model`, `status`, `action` and `rpc_method`. Forge's LLM Observability panel
+reads that stream.
+
+| Field | Value |
+|---|---|
+| `job` | `llm-gateway` |
+| `model` | `mcp:<tool server>` |
+| `status` | HTTP status as a string (`200`, `403`, `429`) |
+| `latency_ms` | request latency; `0` for decisions made before the backend |
+| `prompt_tk`, `comp_tk`, `total_tk`, `cached`, `cost` | `0` on the MCP hop |
+| `userq` | `<rpc_method> <tool>` when the body was read, else the URI |
+| `client`, `caller` | client address and resolved identity (`agent`, `external`, `anonymous`) |
+| `action` | `allow`, `rate_limited`, `tool_forbidden`, `backend_refused` |
+| `req_body`, `resp_body` | payloads clipped to 280 characters |
+| `rpc_method` | `initialize`, `tools/list`, `tools/call` |
+| `tool` | `params.name` of a `tools/call` |
+| `session` | `Mcp-Session-Id` presented by the client (36 characters max) |
+| `transport` | `http`, `sse`, `ws` |
+
+`awsbnkctl forge telemetry` reads the stream (`--loki-url`, default
+`http://localhost:3100` behind `awsbnkctl k port-forward -n llm-egress svc/loki 3100:3100`,
+or `--file` for exported lines), validates every record against this table,
+and prints counts by status, action, method, tool and caller, the 429 and 403
+totals, distinct sessions and latency percentiles. It exits non-zero when a
+record violates the schema.
