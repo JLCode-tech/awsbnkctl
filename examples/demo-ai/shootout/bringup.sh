@@ -6,7 +6,7 @@
 #   1. awsbnkctl up        — VPC/EKS/BNK + 7 protocol demos + SageMaker endpoint
 #   2. IAM                 — let the sigv4 hop invoke the SageMaker endpoint
 #   3. sigv4 hop           — nginx path-rewrite + aws-sigv4-proxy (shared by all legs)
-#   4. BNK leg             — F5BnkGateway + Gateway + HTTPRoute -> sigv4 hop (VIP .130)
+#   4. BNK leg             — GatewaySettings + Gateway + HTTPRoute -> sigv4 hop (VIP .130)
 #   5. HAProxy leg         — haproxy -> sigv4 hop, internal NLB
 #   6. Envoy AI Gateway    — Envoy GW v1.4.2 + AI GW v0.2.0 -> sigv4 hop, internal NLB
 #   7. vLLM legs (opt)     — haproxy + Envoy AI GW fronting the in-cluster vLLM
@@ -95,20 +95,29 @@ YAML
 k -n sagemaker-proxy rollout status deploy/sagemaker-proxy --timeout=120s
 
 echo "==> 4/8 BNK leg (VIP ${SM_VIP} -> sigv4 hop)"
+# BNK 2.4: the Gateway takes its listener context from a GatewaySettings
+# (infrastructure.parametersRef); the GatewayClass name is the one phase 23b
+# recorded in state. The static VIP must sit inside the Infra listener pool.
+GWC="${GWC:-$(grep '^GATEWAYCLASS_NAME=' ".awsbnkctl/${CLUSTER}/state.env" | cut -d= -f2-)}"
+: "${GWC:?GATEWAYCLASS_NAME missing from .awsbnkctl/${CLUSTER}/state.env}"
 k apply -f - <<YAML
-apiVersion: k8s.f5net.com/v1
-kind: F5BnkGateway
+apiVersion: gateway.k8s.f5.com/v1alpha1
+kind: GatewaySettings
 metadata: { name: sagemaker-bnk, namespace: sagemaker-proxy }
 spec:
   ingressConfig:
-    defaultListenerNetworks:
-      - { name: external, ipv4BaseCidr: 10.0.10.0/24, startAddress: ${SM_VIP}, endAddress: ${SM_VIP}, provider: f5-ip-provider }
+    defaultListenerNetwork:
+      ipamRefs: [{ name: listener-pool }]
+      networkRefs: [{ name: ext-vlan-infra }]
+      sourceNATConfig: { type: Automap }
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata: { name: sagemaker-gateway, namespace: sagemaker-proxy }
 spec:
-  gatewayClassName: ${CLUSTER}-gatewayclass
+  gatewayClassName: ${GWC}
+  infrastructure:
+    parametersRef: { group: gateway.k8s.f5.com, kind: GatewaySettings, name: sagemaker-bnk }
   addresses: [{ type: IPAddress, value: ${SM_VIP} }]
   listeners: [{ name: http, protocol: HTTP, port: 80, allowedRoutes: { namespaces: { from: Same } } }]
 ---

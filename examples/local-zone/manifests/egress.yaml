@@ -1,8 +1,8 @@
-# BNK 2.4 egress for the three local-zone test namespaces: one GatewaySettings
-# egressConfigs entry (Automap on the dual-interface tunnel VLAN
-# int-vlan-infra) and an EgressGateway that selects the namespaces. Both live
-# in their own namespace; the tunnel VLAN and TMM static routes come from the
-# Infra CR phase 23b applies. Replaces the 2.3 F5SPKEgress (perth-test-egress).
+# Egress for the three local-zone test namespaces: one GatewaySettings
+# egressConfigs entry (Automap on the dual-interface tunnel VLAN int-vlan-infra)
+# and an EgressGateway that selects the namespaces. Apply with the cluster
+# config so {{.GATEWAYCLASS_NAME}} is filled from state:
+#   awsbnkctl k apply --config <cluster.yaml> -f examples/local-zone/manifests/egress.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -27,7 +27,7 @@ metadata:
   name: perth-test-egress
   namespace: local-zone-egress
 spec:
-  gatewayClassName: <cluster-name>-gatewayclass   # the GatewayClass phase 23b registered (state GATEWAYCLASS_NAME)
+  gatewayClassName: {{.GATEWAYCLASS_NAME}}
   infrastructure:
     parametersRef:
       name: perth-test-egress

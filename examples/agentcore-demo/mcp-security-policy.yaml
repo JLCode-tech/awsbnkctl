@@ -1,4 +1,4 @@
-# F5 BNK 2.3 governance policies for the AgentCore demo.
+# F5 BNK governance policies for the AgentCore demo.
 #
 # This file contains POLICY resources only. It deliberately does NOT contain a
 # Gateway object: the Gateway is owned by gateway-deployment.yaml. An earlier
@@ -10,7 +10,7 @@
 #   KUBECONFIG=.awsbnkctl/bnk-agentcore-demo/kubeconfig \
 #     kubectl apply -f mcp-security-policy.yaml
 #
-# BNK 2.3 attaches policy to a Gateway through two policy-attachment CRs:
+# BNK attaches policy to a Gateway through two policy-attachment CRs:
 #   * NetPolicy -> attaches F5BigCneIrule (general L7 extensions)
 #   * SecPolicy -> attaches F5BigFwPolicy / F5BigLogProfile / F5BigDdosGlobal
 #
@@ -23,7 +23,7 @@
 ---
 # Governance iRule for the MCP tool route: rate limit + telemetry.
 #
-# GOTCHA: the iRule body below carries no `#` comments on purpose. BNK's
+# The iRule body below carries no `#` comments on purpose. BNK's
 # `f5validate.f5net.com` admission webhook rejects any F5BigCneIrule whose
 # script contains a comment line, with the misleading message
 # `braces are required around the expression`. Keep explanation out here.
@@ -34,9 +34,9 @@
 # the 429 record has to be emitted at the point the limiter fires.
 #
 # Path matching: the route matches /v1/mcp/forecast, and the HTTPRoute
-# URLRewrite filter rewrites it to `/` BEFORE this iRule runs (confirmed live —
-# the URI the iRule observes is `/`). Both spellings are matched so the policy
-# holds either way. /.well-known/agent-card.json (discovery) stays exempt.
+# URLRewrite filter rewrites it to `/` before this iRule runs, so the iRule
+# observes `/`. Both spellings are matched so the policy holds either way.
+# /.well-known/agent-card.json (discovery) stays exempt.
 #
 # Window mechanics: `table set KEY VALUE TIMEOUT LIFETIME` stamps BOTH the idle
 # timeout and the absolute lifetime at creation, and every later hit uses
@@ -69,7 +69,7 @@
 # the syslog budget (~210 bytes of fixed fields + 2 × 300 + `userq`), so every
 # record is valid JSON. A clipped body ends in `[clipped]`. If you need full
 # payloads, the fix is a real log transport, not a bigger clip — HSL::send is not
-# wired in BNK 2.3.
+# wired in BNK.
 #
 # Note that rate-limited records carry an empty `req_body` by design: the limit
 # fires before the payload is buffered, so a throttled request is never read or
@@ -201,7 +201,7 @@ spec:
 #
 #   1. BNK Forge's Gateway Topology view only renders iRule attachments under a
 #      listener. A NetPolicy with no `sectionName` attaches and works, but is
-#      invisible in Forge — verified live 2026-08-19.
+#      invisible in Forge.
 #   2. NetPolicy allows exactly one targetRef, so covering both listeners
 #      needs two CRs.
 #
@@ -227,14 +227,14 @@ spec:
 apiVersion: gateway.k8s.f5.com/v1alpha1
 kind: NetPolicy
 metadata:
-  name: mcp-net-policy-http443
+  name: mcp-net-policy-https
   namespace: default
 spec:
   targetRefs:
   - group: gateway.networking.k8s.io
     kind: Gateway
     name: bnk-agentcore-demo-gateway
-    sectionName: http443
+    sectionName: https
   extensionRefs:
   - group: k8s.f5net.com
     kind: F5BigCneIrule

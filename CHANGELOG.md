@@ -4,6 +4,19 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [2.1.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.0.0...v2.1.0) (2026-09-12)
+
+
+### Features
+
+* **bgp:** BNK 2.4 BGP — Infra needs no allowed-services; ZebOS ConfigMap is the 2.4 stanza ([5ed1f25](https://github.com/JLCode-tech/awsbnkctl/commit/5ed1f25b78054d4174458831688725f5fe6fc8da))
+* **bgp:** BNK 2.4 BGP proven with AWS Route Server — Infra needs no allowed-services, ZebOS ConfigMap is the stanza; down finds the LBC policy by name ([f7642e2](https://github.com/JLCode-tech/awsbnkctl/commit/f7642e2ef3867f2e3314b09d9baa7b54a8a0de36))
+
+
+### Bug Fixes
+
+* **down:** phase 14b finds the LB controller IAM policy by name when state lost the ARN ([c85d285](https://github.com/JLCode-tech/awsbnkctl/commit/c85d28545decf50407596e39d11ad4bddd81faab))
+
 ## [2.0.0](https://github.com/JLCode-tech/awsbnkctl/compare/v1.6.1...v2.0.0) (2026-09-12)
 
 
