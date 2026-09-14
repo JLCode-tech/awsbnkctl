@@ -182,6 +182,12 @@ CNEInstance `manifestVersion` against that file, so awsbnkctl uses `2.4.0`.
 | `2.3.1-3.2598.3-0.0.304` | `v2.21.13-0.0.53` | supported |
 | `2.3.0-3.2598.3-0.0.170` | `v2.21.13-0.0.28` | supported (original release awsbnkctl was built against) |
 
+A cluster built on a 2.3.x manifest moves to 2.4 in place with `awsbnkctl bnk
+upgrade` (FLO chart + CNEInstance) followed by `awsbnkctl bnk migrate-2.4`
+(F5SPKVlan, F5SPKEgress, F5BnkGateway and the policies into Infra,
+GatewaySettings, EgressGateway, SecPolicy and NetPolicy); see
+[`UPGRADE-2.4.md`](UPGRADE-2.4.md).
+
 The table is `manifest.KnownReleases`. It exists because the F5 Lifecycle
 Operator is installed by Phase 14 *before* the release manifest is available in
 the cluster, so the operator/manifest pairing has to be known up front.

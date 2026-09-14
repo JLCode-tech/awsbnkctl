@@ -145,6 +145,7 @@ Every command, every flag and every environment variable is in
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the intent format, the 39 phases, patterns, version policy.
 - [`docs/SCENARIOS.md`](docs/SCENARIOS.md) — every scenario, its prerequisites and VIP.
 - [`docs/BGP-ROUTE-SERVER.md`](docs/BGP-ROUTE-SERVER.md) — peering TMM with an AWS Route Server.
+- [`docs/UPGRADE-2.4.md`](docs/UPGRADE-2.4.md) — moving a 2.3.x cluster to BNK 2.4 in place with `bnk upgrade` and `bnk migrate-2.4`.
 - [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) — registering clusters with [BNK Forge](https://github.com/f5devcentral/bnk-forge).
 - `awsbnkctl agent init` scaffolds `AGENTS.md`, personas and a journal for coding-agent sessions; the binary embeds no LLM and no MCP server.
 
