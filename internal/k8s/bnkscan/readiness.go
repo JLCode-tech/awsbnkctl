@@ -34,6 +34,8 @@ type Readiness struct {
 	Gateways Tally `json:"gateways"`
 	// Controller is the f5-cne-controller rollout.
 	Controller Controller `json:"controller"`
+	// TMM is the f5-tmm DaemonSet rollout (Found=false before FLO renders it).
+	TMM TMM `json:"tmm"`
 	// LegacyCRDs is true when gateway.k8s.f5net.com is still served.
 	LegacyCRDs bool `json:"legacyCRDs"`
 	// LegacyCRs counts the 2.3 CRs still present.
@@ -48,7 +50,7 @@ const MigrateHint = "run `awsbnkctl bnk migrate-2.4`"
 func (idx *Index) Readiness() Readiness { return idx.readiness(false) }
 
 func (idx *Index) readiness(acceptLegacy bool) Readiness {
-	r := Readiness{Generation: idx.Generation, Controller: idx.Controller, LegacyCRs: idx.Legacy.count()}
+	r := Readiness{Generation: idx.Generation, Controller: idx.Controller, TMM: idx.TMM, LegacyCRs: idx.Legacy.count()}
 	for _, g := range idx.Groups {
 		if g == LegacyPolicyGroup {
 			r.LegacyCRDs = true
@@ -83,6 +85,9 @@ func (r Readiness) Summary() string {
 		parts = append(parts, fmt.Sprintf("controller %s/%s not found", r.Controller.Namespace, r.Controller.Name))
 	default:
 		parts = append(parts, fmt.Sprintf("controller %d/%d available", r.Controller.Available, r.Controller.Desired))
+	}
+	if r.TMM.Found {
+		parts = append(parts, fmt.Sprintf("TMM %d/%d ready", r.TMM.Ready, r.TMM.Desired))
 	}
 	verdict := "ready"
 	if !r.Ready {

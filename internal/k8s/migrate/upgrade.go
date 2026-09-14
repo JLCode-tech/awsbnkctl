@@ -192,9 +192,9 @@ func Upgrade(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (*Upgra
 	res := &UpgradeResult{Schema: "awsbnkctl.bnk-upgrade/v1", FLOTo: floChart, ManifestTo: target, DryRun: opts.DryRun}
 
 	// Step 0: Multus. The FLO and controller pods this upgrade creates need a
-	// Multus whose kubeconfig token is still valid.
+	// Multus whose kubeconfig follows the service-account token.
 	if deps.K8s != nil && !opts.DryRun {
-		mh, err := k8swait.HealMultusToken(ctx, deps.K8s, 0, prefixWriter{opts.Log, "[upgrade] "})
+		mh, err := k8swait.EnsureMultusTokenWatch(ctx, deps.K8s, false, prefixWriter{opts.Log, "[upgrade] "})
 		if err != nil {
 			fmt.Fprintf(opts.Log, "[upgrade] warning: multus heal: %v\n", err)
 		} else {

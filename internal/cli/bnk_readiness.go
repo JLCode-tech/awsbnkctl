@@ -274,21 +274,26 @@ func warnf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "⚠ "+format+"\n", args...)
 }
 
-// multusDoctorCheck reports whether the Multus pods still hold a valid
-// kubeconfig token (see k8s.HealMultusToken). Detect only: doctor never
-// changes the cluster.
+// multusDoctorCheck reports whether the Multus kubeconfig follows the
+// service-account token (see k8s.EnsureMultusTokenWatch). Detect only: doctor
+// never changes the cluster.
 func multusDoctorCheck(ctx context.Context, cs kubernetes.Interface) doctor.Check {
 	c := doctor.Check{Name: "multus kubeconfig token", BackendName: "k8s"}
-	installed, stale, reason, err := k8s.MultusTokenStale(ctx, cs, 0, time.Now())
+	st, _, err := k8s.InspectMultus(ctx, cs)
+	const fix = " — `awsbnkctl bnk heal` fixes the DaemonSet (`awsbnkctl up` and `awsbnkctl bnk upgrade` do the same)"
 	switch {
 	case err != nil:
 		c.Status, c.Detail = doctor.StatusWarning, "could not inspect Multus: "+err.Error()
-	case !installed:
+	case !st.Installed:
 		c.Status, c.Detail = doctor.StatusOK, "Multus not installed"
-	case stale:
-		c.Status, c.Detail = doctor.StatusWarning, reason+" — `awsbnkctl bnk upgrade` and `awsbnkctl up` restart it; or `kubectl -n kube-system rollout restart ds kube-multus-ds`"
+	case !st.WatchEnabled && st.Unauthorized != "":
+		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("pod %s failed its network sandbox: Multus Unauthorized (expired kubeconfig token); the DaemonSet lacks %s%s", st.Unauthorized, k8s.MultusTokenWatchArg, fix)
+	case !st.WatchEnabled:
+		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("DaemonSet %s/%s writes its kubeconfig once at pod start (no %s): the token expires and new pods fail with Multus Unauthorized%s", k8s.MultusNamespace, k8s.MultusDaemonSet, k8s.MultusTokenWatchArg, fix)
+	case st.Unauthorized != "":
+		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("pod %s failed its network sandbox: Multus Unauthorized although the token watch is on%s", st.Unauthorized, fix)
 	default:
-		c.Status, c.Detail = doctor.StatusOK, "pods younger than "+k8s.MultusMaxPodAge.String()+", no Unauthorized sandbox events"
+		c.Status, c.Detail = doctor.StatusOK, "kubeconfig follows the service-account token ("+k8s.MultusTokenWatchArg+"), no Unauthorized sandbox events"
 	}
 	return c
 }

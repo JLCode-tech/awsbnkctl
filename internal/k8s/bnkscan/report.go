@@ -19,6 +19,12 @@ func WriteReport(w io.Writer, idx *Index) {
 	} else {
 		fmt.Fprintf(w, "controller %s/%s: not found\n", idx.Controller.Namespace, idx.Controller.Name)
 	}
+	if idx.TMM.Found {
+		fmt.Fprintf(w, "tmm %s/%s: %d/%d ready\n", idx.TMM.Namespace, idx.TMM.Name, idx.TMM.Ready, idx.TMM.Desired)
+		for _, p := range idx.TMM.Pending {
+			fmt.Fprintf(w, "  WAIT %s\n", p)
+		}
+	}
 
 	section := func(title string, objs []Object) {
 		if len(objs) == 0 {

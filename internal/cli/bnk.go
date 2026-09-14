@@ -32,6 +32,7 @@ var bnkCmd = &cobra.Command{
 cluster management.
 
 Subcommands:
+  heal         Repair cluster plumbing (Multus kubeconfig token watch) on 2.3 or 2.4
   resync       Force the F5 cne-controller to re-resolve stale TMM pool members
   migrate-2.4  Translate 2.3.x CRs into the 2.4 Infra / GatewaySettings model
   upgrade      In-place FLO + CNEInstance upgrade to BNK 2.4
