@@ -50,8 +50,10 @@ const (
 	// it) when this phase runs, so a cold start of several minutes is normal.
 	cneControllerAvailableWait = 10 * time.Minute
 	// webhookRetryWait bounds the apply retries while the webhook endpoint is
-	// still registering after the pod reports Ready.
-	webhookRetryWait = 3 * time.Minute
+	// still registering after the pod reports Ready, or a fresh ResourceQuota
+	// has no usage yet (the quota controller can take several minutes after
+	// the CRD appears).
+	webhookRetryWait = 10 * time.Minute
 	// Why: installed by the same FLO crd-installer Job as the Infra CRD; 3 min is generous.
 	gatewayClassCRDWait = 3 * time.Minute
 )
