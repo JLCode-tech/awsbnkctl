@@ -55,6 +55,8 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `get <resource> [name]` | Top-level alias of `k get` (`-n`, `-A`, `-l`, `-o yaml|json|wide|name|jsonpath=…`) |
 | `logs <component>` | Tail logs for a BNK component (`flo`, `cis`, `cert-manager`, `cneinstance`); `-f`, `--since`, `--tail`, `--previous`, `-c` |
 | `bnk resync` | Force the F5 cne-controller to re-resolve stale TMM pool members |
+| `bnk migrate-2.4` | Translate the 2.3.x CRs of a running cluster into the 2.4 Infra / GatewaySettings model (`--dry-run` prints the manifests, `--apply` server-side-applies them; `-f`, `--kubeconfig`, `-n`, `--gateway-class`) |
+| `bnk upgrade -f <config>` | In-place upgrade: helm upgrade FLO, patch the CNEInstance (`manifestVersion`, `USE_GATEWAY_SETTINGS`), watch the controller and TMM come back (`--manifest-version`, `--flo-version`, `--dry-run`) |
 | `manifest probe [version]` | Pull a BNK release manifest from `repo.f5.com` with the helm SDK (no host helm) and print its charts and images (`--all`, `--far <path>`) |
 
 ## AI benchmarking and BNK Forge

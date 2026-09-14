@@ -331,8 +331,11 @@ func runFLOHelmInstall(ctx context.Context, h helmInstaller, cl *intent.Cluster,
 // buildHelmInstaller creates an OCI-authenticated Helm installer using the
 // kubeconfig path from state and the FAR key for registry login.
 func buildHelmInstaller(st *state.State, farKeyB64 string) (helmInstaller, error) {
-	kubeconfigPath := st.Get("KUBECONFIG_PATH")
+	return newHelmInstaller(st.Get("KUBECONFIG_PATH"), farKeyB64)
+}
 
+// newHelmInstaller is buildHelmInstaller without the state dependency.
+func newHelmInstaller(kubeconfigPath, farKeyB64 string) (helmInstaller, error) {
 	regClient, err := registry.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("create helm registry client: %w", err)
