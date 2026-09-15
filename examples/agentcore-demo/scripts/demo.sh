@@ -25,6 +25,7 @@ DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
 
 CLUSTER="${CLUSTER:-bnk-agentcore-demo}"
+GW="${GW:-bnk-agentcore-demo-gateway}"   # fixed in gateway-deployment.yaml, independent of the cluster name
 
 # `up` writes the kubeconfig to .awsbnkctl/<cluster>/kubeconfig RELATIVE TO THE
 # DIRECTORY IT RAN FROM — in practice the repo root, because that is where
@@ -95,11 +96,11 @@ fi
 need aws; need kubectl; need python3
 [ -n "${AWS_PROFILE:-}" ] || warn "AWS_PROFILE is unset; relying on ambient credentials"
 
-if ! kubectl get gateway "$CLUSTER-gateway" -n default >/dev/null 2>&1; then
+if ! kubectl get gateway "$GW" -n default >/dev/null 2>&1; then
   bad "cannot reach the cluster, or the Gateway is missing. Is SSO current?"
   echo; echo "  try: aws sso login --profile \${AWS_PROFILE}"; exit 1
 fi
-PROGRAMMED=$(kubectl get gateway "$CLUSTER-gateway" -n default \
+PROGRAMMED=$(kubectl get gateway "$GW" -n default \
   -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
 [ "$PROGRAMMED" = "True" ] && ok "BNK Gateway programmed on $VIP" || bad "Gateway not programmed"
 
@@ -399,7 +400,7 @@ for r in d.get("rows",[]):
   echo
   note "Open these:"
   note "  $FORGE  →  LLM Observability  →  $CLUSTER"
-  note "  $FORGE  →  Gateway Topology   →  $CLUSTER-gateway  (iRule under each listener)"
+  note "  $FORGE  →  Gateway Topology   →  $GW  (iRule under each listener)"
 else
   warn "Forge not reachable at $FORGE — skipping. Start the local stack to see the panels."
 fi

@@ -1,7 +1,8 @@
 # The BNK Gateway for the AgentCore demo: TLS certificate, GatewaySettings,
 # Gateway (80 and 443) and both HTTPRoutes.
 #
-# Apply with the cluster config so {{.GATEWAYCLASS_NAME}} is filled from state:
+# Apply with the cluster config so {{.GATEWAYCLASS_NAME}} and {{.BNK_CA_ISSUER}}
+# (the in-cluster CA ClusterIssuer phase 12 created) are filled from state:
 #   awsbnkctl k apply --config examples/agentcore-demo/cluster.yaml \
 #     -f examples/agentcore-demo/gateway-deployment.yaml
 #
@@ -22,7 +23,7 @@ spec:
   dnsNames:
   - bnk-ingress.bnk-demo.internal
   issuerRef:
-    name: bnk-agentcore-demo-ca-cluster-issuer
+    name: {{.BNK_CA_ISSUER}}
     kind: ClusterIssuer
     group: cert-manager.io
 ---

@@ -37,6 +37,11 @@ type BenchmarkTargetOptions struct {
 	// ClusterID is the forge cluster FK (required by schema).
 	// When zero, registration is skipped — callers receive ErrTargetNoClusterID.
 	ClusterID int
+	// ClusterName disambiguates Name when Forge already holds a target of
+	// that name for another cluster (Forge keys target names globally): the
+	// target is then created as "<Name>-<ClusterName>". Optional; the
+	// cluster ID is used when empty.
+	ClusterName string
 	// LLMBaseURL is the HTTP base URL of the LLM endpoint (e.g. "http://10.0.10.100").
 	LLMBaseURL string
 	// LLMModel is the model name served by the endpoint (e.g. "meta-llama/Llama-3.1-8B-Instruct").
@@ -248,12 +253,42 @@ func RegisterBenchmarkTarget(ctx context.Context, opts BenchmarkTargetOptions) (
 		return BenchmarkTargetResponse{}, fmt.Errorf("forge benchmark target: create: %w", postErr)
 	}
 
-	existing, lookupErr := benchmarkTargetFindByName(ctx, base, token, opts.Name)
-	if lookupErr != nil {
+	existing, lookupErr := benchmarkTargetFindByName(ctx, base, token, opts.Name, opts.ClusterID)
+	if lookupErr == nil {
+		return existing, nil
+	}
+	if !errors.Is(lookupErr, errTargetOtherCluster) {
 		return BenchmarkTargetResponse{}, fmt.Errorf("forge benchmark target: conflict + list failed: %w (original: %v)", lookupErr, postErr)
+	}
+
+	// Forge keys target names globally, so the name belongs to another
+	// cluster's target. Register this cluster's endpoint under a
+	// cluster-qualified name instead of silently reusing the other one.
+	qualified := opts.Name + "-" + opts.clusterSuffix()
+	body["name"] = qualified
+	if postErr = restPost(ctx, base+BenchmarkTargetEndpoint, token, body, &created); postErr == nil {
+		return created, nil
+	}
+	if !isConflictHTTP(postErr) {
+		return BenchmarkTargetResponse{}, fmt.Errorf("forge benchmark target: create %q: %w", qualified, postErr)
+	}
+	existing, lookupErr = benchmarkTargetFindByName(ctx, base, token, qualified, opts.ClusterID)
+	if lookupErr != nil {
+		return BenchmarkTargetResponse{}, fmt.Errorf("forge benchmark target: conflict + list failed for %q: %w", qualified, lookupErr)
 	}
 	return existing, nil
 }
+
+// clusterSuffix is what disambiguates a target name across clusters.
+func (o BenchmarkTargetOptions) clusterSuffix() string {
+	if o.ClusterName != "" {
+		return o.ClusterName
+	}
+	return fmt.Sprintf("cluster-%d", o.ClusterID)
+}
+
+// errTargetOtherCluster: a target of that name exists, but on another cluster.
+var errTargetOtherCluster = errors.New("benchmark target name is taken by another cluster")
 
 // benchmarkTargetListResponse is the wrapper object returned by
 // GET /api/benchmarks/targets (backend/routes/benchmarks.py:317,
@@ -265,20 +300,29 @@ type benchmarkTargetListResponse struct {
 }
 
 // benchmarkTargetFindByName GETs /api/benchmarks/targets and returns the record
-// whose name matches exactly.
+// whose name matches exactly and belongs to clusterID (0 = any cluster). When
+// the only match belongs to another cluster it returns errTargetOtherCluster.
 //
 // Forge returns a JSON object {"targets":[...],"total":N}, NOT a bare array.
 // (GET /api/benchmarks/proxies IS a bare array — only this endpoint uses the
 // list-response wrapper.)
-func benchmarkTargetFindByName(ctx context.Context, base, token, name string) (BenchmarkTargetResponse, error) {
+func benchmarkTargetFindByName(ctx context.Context, base, token, name string, clusterID int) (BenchmarkTargetResponse, error) {
 	var resp benchmarkTargetListResponse
 	if err := restGet(ctx, base+BenchmarkTargetEndpoint, token, &resp); err != nil {
 		return BenchmarkTargetResponse{}, fmt.Errorf("list benchmark targets: %w", err)
 	}
+	otherCluster := false
 	for _, r := range resp.Targets {
-		if r.Name == name {
+		if r.Name != name {
+			continue
+		}
+		if clusterID == 0 || r.ClusterID == clusterID || r.ClusterID == 0 {
 			return r, nil
 		}
+		otherCluster = true
+	}
+	if otherCluster {
+		return BenchmarkTargetResponse{}, fmt.Errorf("%w: %q (cluster %d)", errTargetOtherCluster, name, clusterID)
 	}
 	return BenchmarkTargetResponse{}, fmt.Errorf("benchmark target %q not found in forge", name)
 }

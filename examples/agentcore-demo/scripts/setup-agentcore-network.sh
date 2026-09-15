@@ -14,7 +14,8 @@ set -euo pipefail
 CLUSTER_NAME="${1:-bnk-agentcore-demo}"
 # The demo Gateway in gateway-deployment.yaml is named <cluster>-gateway in the
 # default namespace; override both if you renamed it.
-GATEWAY_NAME="${GATEWAY_NAME:-${CLUSTER_NAME}-gateway}"
+# The Gateway name is fixed in gateway-deployment.yaml, whatever the cluster is called.
+GATEWAY_NAME="${GATEWAY_NAME:-bnk-agentcore-demo-gateway}"
 GATEWAY_NS="${GATEWAY_NS:-default}"
 REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || echo "ap-southeast-2")}"
 export AWS_DEFAULT_REGION="$REGION"
