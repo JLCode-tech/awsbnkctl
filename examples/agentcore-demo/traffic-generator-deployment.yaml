@@ -18,8 +18,9 @@ data:
     MCP_URL = f"http://{VIP}/v1/mcp/forecast"
     DISC_URL = f"http://{VIP}/.well-known/agent-card.json"
     SHIPPER_URL = os.environ.get("SHIPPER_URL", "http://bedrock-token-shipper.llm-egress.svc.cluster.local:9090")
-    AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "demo-agent-token-a7f3c1")
-    EXTERNAL_TOKEN = os.environ.get("EXTERNAL_TOKEN", "demo-external-token-4b9e2d")
+    AGENT_TOKEN = os.environ["AGENT_TOKEN"]
+    EXTERNAL_TOKEN = os.environ["EXTERNAL_TOKEN"]
+    INTERVAL_S = int(os.environ.get("INTERVAL_S", "30"))
 
     def post_json(url, data, headers=None, timeout=5):
         h = {"Content-Type": "application/json", "Host": INGRESS_HOST, "Accept": "application/json"}
@@ -60,17 +61,19 @@ data:
         ctk = random.randint(150, 310)
         lat = random.randint(310, 620)
 
-        # Leg A: Bedrock / AgentCore Model reasoning token shipment
+        # Leg A: a simulated model call. Token counts, latency and therefore
+        # cost are random; the shipper labels the record source=synthetic.
         model_rec = {
             "job": "llm-gateway",
             "model": "claude-3-5-sonnet",
+            "source": "synthetic",
             "status": "200",
             "prompt_tk": ptk,
             "comp_tk": ctk,
             "latency_ms": lat,
             "userq": "Forecast " + sym + " financial metrics for 30 days",
-            "caller": "agentcore-runtime",
-            "client": "10.0.1.112",
+            "caller": "traffic-generator",
+            "client": "traffic-generator",
             "action": "allow",
             "req_body": "{\"prompt\":\"Evaluate quarterly earnings trajectory and risk profile for " + sym + ".\"}",
             "resp_body": "{\"forecast\":\"" + sym + " 30-day projection: steady trajectory, governed by F5 BNK.\"}"
@@ -111,7 +114,7 @@ data:
 
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         print("[" + ts + "] Wave " + str(cycle) + " -> Model:" + sym + " (Loki:" + str(s_res) + ", " + str(ptk+ctk) + " tk) | MCP forecast:" + str(f_res) + " bal:" + str(b_res) + " disc:" + str(d_res) + " unauth:" + str(u_res), flush=True)
-        time.sleep(15)
+        time.sleep(INTERVAL_S)
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -134,6 +137,21 @@ spec:
       - name: traffic-gen
         image: python:3.11-slim
         command: ["python3", "-u", "/app/traffic_gen.py"]
+        env:
+        # rebuild.sh fills BNK_VIP from the live Gateway; edit by hand when
+        # applying this file directly.
+        - name: BNK_VIP
+          value: "10.0.10.150"
+        - name: INGRESS_HOST
+          value: bnk-ingress.bnk-demo.internal
+        # The two demo bearer tokens; the same literals mcp-tool/kustomization.yaml
+        # gives the MCP server and mcp-security-policy.yaml checks in the iRule.
+        - name: AGENT_TOKEN
+          value: demo-agent-token-a7f3c1
+        - name: EXTERNAL_TOKEN
+          value: demo-external-token-4b9e2d
+        - name: INTERVAL_S
+          value: "30"
         volumeMounts:
         - name: code
           mountPath: /app

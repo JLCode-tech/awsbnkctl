@@ -94,14 +94,19 @@ data:
             data = self.rfile.read(length)
             try:
                 record = json.loads(data.decode("utf-8"))
-                prompt_tk = record.get("prompt_tk", 0)
-                comp_tk = record.get("comp_tk", 0)
+                prompt_tk = int(record.get("prompt_tk") or 0)
+                comp_tk = int(record.get("comp_tk") or 0)
                 cost = (prompt_tk / 1000.0 * PRICE_IN_PER_1K) + (comp_tk / 1000.0 * PRICE_OUT_PER_1K)
+                record["prompt_tk"] = prompt_tk
+                record["comp_tk"] = comp_tk
                 record["cost"] = round(cost, 6)
                 record["total_tk"] = prompt_tk + comp_tk
+                # Records posted here are not Bedrock invocation logs. They are
+                # labelled so a reader of the Loki stream can tell them apart.
+                record["source"] = record.get("source") or "synthetic"
                 if "timestamp" not in record:
                     record["timestamp"] = time.time()
-                ts_ns = str(int(record["timestamp"] * 1e9))
+                ts_ns = str(int(float(record["timestamp"]) * 1e9))
                 model = record.get("model", "claude-3-5-sonnet")
                 status = str(record.get("status", "200"))
                 stream = {
@@ -109,6 +114,7 @@ data:
                         "job": "llm-gateway",
                         "model": model,
                         "status": status,
+                        "source": record["source"],
                     },
                     "values": [[ts_ns, json.dumps(record)]],
                 }
@@ -216,10 +222,26 @@ data:
         return False
 
 
+    def cloudwatch_client():
+        # boto3 is installed in the background at container start (see the
+        # Deployment args); wait for it instead of giving up on the first
+        # ImportError. Twenty attempts, 15 s apart.
+        for attempt in range(1, 21):
+            try:
+                import boto3
+                return boto3.client("logs", region_name=REGION)
+            except Exception as exc:  # noqa: BLE001 - not installed yet, or no credentials
+                print(f"[shipper-cw] waiting for boto3 ({attempt}/20): {exc}", flush=True)
+                time.sleep(15)
+        return None
+
+
     def poll_cloudwatch_loop():
+        logs = cloudwatch_client()
+        if logs is None:
+            print(f"[shipper-cw] boto3 unavailable; CloudWatch leg disabled, HTTP receiver active on :{PORT}", flush=True)
+            return
         try:
-            import boto3
-            logs = boto3.client("logs", region_name=REGION)
             since_ms = int((time.time() - LOOKBACK_S) * 1000)
             seen = set()
             print(
@@ -247,6 +269,7 @@ data:
                             if rid:
                                 seen.add(rid)
                             rec = to_record(msg)
+                            rec["source"] = "bedrock-logs"
                             ts_ns = str(int(event["timestamp"]) * 1_000_000)
                             streams.append(
                                 {
@@ -254,6 +277,7 @@ data:
                                         "job": "llm-gateway",
                                         "model": rec["model"],
                                         "status": rec["status"],
+                                        "source": "bedrock-logs",
                                     },
                                     "values": [[ts_ns, json.dumps(rec)]],
                                 }
@@ -266,10 +290,11 @@ data:
                     if len(seen) > 20000:
                         seen.clear()
                 except Exception as exc:  # noqa: BLE001 - keep the loop alive
+                    print(f"[shipper-cw] poll error: {exc}", flush=True)
                     time.sleep(30)
                 time.sleep(INTERVAL)
-        except Exception as exc:
-            print(f"[shipper-cw] boto3 / cloudwatch unavailable ({exc}); HTTP shipper active on :{PORT}", flush=True)
+        except Exception as exc:  # noqa: BLE001 - never take the HTTP receiver down with the poller
+            print(f"[shipper-cw] stopped: {exc}", flush=True)
 
 
     def main():
@@ -308,7 +333,9 @@ spec:
         - /bin/sh
         - -c
         args:
-        - pip install boto3 -q 2>/dev/null & python3 /app/shipper.py
+        # boto3 installs in the background so the HTTP receiver is up at once;
+        # the CloudWatch poller waits for the import (cloudwatch_client).
+        - (pip install boto3 -q 2>&1 | tail -1 &) ; exec python3 /app/shipper.py
         env:
         - name: PYTHONUNBUFFERED
           value: "1"

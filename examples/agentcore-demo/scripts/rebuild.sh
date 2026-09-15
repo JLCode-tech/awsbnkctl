@@ -190,18 +190,48 @@ if [ -z "$LG" ] || [ "$LG" = "None" ]; then
 else
   ok "Bedrock invocation logging already configured → $LG"
 fi
+# The shipper's IAM role (docs/ROADMAP.md) trusts one cluster's OIDC provider.
+# A rebuilt cluster has a new provider, so point the trust at the live one.
+SHIPPER_ROLE=BNKDemoBedrockTokenShipper
+if aws iam get-role --role-name "$SHIPPER_ROLE" >/dev/null 2>&1; then
+  OIDC_HOST=$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" \
+              --query 'cluster.identity.oidc.issuer' --output text | sed 's#^https://##')
+  [ -n "$OIDC_HOST" ] || die "could not read the cluster OIDC issuer"
+  TMPT=$(mktemp -t shipper-trust.XXXXXX.json) || die "mktemp failed"
+  trap 'rm -f "$TMPT"' EXIT
+  cat > "$TMPT" <<EOF
+{"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+ "Principal":{"Federated":"arn:aws:iam::${ACCT}:oidc-provider/${OIDC_HOST}"},
+ "Action":"sts:AssumeRoleWithWebIdentity",
+ "Condition":{"StringEquals":{"${OIDC_HOST}:aud":"sts.amazonaws.com",
+  "${OIDC_HOST}:sub":"system:serviceaccount:llm-egress:bedrock-token-shipper"}}}]}
+EOF
+  aws iam update-assume-role-policy --role-name "$SHIPPER_ROLE" --policy-document "file://$TMPT" \
+    || die "could not update the trust policy of $SHIPPER_ROLE"
+  ok "$SHIPPER_ROLE trusts this cluster's OIDC provider"
+else
+  warn "IAM role $SHIPPER_ROLE does not exist — create it as docs/ROADMAP.md describes; the CloudWatch leg stays off until then"
+fi
 # The tracked manifest keeps a <account-id> placeholder on purpose: this repo is
 # public. Substitute into a temp file and apply that; never write it back.
 TMP=$(mktemp -t shipper.XXXXXX.yaml) || die "mktemp failed"
-trap 'rm -f "$TMP"' EXIT
+trap 'rm -f "$TMP" "$TMPT"' EXIT
 sed -e "s/<account-id>/$ACCT/g" -e "s/^\( *value: \)ap-southeast-2$/\1$REGION/" \
     "$DEMO_DIR/mcp-bedrock-token-shipper.yaml" > "$TMP"
 grep -q "<account-id>" "$TMP" && die "account-id substitution failed"
 kubectl apply -f "$TMP" || die "token shipper apply failed"
 ok "shipper applied with account $ACCT (tracked file left with its placeholder)"
 
-kubectl apply -f "$DEMO_DIR/traffic-generator-deployment.yaml" || die "traffic generator apply failed"
-ok "continuous dual-leg traffic generator deployed"
+# The generator's Leg A is synthetic (random tokens, labelled source=synthetic);
+# Leg B drives the live VIP, read off the Gateway rather than hardcoded.
+VIP=$(kubectl get gateway "$CLUSTER-gateway" -n default -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null)
+[ -n "$VIP" ] || die "could not read the VIP off gateway $CLUSTER-gateway"
+TMPG=$(mktemp -t traffic-gen.XXXXXX.yaml) || die "mktemp failed"
+trap 'rm -f "$TMP" "$TMPG"' EXIT
+sed -e "s/^\( *value: \)\"10\.0\.10\.150\"$/\1\"$VIP\"/" \
+    "$DEMO_DIR/traffic-generator-deployment.yaml" > "$TMPG"
+kubectl apply -f "$TMPG" || die "traffic generator apply failed"
+ok "traffic generator deployed against VIP $VIP (Leg A synthetic, Leg B live)"
 
 # ── 8. the stranger ──────────────────────────────────────────────────────────
 step "Path 3 stranger + the firewall's out-of-range source"

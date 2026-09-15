@@ -121,9 +121,12 @@ if [ -f .agentcore-network-env.json ]; then
     echo "Deleted .agentcore-network-env.json"
 fi
 
-echo "Detaching SSM policy from jumphost IAM role..."
+# Undo what setup-agentcore-network.sh attached for demo.sh; awsbnkctl's own
+# jumphost access (EICE) does not need it.
+echo "Detaching AmazonSSMManagedInstanceCore from ${CLUSTER_NAME}-jumphost-role..."
 aws iam detach-role-policy \
     --role-name "${CLUSTER_NAME}-jumphost-role" \
-    --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null || true
+    --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null \
+    || echo "  (policy was not attached)"
 
 echo "Teardown complete."

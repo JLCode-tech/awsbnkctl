@@ -73,7 +73,7 @@ one before it.
 | 4 | `scripts/setup-agentcore-network.sh` | reads the VIP off the live Gateway; creates the agent security group, SG-to-SG ingress and the private Route 53 zone |
 | 5 | `awsbnkctl k apply -f mcp-persistence.yaml` | the passphrase Secret and the `MODEL_CONTEXT_PROTOCOL` persistence profile the NetPolicies reference. BNK 2.4.0 programs an `F5BigPersistenceProfile` only in the instance namespace (`f5-cne-system`) while a `NetPolicy` looks it up in its own namespace, so the profile in `default` stays unprogrammed and the iRules still attach; `awsbnkctl doctor --backend k8s` reports it |
 | 6 | `awsbnkctl k apply -f mcp-security-policy.yaml` | the rate-limit iRule, persistence and firewall attach to listeners that must already exist |
-| 7 | `awsbnkctl k apply -f mcp-observability.yaml`, `traffic-generator-deployment.yaml`, and `mcp-bedrock-token-shipper.yaml` | Loki, collectors, continuous dual-leg traffic generator, and Bedrock token shipper in `llm-egress` |
+| 7 | `awsbnkctl k apply -f mcp-observability.yaml`, then `scripts/rebuild.sh` step 7 | Loki and the collectors in `llm-egress`; the Bedrock token shipper (`llm-egress`) and the traffic generator (`default`). Apply those two through `rebuild.sh`: it substitutes the account id into the shipper and the live VIP into the generator |
 | 8 | `cd agent && npx agentcore deploy --target demo-v2` | the AgentCore runtime, VPC mode, in the private subnets |
 | 9 | `scripts/setup-stranger.sh` (optional) | an EC2 caller with one NIC inside `10.0.0.0/16` and one outside, so the firewall's reject branch can be shown |
 
@@ -103,7 +103,9 @@ AWS_PROFILE=<profile> ./node_modules/.bin/agentcore invoke \
 ```
 
 The external caller, from the jumphost (the VIP is private; `demo.sh` drives
-this over SSM for you):
+this over SSM for you; `setup-agentcore-network.sh` attaches the SSM policy to
+the jumphost role for the demo and the teardown script removes it, since
+awsbnkctl itself reaches the jumphost over EICE):
 
 ```bash
 python3 external-agent.py --prompt "forecast NVDA"                                  # exit 0, allowed
@@ -134,11 +136,22 @@ kubectl run lq --rm -i --restart=Never -n llm-egress --image=curlimages/curl:8.8
 ```
 
 BNK's records carry zero tokens, honestly: it is in the path of the tool call,
-not the model call. `mcp-bedrock-token-shipper.yaml` and `traffic-generator-deployment.yaml`
-run a continuous dual-leg pipeline into Loki:
-- **Leg A (Reasoning Leg)**: Bedrock model invocation metrics (`claude-3-5-sonnet`) with prompt/completion tokens, latency, and costs shipped to Loki via the in-cluster shipper service (`bedrock-token-shipper:9090`).
-- **Leg B (Tool Leg)**: MCP tool calls through BNK Gateway (`10.0.10.150`) logging authentication, tool-level RBAC, rate-limiting, and agent discovery.
-Forge unifies both legs to display model rankings, Anthropic provider usage trends, and security metrics for `bnk-agentcore-demo`.
+not the model call. Two more sources feed the same Loki stream, each labelled
+with `source`:
+
+- `source=bedrock-logs`: `mcp-bedrock-token-shipper.yaml` polls the Bedrock
+  model-invocation log group and ships real token counts and costs. Needs
+  Bedrock invocation logging turned on in the account.
+- `source=synthetic`: `traffic-generator-deployment.yaml` posts a simulated
+  model call to the shipper every 30 seconds. Its tokens, latency and cost are
+  random numbers; they keep the Forge panels moving on an account without
+  Bedrock logging and are not spend.
+
+The generator also drives the live VIP every cycle: a forecast with the agent
+token (200), a privileged tool with the external token (403), discovery (200)
+and an unauthenticated call (401). It uses four of the external caller's ten
+requests per minute, so `demo.sh` Act 4 reaches its 429 sooner than on a quiet
+cluster.
 
 ## Scenarios and BGP
 
