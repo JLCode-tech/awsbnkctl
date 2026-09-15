@@ -178,27 +178,18 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 	// — cl.Forge is nil but a forge_link.json still exists with the original URLs.
 	cfg := resolveForgeConfig(cl, link)
 
-	if link == nil {
-		// No local link (e.g. the workspace state dir was lost). Only attempt
-		// REST by-name discovery when forge is enabled in intent — when forge
-		// isn't in cluster.yaml AND there's no link, keep the instant skip so
-		// every down doesn't probe localhost.
-		if cl.Forge == nil || !cl.Forge.Enabled {
+	if link == nil || link.ClusterID == 0 || !link.IsRegistered() {
+		// When no local link exists and forge was not enabled in intent, keep the instant skip.
+		if link == nil && (cl.Forge == nil || !cl.Forge.Enabled) {
 			fmt.Fprintln(os.Stderr, "[phase 09 down] forge: no link, nothing to unregister")
 			return nil
 		}
 		discErr := forge.UnregisterRESTByName(ctx, cfg.restURL, cl.Metadata.Name, cfg.restCreds)
 		if discErr == nil {
-			fmt.Fprintln(os.Stderr, "[phase 09 down] forge: unregistered via REST by-name discovery (no local link)")
-			st.Set("FORGE_STATUS", "")
-			st.Set("FORGE_PROJECT_ID", "")
-			st.Set("FORGE_CLUSTER_ID", "")
-			st.Set("FORGE_LINK_PATH", "")
-			return st.Save()
+			return forgeDownDone(st, workspaceDir, "unregistered via REST by-name discovery")
 		}
 		if errors.Is(discErr, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "[phase 09 down] forge: not registered (no link; no project awsbnkctl-%s)\n", cl.Metadata.Name)
-			return nil
+			return forgeDownDone(st, workspaceDir, fmt.Sprintf("not registered (no project awsbnkctl-%s)", cl.Metadata.Name))
 		}
 		// Discovery failed — log and continue teardown. Don't block on forge.
 		fmt.Fprintf(os.Stderr, "[phase 09 down] warning: forge by-name unregister failed (%v) — clean up forge-side manually\n", discErr)
@@ -217,38 +208,19 @@ func Phase09ForgeRegisterDown(ctx context.Context, cl *intent.Cluster, st *state
 	}
 	mcpErr := forge.Unregister(ctx, clients.ForgeClient, workspaceDir, purge)
 	if mcpErr == nil {
-		fmt.Fprintln(os.Stderr, "[phase 09 down] forge: unregistered via MCP")
-		st.Set("FORGE_STATUS", "")
-		st.Set("FORGE_PROJECT_ID", "")
-		st.Set("FORGE_CLUSTER_ID", "")
-		st.Set("FORGE_LINK_PATH", "")
-		return st.Save()
+		return forgeDownDone(st, workspaceDir, "unregistered via MCP")
 	}
 
-	// MCP failed — fall back to REST only for catalog-gap errors (mirrors up path).
-	// For non-catalog-gap errors (auth, connectivity), skip REST and soft-fail.
-	if forge.IsMCPCatalogGapErr(mcpErr) {
-		restErr := forge.UnregisterREST(ctx, cfg.restURL, link, cfg.restCreds)
-		if restErr == nil || forge.Is404(restErr) {
-			// REST succeeded (or 404 — already gone forge-side).
-			if rerr := forge.RemoveLink(workspaceDir); rerr != nil {
-				fmt.Fprintf(os.Stderr, "[phase 09 down] warning: could not remove forge_link.json: %v\n", rerr)
-			}
-			fmt.Fprintln(os.Stderr, "[phase 09 down] forge: unregistered via REST fallback")
-			st.Set("FORGE_STATUS", "")
-			st.Set("FORGE_PROJECT_ID", "")
-			st.Set("FORGE_CLUSTER_ID", "")
-			st.Set("FORGE_LINK_PATH", "")
-			return st.Save()
-		}
-		// Both paths failed — log and keep the link file. Don't block teardown.
-		fmt.Fprintf(os.Stderr, "[phase 09 down] warning: forge unregister failed (MCP: %v; REST: %v) — link preserved for manual cleanup\n",
-			mcpErr, restErr)
-		return nil
+	// MCP failed — fall back to REST (covers catalog gap, network/connectivity, etc.).
+	fmt.Fprintf(os.Stderr, "[phase 09 down] MCP unregister failed (%v) — falling back to REST\n", mcpErr)
+	restErr := forge.UnregisterREST(ctx, cfg.restURL, link, cfg.restCreds)
+	if restErr == nil || forge.Is404(restErr) {
+		// REST succeeded (or 404 — already gone forge-side).
+		return forgeDownDone(st, workspaceDir, "unregistered via REST fallback")
 	}
-
-	// Non-catalog-gap MCP failure — soft-fail immediately, keep link.
-	fmt.Fprintf(os.Stderr, "[phase 09 down] warning: forge unregister failed (%v) — link preserved\n", mcpErr)
+	// Both paths failed — log and keep the link file. Don't block teardown.
+	fmt.Fprintf(os.Stderr, "[phase 09 down] warning: forge unregister failed (MCP: %v; REST: %v) — link preserved for manual cleanup\n",
+		mcpErr, restErr)
 	return nil
 }
 
@@ -390,4 +362,18 @@ func resolveForgeConfig(cl *intent.Cluster, link *forge.Link) resolvedForgeConfi
 		env:      env,
 		projType: projType,
 	}
+}
+
+// forgeDownDone is the single exit of a successful Phase09ForgeRegisterDown:
+// it logs why, removes forge_link.json (a missing file is fine), clears the
+// FORGE_* state keys and saves state.
+func forgeDownDone(st *state.State, workspaceDir, why string) error {
+	fmt.Fprintf(os.Stderr, "[phase 09 down] forge: %s\n", why)
+	if err := forge.RemoveLink(workspaceDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "[phase 09 down] warning: could not remove forge_link.json: %v\n", err)
+	}
+	for _, k := range []string{"FORGE_STATUS", "FORGE_PROJECT_ID", "FORGE_CLUSTER_ID", "FORGE_LINK_PATH"} {
+		st.Set(k, "")
+	}
+	return st.Save()
 }

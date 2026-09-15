@@ -452,7 +452,7 @@ func TestPhase09ForgeRegisterDown_NoLinkDiscoveryFallback(t *testing.T) {
 
 	restMu.Lock()
 	defer restMu.Unlock()
-	want := []string{"DELETE /api/projects/45/k8s/clusters/29", "DELETE /api/projects/45"}
+	want := []string{"DELETE /api/k8s/clusters/29", "DELETE /api/projects/45"}
 	if len(deletes) != 2 || deletes[0] != want[0] || deletes[1] != want[1] {
 		t.Errorf("deletes = %v, want %v", deletes, want)
 	}
@@ -595,6 +595,151 @@ func TestPhase09ForgeRegisterDown_NilForgeBlockWithLink(t *testing.T) {
 	err := Phase09ForgeRegisterDown(context.Background(), cl, st, clients, false)
 	if err != nil {
 		t.Fatalf("Phase09ForgeRegisterDown with nil cl.Forge: expected nil, got: %v", err)
+	}
+}
+
+func TestPhase09ForgeRegisterDown_PendingLinkFallback(t *testing.T) {
+	awsmw.ResetForTest()
+
+	var (
+		restMu  sync.Mutex
+		deletes []string
+	)
+	restSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/auth/login":
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "tok"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{
+					{"id": 45, "name": "awsbnkctl-syd-tracer"},
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/45/k8s/clusters":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"clusters": []map[string]any{
+					{"id": 29, "name": "syd-tracer"},
+				},
+			})
+		case r.Method == http.MethodDelete:
+			restMu.Lock()
+			deletes = append(deletes, "DELETE "+r.URL.Path)
+			restMu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer restSrv.Close()
+
+	dir := t.TempDir()
+	cl := forgeEnabledCluster("http://unused", restSrv.URL)
+	st, _ := state.Load(dir)
+	st.Set("FORGE_PROJECT_ID", "45")
+	st.Set("FORGE_CLUSTER_ID", "0")
+	st.Set("FORGE_STATUS", "pending")
+	st.Set("FORGE_LINK_PATH", "/tmp/forge_link.json")
+
+	restoreWd := chdirTemp(t, dir)
+	defer restoreWd()
+
+	// Write a pending link with ClusterID == 0.
+	if err := forge.WriteLink(cl.StateDir(), &forge.Link{
+		ProjectID: 45, ClusterID: 0, Status: "pending", ForgeURL: restSrv.URL,
+	}); err != nil {
+		t.Fatalf("WriteLink: %v", err)
+	}
+
+	clients := &Clients{Profile: "test"}
+	err := Phase09ForgeRegisterDown(context.Background(), cl, st, clients, false)
+	if err != nil {
+		t.Fatalf("Phase09ForgeRegisterDown: %v", err)
+	}
+
+	restMu.Lock()
+	defer restMu.Unlock()
+	want := []string{"DELETE /api/k8s/clusters/29", "DELETE /api/projects/45"}
+	if len(deletes) != 2 || deletes[0] != want[0] || deletes[1] != want[1] {
+		t.Errorf("deletes = %v, want %v", deletes, want)
+	}
+
+	if _, readErr := forge.ReadLink(cl.StateDir()); readErr == nil {
+		t.Error("expected forge_link.json to be removed")
+	}
+	for _, key := range []string{"FORGE_PROJECT_ID", "FORGE_CLUSTER_ID", "FORGE_STATUS", "FORGE_LINK_PATH"} {
+		if got := st.Get(key); got != "" {
+			t.Errorf("%s = %q, want cleared", key, got)
+		}
+	}
+}
+
+func TestPhase09ForgeRegisterDown_MCPFailureGeneralFallback(t *testing.T) {
+	awsmw.ResetForTest()
+
+	// MCP returns a 500 error on tool calls (general failure, not catalog gap).
+	mcpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}))
+	defer mcpSrv.Close()
+
+	var (
+		restMu  sync.Mutex
+		deletes []string
+	)
+	restSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/auth/login":
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "tok"})
+		case r.Method == http.MethodDelete:
+			restMu.Lock()
+			deletes = append(deletes, "DELETE "+r.URL.Path)
+			restMu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer restSrv.Close()
+
+	dir := t.TempDir()
+	cl := forgeEnabledCluster(mcpSrv.URL+"/mcp/", restSrv.URL)
+	st, _ := state.Load(dir)
+	st.Set("FORGE_PROJECT_ID", "11")
+	st.Set("FORGE_CLUSTER_ID", "99")
+	st.Set("FORGE_STATUS", "registered")
+	st.Set("FORGE_LINK_PATH", "/tmp/forge_link.json")
+
+	restoreWd := chdirTemp(t, dir)
+	defer restoreWd()
+
+	if err := forge.WriteLink(cl.StateDir(), &forge.Link{
+		ProjectID: 11, ClusterID: 99, Status: "registered", ForgeURL: restSrv.URL, ForgeMCPURL: mcpSrv.URL + "/mcp/",
+	}); err != nil {
+		t.Fatalf("WriteLink: %v", err)
+	}
+
+	clients := &Clients{Profile: "test", ForgeClient: forge.NewClient(mcpSrv.URL + "/mcp/")}
+	err := Phase09ForgeRegisterDown(context.Background(), cl, st, clients, false)
+	if err != nil {
+		t.Fatalf("Phase09ForgeRegisterDown: %v", err)
+	}
+
+	restMu.Lock()
+	defer restMu.Unlock()
+	want := []string{"DELETE /api/k8s/clusters/99", "DELETE /api/projects/11"}
+	if len(deletes) != 2 || deletes[0] != want[0] || deletes[1] != want[1] {
+		t.Errorf("deletes = %v, want %v", deletes, want)
+	}
+
+	if _, readErr := forge.ReadLink(cl.StateDir()); readErr == nil {
+		t.Error("expected forge_link.json to be removed")
+	}
+	for _, key := range []string{"FORGE_PROJECT_ID", "FORGE_CLUSTER_ID", "FORGE_STATUS", "FORGE_LINK_PATH"} {
+		if got := st.Get(key); got != "" {
+			t.Errorf("%s = %q, want cleared", key, got)
+		}
 	}
 }
 
