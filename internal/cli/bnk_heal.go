@@ -5,91 +5,98 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	"github.com/JLCode-tech/awsbnkctl/internal/doctor"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
-	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 var (
 	flagBnkHealKubeconfig string
 	flagBnkHealConfig     string
 	flagBnkHealDryRun     bool
+	flagBnkHealOnly       []string
 )
-
-// metricsHealWait bounds how long heal waits for metrics.k8s.io after the
-// add-on exists (the Deployment needs a node and a first scrape).
-const metricsHealWait = 3 * time.Minute
-
-// bnkHealMetrics is the metrics-server part of the heal report.
-type bnkHealMetrics struct {
-	// Managed is false when heal ran without -f and could not touch the EKS
-	// add-on; the API check still runs.
-	Managed bool `json:"managed"`
-	// Created is true when the add-on was created by this run.
-	Created bool `json:"created"`
-	// Available is true when metrics.k8s.io/v1beta1 is served.
-	Available bool   `json:"available"`
-	Detail    string `json:"detail,omitempty"`
-}
 
 // bnkHealResult is the JSON document bnk heal prints with -o json.
 type bnkHealResult struct {
-	Schema  string               `json:"schema"`
-	Multus  k8s.MultusHealResult `json:"multus"`
-	Metrics bnkHealMetrics       `json:"metricsServer"`
+	Schema  string              `json:"schema"`
+	Repairs []phases.HealStatus `json:"repairs"`
 }
 
 var bnkHealCmd = &cobra.Command{
 	Use:   "heal",
-	Short: "Repair the cluster-side plumbing awsbnkctl up and bnk upgrade also fix, on any BNK generation",
-	Long: `awsbnkctl bnk heal runs the idempotent cluster repairs that awsbnkctl up
-and awsbnkctl bnk upgrade apply, without provisioning or upgrading anything.
-It works on 2.3 and 2.4 clusters alike.
+	Short: "Detect and repair the cluster-side plumbing awsbnkctl up and bnk upgrade also fix, on any BNK generation",
+	Long: `awsbnkctl bnk heal runs the idempotent repairs that awsbnkctl up and
+awsbnkctl bnk upgrade apply, without provisioning or upgrading anything. Each
+repair is detected first and fixed only when needed; --dry-run prints what
+would change. awsbnkctl doctor --backend k8s shows the same detections as
+rows. Works on 2.3 and 2.4 clusters.
 
-Repairs:
-  multus          The Multus thin plugin writes its kubeconfig from the
-                  service-account token it holds at pod start and only rewrites
-                  it when started with --cleanup-config-on-exit. Without the flag
-                  the token expires and every new pod on the node fails with
-                  "Multus: ... error waiting for pod: Unauthorized" (TMM stays
-                  Pending). heal adds the flag to the kube-multus-ds DaemonSet,
-                  which rolls it with a fresh token, and rolls it again if a pod
-                  still reports Unauthorized.
-  metrics-server  The metrics-server EKS add-on serves metrics.k8s.io (pod and
-                  node CPU/memory) for kubectl top and the Forge fleet view.
-                  Needs -f so heal can reach the EKS API; with --kubeconfig only
-                  the metrics API is checked, not installed.
+Repairs (--only <name> limits the run):
+  multus-token-watch         kube-multus-ds writes its kubeconfig once at pod
+                             start unless started with --cleanup-config-on-exit;
+                             the expired token fails every new pod with
+                             "Multus ... Unauthorized" (TMM stays Pending)
+  metrics-server         -f  metrics-server EKS add-on: metrics.k8s.io for
+                             kubectl top and the Forge fleet view
+  tmm-log-stream             f5-toda-fluentd stdout store, so logs tmm
+                             --governance and the Loki collector see TMM lines
+  pod-manager                f5-tmm-pod-manager gRPC client cert mount and the
+                             cold-start crash loop against kube-proxy
+  cwc                        cwc pod stuck in the DNS warm-up crash loop
+  dssm-probe                 redis-cli --tls --insecure in the f5-dssm probes
+                             (hostname check blocks the replica on cold start)
+  controller-endpointslices  -f  ClusterRole so the 2.4 controller can read
+                             EndpointSlices (FLO 2.30 omits it)
+  controller-irsa        -f  IRSA trust policy and ServiceAccount annotation
+                             for the controller (cloud provider, Gateway VIPs)
+  tmm-k8s-routes         -f  TMM_K8S_ROUTES=<service CIDR> on the CNEInstance
+                             so TMM keeps dSSM and DNS behind the Infra routes
 
-awsbnkctl doctor --backend k8s reports the same state as "multus kubeconfig
-token" and "metrics api" without changing anything.`,
+Repairs marked -f need cluster.yaml (state.env and the AWS clients); with
+--kubeconfig alone they are detected and reported, not fixed.`,
 	Example: `  awsbnkctl bnk heal -f clusters/lab/cluster.yaml
-  awsbnkctl bnk heal --kubeconfig ~/.kube/lab --dry-run
+  awsbnkctl bnk heal -f clusters/lab/cluster.yaml --dry-run
+  awsbnkctl bnk heal --kubeconfig ~/.kube/lab --only tmm-log-stream,pod-manager
   awsbnkctl bnk heal -f clusters/lab/cluster.yaml -o json`,
 	RunE: runBnkHeal,
 }
 
 func init() {
 	bnkHealCmd.Flags().StringVar(&flagBnkHealKubeconfig, "kubeconfig", "", "explicit kubeconfig path (takes precedence over --config; default: $KUBECONFIG → ~/.kube/config)")
-	bnkHealCmd.Flags().StringVarP(&flagBnkHealConfig, "config", "f", "", "path to cluster.yaml; derives kubeconfig from the cluster's state.env KUBECONFIG_PATH (overridden by --kubeconfig) and enables the EKS add-on repairs")
+	bnkHealCmd.Flags().StringVarP(&flagBnkHealConfig, "config", "f", "", "path to cluster.yaml; derives kubeconfig from the cluster's state.env KUBECONFIG_PATH (overridden by --kubeconfig) and enables the repairs that need AWS or state")
 	bnkHealCmd.Flags().BoolVar(&flagBnkHealDryRun, "dry-run", false, "report what would change without writing to the cluster")
+	bnkHealCmd.Flags().StringSliceVar(&flagBnkHealOnly, "only", nil, "comma-separated repair names to run (default: all)")
 	bnkCmd.AddCommand(bnkHealCmd)
 }
 
 func runBnkHeal(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
+	known := map[string]bool{}
+	for _, r := range phases.Repairs {
+		known[r.Name] = true
+	}
+	for _, n := range flagBnkHealOnly {
+		if !known[n] {
+			return fmt.Errorf("bnk heal: unknown repair %q (see --help for the list)", n)
+		}
+	}
+
+	deps := &phases.HealDeps{DryRun: flagBnkHealDryRun, Log: os.Stderr}
 	kubeconfigPath := flagBnkHealKubeconfig
-	var cl *intent.Cluster
 	if flagBnkHealConfig != "" {
-		loaded, err := intent.Load(flagBnkHealConfig)
+		cl, err := intent.Load(flagBnkHealConfig)
 		if err != nil {
 			return fmt.Errorf("bnk heal: loading --config %s: %w", flagBnkHealConfig, err)
 		}
-		cl = loaded
+		st, err := state.Load(cl.StateDir())
+		if err != nil {
+			return fmt.Errorf("bnk heal: loading state for %s: %w", cl.Metadata.Name, err)
+		}
 		if kubeconfigPath == "" {
 			derived, err := resolveKubeconfigFromConfig(flagBnkHealConfig)
 			if err != nil {
@@ -97,86 +104,63 @@ func runBnkHeal(cmd *cobra.Command, _ []string) error {
 			}
 			kubeconfigPath = derived
 		}
+		clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
+		if err != nil {
+			return fmt.Errorf("bnk heal: AWS clients: %w", err)
+		}
+		deps.Cluster, deps.State, deps.Clients = cl, st, clients
+	} else {
+		deps.Clients = &phases.Clients{}
 	}
-	cs, err := k8s.BuildClientset(kubeconfigPath)
-	if err != nil {
-		return fmt.Errorf("bnk heal: building kube client: %w", err)
-	}
-
-	log := os.Stderr
-	res := bnkHealResult{Schema: "awsbnkctl.bnk-heal/v1"}
-
-	mh, err := k8s.EnsureMultusTokenWatch(ctx, cs, flagBnkHealDryRun, log)
-	res.Multus = mh
-	if err != nil {
-		return fmt.Errorf("bnk heal: multus: %w", err)
+	if err := deps.Clients.AttachK8s(kubeconfigPath); err != nil {
+		return fmt.Errorf("bnk heal: building kube clients: %w", err)
 	}
 
-	res.Metrics, err = healMetricsServer(ctx, cl, cs, flagBnkHealDryRun, log)
-	if err != nil {
-		return fmt.Errorf("bnk heal: metrics-server: %w", err)
-	}
+	statuses := phases.RunHeal(ctx, deps, flagBnkHealOnly)
 
 	if flagOutput == "json" {
-		return json.NewEncoder(os.Stdout).Encode(res)
+		return json.NewEncoder(os.Stdout).Encode(bnkHealResult{Schema: "awsbnkctl.bnk-heal/v2", Repairs: statuses})
 	}
-	switch {
-	case !mh.Installed:
-		fmt.Fprintln(os.Stdout, "multus          not installed")
-	case mh.Patched:
-		fmt.Fprintf(os.Stdout, "multus          %s added to %s/%s; DaemonSet rolled\n", k8s.MultusWatchFlag, k8s.MultusNamespace, k8s.MultusDaemonSet)
-	case mh.Restarted:
-		fmt.Fprintf(os.Stdout, "multus          %s/%s rolled\n", k8s.MultusNamespace, k8s.MultusDaemonSet)
-	case flagBnkHealDryRun && (!mh.WatchEnabled || mh.Unauthorized):
-		fmt.Fprintf(os.Stdout, "multus          would change: %s\n", mh.Reason)
-	default:
-		fmt.Fprintf(os.Stdout, "multus          ok: %s\n", mh.Reason)
+	failed := 0
+	for _, s := range statuses {
+		mark := "ok     "
+		switch {
+		case s.Error != "":
+			mark = "ERROR  "
+			failed++
+		case s.Changed:
+			mark = "FIXED  "
+		case s.Skipped:
+			mark = "SKIP   "
+		case flagBnkHealDryRun && !s.Healthy:
+			mark = "WOULD  "
+		}
+		detail := s.Detail
+		if s.Error != "" {
+			detail = s.Error
+		}
+		fmt.Fprintf(os.Stdout, "%s %-26s %s\n", mark, s.Name, detail)
 	}
-	fmt.Fprintf(os.Stdout, "metrics-server  %s\n", res.Metrics.Detail)
+	if failed > 0 {
+		return fmt.Errorf("bnk heal: %d repair(s) failed", failed)
+	}
 	return nil
 }
 
-// healMetricsServer ensures the EKS add-on when cl is known (heal -f) and
-// reports whether metrics.k8s.io is served.
-func healMetricsServer(ctx context.Context, cl *intent.Cluster, cs kubernetes.Interface, dryRun bool, log *os.File) (bnkHealMetrics, error) {
-	m := bnkHealMetrics{}
-	if cl != nil {
-		m.Managed = true
-		if dryRun {
-			if err := k8s.MetricsAPIAvailable(cs); err != nil {
-				m.Detail = "would ensure the " + phases.MetricsServerAddonName + " EKS add-on: " + err.Error()
-			} else {
-				m.Available = true
-				m.Detail = "ok: " + k8s.MetricsAPIGroupVersion + " served"
-			}
-			return m, nil
+// healDoctorChecks renders the registry detections as doctor rows.
+func healDoctorChecks(ctx context.Context, clients *phases.Clients) []doctor.Check {
+	var out []doctor.Check
+	for _, s := range phases.DetectAll(ctx, &phases.HealDeps{Clients: clients}) {
+		c := doctor.Check{Name: s.Title, BackendName: "k8s"}
+		switch {
+		case s.Error != "":
+			c.Status, c.Detail = doctor.StatusWarning, "could not inspect: "+s.Error
+		case !s.Healthy:
+			c.Status, c.Detail = doctor.StatusWarning, s.Detail
+		default:
+			c.Status, c.Detail = doctor.StatusOK, s.Detail
 		}
-		clients, err := phases.NewClients(ctx, cl.Metadata.Region, "")
-		if err != nil {
-			return m, err
-		}
-		created, err := phases.EnsureMetricsServerAddon(ctx, clients.EKS, cl.Metadata.Name, log)
-		if err != nil {
-			return m, err
-		}
-		m.Created = created
-		if err := k8s.WaitForMetricsAPI(ctx, cs, metricsHealWait); err != nil {
-			m.Detail = "add-on present but " + err.Error()
-			return m, nil
-		}
-		m.Available = true
-		if created {
-			m.Detail = phases.MetricsServerAddonName + " EKS add-on created; " + k8s.MetricsAPIGroupVersion + " served"
-		} else {
-			m.Detail = "ok: " + k8s.MetricsAPIGroupVersion + " served"
-		}
-		return m, nil
+		out = append(out, c)
 	}
-	if err := k8s.MetricsAPIAvailable(cs); err != nil {
-		m.Detail = err.Error() + " — run bnk heal -f <cluster.yaml> to create the " + phases.MetricsServerAddonName + " EKS add-on"
-		return m, nil
-	}
-	m.Available = true
-	m.Detail = "ok: " + k8s.MetricsAPIGroupVersion + " served"
-	return m, nil
+	return out
 }

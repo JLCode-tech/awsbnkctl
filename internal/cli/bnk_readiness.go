@@ -17,8 +17,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/JLCode-tech/awsbnkctl/internal/doctor"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -272,85 +270,4 @@ func writeTargetResults(w io.Writer, targets []forgeScanTarget) {
 // warnf prints an operator warning to stderr.
 func warnf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "⚠ "+format+"\n", args...)
-}
-
-// multusDoctorCheck reports whether the Multus kubeconfig follows the
-// service-account token (see k8s.EnsureMultusTokenWatch). Detect only: doctor
-// never changes the cluster.
-func multusDoctorCheck(ctx context.Context, cs kubernetes.Interface) doctor.Check {
-	c := doctor.Check{Name: "multus kubeconfig token", BackendName: "k8s"}
-	st, _, err := k8s.InspectMultus(ctx, cs)
-	const fix = " — `awsbnkctl bnk heal` fixes the DaemonSet (`awsbnkctl up` and `awsbnkctl bnk upgrade` do the same)"
-	switch {
-	case err != nil:
-		c.Status, c.Detail = doctor.StatusWarning, "could not inspect Multus: "+err.Error()
-	case !st.Installed:
-		c.Status, c.Detail = doctor.StatusOK, "Multus not installed"
-	case !st.WatchEnabled && st.Unauthorized != "":
-		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("pod %s failed its network sandbox: Multus Unauthorized (expired kubeconfig token); the DaemonSet lacks %s%s", st.Unauthorized, k8s.MultusWatchFlag, fix)
-	case !st.WatchEnabled:
-		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("DaemonSet %s/%s writes its kubeconfig once at pod start (no %s): the token expires and new pods fail with Multus Unauthorized%s", k8s.MultusNamespace, k8s.MultusDaemonSet, k8s.MultusWatchFlag, fix)
-	case st.Unauthorized != "":
-		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("pod %s failed its network sandbox: Multus Unauthorized although the token watch is on%s", st.Unauthorized, fix)
-	default:
-		c.Status, c.Detail = doctor.StatusOK, "kubeconfig follows the service-account token ("+k8s.MultusWatchFlag+"), no Unauthorized sandbox events"
-	}
-	return c
-}
-
-// cneIRSADoctorCheck reports whether the ServiceAccount the f5-cne-controller
-// Deployment runs as carries the IRSA role annotation. Without it the 2.4
-// controller starts with no cloud provider and cannot allocate Gateway VIPs
-// on AWS (seen live after a 2.3.0 -> 2.4 upgrade, where the SA name changed).
-func cneIRSADoctorCheck(ctx context.Context, cs kubernetes.Interface, ns string) doctor.Check {
-	c := doctor.Check{Name: "bnk controller IRSA", BackendName: "k8s"}
-	dep, err := cs.AppsV1().Deployments(ns).Get(ctx, bnkscan.DefaultControllerName, metav1.GetOptions{})
-	if err != nil {
-		c.Status, c.Detail = doctor.StatusOK, fmt.Sprintf("deployment %s/%s not found; skipped", ns, bnkscan.DefaultControllerName)
-		return c
-	}
-	saName := dep.Spec.Template.Spec.ServiceAccountName
-	if saName == "" {
-		saName = "default"
-	}
-	sa, err := cs.CoreV1().ServiceAccounts(ns).Get(ctx, saName, metav1.GetOptions{})
-	if err != nil {
-		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("serviceaccount %s/%s: %v", ns, saName, err)
-		return c
-	}
-	if arn := sa.Annotations["eks.amazonaws.com/role-arn"]; arn != "" {
-		c.Status, c.Detail = doctor.StatusOK, saName+" → "+arn
-		return c
-	}
-	c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("serviceaccount %s/%s has no eks.amazonaws.com/role-arn; the controller runs without a cloud provider — `awsbnkctl bnk upgrade` re-binds it (phase 21)", ns, saName)
-	return c
-}
-
-// tmmLogStreamDoctorCheck reports whether the f5-toda-fluentd stdout store
-// that carries the TMM log stream is on (k8s.TMMLogStreamEnabled). Detect
-// only: doctor never changes the cluster.
-func tmmLogStreamDoctorCheck(ctx context.Context, cs kubernetes.Interface) doctor.Check {
-	c := doctor.Check{Name: "bnk tmm log stream", BackendName: "k8s"}
-	on, err := k8s.TMMLogStreamEnabled(ctx, cs)
-	switch {
-	case err != nil:
-		c.Status, c.Detail = doctor.StatusWarning, "could not read "+k8s.TMMLogNamespace+"/"+k8s.TMMLogCustomConfigMap+": "+err.Error()
-	case !on:
-		c.Status, c.Detail = doctor.StatusWarning, "stdout store off in "+k8s.TMMLogNamespace+"/"+k8s.TMMLogCustomConfigMap+": `awsbnkctl logs tmm` and the governance collector see nothing — `awsbnkctl up` (phase 24d) or `awsbnkctl bnk upgrade` enable it"
-	default:
-		c.Status, c.Detail = doctor.StatusOK, "f5-toda-fluentd prints the TMM lines (`awsbnkctl logs tmm --governance`)"
-	}
-	return c
-}
-
-// metricsAPIDoctorCheck reports whether metrics.k8s.io is served: kubectl top
-// and the Forge fleet view read pod and node CPU/memory from it. Detect only.
-func metricsAPIDoctorCheck(cs kubernetes.Interface) doctor.Check {
-	c := doctor.Check{Name: "metrics api", BackendName: "k8s"}
-	if err := k8s.MetricsAPIAvailable(cs); err != nil {
-		c.Status, c.Detail = doctor.StatusWarning, err.Error()+" — `awsbnkctl bnk heal -f <cluster.yaml>` creates the metrics-server EKS add-on (`awsbnkctl up` phase 08c does the same)"
-		return c
-	}
-	c.Status, c.Detail = doctor.StatusOK, k8s.MetricsAPIGroupVersion+" served (metrics-server): pod and node CPU/memory available to kubectl top and Forge"
-	return c
 }

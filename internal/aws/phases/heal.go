@@ -1,0 +1,694 @@
+package phases
+
+// heal.go — the one table of cluster-side repairs. Every entry has a Detect
+// (read-only; doctor prints it) and a Fix (idempotent; bnk heal runs it).
+// The up phases and bnk upgrade call the same functions, so a repair is
+// written once and reaches all three surfaces.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
+
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
+	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
+)
+
+// HealDeps is what a repair may use. Clients.K8s is required; Cluster, State
+// and the AWS clients are present only when the caller passed -f.
+type HealDeps struct {
+	Cluster *intent.Cluster
+	State   *state.State
+	Clients *Clients
+	DryRun  bool
+	Log     io.Writer
+}
+
+func (d *HealDeps) hasIntent() bool { return d.Cluster != nil && d.State != nil }
+
+// Repair is one detect/fix pair.
+type Repair struct {
+	// Name is the CLI key (bnk heal --only <name>).
+	Name string
+	// Title is the doctor row name.
+	Title string
+	// NeedsIntent marks a Fix that needs cluster.yaml, state.env and the AWS
+	// clients (bnk heal -f). Detect always works with the kubeconfig alone.
+	NeedsIntent bool
+	// Detect returns healthy=true with a detail when nothing needs doing;
+	// healthy=false with a detail when Fix should run. err means it could not
+	// tell.
+	Detect func(ctx context.Context, d *HealDeps) (healthy bool, detail string, err error)
+	// Fix repairs and returns what it did.
+	Fix func(ctx context.Context, d *HealDeps) (detail string, err error)
+}
+
+// HealStatus is the outcome of one repair in a bnk heal run.
+type HealStatus struct {
+	Name    string `json:"name"`
+	Title   string `json:"title"`
+	Healthy bool   `json:"healthy"`
+	// Changed is true when Fix ran and wrote to the cluster.
+	Changed bool `json:"changed"`
+	// Skipped is true when the repair needed -f and heal ran without it.
+	Skipped bool   `json:"skipped"`
+	Detail  string `json:"detail"`
+	Error   string `json:"error,omitempty"`
+}
+
+const (
+	healWait       = 3 * time.Minute
+	healPoll       = 5 * time.Second
+	cwcNamespace   = OperatorNamespace
+	dssmCMWaitHeal = 30 * time.Second
+)
+
+var healCNEInstanceGVR = schema.GroupVersionResource{Group: "k8s.f5.com", Version: "v1", Resource: cneInstanceResource}
+
+// Repairs is the registry, in the order bnk heal runs them.
+var Repairs = []Repair{
+	{
+		Name: "multus-token-watch", Title: "multus kubeconfig token",
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			st, _, err := k8s.InspectMultus(ctx, d.Clients.K8s)
+			switch {
+			case err != nil:
+				return false, "", err
+			case !st.Installed:
+				return true, "Multus not installed", nil
+			case !st.WatchEnabled && st.Unauthorized != "":
+				return false, fmt.Sprintf("pod %s failed its network sandbox: Multus Unauthorized (expired kubeconfig token); the DaemonSet lacks %s", st.Unauthorized, k8s.MultusWatchFlag), nil
+			case !st.WatchEnabled:
+				return false, fmt.Sprintf("DaemonSet %s/%s writes its kubeconfig once at pod start (no %s): the token expires and new pods fail with Multus Unauthorized", k8s.MultusNamespace, k8s.MultusDaemonSet, k8s.MultusWatchFlag), nil
+			case st.Unauthorized != "":
+				return false, fmt.Sprintf("pod %s failed its network sandbox: Multus Unauthorized although the token watch is on", st.Unauthorized), nil
+			}
+			return true, "kubeconfig follows the service-account token (" + k8s.MultusWatchFlag + "), no Unauthorized sandbox events", nil
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			res, err := k8s.EnsureMultusTokenWatch(ctx, d.Clients.K8s, d.DryRun, d.Log)
+			switch {
+			case err != nil:
+				return "", err
+			case res.Patched:
+				return k8s.MultusWatchFlag + " added to " + k8s.MultusNamespace + "/" + k8s.MultusDaemonSet + "; DaemonSet rolled", nil
+			case res.Restarted:
+				return k8s.MultusNamespace + "/" + k8s.MultusDaemonSet + " rolled", nil
+			}
+			return res.Reason, nil
+		},
+	},
+	{
+		Name: "metrics-server", Title: "metrics api", NeedsIntent: true,
+		Detect: func(_ context.Context, d *HealDeps) (bool, string, error) {
+			if err := k8s.MetricsAPIAvailable(d.Clients.K8s); err != nil {
+				return false, err.Error() + "; kubectl top and the Forge fleet view have no pod or node CPU/memory", nil
+			}
+			return true, k8s.MetricsAPIGroupVersion + " served (metrics-server): pod and node CPU/memory available to kubectl top and Forge", nil
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			created, err := EnsureMetricsServerAddon(ctx, d.Clients.EKS, d.Cluster.Metadata.Name, d.Log)
+			if err != nil {
+				return "", err
+			}
+			if err := k8s.WaitForMetricsAPI(ctx, d.Clients.K8s, healWait); err != nil {
+				return "", fmt.Errorf("add-on present but %w", err)
+			}
+			if created {
+				return MetricsServerAddonName + " EKS add-on created; " + k8s.MetricsAPIGroupVersion + " served", nil
+			}
+			return k8s.MetricsAPIGroupVersion + " served", nil
+		},
+	},
+	{
+		Name: "tmm-log-stream", Title: "bnk tmm log stream",
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			on, err := k8s.TMMLogStreamEnabled(ctx, d.Clients.K8s)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					return true, k8s.TMMLogNamespace + "/" + k8s.TMMLogCustomConfigMap + " absent (BNK not installed yet)", nil
+				}
+				return false, "", err
+			}
+			if !on {
+				return false, "stdout store off in " + k8s.TMMLogNamespace + "/" + k8s.TMMLogCustomConfigMap + ": `awsbnkctl logs tmm` and the governance collector see nothing", nil
+			}
+			return true, "f5-toda-fluentd prints the TMM lines (`awsbnkctl logs tmm --governance`)", nil
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			changed, err := k8s.EnableTMMLogStream(ctx, d.Clients.K8s, healWait)
+			if err != nil {
+				return "", err
+			}
+			if changed {
+				return "stdout store enabled in " + k8s.TMMLogNamespace + "/" + k8s.TMMLogCustomConfigMap + "; fluentd pod bounced", nil
+			}
+			return "stdout store already on", nil
+		},
+	},
+	{
+		Name: "pod-manager", Title: "bnk tmm pod-manager",
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			return detectPodManager(ctx, d.Clients)
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			return fixPodManager(ctx, d.Clients, d.Log)
+		},
+	},
+	{
+		Name: "cwc", Title: "bnk cwc",
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			pod, ready, restarts, err := cwcPod(ctx, d.Clients)
+			switch {
+			case err != nil:
+				return false, "", err
+			case pod == nil:
+				return true, "no cwc pod (BNK not installed yet)", nil
+			case ready:
+				return true, fmt.Sprintf("cwc Ready (restarts=%d)", restarts), nil
+			case restarts >= cwcRestartThreshold:
+				return false, fmt.Sprintf("cwc pod %s not Ready after %d restarts (DNS warm-up crash loop)", pod.Name, restarts), nil
+			}
+			return true, fmt.Sprintf("cwc pod %s starting (restarts=%d)", pod.Name, restarts), nil
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			pod, _, _, err := cwcPod(ctx, d.Clients)
+			if err != nil || pod == nil {
+				return "", err
+			}
+			if err := d.Clients.K8s.CoreV1().Pods(cwcNamespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
+				return "", fmt.Errorf("delete cwc pod %s: %w", pod.Name, err)
+			}
+			if err := waitPodsReady(ctx, d.Clients, cwcNamespace, cwcLabelSelector, healWait); err != nil {
+				return "", err
+			}
+			return "cwc pod " + pod.Name + " deleted; replacement Ready", nil
+		},
+	},
+	{
+		Name: "dssm-probe", Title: "bnk dssm readiness probe",
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			cm, err := d.Clients.K8s.CoreV1().ConfigMaps(InstanceNamespace).Get(ctx, dssmConfigMapName, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				return true, InstanceNamespace + "/" + dssmConfigMapName + " absent (BNK not installed yet)", nil
+			}
+			if err != nil {
+				return false, "", err
+			}
+			toPatch, done := dssmOverlayKeys(cm)
+			if len(toPatch) == 0 {
+				if done > 0 {
+					return true, fmt.Sprintf("redis-cli --tls --insecure in %d probe scripts", done), nil
+				}
+				return true, "no redis-cli --tls probe scripts in " + dssmConfigMapName, nil
+			}
+			if allDSSMPodsReady(ctx, d.Clients) {
+				return true, "dssm pods Ready; probe overlay not needed", nil
+			}
+			return false, fmt.Sprintf("dssm pods not Ready and %d probe scripts still verify the TLS hostname (redis-cli --tls without --insecure)", len(toPatch)), nil
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			patched, err := applyDSSMOverlay(ctx, d.Clients, d.Log)
+			if err != nil {
+				return "", err
+			}
+			if len(patched) == 0 {
+				return "probe scripts already patched", nil
+			}
+			if d.State != nil {
+				d.State.Set("DSSM_INSECURE_OVERLAY_APPLIED_AT", time.Now().UTC().Format(time.RFC3339))
+				_ = d.State.Save()
+			}
+			return fmt.Sprintf("patched %s in %s; dssm pods bounced", strings.Join(patched, ", "), dssmConfigMapName), nil
+		},
+	},
+	{
+		Name: "controller-endpointslices", Title: "bnk controller endpointslices rbac", NeedsIntent: true,
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			return detectControllerRBAC(ctx, d.Clients)
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			tmpl, err := k8smanifests.FS.ReadFile(CNEControllerRBACYAMLPath)
+			if err != nil {
+				return "", err
+			}
+			rendered, err := render.RenderCNEControllerRBAC(tmpl, d.Cluster)
+			if err != nil {
+				return "", err
+			}
+			if err := applyRawYAML(ctx, d.Clients, rendered); err != nil {
+				return "", err
+			}
+			return "ClusterRole/Binding " + render.CNEControllerRBACName(d.Cluster) + " applied", nil
+		},
+	},
+	{
+		Name: "controller-irsa", Title: "bnk controller IRSA", NeedsIntent: true,
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			return detectControllerIRSA(ctx, d.Clients)
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			if err := Phase21IRSASA(ctx, d.Cluster, d.State, d.Clients, false); err != nil {
+				return "", err
+			}
+			return "IRSA trust policy scoped and ServiceAccount annotated (phase 21)", nil
+		},
+	},
+	{
+		Name: "tmm-k8s-routes", Title: "bnk tmm k8s routes", NeedsIntent: true,
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			return detectTMMK8sRoutes(ctx, d.Clients)
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			return fixTMMK8sRoutes(ctx, d)
+		},
+	},
+}
+
+// RunHeal detects and, when unhealthy, fixes each repair. only limits the run
+// to the named repairs. Repairs whose Fix needs -f are detected but skipped
+// without intent. Detect errors and Fix errors are recorded, not fatal.
+func RunHeal(ctx context.Context, d *HealDeps, only []string) []HealStatus {
+	if d.Log == nil {
+		d.Log = io.Discard
+	}
+	want := map[string]bool{}
+	for _, n := range only {
+		want[n] = true
+	}
+	var out []HealStatus
+	for _, r := range Repairs {
+		if len(want) > 0 && !want[r.Name] {
+			continue
+		}
+		s := HealStatus{Name: r.Name, Title: r.Title}
+		healthy, detail, err := r.Detect(ctx, d)
+		if err != nil {
+			s.Error = err.Error()
+			out = append(out, s)
+			continue
+		}
+		s.Healthy, s.Detail = healthy, detail
+		if healthy {
+			out = append(out, s)
+			continue
+		}
+		if r.NeedsIntent && !d.hasIntent() {
+			s.Skipped = true
+			s.Detail = detail + " — run bnk heal -f <cluster.yaml> to repair"
+			out = append(out, s)
+			continue
+		}
+		fmt.Fprintf(d.Log, "[heal] %s: %s\n", r.Name, detail)
+		if d.DryRun {
+			s.Detail = "would repair: " + detail
+			out = append(out, s)
+			continue
+		}
+		fixed, ferr := r.Fix(ctx, d)
+		if ferr != nil {
+			s.Error = ferr.Error()
+			out = append(out, s)
+			continue
+		}
+		s.Changed, s.Healthy, s.Detail = true, true, fixed
+		fmt.Fprintf(d.Log, "[heal] %s: %s\n", r.Name, fixed)
+		out = append(out, s)
+	}
+	return out
+}
+
+// DetectAll runs only the Detect side of every repair (doctor).
+func DetectAll(ctx context.Context, d *HealDeps) []HealStatus {
+	var out []HealStatus
+	for _, r := range Repairs {
+		s := HealStatus{Name: r.Name, Title: r.Title}
+		healthy, detail, err := r.Detect(ctx, d)
+		if err != nil {
+			s.Error = err.Error()
+		} else {
+			s.Healthy, s.Detail = healthy, detail
+			if !healthy {
+				s.Detail += " — `awsbnkctl bnk heal -f <cluster.yaml>` repairs it"
+			}
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// --- pod-manager ---------------------------------------------------------
+
+func detectPodManager(ctx context.Context, clients *Clients) (bool, string, error) {
+	deploy, err := clients.K8s.AppsV1().Deployments(InstanceNamespace).Get(ctx, h4DeploymentName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, "deployment " + InstanceNamespace + "/" + h4DeploymentName + " absent (BNK not installed yet)", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	mounted := false
+	present := false
+	for _, c := range deploy.Spec.Template.Spec.Containers {
+		if c.Name != h4ContainerName {
+			continue
+		}
+		present = true
+		for _, vm := range c.VolumeMounts {
+			if vm.MountPath == "/tls/f5ingress/grpc/clt" {
+				mounted = true
+			}
+		}
+	}
+	if !present {
+		return true, "no " + h4ContainerName + " container in " + h4DeploymentName, nil
+	}
+	if !mounted {
+		return false, h4ContainerName + " lacks the /tls/f5ingress/grpc/clt mount (gRPC client cert)", nil
+	}
+	pods, err := clients.K8s.CoreV1().Pods(InstanceNamespace).List(ctx, metav1.ListOptions{LabelSelector: metav1.FormatLabelSelector(deploy.Spec.Selector)})
+	if err != nil {
+		return false, "", err
+	}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.DeletionTimestamp != nil {
+			continue
+		}
+		found, ready, restarts, reason := podManagerStatus(p)
+		if !found {
+			continue
+		}
+		if !ready && (reason == "CrashLoopBackOff" || restarts >= h4RestartThreshold) {
+			return false, fmt.Sprintf("%s in pod %s not Ready (restarts=%d%s): cold-start race against kube-proxy", h4ContainerName, p.Name, restarts, reasonSuffix(reason)), nil
+		}
+	}
+	return true, h4ContainerName + " Ready with its gRPC client cert mounted", nil
+}
+
+func reasonSuffix(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	return ", " + reason
+}
+
+func fixPodManager(ctx context.Context, clients *Clients, log io.Writer) (string, error) {
+	ensurePodManagerGrpcCertMount(ctx, clients)
+	if err := restartDeployment(ctx, clients, InstanceNamespace, h4DeploymentName); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(log, "[heal] pod-manager: rollout-restarted %s/%s\n", InstanceNamespace, h4DeploymentName)
+	deadline := time.Now().Add(healWait)
+	for {
+		healthy, detail, err := detectPodManager(ctx, clients)
+		if err == nil && healthy {
+			return "gRPC client cert mount ensured; " + h4DeploymentName + " restarted; " + detail, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("after %s: %s", healWait, detail)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(healPoll):
+		}
+	}
+}
+
+// --- cwc -----------------------------------------------------------------
+
+func cwcPod(ctx context.Context, clients *Clients) (*corev1.Pod, bool, int32, error) {
+	pods, err := clients.K8s.CoreV1().Pods(cwcNamespace).List(ctx, metav1.ListOptions{LabelSelector: cwcLabelSelector})
+	if err != nil {
+		return nil, false, 0, err
+	}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.DeletionTimestamp != nil {
+			continue
+		}
+		ready, restarts := cwcStatus(p)
+		return p, ready, restarts, nil
+	}
+	return nil, false, 0, nil
+}
+
+func waitPodsReady(ctx context.Context, clients *Clients, ns, selector string, timeout time.Duration) error {
+	return wait.PollUntilContextTimeout(ctx, healPoll, timeout, true, func(ctx context.Context) (bool, error) {
+		pods, err := clients.K8s.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil || len(pods.Items) == 0 {
+			return false, nil //nolint:nilerr
+		}
+		for i := range pods.Items {
+			if pods.Items[i].DeletionTimestamp != nil || !isPodReady(&pods.Items[i]) {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+}
+
+// --- dssm ----------------------------------------------------------------
+
+// dssmOverlayKeys lists the ConfigMap keys whose scripts still run
+// redis-cli --tls without --insecure, and how many already carry it.
+func dssmOverlayKeys(cm *corev1.ConfigMap) (toPatch []string, done int) {
+	for k, v := range cm.Data {
+		if !strings.Contains(v, dssmTLSReplace) {
+			continue
+		}
+		if strings.Contains(v, dssmInsecureMarker) {
+			done++
+			continue
+		}
+		toPatch = append(toPatch, k)
+	}
+	return toPatch, done
+}
+
+// applyDSSMOverlay adds --insecure to every redis-cli --tls probe in the
+// f5-dssm ConfigMap and bounces the dssm pods so they re-mount it. Returns
+// the keys it patched (none when already patched).
+func applyDSSMOverlay(ctx context.Context, clients *Clients, log io.Writer) ([]string, error) {
+	var cm *corev1.ConfigMap
+	err := wait.PollUntilContextTimeout(ctx, healPoll, dssmCMWaitHeal, true, func(ctx context.Context) (bool, error) {
+		got, err := clients.K8s.CoreV1().ConfigMaps(InstanceNamespace).Get(ctx, dssmConfigMapName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		cm = got
+		return true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ConfigMap %s/%s: %w", InstanceNamespace, dssmConfigMapName, err)
+	}
+	toPatch, _ := dssmOverlayKeys(cm)
+	if len(toPatch) == 0 {
+		return nil, nil
+	}
+	for _, k := range toPatch {
+		cm.Data[k] = strings.ReplaceAll(cm.Data[k], dssmTLSReplace, dssmTLSInsecureReplace)
+	}
+	if _, err := clients.K8s.CoreV1().ConfigMaps(InstanceNamespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+		return nil, fmt.Errorf("update ConfigMap %s/%s: %w", InstanceNamespace, dssmConfigMapName, err)
+	}
+	fmt.Fprintf(log, "[heal] dssm: patched %s (redis-cli --tls --insecure)\n", strings.Join(toPatch, ", "))
+	if err := clients.K8s.CoreV1().Pods(InstanceNamespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: dssmLabelSelector}); err != nil {
+		fmt.Fprintf(log, "[heal] dssm: warning: bounce dssm pods: %v\n", err)
+	}
+	return toPatch, nil
+}
+
+// --- controller RBAC -----------------------------------------------------
+
+// detectControllerRBAC checks that a ClusterRoleBinding gives the controller
+// ServiceAccount a ClusterRole that can get EndpointSlices. Only the 2.4
+// controller (ServiceAccount f5-cne-controller) needs it; FLO 2.30 omits it.
+func detectControllerRBAC(ctx context.Context, clients *Clients) (bool, string, error) {
+	deploy, err := clients.K8s.AppsV1().Deployments(InstanceNamespace).Get(ctx, h4DeploymentName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, "deployment " + InstanceNamespace + "/" + h4DeploymentName + " absent (BNK not installed yet)", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	sa := deploy.Spec.Template.Spec.ServiceAccountName
+	if sa != render.CNEControllerServiceAccount {
+		return true, "controller runs as " + sa + " (2.3 RBAC covers EndpointSlices)", nil
+	}
+	crbs, err := clients.K8s.RbacV1().ClusterRoleBindings().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false, "", err
+	}
+	for i := range crbs.Items {
+		crb := &crbs.Items[i]
+		bound := false
+		for _, s := range crb.Subjects {
+			if s.Kind == "ServiceAccount" && s.Namespace == InstanceNamespace && s.Name == sa {
+				bound = true
+			}
+		}
+		if !bound {
+			continue
+		}
+		cr, err := clients.K8s.RbacV1().ClusterRoles().Get(ctx, crb.RoleRef.Name, metav1.GetOptions{})
+		if err != nil {
+			continue
+		}
+		for _, rule := range cr.Rules {
+			if containsAny(rule.Resources, "endpointslices", "*") && containsAny(rule.Verbs, "get", "*") {
+				return true, "ClusterRole " + cr.Name + " grants EndpointSlice get to " + InstanceNamespace + "/" + sa, nil
+			}
+		}
+	}
+	return false, "no ClusterRole bound to " + InstanceNamespace + "/" + sa + " grants EndpointSlice get (FLO 2.30 omits it): the controller cannot resolve pool members", nil
+}
+
+func containsAny(list []string, want ...string) bool {
+	for _, l := range list {
+		for _, w := range want {
+			if l == w {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// --- controller IRSA -----------------------------------------------------
+
+func detectControllerIRSA(ctx context.Context, clients *Clients) (bool, string, error) {
+	deploy, err := clients.K8s.AppsV1().Deployments(InstanceNamespace).Get(ctx, h4DeploymentName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, "deployment " + InstanceNamespace + "/" + h4DeploymentName + " absent (BNK not installed yet)", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	saName := deploy.Spec.Template.Spec.ServiceAccountName
+	if saName == "" {
+		saName = "default"
+	}
+	sa, err := clients.K8s.CoreV1().ServiceAccounts(InstanceNamespace).Get(ctx, saName, metav1.GetOptions{})
+	if err != nil {
+		return false, "", fmt.Errorf("serviceaccount %s/%s: %w", InstanceNamespace, saName, err)
+	}
+	arn := sa.Annotations[irsaRoleARNAnnotation]
+	if arn == "" {
+		return false, fmt.Sprintf("serviceaccount %s/%s has no %s: the controller runs without a cloud provider and cannot allocate Gateway VIPs", InstanceNamespace, saName, irsaRoleARNAnnotation), nil
+	}
+	injected, err := deploymentPodsHaveEnv(ctx, clients, deploy, irsaInjectedEnv)
+	if err != nil {
+		return false, "", err
+	}
+	if !injected {
+		return false, fmt.Sprintf("serviceaccount %s/%s → %s but the controller pods carry no %s: they started before the annotation", InstanceNamespace, saName, arn, irsaInjectedEnv), nil
+	}
+	return true, saName + " → " + arn, nil
+}
+
+// --- TMM_K8S_ROUTES ------------------------------------------------------
+
+func findCNEInstanceHeal(ctx context.Context, clients *Clients) (*unstructured.Unstructured, error) {
+	if clients.Dynamic == nil {
+		return nil, fmt.Errorf("no dynamic client")
+	}
+	list, err := clients.Dynamic.Resource(healCNEInstanceGVR).Namespace(InstanceNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(list.Items) == 0 {
+		return nil, nil
+	}
+	return &list.Items[0], nil
+}
+
+func tmmEnvValue(cne *unstructured.Unstructured, name string) (string, bool) {
+	env, _, _ := unstructured.NestedSlice(cne.Object, "spec", "advanced", "tmm", "env")
+	for _, e := range env {
+		m, ok := e.(map[string]any)
+		if ok && m["name"] == name {
+			v, _ := m["value"].(string)
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func detectTMMK8sRoutes(ctx context.Context, clients *Clients) (bool, string, error) {
+	cne, err := findCNEInstanceHeal(ctx, clients)
+	if err != nil {
+		return false, "", err
+	}
+	if cne == nil {
+		return true, "no CNEInstance (BNK not installed yet)", nil
+	}
+	mv, _, _ := unstructured.NestedString(cne.Object, "spec", "manifestVersion")
+	if strings.HasPrefix(mv, "2.3") {
+		return true, "manifestVersion " + mv + ": the 2.3 TMM keeps the pod default route, no static routes", nil
+	}
+	if v, ok := tmmEnvValue(cne, render.TMMK8sRoutesEnv); ok && v != "" {
+		return true, render.TMMK8sRoutesEnv + "=" + v + " on CNEInstance " + cne.GetName(), nil
+	}
+	return false, "CNEInstance " + cne.GetName() + " has no " + render.TMMK8sRoutesEnv + ": once the Infra default route is programmed TMM loses dSSM and DNS and iRule requests reset", nil
+}
+
+func fixTMMK8sRoutes(ctx context.Context, d *HealDeps) (string, error) {
+	cne, err := findCNEInstanceHeal(ctx, d.Clients)
+	if err != nil || cne == nil {
+		return "", err
+	}
+	cidr := d.State.Get(render.ServiceCIDRStateKey)
+	if cidr == "" {
+		out, err := d.Clients.EKS.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: aws.String(d.Cluster.Metadata.Name)})
+		if err != nil {
+			return "", fmt.Errorf("DescribeCluster for the service CIDR: %w", err)
+		}
+		if out.Cluster != nil && out.Cluster.KubernetesNetworkConfig != nil && out.Cluster.KubernetesNetworkConfig.ServiceIpv4Cidr != nil {
+			cidr = *out.Cluster.KubernetesNetworkConfig.ServiceIpv4Cidr
+		}
+		if cidr == "" {
+			return "", fmt.Errorf("EKS cluster %s reports no serviceIpv4Cidr", d.Cluster.Metadata.Name)
+		}
+		d.State.Set(render.ServiceCIDRStateKey, cidr)
+		_ = d.State.Save()
+	}
+	env, _, _ := unstructured.NestedSlice(cne.Object, "spec", "advanced", "tmm", "env")
+	env = append(env, map[string]any{"name": render.TMMK8sRoutesEnv, "value": cidr})
+	patch := fmt.Sprintf(`{"spec":{"advanced":{"tmm":{"env":%s}}}}`, mustJSON(env))
+	if _, err := d.Clients.Dynamic.Resource(healCNEInstanceGVR).Namespace(InstanceNamespace).Patch(ctx, cne.GetName(), types.MergePatchType, []byte(patch), metav1.PatchOptions{FieldManager: "awsbnkctl-heal"}); err != nil {
+		return "", fmt.Errorf("patch CNEInstance %s: %w", cne.GetName(), err)
+	}
+	return render.TMMK8sRoutesEnv + "=" + cidr + " added to CNEInstance " + cne.GetName() + "; FLO rolls TMM", nil
+}
+
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
