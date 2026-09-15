@@ -418,12 +418,22 @@ func restUpdateClusterKubeconfig(ctx context.Context, base, token string, cluste
 }
 
 func restDeleteCluster(ctx context.Context, base, token string, projectID, clusterID int) error {
-	url := fmt.Sprintf("%s/api/projects/%d/k8s/clusters/%d", base, projectID, clusterID)
-	return restDelete(ctx, url, token)
+	url := fmt.Sprintf("%s/api/k8s/clusters/%d", base, clusterID)
+	err := restDelete(ctx, url, token)
+	if err == nil || Is404(err) {
+		return err
+	}
+	if projectID > 0 {
+		projURL := fmt.Sprintf("%s/api/projects/%d/k8s/clusters/%d", base, projectID, clusterID)
+		if fallbackErr := restDelete(ctx, projURL, token); fallbackErr == nil || Is404(fallbackErr) {
+			return fallbackErr
+		}
+	}
+	return err
 }
 
 func restDeleteProject(ctx context.Context, base, token string, projectID int) error {
-	url := fmt.Sprintf("%s/api/projects/%d", base, projectID)
+	url := fmt.Sprintf("%s/api/projects/%d?force=true", base, projectID)
 	return restDelete(ctx, url, token)
 }
 

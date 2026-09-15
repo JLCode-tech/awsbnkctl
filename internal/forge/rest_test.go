@@ -242,7 +242,7 @@ func TestUnregisterREST_PurgesProject(t *testing.T) {
 	var clusterDeleted, projectDeleted bool
 	for _, c := range srv.calls {
 		switch c {
-		case "DELETE /api/projects/11/k8s/clusters/99":
+		case "DELETE /api/k8s/clusters/99":
 			clusterDeleted = true
 		case "DELETE /api/projects/11":
 			projectDeleted = true
@@ -301,7 +301,7 @@ func TestUnregisterRESTByName_DeletesClusterAndProject(t *testing.T) {
 	if err := UnregisterRESTByName(context.Background(), ts.URL, "tracer", RestCreds{}); err != nil {
 		t.Fatalf("UnregisterRESTByName: %v", err)
 	}
-	want := []string{"DELETE /api/projects/45/k8s/clusters/29", "DELETE /api/projects/45"}
+	want := []string{"DELETE /api/k8s/clusters/29", "DELETE /api/projects/45"}
 	if len(deletes) != 2 || deletes[0] != want[0] || deletes[1] != want[1] {
 		t.Errorf("deletes = %v, want %v", deletes, want)
 	}
@@ -721,5 +721,48 @@ func TestUnregisterREST_CredsThreadedToLogin(t *testing.T) {
 	}
 	if capturedPass != "hunter2" {
 		t.Errorf("login password = %q, want %q", capturedPass, "hunter2")
+	}
+}
+
+func TestRestDeleteCluster_Fallback(t *testing.T) {
+	var calls []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		if r.URL.Path == "/api/k8s/clusters/10" {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path == "/api/projects/5/k8s/clusters/10" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	err := restDeleteCluster(context.Background(), ts.URL, "tok", 5, 10)
+	if err != nil {
+		t.Fatalf("restDeleteCluster unexpected error: %v", err)
+	}
+	want := []string{"DELETE /api/k8s/clusters/10", "DELETE /api/projects/5/k8s/clusters/10"}
+	if len(calls) != 2 || calls[0] != want[0] || calls[1] != want[1] {
+		t.Errorf("calls = %v, want %v", calls, want)
+	}
+}
+
+func TestRestDeleteProject_Force(t *testing.T) {
+	var rawQuery string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	err := restDeleteProject(context.Background(), ts.URL, "tok", 5)
+	if err != nil {
+		t.Fatalf("restDeleteProject unexpected error: %v", err)
+	}
+	if rawQuery != "force=true" {
+		t.Errorf("rawQuery = %q, want %q", rawQuery, "force=true")
 	}
 }
