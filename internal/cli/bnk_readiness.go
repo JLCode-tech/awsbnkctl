@@ -342,3 +342,15 @@ func tmmLogStreamDoctorCheck(ctx context.Context, cs kubernetes.Interface) docto
 	}
 	return c
 }
+
+// metricsAPIDoctorCheck reports whether metrics.k8s.io is served: kubectl top
+// and the Forge fleet view read pod and node CPU/memory from it. Detect only.
+func metricsAPIDoctorCheck(cs kubernetes.Interface) doctor.Check {
+	c := doctor.Check{Name: "metrics api", BackendName: "k8s"}
+	if err := k8s.MetricsAPIAvailable(cs); err != nil {
+		c.Status, c.Detail = doctor.StatusWarning, err.Error()+" — `awsbnkctl bnk heal -f <cluster.yaml>` creates the metrics-server EKS add-on (`awsbnkctl up` phase 08c does the same)"
+		return c
+	}
+	c.Status, c.Detail = doctor.StatusOK, k8s.MetricsAPIGroupVersion+" served (metrics-server): pod and node CPU/memory available to kubectl top and Forge"
+	return c
+}

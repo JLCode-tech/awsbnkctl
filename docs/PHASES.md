@@ -27,6 +27,7 @@
 - **`eks-cluster`** (`Phase08EKSCluster`): Provisions the EKS control plane and waits for it to become ACTIVE; records the cluster's service range as `EKS_SERVICE_CIDR`, which the CNEInstance passes to TMM as `TMM_K8S_ROUTES`.
 - **`forge-register`** (`Phase09ForgeRegister`): Registers the newly created EKS cluster with the Forge platform over MCP.
 - **`vpc-cni-prefix`** (`Phase08bVPCCNIPrefix`): Configures VPC-CNI prefix delegation BEFORE the node group boots to prevent secondary ENI asymmetric-drop bugs.
+- **`metrics-server`** (`Phase08cMetricsServer`): Creates the metrics-server EKS managed add-on so `metrics.k8s.io` serves pod and node CPU/memory to `kubectl top` and the Forge fleet view; `bnk heal -f` adds it to existing clusters.
 
 ## STAGE 3 — Nodes · kubeconfig · ENIs · jumphost
 

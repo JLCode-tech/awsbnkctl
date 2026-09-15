@@ -792,6 +792,9 @@ func TestDryRun_NilClients_AllPhasesEndToEnd(t *testing.T) {
 	if err := Phase08bVPCCNIPrefix(ctx, cl, st, clients, true); err != nil {
 		t.Fatalf("Phase08bVPCCNIPrefix: %v", err)
 	}
+	if err := Phase08cMetricsServer(ctx, cl, st, clients, true); err != nil {
+		t.Fatalf("Phase08cMetricsServer: %v", err)
+	}
 	if err := Phase10NodeGroup(ctx, cl, st, clients, true); err != nil {
 		t.Fatalf("Phase10NodeGroup: %v", err)
 	}
