@@ -17,23 +17,15 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/remotecommand"
-	utilexec "k8s.io/client-go/util/exec"
 )
 
-// Namespaces and well-known names used by the k8s backend. Mirror the
-// values baked into k8s_install.yaml — the backend assumes ops install
-// has already provisioned these.
-//
-// No cred-Secret constant: AWS credentials reach the ops pod via the
-// EKS pod-identity webhook's env-var injection, so the backend never
-// names a credential Secret by hand.
+// Well-known names used by the k8s backend.
 const (
-	K8sOpsNamespace  = "awsbnkctl-ops"
+	// K8sTestNamespace holds the one-shot probe Jobs. EnsureTestNamespace
+	// creates it on first use; phase 12 and bnk heal (test-namespace) do the
+	// same so doctor can report it.
 	K8sTestNamespace = "awsbnkctl-test"
-	K8sOpsPodName    = "awsbnkctl-ops"
 
 	// k8sJobReadyTimeout is how long we wait for an ephemeral Job's pod
 	// to reach Running before streaming logs. Image pulls on a cold
@@ -41,12 +33,12 @@ const (
 	// fixture's defaultReadyTimeout in internal/k8s/iperf3.go.
 	k8sJobReadyTimeout = 3 * time.Minute
 
-	// k8sExitFailedToStart (127): backend couldn't reach the cluster,
-	// ops pod missing, etc.
+	// k8sExitFailedToStart (127): backend couldn't reach the cluster or
+	// could not create the Job.
 	k8sExitFailedToStart = 127
 
-	// k8sExitStartedThenFailed (126): ops pod present but the exec
-	// stream errored, or Job created but pod failed to come up.
+	// k8sExitStartedThenFailed (126): Job created but its pod failed to
+	// come up or the log stream errored.
 	k8sExitStartedThenFailed = 126
 )
 
@@ -56,17 +48,13 @@ const (
 // pass tool names from toolImages and aren't affected.
 var jobNameSanitizer = strings.NewReplacer(":", "-", "/", "-", "@", "-")
 
-// K8sBackend executes argv either by exec'ing into a long-lived ops pod
-// (for ad-hoc shells) or by spawning a one-shot Job (for iperf3 client
-// + terraform). The two paths share a single Run entrypoint and
-// dispatch on RunOpts.LongLivedExec — true for the ops-pod exec path,
-// false (default) for the Job path.
+// K8sBackend executes argv as a one-shot Job in the awsbnkctl-test
+// namespace (iperf3 client, the dns probe re-exec). argv[0] picks the
+// tool image; argv[1:] is the in-container command.
 //
-// `awsbnkctl ops install` provisions the namespaces, ServiceAccount,
-// Secret, ClusterRole, and ops Pod this backend assumes exist. The
-// backend doesn't try to bootstrap on first call (would race; would
-// surprise users). Callers see a clear "ops not installed" error
-// (rc=127) and the install command in the message.
+// The namespace is created on first use (EnsureTestNamespace), so the
+// backend needs nothing installed in the cluster beyond a reachable
+// kubeconfig.
 type K8sBackend struct {
 	// once-init plumbing for client + config so a `--help` invocation
 	// doesn't dial the apiserver. Mirror DockerBackend's lazy-init.
@@ -79,52 +67,53 @@ type K8sBackend struct {
 // Name implements Backend.
 func (b *K8sBackend) Name() string { return "k8s" }
 
-// k8sLongLivedEnv is a sentinel set on RunOpts.Env when callers want
-// the long-lived ops-pod exec path instead of the Job path. Since
-// RunOpts.Env is the only "free" extension point on the public Backend
-// interface today (adding a LongLivedExec bool would require an API
-// change), we encode the bit as an env entry and strip it before the
-// child sees it.
-//
-// Future cleanup: bump RunOpts to carry a LongLivedExec field directly
-// once the integrator is ready for an API change.
-const k8sLongLivedEnv = "AWSBNKCTL_K8S_LONG_LIVED=1"
-
-// extractLongLivedFlag pulls the sentinel out of env and returns
-// (longLived, filteredEnv). Callers pass the filtered env on to the pod
-// so the wrapped tool doesn't see internal plumbing.
-func extractLongLivedFlag(env []string) (bool, []string) {
-	out := make([]string, 0, len(env))
-	longLived := false
-	for _, kv := range env {
-		if kv == k8sLongLivedEnv {
-			longLived = true
-			continue
-		}
-		out = append(out, kv)
-	}
-	return longLived, out
-}
-
-// Run implements Backend. Dispatches to runOnOpsPod (long-lived exec)
-// or runAsJob (one-shot Job) per the sentinel in opts.Env.
+// Run implements Backend: ensures the test namespace, then runs argv as a Job.
 func (b *K8sBackend) Run(ctx context.Context, argv []string, opts RunOpts) (int, error) {
 	if len(argv) == 0 {
 		return 0, errors.New("argv is empty")
 	}
 
-	cs, restCfg, err := b.ensureClient()
+	cs, _, err := b.ensureClient()
 	if err != nil {
-		return k8sExitFailedToStart, fmt.Errorf("k8s backend: %w (run `awsbnkctl ops install` to provision the ops pod)", err)
+		return k8sExitFailedToStart, fmt.Errorf("k8s backend: %w", err)
 	}
-
-	longLived, filteredEnv := extractLongLivedFlag(opts.Env)
-	opts.Env = filteredEnv
-
-	if longLived {
-		return b.runOnOpsPod(ctx, cs, restCfg, argv, opts)
+	if _, err := EnsureTestNamespace(ctx, cs); err != nil {
+		return k8sExitFailedToStart, fmt.Errorf("k8s backend: %w", err)
 	}
 	return b.runAsJob(ctx, cs, argv, opts)
+}
+
+// testNamespaceLabels mark the namespace as awsbnkctl-managed.
+var testNamespaceLabels = map[string]string{"awsbnkctl.io/managed": "true"}
+
+// TestNamespaceExists reports whether awsbnkctl-test is present.
+func TestNamespaceExists(ctx context.Context, cs kubernetes.Interface) (bool, error) {
+	_, err := cs.CoreV1().Namespaces().Get(ctx, K8sTestNamespace, metav1.GetOptions{})
+	switch {
+	case err == nil:
+		return true, nil
+	case apierrors.IsNotFound(err):
+		return false, nil
+	}
+	return false, fmt.Errorf("namespace %s: %w", K8sTestNamespace, err)
+}
+
+// EnsureTestNamespace creates awsbnkctl-test when it is missing and reports
+// whether it did. Every probe Job runs there and nothing else provisions it,
+// so the backend, phase 12 and the bnk heal test-namespace repair share this.
+func EnsureTestNamespace(ctx context.Context, cs kubernetes.Interface) (bool, error) {
+	exists, err := TestNamespaceExists(ctx, cs)
+	if err != nil || exists {
+		return false, err
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: K8sTestNamespace, Labels: testNamespaceLabels}}
+	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("creating namespace %s: %w", K8sTestNamespace, err)
+	}
+	return true, nil
 }
 
 // ensureClient lazy-builds the client + REST config. Reuses the
@@ -166,98 +155,6 @@ var defaultK8sInit = func() (kubernetes.Interface, *rest.Config, error) {
 // (or wherever feels natural) calls this in init().
 func SetK8sInit(fn func() (kubernetes.Interface, *rest.Config, error)) {
 	defaultK8sInit = fn
-}
-
-// runOnOpsPod kubectl-execs argv into the ops pod via SPDY.
-//
-// The wrapped tool's stdout/stderr stream live through opts; we wrap
-// both with the redactor as defense-in-depth so secrets surfaced in
-// verbose tool output (kubectl --v=10, terraform TF_LOG=trace, etc.)
-// don't leak to the caller.
-func (b *K8sBackend) runOnOpsPod(ctx context.Context, cs kubernetes.Interface, cfg *rest.Config, argv []string, opts RunOpts) (int, error) {
-	// Verify the ops pod exists + is ready. A clear error here is much
-	// better than an opaque SPDY upgrade failure.
-	pod, err := cs.CoreV1().Pods(K8sOpsNamespace).Get(ctx, K8sOpsPodName, metav1.GetOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return k8sExitFailedToStart, fmt.Errorf("ops pod %s/%s not found; run `awsbnkctl ops install`", K8sOpsNamespace, K8sOpsPodName)
-		}
-		return k8sExitFailedToStart, fmt.Errorf("looking up ops pod: %w", err)
-	}
-	if pod.Status.Phase != corev1.PodRunning || !podReady(pod) {
-		return k8sExitFailedToStart, fmt.Errorf("ops pod %s/%s not Ready (phase=%s)", K8sOpsNamespace, K8sOpsPodName, pod.Status.Phase)
-	}
-
-	// Build the exec request. PodExecOptions.Command is exec'd
-	// **directly** inside the running container's filesystem; the
-	// image's ENTRYPOINT does NOT prepend (that only applies at
-	// container start, and the ops pod's `command:` already overrides
-	// it to `sleep infinity` per k8s_install.yaml). So argv flows
-	// through verbatim — `["kubectl", "get", "pods"]` runs
-	// `kubectl get pods` in the pod, no entrypoint double-up.
-	//
-	// For the one-shot Job path (runAsJob), where Container.Command
-	// DOES override Docker ENTRYPOINT, we use the
-	// `jobToolCmdOverride` map for tools (like `awsbnkctl`) that need
-	// to bypass the tools image's ENTRYPOINT. See `buildJobSpecWithArgs`
-	// for the Args plumbing.
-	cmd := argv
-
-	req := cs.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(K8sOpsPodName).
-		Namespace(K8sOpsNamespace).
-		SubResource("exec").
-		VersionedParams(&corev1.PodExecOptions{
-			Command: cmd,
-			Stdin:   opts.Stdin != nil,
-			Stdout:  true,
-			Stderr:  true,
-			TTY:     opts.TTY,
-		}, scheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
-	if err != nil {
-		return k8sExitStartedThenFailed, fmt.Errorf("building SPDY executor: %w", err)
-	}
-
-	stdout, stdoutClose := wrapForRedaction(opts.Stdout, opts.Credentials)
-	stderr, stderrClose := wrapForRedaction(opts.Stderr, opts.Credentials)
-	defer func() {
-		if stdoutClose != nil {
-			_ = stdoutClose()
-		}
-		if stderrClose != nil {
-			_ = stderrClose()
-		}
-	}()
-
-	streamErr := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdin:  opts.Stdin,
-		Stdout: stdout,
-		Stderr: stderr,
-		Tty:    opts.TTY,
-	})
-	if streamErr == nil {
-		return 0, nil
-	}
-
-	if ctx.Err() != nil {
-		return 137, ctx.Err()
-	}
-
-	// SPDY's CodeExitError carries the wrapped command's exit code.
-	var ee utilexec.CodeExitError
-	if errors.As(streamErr, &ee) {
-		// In-pod tool exited non-zero. 126/127 are reserved for backend
-		// faults; if the in-pod process genuinely exited with 126/127
-		// we still pass it through (the user's tool said so).
-		return ee.ExitStatus(), nil
-	}
-
-	// Anything else is a transport / SPDY error — backend started but
-	// the exec stream errored mid-flight (126 split).
-	return k8sExitStartedThenFailed, fmt.Errorf("k8s exec stream: %w", streamErr)
 }
 
 // jobToolCmdOverride declares the in-container binary `runAsJob` should
@@ -387,6 +284,12 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 	// Wait for the Job's pod to be Running.
 	pod, err := waitForJobPodRunning(ctx, cs, jobName, k8sJobReadyTimeout)
 	if err != nil {
+		// A pod that never starts never finishes, so ttlSecondsAfterFinished
+		// would leave the Job behind; delete it here.
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // #nosec G118 -- ctx may already be cancelled
+		defer cancel()
+		pp := metav1.DeletePropagationForeground
+		_ = cs.BatchV1().Jobs(K8sTestNamespace).Delete(cleanCtx, jobName, metav1.DeleteOptions{PropagationPolicy: &pp})
 		return k8sExitStartedThenFailed, fmt.Errorf("waiting for job pod: %w", err)
 	}
 
@@ -420,17 +323,9 @@ func (b *K8sBackend) runAsJob(ctx context.Context, cs kubernetes.Interface, argv
 }
 
 // buildJobSpec renders the per-Job spec. SCC-clean (matches the iperf3
-// SCC fix). Mounts the files Secret at /work read-only when present;
-// envFroms the cred Secret in awsbnkctl-ops (cross-namespace). Note:
-// projected Secret crossing namespaces requires the SA in awsbnkctl-test
-// to read the cred Secret; we sidestep that by referencing the cred
-// Secret only from the ops pod (long-lived path) and using a fresh
-// envFrom-style projection out of a per-Job Secret for the Job path.
-//
-// AWS retarget: the Job path no longer env-injects long-lived secrets
-// from Credentials; AWS credentials reach in-cluster terraform via
-// IRSA, and ad-hoc tool runs inherit env vars the caller passes
-// through RunOpts.Env. The Credentials struct keeps only the
+// SCC fix). Mounts the per-Job files Secret at /work read-only when
+// present. No credentials are injected: the Job inherits only the env
+// vars the caller passes through RunOpts.Env. The Credentials struct keeps only the
 // kubeconfig surface (see internal/exec/creds.go).
 //
 // buildJobSpecWithArgs is buildJobSpec extended for the entrypoint-
@@ -489,15 +384,13 @@ func buildJobSpecWithArgs(jobName, image string, cmd, args []string, opts RunOpt
 					RestartPolicy: corev1.RestartPolicyNever,
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: ptrBool(true),
-						// Do NOT pin RunAsUser to a specific value.
-						// OpenShift's restricted-v2 SCC assigns a UID
-						// from the namespace's allowed range (e.g.,
-						// 1000680000-1000689999); pinning 65532 collides
-						// and the Job is rejected at admission with
-						// "Invalid value: 65532: must be in the ranges
-						// [...]". Leaving RunAsUser unset lets the SCC
-						// mutating-admission webhook pick a valid UID
-						// per namespace.
+						// Pin the UID: the public tool images (for
+						// example networkstatic/iperf3) declare no USER,
+						// and RunAsNonRoot alone then fails the pod with
+						// CreateContainerConfigError. EKS has no SCC
+						// range to collide with.
+						RunAsUser:  ptrInt64(jobRunAsUID),
+						RunAsGroup: ptrInt64(jobRunAsUID),
 						SeccompProfile: &corev1.SeccompProfile{
 							Type: corev1.SeccompProfileTypeRuntimeDefault,
 						},
@@ -513,10 +406,6 @@ func buildJobSpecWithArgs(jobName, image string, cmd, args []string, opts RunOpt
 						SecurityContext: &corev1.SecurityContext{
 							AllowPrivilegeEscalation: ptrBool(false),
 							RunAsNonRoot:             ptrBool(true),
-							// RunAsUser unset — see PodSecurityContext
-							// comment above. Container-level pinning
-							// to 65532 also collides with restricted-v2's
-							// dynamic UID range.
 							Capabilities: &corev1.Capabilities{
 								Drop: []corev1.Capability{"ALL"},
 							},
@@ -681,17 +570,13 @@ func setSecretOwnerRef(ctx context.Context, cs kubernetes.Interface, name string
 	return err
 }
 
-// podReady returns true when the pod has the Ready condition.
-func podReady(p *corev1.Pod) bool {
-	for _, c := range p.Status.Conditions {
-		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
-			return true
-		}
-	}
-	return false
-}
-
 func ptrBool(b bool) *bool { return &b }
+
+func ptrInt64(v int64) *int64 { return &v }
+
+// jobRunAsUID is the non-root UID every probe Job runs as; it matches the
+// USER in the bundled tools images.
+const jobRunAsUID int64 = 1000
 
 func init() {
 	Register("k8s", &K8sBackend{})

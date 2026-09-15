@@ -58,6 +58,8 @@ Repairs (--only <name> limits the run):
                              so the TMM pod reaches the service network (dSSM,
                              DNS, the fluentd log forward); on 2.3 detected from
                              the f5-fluentbit sidecar log
+  test-namespace             namespace awsbnkctl-test, where test --backend k8s
+                             runs its iperf3 and dns probe Jobs
 
 Repairs marked -f need cluster.yaml (state.env and the AWS clients); with
 --kubeconfig alone they are detected and reported, not fixed.`,

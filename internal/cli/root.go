@@ -6,6 +6,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,8 +14,11 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
 
 // Build metadata, populated via -ldflags at link time.
@@ -52,6 +56,7 @@ The 4-command lifecycle:
 
 See https://github.com/JLCode-tech/awsbnkctl#readme for the user guide.`,
 	SilenceUsage:      true,
+	SilenceErrors:     true, // Execute prints the error once, with the awsbnkctl: prefix
 	PersistentPreRunE: warnLegacyState,
 }
 
@@ -110,10 +115,22 @@ func Execute() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		var code exitCodeError
+		if errors.As(err, &code) {
+			os.Exit(int(code))
+		}
 		fmt.Fprintf(os.Stderr, "awsbnkctl: %v\n", err)
 		os.Exit(1)
 	}
 }
+
+// exitCodeError is returned by commands that already printed their result
+// and want a non-zero exit without a second message. Returning it (instead
+// of calling os.Exit inside RunE) lets deferred cleanup such as the iperf3
+// fixture teardown run first.
+type exitCodeError int
+
+func (e exitCodeError) Error() string { return fmt.Sprintf("exit %d", int(e)) }
 
 // loadDotenv reads ./.env if present. Missing file is silent (the
 // common case for users who don't use one). Parse errors are loud —
@@ -143,6 +160,20 @@ func init() {
 	// binary's build-time Version. A tag-released binary pulls matching
 	// tag-released tool images instead of the :dev tag CI doesn't publish.
 	execbackend.SetToolImageTag(func() string { return Version })
+
+	// The k8s backend (test --backend k8s probe Jobs) builds its client
+	// through the same kubeconfig discovery as every other verb.
+	execbackend.SetK8sInit(func() (kubernetes.Interface, *rest.Config, error) {
+		cs, err := k8s.BuildClientset("")
+		if err != nil {
+			return nil, nil, err
+		}
+		cfg, err := k8s.BuildRESTConfig("")
+		if err != nil {
+			return nil, nil, err
+		}
+		return cs, cfg, nil
+	})
 }
 
 // RootCommand returns the wired-up root cobra command for tooling that
