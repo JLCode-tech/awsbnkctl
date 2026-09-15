@@ -107,6 +107,7 @@ func RegisterMCPTarget(ctx context.Context, opts MCPTargetOptions, ep bnkscan.MC
 		Creds:          opts.Creds,
 		Name:           ep.Name(),
 		ClusterID:      opts.ClusterID,
+		ClusterName:    opts.ClusterName,
 		LLMBaseURL:     url,
 		LLMModel:       "mcp:" + ep.Route,
 		LLMNamespace:   ns,

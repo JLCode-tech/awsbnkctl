@@ -40,6 +40,9 @@ REGION="${REGION:-$(awk '/^  region:/{print $2; exit}' "$CFG")}"
 : "${CLUSTER:?could not read metadata.name from $CFG}"; : "${REGION:?could not read metadata.region from $CFG}"
 CONFIG="examples/agentcore-demo/cluster.yaml"
 KC="$REPO_ROOT/.awsbnkctl/$CLUSTER/kubeconfig"
+# The Gateway name is fixed in gateway-deployment.yaml (the NetPolicies reference
+# it), so it does not follow the cluster name.
+GW="${GW:-bnk-agentcore-demo-gateway}"
 
 SKIP_AGENT=0
 for a in "$@"; do
@@ -134,13 +137,13 @@ done
 [ "$CERT_READY" = "True" ] || die "mcp-tls certificate never went Ready — the :443 listener will not bind"
 ok "mcp-tls issued"
 for i in $(seq 1 60); do
-  P=$(kubectl get gateway "$CLUSTER-gateway" -n default \
+  P=$(kubectl get gateway "$GW" -n default \
       -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
   [ "$P" = "True" ] && break
   sleep 5
 done
 [ "$P" = "True" ] || die "Gateway never reported Programmed=True"
-ok "Gateway programmed on $(kubectl get gateway "$CLUSTER-gateway" -n default -o jsonpath='{.spec.addresses[0].value}')"
+ok "Gateway programmed on $(kubectl get gateway "$GW" -n default -o jsonpath='{.spec.addresses[0].value}')"
 
 # ── 4. network seam ──────────────────────────────────────────────────────────
 step "AWS network seam  (SGs, SG-to-SG, private Route 53 zone)"
@@ -190,8 +193,9 @@ if [ -z "$LG" ] || [ "$LG" = "None" ]; then
 else
   ok "Bedrock invocation logging already configured → $LG"
 fi
-# The shipper's IAM role (docs/ROADMAP.md) trusts one cluster's OIDC provider.
-# A rebuilt cluster has a new provider, so point the trust at the live one.
+# The shipper's IAM role (docs/ROADMAP.md) trusts clusters by OIDC provider.
+# Add this cluster's provider and keep the statements of the other clusters
+# that still exist, so several demo clusters can share the role.
 SHIPPER_ROLE=BNKDemoBedrockTokenShipper
 if aws iam get-role --role-name "$SHIPPER_ROLE" >/dev/null 2>&1; then
   OIDC_HOST=$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" \
@@ -199,16 +203,27 @@ if aws iam get-role --role-name "$SHIPPER_ROLE" >/dev/null 2>&1; then
   [ -n "$OIDC_HOST" ] || die "could not read the cluster OIDC issuer"
   TMPT=$(mktemp -t shipper-trust.XXXXXX.json) || die "mktemp failed"
   trap 'rm -f "$TMPT"' EXIT
-  cat > "$TMPT" <<EOF
-{"Version":"2012-10-17","Statement":[{"Effect":"Allow",
- "Principal":{"Federated":"arn:aws:iam::${ACCT}:oidc-provider/${OIDC_HOST}"},
- "Action":"sts:AssumeRoleWithWebIdentity",
- "Condition":{"StringEquals":{"${OIDC_HOST}:aud":"sts.amazonaws.com",
-  "${OIDC_HOST}:sub":"system:serviceaccount:llm-egress:bedrock-token-shipper"}}}]}
-EOF
+  aws iam get-role --role-name "$SHIPPER_ROLE" --query 'Role.AssumeRolePolicyDocument' --output json \
+    | ACCT="$ACCT" OIDC_HOST="$OIDC_HOST" \
+      PROVIDERS="$(aws iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[].Arn' --output text)" \
+      python3 -c '
+import json, os, sys
+acct, host = os.environ["ACCT"], os.environ["OIDC_HOST"]
+live = set(os.environ["PROVIDERS"].split())
+arn = f"arn:aws:iam::{acct}:oidc-provider/{host}"
+doc = json.load(sys.stdin)
+keep = [s for s in doc.get("Statement", [])
+        if s.get("Principal", {}).get("Federated") not in (arn, None)
+        and s["Principal"]["Federated"] in live]
+keep.append({"Effect": "Allow", "Principal": {"Federated": arn},
+             "Action": "sts:AssumeRoleWithWebIdentity",
+             "Condition": {"StringEquals": {f"{host}:aud": "sts.amazonaws.com",
+                 f"{host}:sub": "system:serviceaccount:llm-egress:bedrock-token-shipper"}}})
+json.dump({"Version": "2012-10-17", "Statement": keep}, sys.stdout)
+' > "$TMPT" || die "could not build the trust policy for $SHIPPER_ROLE"
   aws iam update-assume-role-policy --role-name "$SHIPPER_ROLE" --policy-document "file://$TMPT" \
     || die "could not update the trust policy of $SHIPPER_ROLE"
-  ok "$SHIPPER_ROLE trusts this cluster's OIDC provider"
+  ok "$SHIPPER_ROLE trusts this cluster's OIDC provider ($(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["Statement"]))' "$TMPT") cluster(s) in total)"
 else
   warn "IAM role $SHIPPER_ROLE does not exist — create it as docs/ROADMAP.md describes; the CloudWatch leg stays off until then"
 fi
@@ -224,7 +239,7 @@ ok "shipper applied with account $ACCT (tracked file left with its placeholder)"
 
 # The generator's Leg A is synthetic (random tokens, labelled source=synthetic);
 # Leg B drives the live VIP, read off the Gateway rather than hardcoded.
-VIP=$(kubectl get gateway "$CLUSTER-gateway" -n default -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null)
+VIP=$(kubectl get gateway "$GW" -n default -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null)
 [ -n "$VIP" ] || die "could not read the VIP off gateway $CLUSTER-gateway"
 TMPG=$(mktemp -t traffic-gen.XXXXXX.yaml) || die "mktemp failed"
 trap 'rm -f "$TMP" "$TMPG"' EXIT
