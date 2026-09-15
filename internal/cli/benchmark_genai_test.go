@@ -271,3 +271,42 @@ func TestBenchmarkRunFlags_GenAIRegistered(t *testing.T) {
 		t.Error("benchmark ingest not registered")
 	}
 }
+
+// A --genai-out file (no aiperf artifact) is pushed through the structured
+// endpoint with its percentiles, throughput and GenAI block.
+func TestBenchmarkIngest_PushGenAIOutStructured(t *testing.T) {
+	resetIngestFlags()
+	defer resetIngestFlags()
+	dir := t.TempDir()
+	g := writeTemp(t, dir, "noprefix.json", `{"ttft_p50_ms":109.7,"ttft_p90_ms":111.1,"ttft_p95_ms":111.2,"ttft_p99_ms":112.2,"itl_p50_ms":1.15,"itl_p95_ms":1.24,"itl_p99_ms":1.24,"input_tokens_per_sec":3664,"output_tokens_per_sec":198,"total_tokens_per_sec":3862}`)
+
+	origRaw, origStruct := pushRawAiperfResultFn, pushBenchmarkResultFn
+	defer func() { pushRawAiperfResultFn, pushBenchmarkResultFn = origRaw, origStruct }()
+	pushRawAiperfResultFn = func(_ context.Context, _ forge.RawAiperfPushOptions) (forge.RawAiperfPushResponse, error) {
+		t.Fatal("raw push must not be used for a --genai-out file")
+		return forge.RawAiperfPushResponse{}, nil
+	}
+	var gotRes *jumphost.AiperfResult
+	var gotOpts forge.BenchmarkPushOptions
+	pushBenchmarkResultFn = func(_ context.Context, res *jumphost.AiperfResult, opts forge.BenchmarkPushOptions) (forge.BenchmarkPushResponse, error) {
+		gotRes, gotOpts = res, opts
+		return forge.BenchmarkPushResponse{RunID: 91, Status: "completed"}, nil
+	}
+	origProxy, origModel, origLabel := flagBenchProxy, flagBenchModel, flagBenchRunLabel
+	defer func() { flagBenchProxy, flagBenchModel, flagBenchRunLabel = origProxy, origModel, origLabel }()
+	flagBenchProxy, flagBenchModel, flagBenchRunLabel = "f5-bnk", "llama3", ""
+
+	var out bytes.Buffer
+	if err := execIngest(t, &out, g, "--push"); err != nil {
+		t.Fatalf("ingest --push: %v\n%s", err, out.String())
+	}
+	if gotRes == nil || gotRes.TTFT.P50 != 109.7 || gotRes.ITL.P99 != 1.24 || gotRes.OutputTokenThroughput != 198 || gotRes.GenAI == nil || gotRes.GenAI.TotalTokensPerSec != 3862 {
+		t.Errorf("structured result = %+v", gotRes)
+	}
+	if gotOpts.RunLabel != "noprefix" || gotOpts.Proxy != "f5-bnk" || gotOpts.AiperfConfig["source"] != "genai-out" {
+		t.Errorf("push opts = %+v", gotOpts)
+	}
+	if !strings.Contains(out.String(), "91") {
+		t.Errorf("run id not shown:\n%s", out.String())
+	}
+}
