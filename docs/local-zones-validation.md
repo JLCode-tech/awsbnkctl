@@ -1,72 +1,12 @@
-# F5 BNK/SPK Multi-Protocol Ingress Validation on AWS Local Zones
+# AWS Local Zones: known results
 
-> [!NOTE]
-> **Point-in-time report.** Findings reflect the environment as tested; they are
-> not a statement about current behaviour. The manifests used are preserved at
-> [`examples/local-zone/manifests/`](../examples/local-zone/manifests/), whose
-> README summarises the per-protocol outcome below.
->
-> Two results carry forward and are worth reading before reusing anything here:
-> the HTTP/2 and Diameter data paths **timed out** (asymmetric routing / missing
-> SNAT), and the SCTP listener was **rejected by the Gateway API** outright.
+A point-in-time validation of BNK ingress in the Asia Pacific (Perth) Local Zone (`ap-southeast-2-per-1a`). The manifests are preserved under [`examples/local-zone/manifests/`](../examples/local-zone/manifests/) in the 2.4 shape; the example README lists the per-protocol outcome.
 
-## Executive Summary
-This report summarizes the technical validation of deploying F5 BNK (SPK) 5G Multi-Protocol Ingress within an AWS Local Zone. The objective was to validate 5G edge ingress capabilities across HTTP/2, TCP (Diameter), and SCTP. 
-
-The environment deployed successfully via `awsbnkctl`, and Gateway API configurations were applied. While control-plane integration succeeded for TCP-based protocols, data-plane connectivity faced routing anomalies native to AWS VPC CNI, and SCTP encountered Gateway API protocol limitations.
-
-## 1. Environment Deployment
-
-The validation was performed in the Asia Pacific (Perth) Local Zone (`ap-southeast-2-per-1a`).
-**Target Architecture:**
-- **EKS Cluster:** v1.32+
-- **Location:** an AWS Local Zone
-- **Node Groups:** Managed Node Groups with `gp2` volumes (Local Zone constraint).
-- **Networks:** Isolated subnets for Management (`10.0.3.x`), External / 5G Edge (`10.0.10.x`), and Pod Network.
-- **F5 Components:** F5 CNE Controller, F5 TMM (DPDK-enabled), DSSM.
-
-**Infrastructure Notes & Workarounds:**
-- **Volume types:** Local Zones do not support `gp3`. `gp2` was enforced.
-- **EICE:** EC2 Instance Connect Endpoints are not supported in Local Zones. SSM Session Manager was used for jumphost connectivity.
-
-## 2. Telco Test Environment
-We deployed 3 core validation scenarios targeting typical 5G edge workload profiles:
-1. **HTTP/2** - Standard 5G SBI (Service Based Interface) style traffic.
-2. **TCP / Diameter** - Emulated Diameter traffic on port 3868.
-3. **SCTP** - Emulated Telco signaling traffic on port 9000.
-
-## 3. Multi-Protocol Ingress Validation
-
-### 3.1. HTTP/2 (SBI Style Traffic)
-* **Configuration:** `Gateway` (HTTP 80) and `HTTPRoute` mapped to `http2-backend`.
-* **Control Plane Status:** **PASS**
-  * `F5BnkGateway` properly parsed `10.0.10.202/32`.
-  * `http2-gateway` correctly acquired the IP and reached `Programmed=True`.
-* **Data Plane Status:** **FAIL (Timeouts)**
-  * **Observation:** Client traffic sent to `10.0.10.202:80` timed out.
-  * **Root Cause:** Asymmetric routing / EKS VPC CNI IPAM conflict. The VPC CNI automatically reserved `10.0.10.202` on the worker node's primary ENI before F5 could utilize it. After manually correcting the ENI secondary IP assignments to point to TMM, traffic reached TMM but failed to return to the client. This indicates missing Source NAT (SNAT) rules, causing the backend pod to route its return traffic via the AWS default gateway rather than back through TMM.
-  * **Remediation Attempted:** We deployed an `F5SPKEgress` policy (`perth-test-egress`) configured with `SRC_TRANS_AUTOMAP` and a pseudo-CNI VxLAN tunnel targeting the worker node's primary interface (`ens5`) to force pod return traffic to route through TMM. While the control plane successfully processed this (`Programmed=True`), data-plane traffic continued to time out, indicating potential VxLAN encapsulation issues or AWS Security Group drops on the return path between the worker node and the TMM node. The manifest for this attempt is preserved, in the BNK 2.4 `EgressGateway` shape, as [`examples/local-zone/manifests/egress.yaml`](../examples/local-zone/manifests/egress.yaml).
-
-### 3.2. Diameter (TCP L4)
-* **Configuration:** `Gateway` (TCP 3868) and `L4Route` mapped to `diameter-backend`.
-* **Control Plane Status:** **PASS**
-  * `L4Route` successfully deployed and reached `Programmed=True`.
-* **Data Plane Status:** **FAIL (Timeouts)**
-  * **Observation:** Identical to HTTP/2. The L4 connection established through the `BNK_EXT` subnet but timed out awaiting server reply due to the same SNAT/Asymmetric routing constraints, despite `F5SPKEgress` being applied.
-
-### 3.3. SCTP (Signaling)
-* **Configuration:** `Gateway` (SCTP 9000) and `L4Route` mapped to `sctp-echo-backend`.
-* **Control Plane Status:** **FAIL**
-  * **Observation:** The Gateway listener rejected the configuration.
-  * **Error:** `Listener protocol not supported: SCTP`.
-  * **Root Cause:** Standard Kubernetes Gateway API (v1beta1/v1) does not natively support SCTP listeners in the cluster's current implementation. F5's proprietary `F5SPKIngressSCTP` CRD may be required over the standard Gateway API to achieve SCTP ingress.
-
-## 4. Key Findings & Recommendations
-
-### AWS / EKS Fabric Recommendations
-1. **Isolate `BNK_EXT` from EKS Pod IPAM:** The AWS VPC CNI actively hijacked VIP addresses (`10.0.10.202`) from the `BNK_EXT` subnet because the worker node was attached to it. The `BNK_EXT` subnet should be excluded from `ENIConfig` or secondary IP pool allocations so that only F5 controllers manage those IPs.
-2. **Automate Secondary IP Assignment:** F5 IPAM logs showed successful internal allocation, but the secondary IPs were not actively attached to the AWS EC2 ENI. F5 SPK needs an active AWS cloud-provider integration (or manual attachment workflow) to signal the AWS SDN to forward packets to the TMM MAC address.
-
-### F5 Product Recommendations
-1. **SNAT Configuration:** Data plane timeouts occurred because backend pods replied to the client directly via the AWS default route. Provide clear documentation on enabling SNAT on `F5BnkGateway` / `L4Route` to maintain symmetric routing in AWS environments.
-2. **SCTP Support in Gateway API:** F5 should validate SCTP support within standard `Gateway` listeners. If `L4Route` is expected to handle SCTP, the `Gateway` standard validation webhook currently rejects it. Documentation should clarify whether to use `TCP` on the Gateway listener and `SCTP` on the `L4Route`, or fallback to `F5SPKIngressSCTP`.
+| Area | Result | Handled in code |
+|---|---|---|
+| EBS volumes | Local Zones have no `gp3`; `gp2` is used | phase 10 forces `gp2` on Local Zone node groups |
+| Control-plane subnets | EKS control-plane ENIs cannot live in a Local Zone subnet | phase 08 filters Local Zone subnets out of the control-plane set |
+| Jumphost access | EC2 Instance Connect Endpoints are not offered; SSM Session Manager was used | not automated; `testing.jumphost` assumes EICE |
+| HTTP/2 and Diameter (TCP) data path | Gateway and routes `Programmed=True`; client traffic timed out because backend pods answered via the VPC default route instead of TMM (no SNAT) | on 2.4 the `Infra` `egressDefaults` and `GatewaySettings` `Automap` cover this; not retested in a Local Zone |
+| VIP address | the VPC CNI reserved the VIP address on the worker's primary ENI before TMM owned it | keep the `BNK_EXT` subnet out of the CNI's pod IPAM |
+| SCTP listener | rejected: `Listener protocol not supported: SCTP` | none; Gateway API listeners are HTTP, HTTPS, TLS, TCP, UDP |

@@ -1,5 +1,7 @@
 # Upstream issue draft — f5-cne-controller: pool members not refreshed on EndpointSlice change
 
+> Status: open against BNK 2.3.x; not retested on 2.4. Mitigation: `awsbnkctl bnk resync --watch`.
+
 > Draft upstream issue for filing against F5's BIG-IP Next for Kubernetes (BNK) project. Live-reproduced and worked around (BNK 2.3.0 / manifest `2.3.0-3.2598.3-0.0.170`). User-facing severity: **major** — VIP returns HTTP 500 silently until an operator notices and manually patches the HTTPRoute.
 
 ## Summary

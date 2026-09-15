@@ -1,6 +1,6 @@
 # BGP peering with AWS Route Server
 
-Every deployable example under `examples/` sets `bnk.bgp: true`. This page is
+Every example with a `cluster.yaml` sets `bnk.bgp: true`. This page is
 the one procedure they all point at: what the flag does, what you still have to
 create by hand, how to load the BGP stanza, how to verify, and how to tear it
 down without stranding the cluster. It is written for BNK 2.4; the 2.3 form
@@ -45,7 +45,7 @@ The 2.4 `GlobalRoutingConfig` / `RoutingTemplate` CRs are the OcNOS path (the
 routing container's `grpcconf_watcher`, which only the OcNOS image runs). On a
 FLO-installed 2.4.0 cluster they stay `Programmed=False` with `Failure in
 sending CR config to grpc endpoints` and the cne-controller logs `No heartbeat
-from grpc-svc-f5dr: [<tmm pod ip>]:8095` (live 2026-09-12, `bnk-bgp-test`).
+from grpc-svc-f5dr: [<tmm pod ip>]:8095`.
 Do not use them until BNK ships OcNOS through FLO.
 
 ## Prerequisites
@@ -143,9 +143,8 @@ kubectl apply -f examples/<example>/bgp-route-server.yaml
 
 `kubectl apply` warns once that the ConfigMap (created by FLO) lacks the
 last-applied annotation and patches it in; that is expected. The BFD watcher in
-the routing container picks the new stanza up within about a minute — the
-session was Established and BFD Up about 70 s after the apply on
-`bnk-bgp-test`. To change the stanza later, edit the file and apply again; the
+the routing container picks the new stanza up within about a minute and the
+session comes up Established with BFD Up. To change the stanza later, edit the file and apply again; the
 TMM chart preserves the ConfigMap content across upgrades.
 
 ## 6. Verify

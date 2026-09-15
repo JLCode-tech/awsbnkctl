@@ -9,8 +9,8 @@
 `awsbnkctl` is a single-binary CLI written in Go for deploying and operating **F5 BIG-IP Next for Kubernetes (BNK)** on AWS EKS. It eliminates Terraform and external `kubectl` dependencies by using the AWS Go SDK v2 and client-go directly.
 
 ### Core Tenets
-1. **Single-Binary Delivery** — Zero required host binaries besides optional `aws` CLI for SSO and EICE jumphost tunnels.
-2. **Deterministic Phased State Machine** — Exactly 39 phase files / `stage()` calls (`internal/cli/lifecycle.go`) executed sequentially with full idempotency and resume-safety. Two phases are conditional: `sagemaker-lmi` (only with `ai.sagemaker.enabled`) and `demo-stage` (only in demo mode).
+1. **Single-Binary Delivery** — Zero required host binaries besides `aws` and `ssh` for the EICE jumphost path (live traffic scenarios only).
+2. **Deterministic Phased State Machine** — Exactly 41 phase files / `stage()` calls (`internal/cli/lifecycle.go`) executed sequentially with full idempotency and resume-safety. Two phases are conditional: `sagemaker-lmi` (only with `ai.sagemaker.enabled`) and `demo-stage` (only in demo mode).
 3. **AWS Tags as Source of Truth** — Cloud resources are tagged with `awsbnkctl:cluster`, `awsbnkctl:component`, and `awsbnkctl:managed` (`internal/aws/tags`), enabling reliable reconstruction of local workspace state.
 4. **End-to-End Traffic Scenarios** — 15 built-in automated test scenarios validate data-plane VIPs and routing policies from inside the VPC.
 
@@ -29,7 +29,7 @@
 
 ## 3. CLI Command Taxonomy
 
-27 top-level commands (`awsbnkctl --help` is authoritative):
+24 top-level commands, 26 with `completion` and `help` (`awsbnkctl --help` is authoritative):
 
 | Category | Commands |
 |---|---|
@@ -37,15 +37,15 @@
 | **Validation Tests** | `test [suite]` with `test {connectivity, dns, throughput, traffic, list}` and `test hosts {add, clear, list, remove}` |
 | **Data Plane Scenarios** | `scenarios {list, run, clean}` — 15 registered scenarios (the core-dump one is `core-file-collection`) |
 | **Walkthrough & Demos** | `demo {list, run, clean, preview}` — demos: `diameter`, `http2`, `bigip-cis`, `ingress-migration` |
-| **Kubernetes Passthrough** | `k {apply, delete, describe, exec, get, logs, port-forward}`; top-level aliases `get <resource>` and `logs <component>` (flo, cis, cert-manager, cneinstance) |
-| **BNK Runtime & Manifests** | `bnk resync`, `manifest probe` |
-| **AI & Benchmarking** | `benchmark {setup, run, daemon, list, status}` (bare `benchmark` = `benchmark run`) |
-| **Fleet & Forge** | `forge {register, status, unregister, cleanup, benchmark}`; `forge register` flags: `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
+| **Kubernetes Passthrough** | `k {apply, delete, describe, exec, get, logs, port-forward}`; top-level aliases `get <resource>` and `logs <component>` (flo, cis, cert-manager, cneinstance, tmm) |
+| **BNK Runtime & Manifests** | `bnk {heal, resync, upgrade, migrate-2.4, mcp-session}`, `manifest probe`; `bnk heal` runs the 10-entry repair registry in `internal/aws/phases/heal.go`, which `up`, `bnk upgrade` and `doctor --backend k8s` share |
+| **AI & Benchmarking** | `benchmark {setup, run, daemon, list, status, ingest}` (bare `benchmark` = `benchmark run`) |
+| **Fleet & Forge** | `forge {register, status, unregister, cleanup, scan, telemetry, benchmark}` (group flags `-f`, `--forge-mcp-url`); `forge register` flags: `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
 | **Agentic Workflow** | `agent` (list CLIs), `agent init`, `agent <cli>` where cli is exactly one of `claude`, `gemini`, `aider`, `openai`, `pi`, `opencode`; `journal {add, list, report}` (no `--format` flag) |
-| **Workspaces & Targets** | `workspaces {current, delete, list, new, use}`, `targets {add, list, remove, show}` |
+| **Workspaces & Targets** | `workspaces {current, delete, list, new, use}`, `targets {add, list, remove, show, scan}` |
 | **Maintenance** | `install`, `self update`, `completion <shell>`, `help` |
 
-There is no `mcp` command: awsbnkctl is only an MCP *client* to BNK Forge (`internal/forge`).
+There is no MCP server: `bnk mcp-session` renders and applies BNK persistence CRs, and awsbnkctl is an MCP *client* to BNK Forge (`internal/forge`). `test --backend k8s` runs one-shot Jobs in namespace `awsbnkctl-test`.
 
 ---
 
