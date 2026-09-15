@@ -126,49 +126,15 @@ func Phase24bDSSMInsecureOverlay(ctx context.Context, cl *intent.Cluster, st *st
 		return nil
 	}
 
-	patchedKeys := []string{}
-	skippedKeys := []string{}
-	for k, v := range cm.Data {
-		if !strings.Contains(v, dssmTLSReplace) {
-			continue
-		}
-		if strings.Contains(v, dssmInsecureMarker) {
-			skippedKeys = append(skippedKeys, k)
-			continue
-		}
-		cm.Data[k] = strings.ReplaceAll(v, dssmTLSReplace, dssmTLSInsecureReplace)
-		patchedKeys = append(patchedKeys, k)
+	patched, err := applyDSSMOverlay(ctx, clients, os.Stderr)
+	if err != nil {
+		return fmt.Errorf("phase 24b: %w", err)
 	}
-
-	if len(patchedKeys) == 0 {
-		if len(skippedKeys) > 0 {
-			fmt.Fprintf(os.Stderr, "[phase 24b] f5-dssm ConfigMap already patched (--tls --insecure present in %d scripts) — skipping\n",
-				len(skippedKeys))
-		} else {
-			fmt.Fprintln(os.Stderr, "[phase 24b] warning: no '--tls' scripts found in f5-dssm ConfigMap — nothing to patch")
-		}
+	if len(patched) == 0 {
+		fmt.Fprintln(os.Stderr, "[phase 24b] f5-dssm ConfigMap already patched or has no redis-cli --tls probes — skipping")
 		return nil
 	}
-
-	_, err := clients.K8s.CoreV1().ConfigMaps(InstanceNamespace).Update(ctx, cm, metav1.UpdateOptions{})
-	if err != nil {
-		return fmt.Errorf("phase 24b: update ConfigMap %s/%s: %w", InstanceNamespace, dssmConfigMapName, err)
-	}
-	fmt.Fprintf(os.Stderr, "[phase 24b] patched %d scripts in f5-dssm ConfigMap (added --insecure to redis-cli --tls invocations): %s\n",
-		len(patchedKeys), strings.Join(patchedKeys, ", "))
-
-	// Bounce dssm pods so they re-mount the patched ConfigMap.
-	if err := clients.K8s.CoreV1().Pods(InstanceNamespace).DeleteCollection(
-		ctx,
-		metav1.DeleteOptions{},
-		metav1.ListOptions{LabelSelector: dssmLabelSelector},
-	); err != nil {
-		// Log but don't fail — pods will pick up the new CM on next restart anyway.
-		fmt.Fprintf(os.Stderr, "[phase 24b] warning: bounce dssm pods: %v\n", err)
-	} else {
-		fmt.Fprintln(os.Stderr, "[phase 24b] bounced f5-dssm pods to re-mount patched ConfigMap")
-	}
-
+	fmt.Fprintf(os.Stderr, "[phase 24b] patched %d scripts in f5-dssm ConfigMap and bounced the dssm pods: %s\n", len(patched), strings.Join(patched, ", "))
 	st.Set("DSSM_INSECURE_OVERLAY_APPLIED_AT", time.Now().UTC().Format(time.RFC3339))
 	if err := st.Save(); err != nil {
 		fmt.Fprintf(os.Stderr, "[phase 24b] warning: save state: %v\n", err)
