@@ -329,7 +329,9 @@ func ensureJumphostInstanceProfile(ctx context.Context, iamClient IAMAPI, cluste
 	}
 
 	// Attach AmazonSSMManagedInstanceCore was here (removed per AWS-17 security issue).
-	// EICE does not require SSM on the instance itself.
+	// EICE does not require SSM on the instance itself. The agentcore-demo
+	// scripts attach it for the duration of that demo (its demo.sh runs
+	// over SSM) and detach it on teardown.
 
 	// Ensure instance profile.
 	profileTagSlice := tags.IAMTags(

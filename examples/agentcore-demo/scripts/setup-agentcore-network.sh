@@ -91,6 +91,15 @@ else
     echo "Found existing Agent SG: $AGENT_SG_ID"
 fi
 
+# demo.sh drives the jumphost with SSM Run Command. awsbnkctl itself reaches
+# the jumphost over EICE and does not attach this policy (phase 17b, AWS-17);
+# the demo adds it here and teardown-agentcore-network.sh removes it again.
+echo "Attaching AmazonSSMManagedInstanceCore to ${CLUSTER_NAME}-jumphost-role (demo.sh runs over SSM)..."
+aws iam attach-role-policy \
+    --role-name "${CLUSTER_NAME}-jumphost-role" \
+    --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" \
+    || { echo "ERROR: could not attach the SSM policy; demo.sh will not reach the jumphost" >&2; exit 1; }
+
 echo "Authorizing ingress from VPC CIDR ($VPC_CIDR) to Agent SG ($AGENT_SG_ID) on port 8080..."
 aws ec2 authorize-security-group-ingress \
     --group-id "$AGENT_SG_ID" \
