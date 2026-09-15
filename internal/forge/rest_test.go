@@ -766,3 +766,44 @@ func TestRestDeleteProject_Force(t *testing.T) {
 		t.Errorf("rawQuery = %q, want %q", rawQuery, "force=true")
 	}
 }
+
+// A Forge without the project-scoped route answers 404 there; that must not
+// turn a refused direct delete into a success.
+func TestRestDeleteCluster_FallbackNotFoundKeepsDirectError(t *testing.T) {
+	var calls []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		if r.URL.Path == "/api/k8s/clusters/10" {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	err := restDeleteCluster(context.Background(), ts.URL, "tok", 5, 10)
+	if err == nil || Is404(err) {
+		t.Fatalf("want the direct 405 error, got %v", err)
+	}
+	var he *restHTTPErr
+	if !errors.As(err, &he) || he.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("error %q", err)
+	}
+	if len(calls) != 2 {
+		t.Errorf("calls = %v", calls)
+	}
+}
+
+// Is404 trusts the typed status when it has one; the string heuristics stay
+// for untyped MCP errors only.
+func TestIs404_TypedStatusWins(t *testing.T) {
+	if Is404(&restHTTPErr{StatusCode: 500, URL: "u", Body: `{"error":"backend not found"}`}) {
+		t.Error("a 500 whose body mentions 'not found' is not a 404")
+	}
+	if !Is404(&restHTTPErr{StatusCode: 404, URL: "u", Body: "{}"}) {
+		t.Error("typed 404 must be recognised")
+	}
+	if !Is404(errors.New("mcp tool delete_cluster returned error: NOT_FOUND")) {
+		t.Error("untyped MCP not-found must still be recognised")
+	}
+}

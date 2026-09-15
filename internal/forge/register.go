@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -280,6 +281,10 @@ func Status(ctx context.Context, c *Client, workspaceDir string) (StatusResult, 
 func Is404(err error) bool {
 	if err == nil {
 		return false
+	}
+	var he *restHTTPErr
+	if errors.As(err, &he) {
+		return he.StatusCode == http.StatusNotFound
 	}
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "not_found") ||
