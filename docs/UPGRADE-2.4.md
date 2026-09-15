@@ -1,3 +1,4 @@
+# Upgrade a BNK 2.3.x cluster to 2.4 in place
 
 Two commands move a running BNK 2.3.x cluster to 2.4 without rebuilding it:
 
@@ -20,7 +21,7 @@ awsbnkctl bnk upgrade -f clusters/lab/cluster.yaml
 
 | Step | What happens |
 |---|---|
-| 0 | Multus: the thin plugin rewrites its kubeconfig on token rotation only with `--cleanup-config-on-exit=true`; without it the token expires and no new pod can start (`FailedCreatePodSandBox ... Multus ... Unauthorized`). The flag is added to the DaemonSet (which rolls it) before anything else; `awsbnkctl bnk heal` does the same on a cluster that stays on 2.3, `awsbnkctl doctor --backend k8s` reports it as `multus kubeconfig token` |
+| 0 | Multus: the thin plugin rewrites its kubeconfig on token rotation only with `--cleanup-config-on-exit=true`; without it the token expires and no new pod can start (`FailedCreatePodSandBox ... Multus ... Unauthorized`). The flag is added to the DaemonSet (which rolls it) before anything else; `awsbnkctl bnk heal` does the same on a cluster that stays on 2.3 (it runs all ten repairs of the heal registry: `multus-token-watch`, `metrics-server`, `tmm-log-stream`, `pod-manager`, `cwc`, `dssm-probe`, `controller-endpointslices`, `controller-irsa`, `tmm-k8s-routes`, `test-namespace`; `--only`, `--dry-run`), `awsbnkctl doctor --backend k8s` reports it as `multus kubeconfig token` |
 | 1 | `helm upgrade f5-lifecycle-operator` to the chart paired with the target manifest (`v2.30.0-0.5.2` for `2.4.0`), values rendered from `cluster.yaml` as `up` renders them |
 | 2 | JSON merge patch on the CNEInstance: `spec.manifestVersion`, controller env `USE_GATEWAY_SETTINGS=true`; `MAX_ACTIVE_TMM_REPLICAS=32` and the TMM env `ZEBOS_STATE=legacy` are added when absent; every other env entry is kept; the TMM env `TMM_K8S_ROUTES=<service range>` is added when absent (`--service-cidr`, else `EKS_SERVICE_CIDR` from `state.env`, else the EKS cluster) so DNS, dSSM (iRule `table`, persistence) and log forwarding stay reachable over eth0 once the `Infra` default route exists |
 | 3 | Wait for the `Infra` CRD, then for FLO to render `USE_GATEWAY_SETTINGS=true` into the `f5-cne-controller` Deployment (3 min, `--timeout` for the rest). FLO 2.30 cannot update a CNEController created by FLO 2.21 (its payload carries `null` for `spec.crdUpdater.resources` and `f5CsmQkview`, which the 2.4 CRD rejects), so when the env does not appear the CNEController CR is deleted and FLO recreates it and the Deployment through its create path (`controllerRecreated` in `-o json`; about a minute without the controller, TMM keeps forwarding). Then the Deployment rollout, the CNEInstance conditions `CNEControllerAvailable` and `F5TmmAvailable`, and Ready `app=f5-tmm` pods |
@@ -35,8 +36,9 @@ on `repo.f5.com` and the name FLO matches (`bigip-k8s-manifest-2.4.0.yaml`).
 release already on the chart and a CNEInstance already on the version are
 reported and skipped.
 
-`-o json` prints the result (`floFrom`, `floTo`, `manifestFrom`, `manifestTo`,
-`tmmReady`, `tmmTotal`, `controllerRecreated`, `multus`, `readiness`). The
+`-o json` prints the result (`floFrom`, `floTo`, `floUpgraded`, `manifestFrom`,
+`manifestTo`, `patched`, `tmmReady`, `tmmTotal`, `controllerReady`,
+`controllerRecreated`, `rbacApplied`, `logStreamEnabled`, `multus`, `readiness`). The
 `readiness` block is the shared bnkscan verdict `status`, `doctor` and
 `forge scan` print; right after an upgrade it reports `mixed` with no Infra CR
 and points at `bnk migrate-2.4`.
@@ -56,11 +58,12 @@ model has no field for. Read the warnings before applying.
 |---|---|
 | `F5SPKVlan` | `Infra` network (`type: vlan`, same name, tag, mtu), a network attachment resolved from CNEInstance `networkAttachments` (interface `1.N` is the Nth NAD), and a self-IP IPAM pool: the /27 block around the 2.3 self IP (`--single-self-ip` keeps the exact address) |
 | `F5SPKStaticRoute` (type `gateway`) | `Infra` `staticRoutes` entry (`destination/prefixLen`, `nextHop`) |
+| no `F5SPKStaticRoute` | a default route `0.0.0.0/0` via the external VLAN gateway, as `up` renders it; the report warns |
 | `Vrf` | `Infra` `vrfs` entry |
 | `Vxlan` | `Infra` network (`type: vxlan`) with a VTEP pool |
 | `F5SPKSnatpool` | `Infra` IPAM pool `<name>-snat`, referenced by `GatewaySettings.sourceNATPools` |
 | `F5SPKEgress` | `Infra` `egressDefaults` (tunnel subnet and VLAN), one `GatewaySettings` with `egressConfigs` and one `EgressGateway` per `pseudoCNIConfig.namespaces` entry; `snatType` becomes `sourceNATConfig` (`Automap`, `None`, `Pool`); `firewallEnforcedPolicy` becomes a `SecPolicy` targeting the `EgressGateway` |
-| none | A cluster without any `F5SPKEgress` still gets `Infra` `egressDefaults` (`192.168.0.0/16`, port 4789, the internal VLAN); without the block the controller defaults the tunnel subnet to `10.0.0.0/16`, which overlaps the VPC self-IP pools and leaves the Infra `Programmed=False` (`EgressDefaultsSubnetConflict`) |
+| none | A cluster without any `F5SPKEgress` still gets `Infra` `egressDefaults` (`192.168.0.0/16`, port 4789, the tunnel VLAN: internal where one exists, else external); without the block the controller defaults the tunnel subnet to `10.0.0.0/16`, which overlaps the VPC self-IP pools and leaves the Infra `Programmed=False` (`EgressDefaultsSubnetConflict`) |
 | `F5BnkGateway` + `Gateway` | a listener IPAM pool in `Infra`, a `GatewaySettings` per BNK Gateway (`ipamRefs`, external `networkRefs`, `Automap`), and a server-side-apply patch adding `spec.infrastructure.parametersRef` to the Gateway; a Gateway without an `F5BnkGateway` gets a pool from its static address |
 | `BNKSecPolicy`, `BNKNetPolicy` | `SecPolicy`, `NetPolicy` in `gateway.k8s.f5.com/v1alpha1`, same name, namespace, labels and spec |
 

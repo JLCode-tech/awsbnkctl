@@ -14,7 +14,7 @@ scenarios and tears it all down again. One static binary; no Terraform, no host
 `kubectl`, no host `helm`.
 
 You need an AWS account, an F5 pull key and licence JWT for `repo.f5.com`, and
-about **US$3 per hour** while the reference cluster is up.
+~US$3/hr on-demand in `ap-southeast-2` while the reference cluster is up.
 
 ## Install
 
@@ -23,7 +23,7 @@ Download the archive for your platform from
 and put the binary on your `PATH`:
 
 ```bash
-VERSION=1.4.0
+VERSION=2.3.0
 OS=darwin    # or linux
 ARCH=arm64   # or amd64
 curl -fsSL "https://github.com/JLCode-tech/awsbnkctl/releases/download/v${VERSION}/awsbnkctl_${VERSION}_${OS}_${ARCH}.tar.gz" | tar -xz
@@ -36,8 +36,8 @@ with Go 1.26 or newer; the binary lands in `bin/awsbnkctl`.
 
 ## Quick start
 
-Every cluster starts from an example. `full-cluster` is the reference; the
-others are demos built on the same shape (see [`examples/`](examples/)).
+`full-cluster` is the reference. `egress-demo`, `demo-ai` and `agentcore-demo`
+build on it; `local-zone` is reference manifests only (see [`examples/`](examples/)).
 
 ```bash
 # 1. Copy the reference example. Everything you run reads cluster.yaml from here.
@@ -52,7 +52,7 @@ cp -r examples/full-cluster my-cluster && cd my-cluster
 awsbnkctl validate cluster.yaml
 AWSBNKCTL_SKIP_AUTH=1 awsbnkctl up -f cluster.yaml --dry-run
 
-# 4. Build it (about 25 minutes), prove traffic flows, tear it down.
+# 4. Build (~25 min), run one scenario, tear down.
 awsbnkctl up -f cluster.yaml
 awsbnkctl scenarios run http-routing-e2e -f cluster.yaml
 awsbnkctl down -f cluster.yaml --yes
@@ -97,7 +97,7 @@ switch it to either single-interface pattern.
 | FLO chart | paired with the manifest (`v2.30.0-0.5.2` for 2.4.0) | `addons.flo.version` |
 | Go | 1.26 | `go.mod` |
 
-Four of those pins expire on a calendar. Check them before a new deployment:
+Pins with an expiry:
 
 | Check | Current | Changes when | Then |
 |---|---|---|---|
@@ -113,17 +113,17 @@ The reasoning behind each pin is in
 
 `awsbnkctl scenarios run --all -f cluster.yaml` runs 15 validation scenarios
 against a live cluster: HTTP and gRPC routing, weighted splits, L4 TCP/UDP,
-multi-VIP, external backends, cluster-wide watch, admin-access RBAC, AI token
-counting and semantic caching, GPU inference, transparent egress and core-file
-collection. Most drive real traffic from the jumphost; the ones that only assert
-control-plane state are rated Amber and say so. `scenarios list` prints the rating of each, and
+multi-VIP, external backends, cluster-wide watch, CWC admin access, AI token
+counting and semantic caching, GPU inference, PROXY-protocol L4, transparent
+egress and core-file collection. Four are Amber (partial assertions);
+`scenarios list` prints the rating of each, and
 [`docs/SCENARIOS.md`](docs/SCENARIOS.md) has what every scenario needs and the
 VIP each one owns.
 
 `awsbnkctl demo run --all` adds four narrated protocol demos (Diameter, HTTP/2,
 ingress migration, BIG-IP CIS) on a cluster built with `demo.enabled: true`.
 
-## Commands you will actually use
+## Common commands
 
 | Command | What it does |
 |---|---|
@@ -133,16 +133,16 @@ ingress migration, BIG-IP CIS) on a cluster built with `demo.enabled: true`.
 | `scenarios run <name\|--all> -f <cluster.yaml>` | run validation scenarios |
 | `k get\|apply\|logs\|exec …` | kubectl equivalents built in, no host kubectl |
 | `down -f <cluster.yaml> --yes` | remove everything `up` created, by tag, even if local state is lost |
-| `doctor` | check credentials and prerequisites |
+| `doctor` | check credentials and prerequisites; `--backend k8s` adds BNK readiness and the heal detections |
+| `bnk heal -f <cluster.yaml>` | detect and repair cluster plumbing (10 repairs); `--dry-run`, `--only` |
 | `manifest probe [version]` | list what a BNK release manifest ships |
 
-Every command, every flag and every environment variable is in
-[`docs/COMMANDS.md`](docs/COMMANDS.md).
+Command and flag reference: [`docs/COMMANDS.md`](docs/COMMANDS.md).
 
 ## Further reading
 
 - [`examples/`](examples/) — the five examples, what each costs and demonstrates.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the intent format, the 39 phases, patterns, version policy.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the intent format, the 41 phases, patterns, version policy.
 - [`docs/SCENARIOS.md`](docs/SCENARIOS.md) — every scenario, its prerequisites and VIP.
 - [`docs/BGP-ROUTE-SERVER.md`](docs/BGP-ROUTE-SERVER.md) — peering TMM with an AWS Route Server.
 - [`docs/UPGRADE-2.4.md`](docs/UPGRADE-2.4.md) — moving a 2.3.x cluster to BNK 2.4 in place with `bnk upgrade` and `bnk migrate-2.4`.

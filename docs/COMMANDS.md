@@ -14,7 +14,7 @@ Every command accepts `--help`. Global flags on every command: `-w/--workspace`,
 | `up -f <config>` | Provision the EKS cluster and BNK stack (flags: `--dry-run`, `--auto`, `--demo`, `--no-kubeconfig`, `--register-with-forge`, `--skip-activation-poll`) |
 | `down -f <config>` | Destroy everything `up` provisioned (flags: `--dry-run`, `--yes`, `--auto`, `--keep-irsa`, `--keep-forge-link`) |
 | `status` | Summary of the workspace: cluster, components, deploy state (`-f` locates the phased path's `state.env`), BNK API generation, Infra / Gateway / controller readiness (bnkscan) |
-| `doctor` | Check prerequisites and report missing pieces (`--backend k8s|ssh:<target>`, `--target <name>` add per-backend probes); `--backend k8s` also reports BNK readiness and warns when 2.3 CRDs or CRs remain on a 2.4 cluster |
+| `doctor` | Check prerequisites and report missing pieces (`--backend k8s|ssh:<target>`, `--target <name>` add per-backend probes); `--backend k8s` reports BNK readiness (Infra, Gateways, controller, a warning when 2.3 CRDs or CRs remain) plus one row per `bnk heal` repair |
 | `topology -f <config>` | Render the data-path topology as `--format ascii` or `mermaid` |
 | `version` | Print version, commit and build date |
 
@@ -34,12 +34,14 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `test list` | List available test suites |
 | `test hosts {add,clear,list,remove}` | Manage `test.connectivity.extra_hosts` in the workspace config |
 | `scenarios list` | Print registered scenarios with their rating |
-| `scenarios run <name>` | Run a scenario (or `--all`); `--vip` overrides the base VIP, `--synthetic` runs `ai-inference-e2e` without a GPU |
+| `scenarios run <name>` | Run a scenario (or `--all`); `--vip` overrides the base VIP, `--synthetic` runs `ai-inference-e2e` without a GPU, `--dry-run` |
 | `scenarios clean <name>` | Invoke a scenario's Cleanup hook |
 | `demo list` | Print registered demo use-cases and Green scenarios |
-| `demo run <name>` | Run a demo use-case (or `--all`); requires a demo cluster |
+| `demo run <name>` | Run a demo use-case (or `--all`, `--dry-run`); requires a demo cluster |
 | `demo clean <name>` | Invoke a demo use-case's Cleanup hook (or `--all`) |
 | `demo preview` | Play the up/down animation locally (no AWS) |
+
+`test dns`: `--target`, `--type`, `--server`, `--iterations`, `--timeout`, `--gslb-compare`, `--require-divergence`. `test throughput`: `--mode north-south|east-west`, `--cross-node`, `--keep`. `test traffic`: `--vip`, `--iterations`, `--timeout`. `--backend k8s` (the iperf3 default) runs each probe as a one-shot Job in namespace `awsbnkctl-test`, which `up` and `bnk heal` create.
 
 ## Kubernetes and BNK runtime
 
@@ -55,11 +57,11 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `get <resource> [name]` | Top-level alias of `k get` (`-n`, `-A`, `-l`, `-o yaml|json|wide|name|jsonpath=…`) |
 | `logs <component>` | Tail logs for a BNK component (`flo`, `cis`, `cert-manager`, `cneinstance`, `tmm`); `-f`, `--since`, `--tail`, `--previous`, `-c`; `--governance` / `--mcp` print only BNKGOV records as `[GOV] <status> <rpc_method> tool= session= latency= action=` |
 | `bnk heal` | Detect and repair the cluster plumbing `up` and `bnk upgrade` also fix, on 2.3 or 2.4: Multus token watch, metrics-server add-on, TMM log stream, pod-manager cert mount and crash loop, cwc crash loop, dSSM probe overlay, controller EndpointSlice RBAC, controller IRSA, `TMM_K8S_ROUTES`, the `awsbnkctl-test` namespace for `test --backend k8s` (`-f` for the AWS-backed ones, `--kubeconfig`, `--only`, `--dry-run`, `-o json`); `doctor --backend k8s` shows the same detections |
-| `bnk resync` | Force the F5 cne-controller to re-resolve stale TMM pool members |
-| `bnk migrate-2.4` | Translate the 2.3.x CRs of a running cluster into the 2.4 Infra / GatewaySettings model (`--dry-run` prints the manifests, `--apply` server-side-applies them; `-f`, `--kubeconfig`, `-n`, `--gateway-class`) |
-| `bnk upgrade -f <config>` | In-place upgrade: helm upgrade FLO, patch the CNEInstance (`manifestVersion`, `USE_GATEWAY_SETTINGS`), watch the controller and TMM come back (`--manifest-version`, `--flo-version`, `--dry-run`) |
-| `bnk mcp-session` | Render or `--apply` an `F5BigPersistenceProfile` (`MODEL_CONTEXT_PROTOCOL` or `AGENT2AGENT`), its passphrase `Secret` and the `NetPolicy` per listener that pins MCP sessions to one backend (`--name`, `--gateway`, `--listener`, `--irule`, `--passphrase-env`) |
-| `manifest probe [version]` | Pull a BNK release manifest from `repo.f5.com` with the helm SDK (no host helm) and print its charts and images (`--all`, `--far <path>`) |
+| `bnk resync` | Force the F5 cne-controller to re-resolve stale TMM pool members (`-n`, `--all-in-ns`, `--gateway-class`, `--dry-run`; `--watch` with `--debounce` re-resyncs on EndpointSlice changes) |
+| `bnk migrate-2.4` | Translate the 2.3.x CRs of a running cluster into the 2.4 Infra / GatewaySettings model (`--dry-run` prints the manifests, `--apply` server-side-applies them; `-f`, `--kubeconfig`, `-n`, `--gateway-class`, `--infra-name`, `--single-self-ip`, `--wait`) |
+| `bnk upgrade -f <config>` | In-place upgrade: helm upgrade FLO, patch the CNEInstance (`manifestVersion`, `USE_GATEWAY_SETTINGS`), watch the controller and TMM come back (`--manifest-version`, `--flo-version`, `--service-cidr` sets `TMM_K8S_ROUTES`, `--instance`, `-n`, `--kubeconfig`, `--timeout`, `--dry-run`) |
+| `bnk mcp-session` | Render or `--apply` an `F5BigPersistenceProfile` (`MODEL_CONTEXT_PROTOCOL` or `AGENT2AGENT`), its passphrase `Secret` and the `NetPolicy` per listener that pins MCP sessions to one backend (`--name`, `--type`, `--gateway`, `--listener`, `--irule`, `--passphrase-env`, `--secret`, `--net-policy-name`, `--apply`, `--wait`) |
+| `manifest probe [version]` | Pull a BNK release manifest from `repo.f5.com` with the helm SDK (no host helm) and print its charts and images (`--all`, `--far <path>`, `--out`) |
 
 ## AI benchmarking and BNK Forge
 
@@ -67,18 +69,20 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 |---|---|
 | `benchmark` | Runs the default `benchmark run` workflow |
 | `benchmark setup` | Prepare the jumphost (aiperf) and register the benchmark agent and target in Forge; `--auto-discover` also registers every MCP endpoint the cluster exposes |
-| `benchmark run` | Drive an aiperf run, preset (`--scenarios`), native Forge scenario sweep (`--scenario`), or proxy shootout (`--proxies`); `--prefix-prompt-length`, `--num-prefix-prompts`, `--random-seed` for shared-prefix workloads; `--metrics-pod-selector` / `--metrics-url` scrape vLLM or EPP metrics for the prefix-cache hit rate; `--genai-out` |
+| `benchmark run` | Drive an aiperf run, preset (`--scenarios`), native Forge scenario sweep (`--scenario`), or proxy shootout (`--proxies`); `--prefix-prompt-length`, `--num-prefix-prompts`, `--random-seed` for shared-prefix workloads; `--metrics-pod-selector` / `--metrics-url` scrape vLLM or EPP metrics for the prefix-cache hit rate; `--genai-out`; `--help` lists the load-shape flags (`--concurrency`, `--num-requests`, `--isl`, `--osl`, `--stream`, …) |
 | `benchmark list` | List native Forge scenarios and smoke presets |
 | `benchmark status` | Check the benchmark environment, jumphost and Forge linkage |
 | `benchmark daemon` | Run the persistent Forge benchmark agent daemon |
 | `benchmark ingest` | Parse aiperf artifacts offline into TTFT/ITL percentiles, token throughput and prefix-cache hit rate; compare TTFT between runs (`--expect-ttft-drop`), `--metrics-before`/`--metrics-after` scrape files, `--push` to Forge |
 | `forge register` | Register the workspace's EKS cluster with Forge (idempotent: an existing registration is kept and the link's REST and MCP URLs are refreshed to the ones in use); `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
 | `forge status` | Show this workspace's Forge registration state |
-| `forge unregister` | Remove this workspace's Forge registration |
-| `forge cleanup` | Delete all awsbnkctl benchmark artifacts from Forge for a workspace |
+| `forge unregister` | Remove this workspace's Forge registration (`--purge` also deletes the project) |
+| `forge cleanup` | Delete all awsbnkctl benchmark artifacts from Forge for a workspace (`--workspace`, `--dry-run`, `--forge-rest-url`, `--forge-user`, `--forge-pass`) |
 | `forge scan` | Index the cluster's BNK 2.4 resources, check readiness (Infra, Gateway, controller) and discover MCP endpoints; `--probe`, `--register-targets`, `--remote`, `-o json` |
 | `forge telemetry` | Validate the MCP governance records in Loki against the schema Forge's LLM Observability panel reads; `--loki-url`, `--since`, `--file`, `--show` |
 | `forge benchmark` | Alias for `benchmark run` |
+
+Every `forge` command takes `-f <cluster.yaml>` and `--forge-mcp-url`.
 
 `awsbnkctl up --register-with-forge` registers after a successful apply; `down`
 unregisters unless `--keep-forge-link` is passed. The binary is an MCP *client*
@@ -107,7 +111,7 @@ The binary embeds no LLM; bring your own coding-agent CLI.
 | `workspaces new <name>` | Create an empty workspace skeleton; run `init -w <name>` to populate |
 | `workspaces use <name>` | Set the current workspace pointer |
 | `workspaces delete <name>` | Delete a workspace (refuses if state is non-empty unless `--force`) |
-| `targets {add,list,remove,show}` | Manage the SSH targets used by `--on` / `--backend ssh:<target>` |
+| `targets {add,list,remove,show}` | Manage the SSH targets used by `--on` / `--backend ssh:<target>` (`add`: `--host`, `--user`, `--port`, `--key-path`, `--key-source`) |
 | `targets scan` | Discover the MCP endpoints behind BNK Gateways and register them in Forge's Target Catalog (idempotent); `-f`, `--register=false`, `--probe`, `-o json` |
 | `install` | Copy the running binary into a directory on `PATH` (`--dir`, `--force`) |
 | `self update` | Pull the latest release matching the host OS/arch |
@@ -129,7 +133,7 @@ The binary embeds no LLM; bring your own coding-agent CLI.
 | `HF_TOKEN` | Hugging Face token for gated models (`ai.sagemaker`, `ai-inference-e2e`) |
 | `AWSBNKCTL_GPU_AZ_DENY` | Extra GPU instance-type AZ deny entries, format `region:az1,az2;region2:az3` |
 | `AWSBNKCTL_DOCTOR_SERVICE_QUOTAS=1` | Opt `doctor` into the AWS Service Quotas checks |
-| `AWSBNKCTL_SSH_TARGET` / `AWSBNKCTL_K8S_LONG_LIVED` | Internal sentinels set when re-dispatching to an `ssh:<target>` or `k8s` backend; not meant to be set by operators |
+| `AWSBNKCTL_SSH_TARGET` | Internal sentinel set when re-dispatching to an `ssh:<target>` backend; not meant to be set by operators |
 
 ## Two `cluster.yaml` blocks worth knowing
 

@@ -98,13 +98,12 @@ Use --backend local|k8s|ssh:<target> to pick a single vantage point;
 
 var testThroughputCmd = &cobra.Command{
 	Use:   "throughput",
-	Short: "iperf3 throughput; deploys server pod automatically (v1.x)",
-	Long: `Deploys an iperf3 server in the test namespace and runs the client
-either from the awsbnkctl host (--mode north-south, default) or from a second
-in-cluster pod (--mode east-west).
-
-Not yet implemented — landing in v1.x once the internal/k8s client-go
-fixture lifecycle is wired.`,
+	Short: "iperf3 throughput; deploys the server pod automatically",
+	Long: `Deploys an iperf3 server in namespace awsbnkctl-test and runs the client
+as a one-shot Job in the same namespace (--backend k8s, the default) or from
+the awsbnkctl host (--backend local). --mode north-south targets the
+LoadBalancer endpoint, --mode east-west the ClusterIP. The fixture is removed
+afterwards unless --keep is set.`,
 	RunE: runTestThroughputCmd,
 }
 
