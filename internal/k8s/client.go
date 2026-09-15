@@ -13,9 +13,9 @@ import (
 )
 
 // InClusterKubeconfigSentinel is the magic value for kubeconfigPath that
-// triggers rest.InClusterConfig() lookup. Used by the in-cluster K8s
-// execution backend when awsbnkctl runs inside an ops Pod and gets its
-// credentials from the projected service account.
+// triggers rest.InClusterConfig() lookup. Used when awsbnkctl runs inside
+// a cluster (the test --backend k8s probe Job) and gets its credentials
+// from the projected service account.
 const InClusterKubeconfigSentinel = "in-cluster"
 
 // Client wraps a Kubernetes clientset and the REST config used to build

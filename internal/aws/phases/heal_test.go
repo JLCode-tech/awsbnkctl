@@ -44,7 +44,8 @@ func controllerPod(name string, pmReady bool, restarts int32, waiting string) *c
 }
 
 // An empty cluster is healthy everywhere except the metrics API, which the
-// fake discovery cannot serve; nothing is fixed and nothing errors.
+// fake discovery cannot serve, and the test namespace, which is created;
+// nothing else is fixed and nothing errors.
 func TestRunHeal_EmptyClusterDetectsOnly(t *testing.T) {
 	d := healDeps()
 	d.Clients.Dynamic = nil
@@ -61,6 +62,10 @@ func TestRunHeal_EmptyClusterDetectsOnly(t *testing.T) {
 		case "tmm-k8s-routes":
 			if s.Error == "" { // no dynamic client → detect error, never a fix
 				t.Errorf("tmm-k8s-routes: expected an error without a dynamic client: %+v", s)
+			}
+		case "test-namespace":
+			if !s.Changed || !s.Healthy || !strings.Contains(s.Detail, "created") {
+				t.Errorf("test-namespace: expected the namespace to be created: %+v", s)
 			}
 		default:
 			if !s.Healthy || s.Changed || s.Error != "" {
@@ -166,5 +171,26 @@ func TestSidecarServiceNetworkEvidence(t *testing.T) {
 	}
 	if sidecarServiceNetworkEvidence("[info] [output:forward:forward.1] worker #0 started\n") != "" {
 		t.Error("healthy log must give no evidence")
+	}
+}
+
+func TestRepairTestNamespace(t *testing.T) {
+	d := healDeps()
+	out := RunHeal(context.Background(), d, []string{"test-namespace"})
+	if len(out) != 1 || !out[0].Changed || !out[0].Healthy {
+		t.Fatalf("first run should create the namespace: %+v", out)
+	}
+	if _, err := d.Clients.K8s.CoreV1().Namespaces().Get(context.Background(), "awsbnkctl-test", metav1.GetOptions{}); err != nil {
+		t.Fatalf("namespace not created: %v", err)
+	}
+	out = RunHeal(context.Background(), d, []string{"test-namespace"})
+	if out[0].Changed || !out[0].Healthy || !strings.Contains(out[0].Detail, "present") {
+		t.Errorf("second run should detect only: %+v", out[0])
+	}
+	det := DetectAll(context.Background(), healDeps())
+	for _, s := range det {
+		if s.Name == "test-namespace" && (s.Healthy || !strings.Contains(s.Detail, "missing")) {
+			t.Errorf("DetectAll on an empty cluster: %+v", s)
+		}
 	}
 }
