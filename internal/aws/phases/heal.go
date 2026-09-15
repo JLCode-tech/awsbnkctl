@@ -646,12 +646,19 @@ func detectTMMK8sRoutes(ctx context.Context, clients *Clients) (bool, string, er
 	if cne == nil {
 		return true, "no CNEInstance (BNK not installed yet)", nil
 	}
-	mv, _, _ := unstructured.NestedString(cne.Object, "spec", "manifestVersion")
-	if strings.HasPrefix(mv, "2.3") {
-		return true, "manifestVersion " + mv + ": the 2.3 TMM keeps the pod default route, no static routes", nil
-	}
 	if v, ok := tmmEnvValue(cne, render.TMMK8sRoutesEnv); ok && v != "" {
 		return true, render.TMMK8sRoutesEnv + "=" + v + " on CNEInstance " + cne.GetName(), nil
+	}
+	mv, _, _ := unstructured.NestedString(cne.Object, "spec", "manifestVersion")
+	if strings.HasPrefix(mv, "2.3") {
+		// 2.3 programs no Infra routes, so the pod default route usually keeps
+		// the service network reachable. The TMM sidecars tell when it is not:
+		// fluent-bit cannot resolve f5-toda-fluentd and no TMM line reaches
+		// the log stream.
+		if evidence := tmmSidecarServiceNetworkBroken(ctx, clients); evidence != "" {
+			return false, "CNEInstance " + cne.GetName() + " (manifestVersion " + mv + ") has no " + render.TMMK8sRoutesEnv + " and the TMM pod cannot reach the service network: " + evidence, nil
+		}
+		return true, "manifestVersion " + mv + ": no " + render.TMMK8sRoutesEnv + " and the TMM sidecars reach the service network", nil
 	}
 	return false, "CNEInstance " + cne.GetName() + " has no " + render.TMMK8sRoutesEnv + ": once the Infra default route is programmed TMM loses dSSM and DNS and iRule requests reset", nil
 }
@@ -691,4 +698,51 @@ func mustJSON(v any) string {
 		return "[]"
 	}
 	return string(b)
+}
+
+// tmmSidecarLogTail bounds how much of the TMM fluent-bit sidecar log the
+// service-network check reads.
+const tmmSidecarLogTail int64 = 400
+
+// tmmSidecarServiceNetworkBroken reads the tail of the TMM pod's f5-fluentbit
+// sidecar log and returns the evidence line when the sidecar cannot resolve
+// or reach f5-toda-fluentd (its forward output), which means the pod has no
+// route to the service network. Empty when the log shows no such failure or
+// cannot be read.
+func tmmSidecarServiceNetworkBroken(ctx context.Context, clients *Clients) string {
+	pods, err := clients.K8s.CoreV1().Pods(InstanceNamespace).List(ctx, metav1.ListOptions{LabelSelector: "app=f5-tmm"})
+	if err != nil || len(pods.Items) == 0 {
+		return ""
+	}
+	tail := tmmSidecarLogTail
+	stream, err := clients.K8s.CoreV1().Pods(InstanceNamespace).GetLogs(pods.Items[0].Name, &corev1.PodLogOptions{Container: "f5-fluentbit", TailLines: &tail}).Stream(ctx)
+	if err != nil {
+		return ""
+	}
+	defer stream.Close()
+	b, err := io.ReadAll(io.LimitReader(stream, 1<<20))
+	if err != nil {
+		return ""
+	}
+	return sidecarServiceNetworkEvidence(string(b))
+}
+
+// sidecarServiceNetworkEvidence returns the first fluent-bit line that shows
+// the forward output cannot reach fluentd through the service network.
+func sidecarServiceNetworkEvidence(log string) string {
+	for _, line := range strings.Split(log, "\n") {
+		switch {
+		case strings.Contains(line, "Timeout while contacting DNS servers"),
+			strings.Contains(line, "no upstream connections available"),
+			strings.Contains(line, "getaddrinfo(host=") && strings.Contains(line, "err="):
+			if i := strings.Index(line, "["); i >= 0 {
+				line = line[i:]
+			}
+			if len(line) > 200 {
+				line = line[:200]
+			}
+			return "f5-fluentbit: " + strings.TrimSpace(line)
+		}
+	}
+	return ""
 }

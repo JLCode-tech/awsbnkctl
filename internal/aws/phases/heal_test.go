@@ -157,3 +157,14 @@ func TestDetectControllerIRSA(t *testing.T) {
 		t.Errorf("unannotated: ok=%v %q err=%v", ok, detail, err)
 	}
 }
+
+func TestSidecarServiceNetworkEvidence(t *testing.T) {
+	log := "[2026/09/15 02:23:37] [ info] [task] task_id=99 still running\n[2026/09/15 02:23:37.278793012] [ warn] [net] getaddrinfo(host='f5-toda-fluentd.f5-cne-core.svc.cluster.local.', err=12): Timeout while contacting DNS servers\n[2026/09/15 02:23:37] [error] [output:forward:forward.1] no upstream connections available\n"
+	got := sidecarServiceNetworkEvidence(log)
+	if !strings.Contains(got, "Timeout while contacting DNS servers") || !strings.HasPrefix(got, "f5-fluentbit: [2026/09/15 02:23:37.278793012]") {
+		t.Errorf("evidence %q", got)
+	}
+	if sidecarServiceNetworkEvidence("[info] [output:forward:forward.1] worker #0 started\n") != "" {
+		t.Error("healthy log must give no evidence")
+	}
+}

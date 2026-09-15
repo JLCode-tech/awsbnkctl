@@ -55,7 +55,9 @@ Repairs (--only <name> limits the run):
   controller-irsa        -f  IRSA trust policy and ServiceAccount annotation
                              for the controller (cloud provider, Gateway VIPs)
   tmm-k8s-routes         -f  TMM_K8S_ROUTES=<service CIDR> on the CNEInstance
-                             so TMM keeps dSSM and DNS behind the Infra routes
+                             so the TMM pod reaches the service network (dSSM,
+                             DNS, the fluentd log forward); on 2.3 detected from
+                             the f5-fluentbit sidecar log
 
 Repairs marked -f need cluster.yaml (state.env and the AWS clients); with
 --kubeconfig alone they are detected and reported, not fixed.`,
