@@ -429,6 +429,13 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 	}); err != nil {
 		return err
 	}
+	// Phase 08c: metrics-server add-on, so kubectl top and the Forge fleet view
+	// get pod and node CPU/memory for the BNK pods.
+	if err := stage(2, "metrics-server", func() error {
+		return phases.Phase08cMetricsServer(ctx, cl, st, clients, dryRun)
+	}); err != nil {
+		return err
+	}
 	if err := stage(3, "node-group", func() error {
 		return phases.Phase10NodeGroup(ctx, cl, st, clients, dryRun)
 	}); err != nil {
@@ -841,6 +848,7 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 		// STAGE 2 — EKS control plane.
 		{2, "forge-benchmark-cleanup", func() error { return phases.Phase09bBenchmarkDown(ctx, cl, st, clients) }},
 		{2, "forge-register", func() error { return phases.Phase09ForgeRegisterDown(ctx, cl, st, clients, flagKeepForgeLink) }},
+		{2, "metrics-server", func() error { return phases.Phase08cMetricsServerDown(ctx, cl, st, clients) }},
 		{2, "vpc-cni-prefix", func() error { return phases.Phase08bVPCCNIPrefixDown(ctx, cl, st, clients) }},
 		{2, "eks-cluster", func() error { return phases.Phase08EKSClusterDown(ctx, cl, st, clients) }},
 		// STAGE 1 — VPC · subnets · IGW · NAT · IAM.
