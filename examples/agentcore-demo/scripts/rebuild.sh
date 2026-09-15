@@ -180,8 +180,8 @@ kubectl rollout status deploy/loki -n llm-egress --timeout=180s >/dev/null 2>&1 
   || warn "loki slow to start — check later"
 ok "loki + collectors applied"
 
-# ── 7. bedrock token shipper ─────────────────────────────────────────────────
-step "Bedrock token shipper  (out-of-path accounting lane)"
+# ── 7. bedrock token shipper & continuous traffic generator ─────────────────
+step "Bedrock token shipper & continuous traffic generator"
 LG=$(aws bedrock get-model-invocation-logging-configuration \
       --query 'loggingConfig.cloudWatchConfig.logGroupName' --output text 2>/dev/null)
 if [ -z "$LG" ] || [ "$LG" = "None" ]; then
@@ -199,6 +199,9 @@ sed -e "s/<account-id>/$ACCT/g" -e "s/^\( *value: \)ap-southeast-2$/\1$REGION/" 
 grep -q "<account-id>" "$TMP" && die "account-id substitution failed"
 kubectl apply -f "$TMP" || die "token shipper apply failed"
 ok "shipper applied with account $ACCT (tracked file left with its placeholder)"
+
+kubectl apply -f "$DEMO_DIR/traffic-generator-deployment.yaml" || die "traffic generator apply failed"
+ok "continuous dual-leg traffic generator deployed"
 
 # ── 8. the stranger ──────────────────────────────────────────────────────────
 step "Path 3 stranger + the firewall's out-of-range source"

@@ -91,6 +91,11 @@ else
     echo "Found existing Agent SG: $AGENT_SG_ID"
 fi
 
+echo "Ensuring SSM policy on jumphost IAM role for demo runner..."
+aws iam attach-role-policy \
+    --role-name "${CLUSTER_NAME}-jumphost-role" \
+    --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null || true
+
 echo "Authorizing ingress from VPC CIDR ($VPC_CIDR) to Agent SG ($AGENT_SG_ID) on port 8080..."
 aws ec2 authorize-security-group-ingress \
     --group-id "$AGENT_SG_ID" \

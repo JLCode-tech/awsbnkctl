@@ -73,7 +73,7 @@ one before it.
 | 4 | `scripts/setup-agentcore-network.sh` | reads the VIP off the live Gateway; creates the agent security group, SG-to-SG ingress and the private Route 53 zone |
 | 5 | `awsbnkctl k apply -f mcp-persistence.yaml` | the passphrase Secret and the `MODEL_CONTEXT_PROTOCOL` persistence profile the NetPolicies reference. BNK 2.4.0 programs an `F5BigPersistenceProfile` only in the instance namespace (`f5-cne-system`) while a `NetPolicy` looks it up in its own namespace, so the profile in `default` stays unprogrammed and the iRules still attach; `awsbnkctl doctor --backend k8s` reports it |
 | 6 | `awsbnkctl k apply -f mcp-security-policy.yaml` | the rate-limit iRule, persistence and firewall attach to listeners that must already exist |
-| 7 | `awsbnkctl k apply -f mcp-observability.yaml` | Loki and the log collector in `llm-egress` |
+| 7 | `awsbnkctl k apply -f mcp-observability.yaml`, `traffic-generator-deployment.yaml`, and `mcp-bedrock-token-shipper.yaml` | Loki, collectors, continuous dual-leg traffic generator, and Bedrock token shipper in `llm-egress` |
 | 8 | `cd agent && npx agentcore deploy --target demo-v2` | the AgentCore runtime, VPC mode, in the private subnets |
 | 9 | `scripts/setup-stranger.sh` (optional) | an EC2 caller with one NIC inside `10.0.0.0/16` and one outside, so the firewall's reject branch can be shown |
 
@@ -134,9 +134,11 @@ kubectl run lq --rm -i --restart=Never -n llm-egress --image=curlimages/curl:8.8
 ```
 
 BNK's records carry zero tokens, honestly: it is in the path of the tool call,
-not the model call. `mcp-bedrock-token-shipper.yaml` pulls Bedrock's own
-invocation logs into the same Loki stream so Forge shows both legs; the one-time
-IAM setup for it is in [`docs/ROADMAP.md`](docs/ROADMAP.md#bedrock-token-shipper).
+not the model call. `mcp-bedrock-token-shipper.yaml` and `traffic-generator-deployment.yaml`
+run a continuous dual-leg pipeline into Loki:
+- **Leg A (Reasoning Leg)**: Bedrock model invocation metrics (`claude-3-5-sonnet`) with prompt/completion tokens, latency, and costs shipped to Loki via the in-cluster shipper service (`bedrock-token-shipper:9090`).
+- **Leg B (Tool Leg)**: MCP tool calls through BNK Gateway (`10.0.10.150`) logging authentication, tool-level RBAC, rate-limiting, and agent discovery.
+Forge unifies both legs to display model rankings, Anthropic provider usage trends, and security metrics for `bnk-agentcore-demo`.
 
 ## Scenarios and BGP
 

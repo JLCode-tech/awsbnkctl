@@ -121,4 +121,9 @@ if [ -f .agentcore-network-env.json ]; then
     echo "Deleted .agentcore-network-env.json"
 fi
 
+echo "Detaching SSM policy from jumphost IAM role..."
+aws iam detach-role-policy \
+    --role-name "${CLUSTER_NAME}-jumphost-role" \
+    --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null || true
+
 echo "Teardown complete."
