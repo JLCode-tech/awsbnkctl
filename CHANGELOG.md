@@ -4,6 +4,44 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [2.3.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.2.0...v2.3.0) (2026-09-15)
+
+
+### Features
+
+* **benchmark:** GenAI inference metrics in Forge payloads, aiperf ingest, prefix-cache shootout ([45b9f3f](https://github.com/JLCode-tech/awsbnkctl/commit/45b9f3f6bb53b8f3c64dba183235f7c81feaa36b))
+* **benchmark:** GenAI inference metrics, aiperf ingest, prefix-cache shootout ([6ceb274](https://github.com/JLCode-tech/awsbnkctl/commit/6ceb274f53232bf9352ae2c0ed007fc6c38c9fd3))
+* **benchmark:** ingest --push sends --genai-out files as structured runs ([211b7ba](https://github.com/JLCode-tech/awsbnkctl/commit/211b7ba2ab027e7591b518565386f40fbae42afa))
+* **benchmark:** ingest --push sends --genai-out files as structured runs ([12cf47c](https://github.com/JLCode-tech/awsbnkctl/commit/12cf47c57ca2a7392b52e7850668440511f3c6f2))
+* **bnk:** migrate-2.4 translation engine and in-place upgrade pipeline ([f7eae09](https://github.com/JLCode-tech/awsbnkctl/commit/f7eae09e59345b753eb27bb84ced4dfb1c469ec9))
+* **bnk:** migrate-2.4 translation engine and in-place upgrade pipeline ([f868cc2](https://github.com/JLCode-tech/awsbnkctl/commit/f868cc212d3496058ae56d55980eaf1da46f01de))
+* **bnk:** TMM_K8S_ROUTES from the EKS service range, TMM log stream, upgrade RBAC and default route ([e33725c](https://github.com/JLCode-tech/awsbnkctl/commit/e33725c5f063f87e8b3d925219e3c2b62e20c043))
+* **cli:** bnk heal registry of nine detect/fix repairs shared with doctor ([dd77b89](https://github.com/JLCode-tech/awsbnkctl/commit/dd77b891a3cd393fccff5eafebd9046eebe4a806))
+* **cli:** bnk heal registry of nine detect/fix repairs shared with doctor ([0829130](https://github.com/JLCode-tech/awsbnkctl/commit/082913099550b0441dba608aaf35726489af6549))
+* **cli:** shared bnkscan readiness in status, doctor, up and upgrade; logs --governance; targets scan ([7dac3c2](https://github.com/JLCode-tech/awsbnkctl/commit/7dac3c262e029bde0e62805f0b4ab47b3db732d8))
+* **cli:** shared bnkscan readiness, logs --governance, targets scan (Phase 6) ([dd3d6f1](https://github.com/JLCode-tech/awsbnkctl/commit/dd3d6f1df5d079b66acb1f435b59dffe81ef1801))
+* **forge:** BNK 2.4 scan, MCP session persistence, MCP targets, governance telemetry ([4fcced2](https://github.com/JLCode-tech/awsbnkctl/commit/4fcced29566d5be7b8d38f4be66867db7c8208df))
+* **forge:** BNK 2.4 scan, MCP session persistence, MCP targets, governance telemetry ([344aca9](https://github.com/JLCode-tech/awsbnkctl/commit/344aca9bdb699db4cc93d9105fa9c11ddbeb9b46))
+* **k:** port-forward svc/&lt;name&gt; resolves a Ready pod and its targetPort ([197b8c1](https://github.com/JLCode-tech/awsbnkctl/commit/197b8c15e675148fe80c5ba43e90b54c777acb39))
+* **phases:** metrics-server EKS add-on so Forge reads BNK pod and node CPU/memory ([b44035d](https://github.com/JLCode-tech/awsbnkctl/commit/b44035d8c93f801a9ad9f4b8b07aee48b8ee6d53))
+* **phases:** metrics-server EKS add-on so Forge reads BNK pod and node CPU/memory ([39833a8](https://github.com/JLCode-tech/awsbnkctl/commit/39833a82cc1f2db04c764987aceb91d07ec2e682))
+* **upgrade:** re-bind the controller IRSA role after the rollout; doctor reports controller IRSA ([708b1de](https://github.com/JLCode-tech/awsbnkctl/commit/708b1de76ac4de2a1d37aae51e99921d0c67a90f))
+
+
+### Bug Fixes
+
+* **benchmark:** plain label selectors pass through the metrics role parser ([7bafa5f](https://github.com/JLCode-tech/awsbnkctl/commit/7bafa5fa47e25bd0a1017adeb859761aa866eece))
+* **forge:** fallback to REST unregister on partial link and general MCP failures ([a2e590a](https://github.com/JLCode-tech/awsbnkctl/commit/a2e590ad03fabef0efd5a1755161544d3e06cb0d))
+* **forge:** fallback to REST unregister on partial link and general MCP failures ([2e3c233](https://github.com/JLCode-tech/awsbnkctl/commit/2e3c233d45ae2ca25326ec97d3d833c3d2b540ff))
+* **forge:** treat status-less links as registered, single down exit, honest delete fallback ([923c55f](https://github.com/JLCode-tech/awsbnkctl/commit/923c55f2dfb6a6e7ebafacf73119b6b0761fb570))
+* **heal:** tmm-k8s-routes covers 2.3 when the TMM sidecar cannot reach fluentd ([633e1ef](https://github.com/JLCode-tech/awsbnkctl/commit/633e1ef238e624d1ff6542b1466bebbcc3f659e1))
+* **k8s:** keep the Multus kubeconfig token fresh, report the TMM DaemonSet, add bnk heal ([84d6251](https://github.com/JLCode-tech/awsbnkctl/commit/84d6251d4df3f91e61624a49ed942771203ee577))
+* Multus token watch, TMM readiness row, bnk heal, providerID node lookup, quota retry, svc port-forward ([e097372](https://github.com/JLCode-tech/awsbnkctl/commit/e097372a98a084030c576f71dc1a5abcc3367eb5))
+* **phases:** resolve the TMM node's EC2 instance from its providerID ([ebf8982](https://github.com/JLCode-tech/awsbnkctl/commit/ebf89821400562263827b159220ad7162edc0f10))
+* **phases:** retry the Infra apply while a fresh ResourceQuota has no usage ([6edb55e](https://github.com/JLCode-tech/awsbnkctl/commit/6edb55e29fbcf62ae297aa5b25d2e01262fd00ad))
+* **status:** --config works without an initialised workspace ([9ee8fb0](https://github.com/JLCode-tech/awsbnkctl/commit/9ee8fb0aae7f187e4cc54486a3ba9af78ddb0876))
+* **upgrade:** heal Multus tokens, recreate the 2.3 CNEController, always emit Infra egressDefaults ([d2e94cb](https://github.com/JLCode-tech/awsbnkctl/commit/d2e94cb799a6451e64ffe78f995822d54f9e7d25))
+
 ## [2.2.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.1.0...v2.2.0) (2026-09-14)
 
 
