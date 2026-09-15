@@ -347,13 +347,32 @@ func runBenchmarkIngest(cmd *cobra.Command, args []string) error {
 
 	if flagBenchIngestPush {
 		for i := range rows {
-			if rows[i].raw == nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "⚠ %s: --genai-out files carry no aiperf artifact, not pushed\n", rows[i].Label)
-				continue
-			}
 			label := flagBenchRunLabel
 			if label == "" {
 				label = rows[i].Label
+			}
+			if rows[i].raw == nil {
+				// A --genai-out file has no aiperf artifact (it stayed on the jumphost),
+				// so it goes through the structured endpoint the run command falls
+				// back to, carrying the percentiles and throughput it does have.
+				resp, err := pushBenchmarkResultFn(cmd.Context(), aiperfResultFromGenAI(rows[i].Metrics, flagBenchModel, flagBenchEndpoint), forge.BenchmarkPushOptions{
+					RestURL:   flagBenchForgeURL,
+					Creds:     effectiveForgeCreds(),
+					RunLabel:  label,
+					Proxy:     flagBenchProxy,
+					AgentName: flagBenchAgentName,
+					AiperfConfig: map[string]any{
+						"model":    flagBenchModel,
+						"endpoint": flagBenchEndpoint,
+						"source":   "genai-out",
+					},
+				})
+				if err != nil {
+					return fmt.Errorf("push %s: %w", rows[i].Label, err)
+				}
+				rows[i].RunID = resp.RunID
+				fmt.Fprintf(cmd.ErrOrStderr(), "✓ pushed %s (structured, from --genai-out): run_id=%d\n", rows[i].Label, resp.RunID)
+				continue
 			}
 			resp, err := pushRawAiperfResultFn(cmd.Context(), forge.RawAiperfPushOptions{
 				RestURL:   flagBenchForgeURL,
@@ -434,4 +453,18 @@ func optionalBaseURL(host string) string {
 		return ""
 	}
 	return llmBaseURL(host)
+}
+
+// aiperfResultFromGenAI builds the result a --genai-out file can still push:
+// the TTFT/ITL percentiles and token throughput it carries, with the GenAI
+// block attached. Request counts and the raw artifact are unknown.
+func aiperfResultFromGenAI(m *genai.Metrics, model, endpoint string) *jumphost.AiperfResult {
+	return &jumphost.AiperfResult{
+		Model:                 model,
+		Endpoint:              endpoint,
+		OutputTokenThroughput: m.OutputTokensPerSec,
+		TTFT:                  jumphost.DistributionStats{Unit: "ms", P50: m.TTFTP50Ms, P90: m.TTFTP90Ms, P95: m.TTFTP95Ms, P99: m.TTFTP99Ms},
+		ITL:                   jumphost.DistributionStats{Unit: "ms", P50: m.ITLP50Ms, P95: m.ITLP95Ms, P99: m.ITLP99Ms},
+		GenAI:                 m,
+	}
 }
