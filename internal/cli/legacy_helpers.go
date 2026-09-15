@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	corev1 "k8s.io/api/core/v1"
-
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 )
@@ -15,7 +13,7 @@ import (
 // These are legacy back-compat shims split out from the deleted IBM
 // lifecycle verbs. The file is trimmed to the helpers that still have
 // live callers in test.go / doctor_backend.go (workspaceEnv,
-// resolveBackendSpecWith, podReady). IBM Cloud API key injection was
+// resolveBackendSpecWith). IBM Cloud API key injection was
 // removed when AWS credentials moved to the SDK chain in internal/aws
 // and IRSA in-cluster; there is nothing left for these helpers to inject.
 
@@ -65,19 +63,4 @@ func resolveBackendSpecWith(cctx *config.Context, tool, flagOverride string) str
 // directly.
 var perToolDefaultBackend = map[string]string{
 	"iperf3": "k8s",
-}
-
-// podReady reports whether a pod's ContainerStatuses agree that it is
-// Ready. Lifted verbatim from the deleted ops.go so doctor_backend.go's
-// ops-pod check keeps compiling.
-func podReady(pod *corev1.Pod) bool {
-	if pod == nil {
-		return false
-	}
-	for _, c := range pod.Status.Conditions {
-		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
-			return true
-		}
-	}
-	return false
 }
