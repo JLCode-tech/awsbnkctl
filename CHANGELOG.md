@@ -4,6 +4,15 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [2.4.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.3.0...v2.4.0) (2026-09-15)
+
+
+### Features
+
+* **agentcore-demo:** continuous dual-leg observability and demo reliability ([#63](https://github.com/JLCode-tech/awsbnkctl/issues/63)) ([9a79cc2](https://github.com/JLCode-tech/awsbnkctl/commit/9a79cc2fde49fd052a69fa4fb843ffa837227a03))
+* **heal:** test-namespace repair; k8s backend runs Jobs without the ops pod ([e503ce0](https://github.com/JLCode-tech/awsbnkctl/commit/e503ce02696ae926e36d841c734dda8bc4f858c4))
+* **heal:** test-namespace repair; k8s backend runs Jobs without the ops pod ([22c63db](https://github.com/JLCode-tech/awsbnkctl/commit/22c63dbd35914748be5221b1169139c5d490d737))
+
 ## [2.3.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.2.0...v2.3.0) (2026-09-15)
 
 
