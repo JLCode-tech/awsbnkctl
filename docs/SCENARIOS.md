@@ -26,12 +26,12 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 ### `http-routing-e2e`
 - **Objective**: Validates standard Kubernetes Gateway API `Gateway` + `HTTPRoute` routing.
 - **Traffic Path**: Client (EC2 jumphost via EICE tunnel) $\to$ TMM VIP $\to$ `http-echo` backend pods.
-- **Assertions**: HTTP 200 responses, expected response body headers, and correct backend pod matching.
+- **Assertions**: 5/5 jumphost curls return HTTP 200 through the VIP.
 
 ### `http-traffic-split`
 - **Objective**: Validates weighted canary / split traffic distribution.
-- **Traffic Path**: Jumphost $\to$ TMM VIP $\to$ Backend Service A (80%) vs Backend Service B (20%).
-- **Assertions**: Statistical distribution of responses matches defined weights within tolerance.
+- **Traffic Path**: Jumphost $\to$ TMM VIP $\to$ backend-a (70%) vs backend-b (30%).
+- **Assertions**: Both `backend-a` and `backend-b` appear across 10 jumphost curls (no ratio check).
 
 ### `grpc-loadbalance`
 - **Objective**: Validates gRPC stream handling and balancing across microservices.
@@ -45,8 +45,8 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 
 ### `tcp-l4-loadbalance`
 - **Objective**: Validates raw L4 TCP stream proxying via `L4Route`.
-- **Traffic Path**: Jumphost TCP socket client $\to$ TMM L4 VIP:8080 $\to$ TCP echo servers.
-- **Assertions**: TCP connection establishment, payload mirroring, 70/30 weight distribution.
+- **Traffic Path**: Jumphost curl $\to$ L4Route on VIP:8080 $\to$ two nginx marker backends.
+- **Assertions**: Deployments Available, Gateway Programmed, L4Route Accepted, both weighted backends reached (no ratio check).
 
 ### `udp-l4-loadbalance`
 - **Objective**: Validates stateless UDP datagram routing and load distribution.
@@ -55,9 +55,9 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 - **Rating**: Amber. Green needs a UDP client on the jumphost (socat / nc) driving VIP:5353 and checking the echo.
 
 ### `proxy-protocol-l4`
-- **Objective**: Validates Proxy Protocol (v1 and v2) header processing.
+- **Objective**: Validates PROXY protocol v1 injection via an `F5BigCneIrule` + `NetPolicy` on the TCP listener.
 - **Traffic Path**: Client sending Proxy Protocol header $\to$ TMM VIP $\to$ Backend pod.
-- **Assertions**: Preservation of originating client IP address through TMM to backend logs.
+- **Assertions**: The backend echoes `$proxy_protocol_addr`; it must equal the jumphost BNK_EXT ENI IP.
 
 ---
 
@@ -74,9 +74,9 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 - **Assertions**: the new namespace's Deployment becomes Available, its Gateway is Programmed and its HTTPRoute Accepted, then the jumphost curls the VIP with `Host: cwatch.awsbnkctl.local` and every probe must return HTTP 200 — proving the single controller reconciles, and carries traffic for, a namespace it was not installed for.
 
 ### `cwc-admin-access`
-- **Objective**: Validates RBAC isolation and mTLS certificate verification within CWC.
-- **Traffic Path**: Tenant vs Admin RBAC boundary checks.
-- **Assertions**: Tenant service accounts cannot access or mutate unauthorized Gateways.
+- **Objective**: Validates that the CWC admin and licensing endpoints require both a client certificate and a Bearer token.
+- **Traffic Path**: In-cluster probe Deployment $\to$ CWC HTTPS endpoints.
+- **Assertions**: Authenticated request accepted; missing token rejected; bogus token rejected.
 
 ### `multi-vip`
 - **Objective**: Validates binding and processing traffic across multiple distinct VIPs on the same secondary ENI.
@@ -140,7 +140,7 @@ is real, and what else has to be true.
 | `grpc-loadbalance` | – | – | Amber: control plane only (Gateways Programmed, GRPCRoute + L4Route Accepted); no traffic probe | all four |
 | `multi-vip` | Yes | – | Pool `.115`–`.117` | all four |
 | `cluster-wide-watch` | Yes | – | Jumphost curl through the new namespace's Gateway | all four |
-| `cwc-admin-access` | – | – | Control plane only | all four |
+| `cwc-admin-access` | – | – | In-cluster probe | all four |
 | `ai-token-counting` | – | – | Amber: control plane only unless a vLLM-compatible backend is pointed at | all four; data path on `demo-ai` |
 | `ai-semantic-cache` | (probe) | – | Amber: control plane only unless a ModelCache backend is supplied | all four |
 | `ai-inference-e2e` | Yes | **Yes** | `HF_TOKEN` for the gated model; `--synthetic` runs a GPU-free simulator anywhere | `demo-ai` (real); others with `--synthetic` |
@@ -159,7 +159,7 @@ Every scenario and demo owns one fixed last octet in the external data-path
 subnet (`network.dataPath.external.cidr`, `10.0.10.0/24` in every example), so
 `scenarios run --all` never has two Gateways claiming the same
 address. `http-routing-e2e` alone uses the cluster default VIP (`<subnet>.100`,
-`intent.DefaultVIP`); the others replace the last octet. `--vip` moves the base
+`intent.DefaultVIPHostOffset`); the others replace the last octet. `--vip` moves the base
 address but keeps each scenario's octet. The three demo use-cases with a VIP
 (`diameter`, `http2`, `ingress-migration`) derive theirs the same way, so a
 cluster whose external subnet is not `10.0.10.0/24` still gets every VIP inside

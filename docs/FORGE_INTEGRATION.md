@@ -1,6 +1,6 @@
 # Forge Integration
 
-`awsbnkctl` can optionally register the clusters it provisions with **forge**, a GUI for operating BNK deployments. 
+`awsbnkctl` can optionally register the clusters it provisions with **forge**, a GUI for operating BNK deployments.
 
 This integration is a **write-only handoff**: `awsbnkctl` operates AWS infrastructure, reports the cluster connection details to forge, and then forge connects directly to the cluster.
 
@@ -34,7 +34,9 @@ forge:
   url: http://localhost:8000
   mcpUrl: http://localhost:8081/mcp/
   username: admin
+  # password: set AWSBNKCTL_FORGE_PASSWORD instead of writing it here
   credentialTemplateId: 1
+  projectType: cloud-aws            # default
   environment: dev                  # forge project environment (default "dev")
   projectName: awsbnkctl-my-cluster # default "awsbnkctl-<metadata.name>"
 ```
@@ -57,7 +59,8 @@ inside it. The project name resolves as `AWSBNKCTL_FORGE_PROJECT` env >
   purges the project **only when `forge.projectName` is unset or equals the default name**
   `awsbnkctl-<metadata.name>`. A non-default `forge.projectName` is assumed to
   be shared, so the project is left in place and only the cluster record is
-  removed. `awsbnkctl down --keep-forge-link` skips the unregister entirely and
+  removed. `AWSBNKCTL_FORGE_PROJECT` does not protect a shared project; set
+  `forge.projectName` for that. `awsbnkctl down --keep-forge-link` skips the unregister entirely and
   preserves `forge_link.json`.
 
 ---
@@ -82,6 +85,10 @@ Because AWS provisioning is time-consuming, a forge outage shouldn't break the w
 
 ---
 
+### Link lifecycle
+
+`forge status` shows the link; `forge unregister [--purge]` removes the cluster (and the project with `--purge`); `down` also deletes this cluster's benchmark targets and agent (phase 09b, `forge-benchmark-cleanup`); `forge cleanup -w <workspace> [--dry-run]` purges the shared `awsbnkctl-*` agents and configs.
+
 ## 5. Configuration Overrides
 
 It is unsafe to store passwords in `cluster.yaml`. You can override forge settings using environment variables:
@@ -90,7 +97,7 @@ It is unsafe to store passwords in `cluster.yaml`. You can override forge settin
 |---|---|---|---|
 | **REST URL** | `AWSBNKCTL_FORGE_URL` | `forge.url` | `http://localhost:8000` |
 | **MCP URL** | `AWSBNKCTL_FORGE_MCP_URL` (see note) | `forge.mcpUrl` | `http://localhost:8081/mcp/` |
-| **Username** | `AWSBNKCTL_FORGE_USERNAME` (`benchmark` subcommands only) | `forge.username` | `admin` |
+| **Username** | `AWSBNKCTL_FORGE_USERNAME` (everything except Phase 09) | `forge.username` | `admin` |
 | **Password** | `AWSBNKCTL_FORGE_PASSWORD` | `forge.password` | *built-in dev default* (`changeme`, with a warning) |
 | **Project** | `AWSBNKCTL_FORGE_PROJECT` | `forge.projectName` | `awsbnkctl-<metadata.name>` |
 | **Environment** | `AWSBNKCTL_FORGE_ENVIRONMENT` | `forge.environment` | `dev` |
@@ -102,8 +109,8 @@ Notes on the two exceptions to "env beats YAML":
   YAML key nor the `--forge-mcp-url` flag is set (`forge.NewClient`). So for the MCP
   endpoint the order is flag > YAML > env > default.
 - **Username**: Phase 09 resolves `forge.username` > `admin` and does not read
-  the environment. `AWSBNKCTL_FORGE_USERNAME` is read only by the `awsbnkctl
-  benchmark` family as the fallback for `--forge-user`.
+  the environment. `AWSBNKCTL_FORGE_USERNAME` is the fallback for `--forge-user`
+  in the `benchmark`, `forge scan` and `targets scan` families.
 
 > [!WARNING]
 > Always use `AWSBNKCTL_FORGE_PASSWORD` in real environments!
@@ -143,12 +150,12 @@ When Forge is running locally (e.g. `http://localhost:8000`), the cloud jumphost
 │                    AWS CLOUD VPC DATA PLANE              │
 │                                                          │
 │  [EC2 Jumphost]                                          │
-│   • Source IP: 10.10.10.140 (BNK External ENI)           │
+│   • Source IP: 10.0.10.200 (BNK External ENI)            │
 │   • Runs aiperf profile against VIP                      │
 │   • Injects Host: awsbnkctl-aiinference.local            │
 │                 │                                        │
 │                 ▼                                        │
-│  [F5 BNK Gateway VIP: 10.10.10.108:80]                   │
+│  [F5 BNK Gateway VIP: 10.0.10.100:80]                    │
 │   • HTTPRoute scn-aiinference-route                      │
 │                 │                                        │
 │                 ▼                                        │

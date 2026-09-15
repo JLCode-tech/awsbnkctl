@@ -12,7 +12,7 @@ The tool is built around four core commitments:
 
 | Concept | Approach |
 |---|---|
-| **AWS SDK Only** | Direct use of the AWS SDK for Go. No shelling out to the `aws` CLI. All AWS interactions live under `internal/aws/`. |
+| **SDKs Only** | AWS SDK for Go v2 (`internal/aws/`), client-go (`internal/k8s/`) and the Helm Go SDK (phase 14). No `aws`, `kubectl`, `helm` or Terraform on the host. |
 | **Phased Provisioning** | Imperative, sequential phases. No complex reconciler framework. Each phase is a readable, log-able Go function. |
 | **Declarative Intent** | A structured `cluster.yaml` is mapped directly to AWS calls without intermediate variable layers. |
 | **Tag-Driven State** | AWS resource tags are the ultimate source of truth. A local `state.env` cache simply accelerates re-runs. |
@@ -33,10 +33,10 @@ apiVersion: awsbnkctl/v1
 kind: Cluster
 
 metadata:
-  name: full-cluster          # Must be lowercase alphanumeric (2-40 chars)
+  name: full-cluster          # lowercase letters, digits, hyphens; starts with a letter, 2-40 chars
   region: ap-southeast-2
 
-pattern: host-device          # Selects the data-path variant
+pattern: dual-interface       # external-only | dual-interface | sriov-external
 
 network:
   vpcCidr: 10.0.0.0/16
@@ -56,9 +56,10 @@ cluster:
       instanceType: m6i.4xlarge
       desiredSize: 3
 
-bnk:                          # Supply-chain credentials
+bnk:                          # Supply-chain credentials and release
   farArchive: ./cne_pull_64.json
   jwt: ./license.jwt
+  manifestVersion: "2.4.0"    # default; a 2.3.x build can be pinned here
 ```
 
 **Key Points:**
@@ -76,9 +77,7 @@ example pins. 1.34 is only our EKS standard-support floor. Anything lower is
 rejected by `validate`, before any AWS call:
 
 ```
-cluster.kubernetesVersion "1.33" is below the mandated floor 1.34: everything
-below it is past the end of EKS standard support (1.31, 1.32 and 1.33 all
-reached end of standard support) and is not exercised in CI; set 1.34 or newer
+cluster.kubernetesVersion "1.33" is below the mandated floor 1.34: everything below it is past the end of EKS standard support (1.31, 1.32 and 1.33 all expired between 2025-11 and 2026-07), which forces extended-support pricing and is not exercised in CI; set 1.34 or newer (1.35 is the highest BNK 2.3 installs on)
 ```
 
 Two reasons for the floor. It tracks EKS *standard* support: as of 2026-08,
@@ -112,14 +111,20 @@ Provisioning is an ordered sequence of phases. Each phase checks authentication,
 
 The `up` command runs four conceptual stages:
 
-1. **Network & IAM:** VPC, subnets, IGW, NAT, Route Tables, and IAM roles.
-2. **EKS Control Plane:** Deploys EKS cluster and configures VPC CNI prefix delegation.
-3. **Nodes & Data Path:** Node group, kubeconfig, TMM labels, host-device secondary ENIs, optional test jumphost, and OIDC/IRSA.
-4. **BNK Install & Activation:** EBS CSI, cert-manager, FLO via Helm, OTEL certs, network mappings, data-plane plumbing, and final activation polling.
+1. **Network & IAM:** VPC, subnets, IGW, NAT, route tables, IAM roles and the data-plane security group.
+2. **EKS Control Plane:** EKS cluster, optional Forge registration, VPC CNI prefix delegation, the metrics-server add-on.
+3. **Nodes & Data Path:** Node group, kubeconfig, TMM node label, GPU and SageMaker opt-ins, secondary ENIs, optional jumphost and BIG-IP VE, interface discovery, demo staging, OIDC/IRSA.
+4. **BNK Install & Activation:** EBS CSI and hugepages, cert-manager and Multus, FLO via the Helm SDK, optional LB controller, OTEL certs, network mapping and NADs, the CNEInstance with license, GatewayClass and Infra, the cluster-side repairs (cwc, dSSM probe, TMM log stream, pod-manager), the activation poll, optional BIG-IP onboarding, postflight.
+
+The ordered list of all 41 phases is in [`PHASES.md`](PHASES.md).
+
+### Cluster-side repairs
+
+The fixes the phases apply to a running cluster (Multus token watch, metrics-server, TMM log stream, pod-manager, cwc, dSSM probe, controller EndpointSlice RBAC, controller IRSA, `TMM_K8S_ROUTES`, the `awsbnkctl-test` namespace) live in one registry, `internal/aws/phases/heal.go`. `awsbnkctl bnk heal` runs them on any 2.3 or 2.4 cluster and `awsbnkctl doctor --backend k8s` prints the detections. `bnk upgrade` and `bnk migrate-2.4` move a 2.3 cluster to 2.4 (section 7).
 
 ### `awsbnkctl down`
 
-The `down` command runs in reverse. It cleans up Kubernetes objects first, then AWS resources, gracefully handling items that are "already gone."
+`down` walks the stages in reverse but is not a strict mirror: demo `Cleanup` hooks run first, `otel-certs` and `lb-controller` are removed before FLO, and a down-only `forge-benchmark-cleanup` step runs before the Forge unregister. Resources that are already gone are skipped. Flags: `--yes`, `--keep-forge-link`, `--keep-irsa`. The exact order is in [`PHASES.md`](PHASES.md).
 
 ---
 
@@ -133,7 +138,7 @@ The `down` command runs in reverse. It cleans up Kubernetes objects first, then 
    - `awsbnkctl:managed` = `true`
 
 2. **Local ID Cache (`state.env`):**
-   A simple `KEY=VALUE` file stored in `.awsbnkctl/<cluster-name>/state.env`. This cache speeds up destruction (`down`) but the tool can fully recover and clean up a cluster just by reading AWS tags if the cache is lost.
+   A simple `KEY=VALUE` file stored in `.awsbnkctl/<cluster-name>/state.env`. AWS resources are re-discoverable from the `awsbnkctl:cluster` tag, so `down` reclaims the infrastructure without the cache. The Kubernetes-side steps need `KUBECONFIG_PATH` from state.env, and a few IAM objects are found by their deterministic name.
 
 ---
 
@@ -147,7 +152,7 @@ The `pattern:` field determines how TMM (Traffic Management Microkernel) interfa
 | `dual-interface` | External + Internal | `host-device` | Yes | 3 |
 | `sriov-external` | External only | `sriov / vfio-pci` | No | 2 (Experimental) |
 
-*Note: `host-device` is treated as a legacy alias for `dual-interface`.*
+*Note: `host-device` is treated as a legacy alias for `dual-interface`. BNK patterns also need `desiredSize` ≥3 and an instance type with ≥16 vCPU and ≥64 GiB; `preflight` checks this.*
 
 ---
 
@@ -155,12 +160,17 @@ The `pattern:` field determines how TMM (Traffic Management Microkernel) interfa
 
 | Component | Location |
 |---|---|
-| CLI Commands & Wiring | `internal/cli/` |
-| AWS SDK Phases | `internal/aws/phases/` |
-| Intent Validation | `internal/intent/` |
-| Kubernetes Apply logic | `internal/k8s/` |
-| State & Tagging | `internal/aws/state/`, `internal/aws/tags/` |
-| Runnable Examples | `examples/` |
+| CLI commands and wiring | `internal/cli/` |
+| Provisioning phases and the heal registry | `internal/aws/phases/` (`heal.go`) |
+| Intent (`cluster.yaml`) schema and validation | `internal/intent/` |
+| Kubernetes client, `k` verbs, rendered CRs, embedded manifests, 2.3→2.4 migration, readiness scan, MCP session persistence | `internal/k8s/` (`render/`, `manifests/`, `migrate/`, `bnkscan/`, the MCP session package) |
+| F5 release manifests (BOM), default version | `internal/manifest/` |
+| Forge client (MCP first, REST fallback), benchmarks, telemetry | `internal/forge/`, `internal/genai/` |
+| Execution backends: local, docker, k8s (one-shot Jobs in `awsbnkctl-test`), ssh | `internal/exec/`, `internal/remote/` |
+| Scenarios, demos, tests, doctor, topology | `internal/scenarios/`, `internal/demo/`, `internal/test/`, `internal/doctor/`, `internal/topology/` |
+| State and tagging | `internal/aws/state/`, `internal/aws/tags/` |
+| Exported BNK runtime helpers | `pkg/bnk/` |
+| Runnable examples | `examples/` |
 
 ## 7. BNK release policy
 

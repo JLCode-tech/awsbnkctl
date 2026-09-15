@@ -11,7 +11,7 @@ This project is tested on Linux and macOS hosts.
 **Required:**
 - **Go 1.26+** (Check `go.mod` for the exact source of truth)
 - **git**, **make**, **docker**
-- Standard dev utilities: `jq`, `unzip`, `gnupg`, `openssh-client`, `python3`, and `helm 3` (for chart operations)
+- Optional: `jq` for reading JSON output. Helm is the Go SDK inside the binary; no host `helm`.
 
 **Required for live runs that drive traffic:**
 - `aws` CLI and `ssh` — `internal/jumphost` shells out to
@@ -43,13 +43,14 @@ go build -o awsbnkctl ./cmd/awsbnkctl
 ## Testing
 
 ### Running Tests
-The unit suite runs entirely without external dependencies. Always run these locally before pushing your code — CI enforces all four, and `gofmt` plus `staticcheck` catch things `go build`, `go vet` and `go test` do not.
+The unit suite runs entirely without external dependencies. Always run these locally before pushing your code — CI enforces all of these, and `gofmt`, `staticcheck` and `gosec` catch things `go build`, `go vet` and `go test` do not.
 
 ```bash
 gofmt -l .        # Must be empty
 go vet ./...      # Must be clean
 go tool staticcheck ./...  # Must be clean (tool directive in go.mod; no separate install)
 go test ./...     # Must pass
+gosec ./...      # Must report 0 findings
 ```
 
 > [!TIP]
@@ -90,8 +91,12 @@ The jobs in `.github/workflows/ci.yml` run on every PR and on pushes to `main` /
 | **`testcontainers` (sshd)** | `integration` | `internal/exec` SSH backend against a containerised sshd (Linux only) |
 | **Docker backend** | `docker-backend` | `internal/exec` docker backend against a local `busybox` container |
 | **AWS-SDK mocked** | `aws-mocked` | `internal/aws` helpers against mocked aws-sdk-go-v2 clients — no live AWS |
-| **K8s backend (`kind`)** | `k8s-backend` | `internal/exec` k8s backend and `internal/cli` ops lifecycle against an ephemeral `helm/kind-action` cluster; tests self-skip if no kubeconfig is reachable |
+| **K8s backend (`kind`)** | `k8s-backend` | `internal/exec` k8s backend (one-shot Jobs in `awsbnkctl-test`) against an ephemeral `helm/kind-action` cluster; tests self-skip if no kubeconfig is reachable |
 | **Dry-run smoke** | `test-dryrun` | Builds the binary and runs `awsbnkctl test {connectivity,dns,throughput} --dry-run` against a materialised fake workspace |
+| **Plan smoke** | `up-dryrun` | `awsbnkctl validate` plus `up` / `down --dry-run` on the examples |
+| **Portability** | `windows-build`, `goreleaser-check` | Windows cross-build and goreleaser config sanity |
+| **Docs** | `docs-spellcheck` | cspell over the Markdown (`cspell.json` holds the word list) |
+| **Security** | `security-audit` | gosec, govulncheck, gitleaks |
 | **Live e2e** | `e2e-full.yml` | Real AWS account + real EKS cluster — on demand only |
 
 *Note: Integration tests are gated by the `integration` build tag so they don't run by default. To run them:*
@@ -129,6 +134,14 @@ If you're extending the provisioning graph:
 3. Wire it into `internal/cli/lifecycle.go:runPhasedUp` and the inverse in `runPhasedDown` at the correct ordering.
 4. Make sure the phase is **idempotent** on healthy re-runs.
 5. Update `docs/ARCHITECTURE.md` if the phase changes the model.
+
+## Adding a Heal Repair
+
+A cluster-side fix that must also work on an existing cluster is a `Repair` in `internal/aws/phases/heal.go`, not a phase:
+1. Add a `Detect` (healthy, detail, err) and a `Fix` to the `Repairs` slice; set `NeedsIntent` when the fix needs AWS clients or `state.env`.
+2. Call the same fix from the `up` phase that applies it on a fresh cluster.
+3. Add the repair to the `bnk heal --help` list in `internal/cli/bnk_heal.go` and to the `bnk heal` row in `docs/COMMANDS.md`.
+4. `doctor --backend k8s` picks up the detection automatically; add a `heal_test.go` case.
 
 ---
 

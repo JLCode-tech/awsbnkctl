@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) and AI coding agents
 
 `awsbnkctl` is a single-binary Go CLI that drives a full F5 BIG-IP Next for Kubernetes (BNK) 2.4 deployment onto an AWS EKS cluster with secondary Elastic Network Interfaces (ENIs) dedicated to the Traffic Management Microkernel (TMM). The default CNE release manifest is `2.4.0` (BNK 2.4.0; `internal/manifest/manifest.go`); operators pin an older 2.3.x build per cluster via `bnk.manifestVersion` in `cluster.yaml`, and `manifest.KnownReleases` pairs every supported build with the FLO chart F5 shipped with it.
 
-It executes a deterministic 39-phase provisioning lifecycle (two phases, `sagemaker-lmi` and `demo-stage`, are conditional) implemented directly in Go using the AWS SDK for Go v2 and client-go — **no Terraform, no host `kubectl`, no host `helm`**. cert-manager `v1.21.1` is applied from embedded upstream YAML via client-go; the EKS floor is Kubernetes `1.34` (`intent.MinKubernetesVersion`), the default is `1.35` (`intent.DefaultKubernetesVersion`, the minor F5 lists for BNK 2.3.x and 2.4.0), 1.36+ warns.
+It executes a deterministic 41-phase provisioning lifecycle (two phases, `sagemaker-lmi` and `demo-stage`, are conditional) implemented directly in Go using the AWS SDK for Go v2 and client-go — **no Terraform, no host `kubectl`, no host `helm`**. cert-manager `v1.21.1` is applied from embedded upstream YAML via client-go; the EKS floor is Kubernetes `1.34` (`intent.MinKubernetesVersion`), the default is `1.35` (`intent.DefaultKubernetesVersion`, the minor F5 lists for BNK 2.3.x and 2.4.0), 1.36+ warns.
 
 ## Key Commands & Development Workflows
 
@@ -38,14 +38,14 @@ AWSBNKCTL_SKIP_AUTH=1 ./bin/awsbnkctl down -f examples/full-cluster/cluster.yaml
 cmd/awsbnkctl/           # CLI entrypoint (main.go)
 internal/
 ├── aws/                 # aws-sdk-go-v2 wrappers: VPC, EKS, EC2, IAM, S3, STS, Service Quotas; tags/ and state/ subpackages
-│   └── phases/          # Exactly 39 ordered provisioning and teardown phases (phaseNN_*.go), orchestrated by internal/cli/lifecycle.go
+│   └── phases/          # Exactly 41 ordered provisioning and teardown phases (phaseNN_*.go), orchestrated by internal/cli/lifecycle.go; heal.go is the 10-entry repair registry shared by up, bnk upgrade, bnk heal and doctor --backend k8s
 ├── bnkconst/            # BNK-wide constants shared across packages
 ├── cli/                 # Cobra command tree — every command lives here; Version/Commit/BuildDate vars in root.go are stamped via -ldflags
 ├── config/              # Workspace paths ($AWSBNKCTL_HOME) and global config — NOT the cluster.yaml schema
 ├── demo/                # Demo use-case registry + narration (diameter, http2, bigip-cis, ingress-migration)
 ├── doctor/              # Prerequisite checks behind `awsbnkctl doctor`
 ├── embedded/            # Agentic-mode scaffolding (AGENTS.md, personas/, journal/) shipped in the binary
-├── exec/                # Execution backends: local, docker, k8s, ssh:<target>
+├── exec/                # Execution backends: local, docker, k8s (one-shot Jobs in namespace awsbnkctl-test), ssh:<target>
 ├── forge/               # BNK Forge client (MCP preferred, REST fallback) — register/unregister/benchmark, typed scan/health, MCP target registration, governance telemetry schema
 ├── genai/               # GenAI benchmark metrics: aiperf artifact percentiles, Prometheus scrape parsing, prefix-cache hit rate, prefill/decode utilization (no internal deps)
 ├── intent/              # cluster.yaml schema (v1), strict loader, validation, pinned defaults (K8s floor, FLO, cert-manager)

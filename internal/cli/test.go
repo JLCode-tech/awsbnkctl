@@ -98,13 +98,12 @@ Use --backend local|k8s|ssh:<target> to pick a single vantage point;
 
 var testThroughputCmd = &cobra.Command{
 	Use:   "throughput",
-	Short: "iperf3 throughput; deploys server pod automatically (v1.x)",
-	Long: `Deploys an iperf3 server in the test namespace and runs the client
-either from the awsbnkctl host (--mode north-south, default) or from a second
-in-cluster pod (--mode east-west).
-
-Not yet implemented — landing in v1.x once the internal/k8s client-go
-fixture lifecycle is wired.`,
+	Short: "iperf3 throughput; deploys the server pod automatically",
+	Long: `Deploys an iperf3 server in namespace awsbnkctl-test and runs the client
+as a one-shot Job in the same namespace (--backend k8s, the default) or from
+the awsbnkctl host (--backend local). --mode north-south targets the
+LoadBalancer endpoint, --mode east-west the ClusterIP. The fixture is removed
+afterwards unless --keep is set.`,
 	RunE: runTestThroughputCmd,
 }
 
@@ -316,13 +315,13 @@ func runDNSSingleVantage(ctx context.Context, cctx *config.Context, target strin
 	// in the text rendering at printDNSVantageText); the exit code mirrors
 	// that classification. Pinned by e2e step LD3 (NXDOMAIN must exit 1).
 	if res.Err != "" || res.Rcode != "NOERROR" {
-		os.Exit(1)
+		return exitCodeError(1)
 	}
 	return nil
 }
 
 // runDNSGSLBCompare fans the probe out across the configured
-// vantages (local always, plus k8s if a kubeconfig + ops-pod-equivalent
+// vantages (local always, plus k8s if a kubeconfig
 // is reachable, plus each ssh target the workspace defines).
 //
 // Divergence is *expected* in a healthy GSLB; --require-divergence flips
@@ -387,11 +386,11 @@ func runDNSGSLBCompare(ctx context.Context, cctx *config.Context, target string,
 	// vantage errored.
 	if flagDNSRequireDivergence && !cmp.GSLBDivergence {
 		fmt.Fprintln(os.Stderr, "✗ --require-divergence: no divergence across vantages (GSLB may not be taking effect)")
-		os.Exit(1)
+		return exitCodeError(1)
 	}
 	for _, v := range cmp.Vantages {
 		if v.Err != "" {
-			os.Exit(1)
+			return exitCodeError(1)
 		}
 	}
 	return nil
@@ -402,8 +401,8 @@ func runDNSGSLBCompare(ctx context.Context, cctx *config.Context, target string,
 //   - "local" runs in-process via Probe.Run.
 //   - "k8s" runs in-cluster as a one-shot Job that re-execs the
 //     `awsbnkctl` binary with the same probe args + `-o json`. The
-//     binary lives inside the ops pod's image (the bundled tools
-//     image ships `/usr/local/bin/awsbnkctl`). The Job's stdout is
+//     binary lives inside the bundled tools image
+//     (`/usr/local/bin/awsbnkctl`). The Job's stdout is
 //     parsed back into a DNSProbeResult.
 //   - "ssh:<target>" runs the binary on the named SSH target.
 //
@@ -432,7 +431,7 @@ func dispatchDNSProbe(ctx context.Context, cctx *config.Context, spec, target st
 
 // runDNSProbeK8s executes the DNS probe inside the cluster as a
 // one-shot Job that self-execs `awsbnkctl test dns ...` against the
-// same flags. The Job's image is the bundled ops pod image (which
+// same flags. The Job.s image is the bundled tools image (which
 // carries the `awsbnkctl` binary).
 //
 // The binary itself runs in-cluster; no separate image needed.
@@ -474,7 +473,11 @@ func runDNSProbeK8s(ctx context.Context, cctx *config.Context, target string, qt
 	res, err := decodeDNSProbeJSON(stdout.String())
 	if err != nil {
 		if rc != 0 {
-			return nil, fmt.Errorf("k8s dns-probe job exited %d: %s", rc, strings.TrimSpace(stdout.String()))
+			detail := strings.TrimSpace(stdout.String())
+			if runErr != nil {
+				detail = strings.TrimSpace(runErr.Error() + " " + detail)
+			}
+			return nil, fmt.Errorf("k8s dns-probe job exited %d: %s", rc, detail)
 		}
 		return nil, fmt.Errorf("parsing k8s dns-probe output: %w", err)
 	}
@@ -699,6 +702,9 @@ func runIperf3ClientK8s(ctx context.Context, kc *k8s.Client, image string, opts 
 	if rc != 0 {
 		probe.Status = test.StatusFail
 		probe.Detail = fmt.Sprintf("iperf3 client Job exited %d", rc)
+		if runErr != nil {
+			probe.Detail += ": " + runErr.Error()
+		}
 	} else {
 		probe.Status = test.StatusPass
 		// Parse the JSON output from the Job's stdout (collected via
@@ -839,7 +845,7 @@ func outputSuite(s test.SuiteRun) error {
 		test.PrintSuiteText(os.Stderr, s)
 	}
 	if s.Overall == test.StatusFail {
-		os.Exit(1)
+		return exitCodeError(1)
 	}
 	return nil
 }
@@ -950,7 +956,7 @@ func outputAll(all test.AllRun) error {
 		fmt.Fprintf(os.Stderr, "\n%s overall (%d/%d suites passed)\n", all.Overall, passed, len(all.Suites))
 	}
 	if all.Overall == test.StatusFail {
-		os.Exit(1)
+		return exitCodeError(1)
 	}
 	return nil
 }

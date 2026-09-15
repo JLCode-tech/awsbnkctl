@@ -19,9 +19,9 @@ package cli
 //     surface) and break muscle memory. Users get the k8s apply via
 //     `awsbnkctl k apply` explicitly.
 //
-// `exec` is intentionally NOT aliased: host-side `awsbnkctl exec
-// <cmd>` already exists, and shadowing it would break user muscle
-// memory. Cluster-side exec is `awsbnkctl k exec <pod>` only.
+// `exec` is intentionally NOT aliased: cluster-side exec is
+// `awsbnkctl k exec <pod>` only, so a bare `exec` cannot be mistaken for
+// a host-side command.
 //
 // Each top-level alias instantiates a fresh cobra.Command (rather
 // than sharing the same instance with k_*.go) because cobra disallows

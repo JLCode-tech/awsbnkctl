@@ -139,11 +139,16 @@ spec:
         if { [HTTP::path] equals "/" } { set gov_mcp 1 }
         if { $gov_mcp == 0 } { return }
 
-        if { [table lookup -notouch -subtable "mcp_rl" $gov_key] eq "" } {
-            table set -subtable "mcp_rl" $gov_key 1 60 60
+        set cur_window [expr {[clock seconds] / 60}]
+        set win_key "${gov_key}:${cur_window}"
+        set gov_count 1
+        set cur [table lookup -subtable "mcp_rl" $win_key]
+        if { $cur eq "" } {
+            table set -subtable "mcp_rl" $win_key 1 120 120
             set gov_count 1
         } else {
-            set gov_count [table incr -notouch -subtable "mcp_rl" $gov_key]
+            set gov_count [expr {$cur + 1}]
+            table set -subtable "mcp_rl" $win_key $gov_count 120 120
         }
 
         if { $gov_count > 10 } {
@@ -170,7 +175,13 @@ spec:
             append gov_req {[clipped]}
         }
         set gov_method [findstr [HTTP::payload] "\"method\":\"" 10 "\""]
+        if { $gov_method eq "" } {
+            set gov_method [findstr [HTTP::payload] "\"method\": \"" 11 "\""]
+        }
         set gov_tool [findstr [HTTP::payload] "\"name\":\"" 8 "\""]
+        if { $gov_tool eq "" } {
+            set gov_tool [findstr [HTTP::payload] "\"name\": \"" 9 "\""]
+        }
         if { $gov_method ne "" } { set gov_userq "$gov_method $gov_tool" }
 
         if { $gov_method eq "tools/call" && [lsearch -exact $static::mcp_privileged_tools $gov_tool] != -1 } {

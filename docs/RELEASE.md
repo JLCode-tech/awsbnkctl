@@ -1,61 +1,45 @@
-# Release Guide for awsbnkctl
+# Release Guide
 
-This document outlines the release process, versioning conventions, build artifacts, container runner image builds, and catalog synchronization for `awsbnkctl`.
+## Versioning
 
----
+SemVer. Major (`vX.0.0`) for breaking CLI or `cluster.yaml` changes; minor (`vX.Y.0`) for new phases, scenarios, or supported BNK and Kubernetes versions; patch (`vX.Y.Z`) for fixes, security and dependency updates.
 
-## 1. Versioning Model
+## Branches and commits
 
-`awsbnkctl` adheres to [Semantic Versioning (SemVer 2.0.0)](https://semver.org/):
-- **Major (`vX.0.0`)**: Breaking CLI flag changes, schema breaks in `cluster.yaml`, or major architectural migrations.
-- **Minor (`v1.X.0`)**: New provisioning phases, new scenarios, newly supported BNK or Kubernetes minor versions.
-- **Patch (`v1.0.X`)**: Bug fixes, security remediation, dependency updates, and documentation enhancements.
+PRs target `staging`; `staging` is promoted to `main` by a PR. Feature PRs are squash-merged with a conventional title (`feat:`, `fix:`, `chore:`, `docs:`, `test:`): release-please reads the commit subjects on `main`, so a plain `Merge pull request #N` subject is invisible to it. A major bump needs `feat!:` or a `Release-As:` footer.
 
----
+## Pipeline (`.github/workflows/release.yml`)
 
-## 2. Automated Release Pipeline
+1. release-please keeps a release PR open against `main` with the version bump and `CHANGELOG.md`.
+2. Merging it creates the `vX.Y.Z` tag and the GitHub release.
+3. goreleaser builds the assets: Linux and macOS `amd64`/`arm64` as `.tar.gz`, Windows `amd64`/`arm64` as `.zip`, plus `checksums.txt` (seven assets). It runs with `--parallelism 2` and a 45-minute budget. No signing, no Homebrew tap.
 
-The repository uses Google's `release-please` GitHub Action in combination with `goreleaser` (`.github/workflows/release.yml`):
+Rebuild the assets for an existing tag:
 
-1. **Conventional Commits**: Every PR merged to `main` must follow conventional commit prefixes (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
-2. **Release PR**: `release-please` automatically maintains an open Release PR aggregating merged changes and bumping `CHANGELOG.md`.
-3. **Tag & Build**: Merging the Release PR automatically cuts the `vX.Y.Z` git tag and triggers GoReleaser.
-4. **Binary Artifacts**: GoReleaser builds statically linked binaries for:
-   - Linux (`amd64`, `arm64`) — `.tar.gz`
-   - macOS (`arm64` Apple Silicon, `amd64` Intel) — `.tar.gz`
-   - Windows (`amd64`, `arm64`) — `.zip`
-   - `checksums.txt` containing SHA-256 digests.
-
----
-
-## 3. Container Runner Images for BNK Forge
-
-`awsbnkctl` can be executed as a containerized runner module within BNK Forge without requiring host binary installations:
-
-```bash
-# Build the multi-arch runner image
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  --build-arg AWSBNKCTL_VERSION=1.1.0 \
-  -t ghcr.io/jlcode-tech/awsbnkctl-tools-runner:1.1.0 \
-  -f runner.Dockerfile --push .
+```
+gh workflow run release.yml -f tag=vX.Y.Z
 ```
 
----
+## Before the tag
 
-## 4. bnkctl-index Catalog Registration
+```
+make release              # CHANGELOG stamp, staticcheck, integration-tag build, goreleaser check, snapshot
+make goreleaser-check     # config only
+make goreleaser-snapshot  # local unpublished build
+```
 
-The runner image and pack metadata are registered in `mwiget/bnkctl-index` under `tools/awsbnkctl/`:
-1. Update `tools/awsbnkctl/bnkforge.pack.json` with the new version.
-2. Update `tools/awsbnkctl/bnkforge.artifact.json` with the image digest (`sha256:...`).
-3. Run `python3 <bnk-forge>/scripts/validate_catalog_content.py <bnkctl-index>` before publishing.
+## Other workflows
 
----
+`ci.yml` (vet, fmt, staticcheck, tests, integration tiers, dry-run smoke, security audit), `spellcheck.yml` (cspell over Markdown), `e2e-full.yml` (manual live run), `tools-images.yml` (below).
 
-## 5. In-Place Self Upgrades
+## Tools images
 
-Users can update their installed binary directly via:
-```bash
+`tools-images.yml` publishes `ghcr.io/jlcode-tech/awsbnkctl-tools-aws` and `ghcr.io/jlcode-tech/awsbnkctl-tools-iperf3` (multi-arch): `:<tag>` and `:latest` on a tag push, `:dev` on a push to `main`. The docker execution backend pulls them (`internal/exec/docker.go`). `runner.Dockerfile` builds a container with a released binary; no workflow publishes it.
+
+## Self upgrade
+
+```
 awsbnkctl self update
 ```
-The command fetches the latest GitHub release metadata, matches the host's operating system and architecture, verifies the SHA-256 checksum against `checksums.txt`, and safely replaces the executing binary.
+
+Fetches the latest release, matches the host OS and architecture, verifies the SHA-256 against `checksums.txt`, and replaces the running binary in place.

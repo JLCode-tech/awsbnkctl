@@ -60,7 +60,7 @@ upgrade verb).`,
 var flagDoctorTarget string
 
 // flagDoctorBackend — when set, doctor runs per-backend availability
-// checks (k8s ops pod + RBAC, ssh:<target> reachability + bootstrap
+// checks (k8s: BNK readiness and the bnk heal detections; ssh:<target>: reachability and bootstrap
 // feasibility). Empty preserves the default doctor behaviour.
 var flagDoctorBackend string
 

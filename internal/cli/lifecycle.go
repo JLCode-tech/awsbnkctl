@@ -65,7 +65,7 @@ var (
 	flagKeepIRSA bool
 
 	// flagSkipActivationPoll is bound ONLY to upCmd. When true, Phase25 returns
-	// immediately after logging intent, skipping the 20-min CNEInstance+License
+	// immediately after logging intent, skipping the 9-min CNEInstance+License
 	// poll. Designed for reviewers who need to re-run up without re-burning a
 	// real F5 license activation each round. Default false (always poll).
 	flagSkipActivationPoll bool
@@ -116,7 +116,7 @@ func init() {
 	upCmd.Flags().BoolVar(&flagUpDryRun, "dry-run", false, "print the phased plan and exit 0 with no AWS mutations")
 	upCmd.Flags().BoolVar(&flagRegisterWithForge, "register-with-forge", false, "after a successful apply, register the EKS cluster with bnk-forge over MCP (no-op in --dry-run)")
 	upCmd.Flags().StringVarP(&flagConfig, "config", "f", "", "path to cluster.yaml (required)")
-	upCmd.Flags().BoolVar(&flagSkipActivationPoll, "skip-activation-poll", false, "skip the 20-min CNEInstance+License activation poll (for reviewer re-runs that must not re-burn the F5 license)")
+	upCmd.Flags().BoolVar(&flagSkipActivationPoll, "skip-activation-poll", false, "skip the 9-min CNEInstance+License activation poll (for reviewer re-runs that must not re-burn the F5 license)")
 	upCmd.Flags().BoolVar(&flagDemo, "demo", false, "provision the same cluster, marked as a demo (writes DEMO_MODE, requires testing.jumphost.enabled)")
 
 	downCmd.Flags().BoolVar(&flagAuto, "auto", false, "skip the destroy confirmation")
@@ -638,7 +638,7 @@ func runPhasedUp(ctx context.Context, configPath string, dryRun bool, skipActiva
 	}); err != nil {
 		return err
 	}
-	// Phase 25: Activation poll — CNEInstance + License status (up to 20 min).
+	// Phase 25: Activation poll — CNEInstance + License status (up to 9 min).
 	// skipActivationPoll is set by --skip-activation-poll for reviewer re-runs.
 	if err := stage(4, "activation-poll", func() error {
 		return phases.Phase25ActivationPoll(ctx, cl, st, clients, dryRun, skipActivationPoll)

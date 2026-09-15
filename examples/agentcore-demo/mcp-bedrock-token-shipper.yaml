@@ -59,12 +59,13 @@ data:
     """
     import json
     import os
+    import threading
     import time
     import urllib.error
     import urllib.request
+    from http.server import HTTPServer, BaseHTTPRequestHandler
 
-    import boto3
-
+    PORT = int(os.environ.get("PORT", "9090"))
     LOG_GROUP = os.environ.get("LOG_GROUP", "/aws/bedrock/modelinvocations")
     LOKI_URL = os.environ.get(
         "LOKI_URL", "http://loki:3100/loki/api/v1/push"
@@ -87,7 +88,56 @@ data:
     # to 0) if prompt content must not leave the AWS account.
     BODY_LIMIT = int(os.environ.get("BODY_LIMIT", "4000"))
 
-    logs = boto3.client("logs", region_name=REGION)
+    class MetricsHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            data = self.rfile.read(length)
+            try:
+                record = json.loads(data.decode("utf-8"))
+                prompt_tk = int(record.get("prompt_tk") or 0)
+                comp_tk = int(record.get("comp_tk") or 0)
+                cost = (prompt_tk / 1000.0 * PRICE_IN_PER_1K) + (comp_tk / 1000.0 * PRICE_OUT_PER_1K)
+                record["prompt_tk"] = prompt_tk
+                record["comp_tk"] = comp_tk
+                record["cost"] = round(cost, 6)
+                record["total_tk"] = prompt_tk + comp_tk
+                # Records posted here are not Bedrock invocation logs. They are
+                # labelled so a reader of the Loki stream can tell them apart.
+                record["source"] = record.get("source") or "synthetic"
+                if "timestamp" not in record:
+                    record["timestamp"] = time.time()
+                ts_ns = str(int(float(record["timestamp"]) * 1e9))
+                model = record.get("model", "claude-3-5-sonnet")
+                status = str(record.get("status", "200"))
+                stream = {
+                    "stream": {
+                        "job": "llm-gateway",
+                        "model": model,
+                        "status": status,
+                        "source": record["source"],
+                    },
+                    "values": [[ts_ns, json.dumps(record)]],
+                }
+                push([stream])
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok"}')
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(str(e).encode("utf-8"))
+
+        def do_GET(self):
+            if self.path == "/healthz":
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ok")
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
 
 
     def first_user_text(body):
@@ -172,57 +222,87 @@ data:
         return False
 
 
-    def main():
-        # Start slightly in the past so a restart does not lose the last batch.
-        # requestId dedup keeps the overlap from double-counting.
-        since_ms = int((time.time() - LOOKBACK_S) * 1000)
-        seen = set()
-        print(
-            f"[shipper] group={LOG_GROUP} loki={LOKI_URL} interval={INTERVAL}s",
-            flush=True,
-        )
-        while True:
+    def cloudwatch_client():
+        # boto3 is installed in the background at container start (see the
+        # Deployment args); wait for it instead of giving up on the first
+        # ImportError. Twenty attempts, 15 s apart.
+        for attempt in range(1, 21):
             try:
-                streams, newest, count = [], since_ms, 0
-                paginator = logs.get_paginator("filter_log_events")
-                for page in paginator.paginate(
-                    logGroupName=LOG_GROUP, startTime=since_ms
-                ):
-                    for event in page.get("events", []):
-                        raw = event.get("message", "").strip()
-                        if not raw.startswith("{"):
-                            continue
-                        try:
-                            msg = json.loads(raw)
-                        except ValueError:
-                            continue
-                        rid = msg.get("requestId")
-                        if rid and rid in seen:
-                            continue
-                        if rid:
-                            seen.add(rid)
-                        rec = to_record(msg)
-                        ts_ns = str(int(event["timestamp"]) * 1_000_000)
-                        streams.append(
-                            {
-                                "stream": {
-                                    "job": "llm-gateway",
-                                    "model": rec["model"],
-                                    "status": rec["status"],
-                                },
-                                "values": [[ts_ns, json.dumps(rec)]],
-                            }
-                        )
-                        newest = max(newest, int(event["timestamp"]))
-                        count += 1
-                if streams and push(streams):
-                    print(f"[shipper] pushed {count} record(s)", flush=True)
-                    since_ms = newest + 1
-                if len(seen) > 20000:
-                    seen.clear()
-            except Exception as exc:  # noqa: BLE001 - keep the loop alive
-                print(f"[shipper] poll error: {exc}", flush=True)
-            time.sleep(INTERVAL)
+                import boto3
+                return boto3.client("logs", region_name=REGION)
+            except Exception as exc:  # noqa: BLE001 - not installed yet, or no credentials
+                print(f"[shipper-cw] waiting for boto3 ({attempt}/20): {exc}", flush=True)
+                time.sleep(15)
+        return None
+
+
+    def poll_cloudwatch_loop():
+        logs = cloudwatch_client()
+        if logs is None:
+            print(f"[shipper-cw] boto3 unavailable; CloudWatch leg disabled, HTTP receiver active on :{PORT}", flush=True)
+            return
+        try:
+            since_ms = int((time.time() - LOOKBACK_S) * 1000)
+            seen = set()
+            print(
+                f"[shipper-cw] group={LOG_GROUP} loki={LOKI_URL} interval={INTERVAL}s",
+                flush=True,
+            )
+            while True:
+                try:
+                    streams, newest, count = [], since_ms, 0
+                    paginator = logs.get_paginator("filter_log_events")
+                    for page in paginator.paginate(
+                        logGroupName=LOG_GROUP, startTime=since_ms
+                    ):
+                        for event in page.get("events", []):
+                            raw = event.get("message", "").strip()
+                            if not raw.startswith("{"):
+                                continue
+                            try:
+                                msg = json.loads(raw)
+                            except ValueError:
+                                continue
+                            rid = msg.get("requestId")
+                            if rid and rid in seen:
+                                continue
+                            if rid:
+                                seen.add(rid)
+                            rec = to_record(msg)
+                            rec["source"] = "bedrock-logs"
+                            ts_ns = str(int(event["timestamp"]) * 1_000_000)
+                            streams.append(
+                                {
+                                    "stream": {
+                                        "job": "llm-gateway",
+                                        "model": rec["model"],
+                                        "status": rec["status"],
+                                        "source": "bedrock-logs",
+                                    },
+                                    "values": [[ts_ns, json.dumps(rec)]],
+                                }
+                            )
+                            newest = max(newest, int(event["timestamp"]))
+                            count += 1
+                    if streams and push(streams):
+                        print(f"[shipper-cw] pushed {count} record(s)", flush=True)
+                        since_ms = newest + 1
+                    if len(seen) > 20000:
+                        seen.clear()
+                except Exception as exc:  # noqa: BLE001 - keep the loop alive
+                    print(f"[shipper-cw] poll error: {exc}", flush=True)
+                    time.sleep(30)
+                time.sleep(INTERVAL)
+        except Exception as exc:  # noqa: BLE001 - never take the HTTP receiver down with the poller
+            print(f"[shipper-cw] stopped: {exc}", flush=True)
+
+
+    def main():
+        print(f"[shipper] starting HTTP receiver on port {PORT}, loki={LOKI_URL}", flush=True)
+        cw_thread = threading.Thread(target=poll_cloudwatch_loop, daemon=True)
+        cw_thread.start()
+        server = HTTPServer(("0.0.0.0", PORT), MetricsHandler)
+        server.serve_forever()
 
 
     if __name__ == "__main__":
@@ -253,10 +333,14 @@ spec:
         - /bin/sh
         - -c
         args:
-        - pip install boto3 -q && python /app/shipper.py
+        # boto3 installs in the background so the HTTP receiver is up at once;
+        # the CloudWatch poller waits for the import (cloudwatch_client).
+        - (pip install boto3 -q 2>&1 | tail -1 &) ; exec python3 /app/shipper.py
         env:
         - name: PYTHONUNBUFFERED
           value: "1"
+        - name: PORT
+          value: "9090"
         - name: AWS_REGION
           # rebuild.sh substitutes metadata.region from cluster.yaml here; edit
           # by hand if you apply this file directly outside ap-southeast-2.
@@ -267,6 +351,9 @@ spec:
           value: http://loki:3100/loki/api/v1/push
         - name: INTERVAL
           value: "20"
+        ports:
+        - containerPort: 9090
+          name: http
         volumeMounts:
         - name: code
           mountPath: /app
@@ -281,3 +368,17 @@ spec:
       - name: code
         configMap:
           name: bedrock-token-shipper-code
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bedrock-token-shipper
+  namespace: llm-egress
+spec:
+  selector:
+    app.kubernetes.io/name: bedrock-token-shipper
+  ports:
+  - name: http
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
