@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -181,5 +184,56 @@ func TestReadiness_PersistenceProfileNamespaceHint(t *testing.T) {
 	}
 	if !hit {
 		t.Errorf("problems lack the namespace hint: %v", rd.Problems)
+	}
+}
+
+// A TMM DaemonSet with a Pending pod is a readiness problem that names the
+// pod and the kubelet's latest warning, so status/doctor/forge scan show why
+// the data plane is down instead of only "Gateway Programmed".
+func TestReadinessTMMPending(t *testing.T) {
+	dyn := newFakeDynamic(t, fixture24)
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: DefaultTMMName, Namespace: DefaultControllerNamespace},
+		Spec:       appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "f5-tmm"}}},
+		Status:     appsv1.DaemonSetStatus{DesiredNumberScheduled: 1, NumberReady: 0},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "f5-tmm-jrxqm", Namespace: DefaultControllerNamespace, Labels: map[string]string{"app": "f5-tmm"}},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	ev := &corev1.Event{
+		ObjectMeta:     metav1.ObjectMeta{Name: "f5-tmm-jrxqm.1", Namespace: DefaultControllerNamespace},
+		Type:           corev1.EventTypeWarning,
+		Reason:         "FailedCreatePodSandBox",
+		Message:        "Failed to create pod sandbox: rpc error: plugin type=\"multus\" failed (add): Multus: error waiting for pod: Unauthorized",
+		InvolvedObject: corev1.ObjectReference{Kind: "Pod", Namespace: DefaultControllerNamespace, Name: "f5-tmm-jrxqm"},
+		LastTimestamp:  metav1.Now(),
+	}
+	rd, idx, err := CheckReadiness(context.Background(), dyn, k8sfake.NewClientset(controllerDeployment(1), ds, pod, ev), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rd.Ready || !rd.TMM.Found || rd.TMM.Complete() {
+		t.Fatalf("ready=%v tmm=%+v", rd.Ready, rd.TMM)
+	}
+	joined := strings.Join(rd.Problems, "\n")
+	for _, want := range []string{"daemonset f5-cne-system/f5-tmm: 0/1 TMM pods ready", "pod f5-tmm-jrxqm Pending", "FailedCreatePodSandBox", "Unauthorized"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("problems lack %q: %v", want, rd.Problems)
+		}
+	}
+	if !strings.Contains(rd.Summary(), "TMM 0/1 ready") {
+		t.Errorf("summary %q", rd.Summary())
+	}
+	var buf strings.Builder
+	WriteReport(&buf, idx)
+	if !strings.Contains(buf.String(), "tmm f5-cne-system/f5-tmm: 0/1 ready") || !strings.Contains(buf.String(), "WAIT pod f5-tmm-jrxqm Pending") {
+		t.Errorf("report:\n%s", buf.String())
+	}
+
+	ds.Status.NumberReady = 1
+	rd, _, err = CheckReadiness(context.Background(), dyn, k8sfake.NewClientset(controllerDeployment(1), ds), Options{})
+	if err != nil || !rd.Ready || !strings.Contains(rd.Summary(), "TMM 1/1 ready") {
+		t.Errorf("ready=%v summary=%q err=%v", rd.Ready, rd.Summary(), err)
 	}
 }

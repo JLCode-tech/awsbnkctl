@@ -145,19 +145,39 @@ func isWebhookUnavailable(err error) bool {
 		strings.Contains(msg, "no endpoints available for service")
 }
 
-// retryWhileWebhookUnavailable runs fn, retrying on webhook-unavailable errors
+// isQuotaStatusUnknown reports the admission error the API server returns
+// while a freshly created ResourceQuota has no computed usage yet
+// ("status unknown for quota: f5-single-infra-quota"). FLO creates
+// count/<crd> quotas next to the controller, and the quota controller needs a
+// discovery cycle before it fills status.used; until then every create in
+// that namespace is refused. Seen live 2026-09-14 on the Infra apply.
+func isQuotaStatusUnknown(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "status unknown for quota")
+}
+
+// isTransientAdmission groups the admission failures that clear on their own.
+func isTransientAdmission(err error) bool {
+	return isWebhookUnavailable(err) || isQuotaStatusUnknown(err)
+}
+
+// retryWhileWebhookUnavailable runs fn, retrying on transient admission
+// errors (webhook endpoint not ready, ResourceQuota usage not computed yet)
 // until timeout. Any other error is returned immediately.
 func retryWhileWebhookUnavailable(ctx context.Context, timeout time.Duration, fn func() error) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		err := fn()
-		if err == nil || !isWebhookUnavailable(err) {
+		if err == nil || !isTransientAdmission(err) {
 			return err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("after %s the admission webhook is still unavailable: %w", timeout, err)
+			return fmt.Errorf("after %s admission still refuses the object: %w", timeout, err)
 		}
-		fmt.Fprintf(os.Stderr, "[phase] admission webhook not ready yet, retrying in %s: %v\n", deployPollInterval, err)
+		what := "admission webhook not ready yet"
+		if isQuotaStatusUnknown(err) {
+			what = "ResourceQuota usage not computed yet"
+		}
+		fmt.Fprintf(os.Stderr, "[phase] %s, retrying in %s: %v\n", what, deployPollInterval, err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

@@ -17,8 +17,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/JLCode-tech/awsbnkctl/internal/doctor"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -272,68 +270,4 @@ func writeTargetResults(w io.Writer, targets []forgeScanTarget) {
 // warnf prints an operator warning to stderr.
 func warnf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "⚠ "+format+"\n", args...)
-}
-
-// multusDoctorCheck reports whether the Multus pods still hold a valid
-// kubeconfig token (see k8s.HealMultusToken). Detect only: doctor never
-// changes the cluster.
-func multusDoctorCheck(ctx context.Context, cs kubernetes.Interface) doctor.Check {
-	c := doctor.Check{Name: "multus kubeconfig token", BackendName: "k8s"}
-	installed, stale, reason, err := k8s.MultusTokenStale(ctx, cs, 0, time.Now())
-	switch {
-	case err != nil:
-		c.Status, c.Detail = doctor.StatusWarning, "could not inspect Multus: "+err.Error()
-	case !installed:
-		c.Status, c.Detail = doctor.StatusOK, "Multus not installed"
-	case stale:
-		c.Status, c.Detail = doctor.StatusWarning, reason+" — `awsbnkctl bnk upgrade` and `awsbnkctl up` restart it; or `kubectl -n kube-system rollout restart ds kube-multus-ds`"
-	default:
-		c.Status, c.Detail = doctor.StatusOK, "pods younger than "+k8s.MultusMaxPodAge.String()+", no Unauthorized sandbox events"
-	}
-	return c
-}
-
-// cneIRSADoctorCheck reports whether the ServiceAccount the f5-cne-controller
-// Deployment runs as carries the IRSA role annotation. Without it the 2.4
-// controller starts with no cloud provider and cannot allocate Gateway VIPs
-// on AWS (seen live after a 2.3.0 -> 2.4 upgrade, where the SA name changed).
-func cneIRSADoctorCheck(ctx context.Context, cs kubernetes.Interface, ns string) doctor.Check {
-	c := doctor.Check{Name: "bnk controller IRSA", BackendName: "k8s"}
-	dep, err := cs.AppsV1().Deployments(ns).Get(ctx, bnkscan.DefaultControllerName, metav1.GetOptions{})
-	if err != nil {
-		c.Status, c.Detail = doctor.StatusOK, fmt.Sprintf("deployment %s/%s not found; skipped", ns, bnkscan.DefaultControllerName)
-		return c
-	}
-	saName := dep.Spec.Template.Spec.ServiceAccountName
-	if saName == "" {
-		saName = "default"
-	}
-	sa, err := cs.CoreV1().ServiceAccounts(ns).Get(ctx, saName, metav1.GetOptions{})
-	if err != nil {
-		c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("serviceaccount %s/%s: %v", ns, saName, err)
-		return c
-	}
-	if arn := sa.Annotations["eks.amazonaws.com/role-arn"]; arn != "" {
-		c.Status, c.Detail = doctor.StatusOK, saName+" → "+arn
-		return c
-	}
-	c.Status, c.Detail = doctor.StatusWarning, fmt.Sprintf("serviceaccount %s/%s has no eks.amazonaws.com/role-arn; the controller runs without a cloud provider — `awsbnkctl bnk upgrade` re-binds it (phase 21)", ns, saName)
-	return c
-}
-
-// tmmLogStreamDoctorCheck reports whether the f5-toda-fluentd stdout store
-// that carries the TMM log stream is on (k8s.TMMLogStreamEnabled). Detect
-// only: doctor never changes the cluster.
-func tmmLogStreamDoctorCheck(ctx context.Context, cs kubernetes.Interface) doctor.Check {
-	c := doctor.Check{Name: "bnk tmm log stream", BackendName: "k8s"}
-	on, err := k8s.TMMLogStreamEnabled(ctx, cs)
-	switch {
-	case err != nil:
-		c.Status, c.Detail = doctor.StatusWarning, "could not read "+k8s.TMMLogNamespace+"/"+k8s.TMMLogCustomConfigMap+": "+err.Error()
-	case !on:
-		c.Status, c.Detail = doctor.StatusWarning, "stdout store off in "+k8s.TMMLogNamespace+"/"+k8s.TMMLogCustomConfigMap+": `awsbnkctl logs tmm` and the governance collector see nothing — `awsbnkctl up` (phase 24d) or `awsbnkctl bnk upgrade` enable it"
-	default:
-		c.Status, c.Detail = doctor.StatusOK, "f5-toda-fluentd prints the TMM lines (`awsbnkctl logs tmm --governance`)"
-	}
-	return c
 }

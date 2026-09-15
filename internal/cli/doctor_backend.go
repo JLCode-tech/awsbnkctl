@@ -11,11 +11,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
 	"github.com/JLCode-tech/awsbnkctl/internal/config"
 	"github.com/JLCode-tech/awsbnkctl/internal/doctor"
 	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
@@ -93,9 +95,13 @@ func runK8sBackendChecks(ctx context.Context) []doctor.Check {
 	// Gateways, controller, and a migrate-2.4 hint when 2.3 objects remain.
 	idx, scanErr := scanBNK(ctx, "", bnkscan.DefaultControllerNamespace, statusScanTimeout)
 	out = append(out, bnkDoctorChecks(idx, scanErr)...)
-	out = append(out, multusDoctorCheck(ctx, cs))
-	out = append(out, tmmLogStreamDoctorCheck(ctx, cs))
-	out = append(out, cneIRSADoctorCheck(ctx, cs, bnkscan.DefaultControllerNamespace))
+	healClients := &phases.Clients{K8s: cs}
+	if restCfg != nil {
+		if dyn, derr := dynamic.NewForConfig(restCfg); derr == nil {
+			healClients.Dynamic = dyn
+		}
+	}
+	out = append(out, healDoctorChecks(ctx, healClients)...)
 
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

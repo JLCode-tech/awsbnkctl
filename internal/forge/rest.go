@@ -417,13 +417,29 @@ func restUpdateClusterKubeconfig(ctx context.Context, base, token string, cluste
 	return restPut(ctx, url, token, body, nil)
 }
 
+// restDeleteCluster deletes a cluster record through /api/k8s/clusters/{id}
+// (the route current Forge serves) and, when that route refuses for a reason
+// other than 404, retries the older project-scoped route. A 404 from the
+// direct route means the cluster is gone and is returned as such; a 404 from
+// the fallback only tells that the old route does not exist, so the direct
+// route's error is what the caller sees (never the fallback's, which Is404
+// would misread as "already gone").
 func restDeleteCluster(ctx context.Context, base, token string, projectID, clusterID int) error {
-	url := fmt.Sprintf("%s/api/projects/%d/k8s/clusters/%d", base, projectID, clusterID)
-	return restDelete(ctx, url, token)
+	err := restDelete(ctx, fmt.Sprintf("%s/api/k8s/clusters/%d", base, clusterID), token)
+	if err == nil || Is404(err) || projectID <= 0 {
+		return err
+	}
+	if restDelete(ctx, fmt.Sprintf("%s/api/projects/%d/k8s/clusters/%d", base, projectID, clusterID), token) == nil {
+		return nil
+	}
+	return err
 }
 
+// restDeleteProject deletes a project; force=true purges an active project
+// shell on Forge builds that would otherwise refuse, and is ignored by the
+// ones that cascade anyway.
 func restDeleteProject(ctx context.Context, base, token string, projectID int) error {
-	url := fmt.Sprintf("%s/api/projects/%d", base, projectID)
+	url := fmt.Sprintf("%s/api/projects/%d?force=true", base, projectID)
 	return restDelete(ctx, url, token)
 }
 

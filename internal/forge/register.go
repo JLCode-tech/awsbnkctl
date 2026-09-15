@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -13,6 +14,10 @@ import (
 // caller. The caller is responsible for resolving the workspace dir and
 // providing the kubeconfig — this package doesn't reach into config/.
 type RegisterRequest struct {
+	// ForgeRESTURL is the Forge REST base URL recorded in the link so the
+	// REST-side commands (forge scan --register-targets, benchmark) find Forge
+	// without flags. Optional.
+	ForgeRESTURL  string
 	WorkspaceName string // logical workspace label (used in project name)
 	WorkspaceDir  string // filesystem dir where forge_link.json lives
 	ProjectName   string // forge project name; empty → "awsbnkctl-<workspace>"
@@ -53,10 +58,13 @@ type RegisterRequest struct {
 
 // RegisterResult is what forge register returns to the CLI for display.
 type RegisterResult struct {
-	Link        *Link
-	ScanOutput  string // raw JSON from scan_cluster (empty if skipped)
-	HealthCheck string // raw JSON from bnk_health (empty if skipped)
-	ForgeURL    string
+	Link *Link
+	// LinkRefreshed is true when an existing link was kept but its Forge
+	// URLs were rewritten to the ones this run used.
+	LinkRefreshed bool
+	ScanOutput    string // raw JSON from scan_cluster (empty if skipped)
+	HealthCheck   string // raw JSON from bnk_health (empty if skipped)
+	ForgeURL      string
 }
 
 // Register executes the awsbnkctl→forge handoff:
@@ -67,8 +75,10 @@ type RegisterResult struct {
 //  3. Optionally: scan_cluster + bnk_health smoke check.
 //  4. Write forge_link.json so `forge status` / `forge unregister` work.
 //
-// If the workspace already has a link, Register returns it unchanged
-// after a get_cluster sanity check.
+// If the workspace already has a link, Register keeps its project and cluster
+// after a get_cluster sanity check and rewrites the link when the Forge URLs
+// in use differ from the recorded ones (Forge moved, or the link was written
+// from another host).
 func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResult, error) {
 	if req.WorkspaceName == "" {
 		return RegisterResult{}, errors.New("forge.Register: workspace name is required")
@@ -101,7 +111,14 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 					fmt.Errorf("workspace already linked to forge cluster_id=%d but get_cluster failed: %w",
 						existing.ClusterID, gerr)
 			}
-			return RegisterResult{Link: existing, ForgeURL: c.URL()}, nil
+			out := RegisterResult{Link: existing, ForgeURL: c.URL()}
+			if refreshLinkURLs(existing, c.URL(), req.ForgeRESTURL) {
+				if err := WriteLink(req.WorkspaceDir, existing); err != nil {
+					return out, fmt.Errorf("refresh link URLs: %w", err)
+				}
+				out.LinkRefreshed = true
+			}
+			return out, nil
 		}
 		// Link exists but is not registered (e.g. Status=="pending") — fall through.
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -152,6 +169,7 @@ func Register(ctx context.Context, c *Client, req RegisterRequest) (RegisterResu
 
 	link := &Link{
 		ForgeMCPURL:  c.URL(),
+		ForgeURL:     req.ForgeRESTURL,
 		ProjectID:    proj.Project.ID,
 		ProjectName:  proj.Project.Name,
 		ClusterID:    cluster.Cluster.ID,
@@ -264,6 +282,10 @@ func Is404(err error) bool {
 	if err == nil {
 		return false
 	}
+	var he *restHTTPErr
+	if errors.As(err, &he) {
+		return he.StatusCode == http.StatusNotFound
+	}
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "not_found") ||
 		strings.Contains(s, "not found") ||
@@ -273,4 +295,19 @@ func Is404(err error) bool {
 
 func is404(err error) bool {
 	return Is404(err)
+}
+
+// refreshLinkURLs points l at the Forge endpoints in use and reports whether
+// anything changed. An empty restURL leaves the recorded REST URL alone.
+func refreshLinkURLs(l *Link, mcpURL, restURL string) bool {
+	changed := false
+	if mcpURL != "" && l.ForgeMCPURL != mcpURL {
+		l.ForgeMCPURL = mcpURL
+		changed = true
+	}
+	if restURL != "" && l.ForgeURL != restURL {
+		l.ForgeURL = restURL
+		changed = true
+	}
+	return changed
 }

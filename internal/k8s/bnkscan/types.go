@@ -46,6 +46,8 @@ const (
 	DefaultControllerNamespace = "f5-cne-system"
 	// DefaultControllerName is the f5-cne-controller Deployment.
 	DefaultControllerName = "f5-cne-controller"
+	// DefaultTMMName is the TMM DaemonSet FLO renders next to the controller.
+	DefaultTMMName = "f5-tmm"
 
 	// AnnotationProtocol marks an HTTPRoute as an MCP endpoint explicitly
 	// (value "mcp"). Routes without it are recognised by path.
@@ -139,6 +141,21 @@ type Controller struct {
 	Available int32  `json:"available"`
 	Ready     bool   `json:"ready"`
 }
+
+// TMM is the f5-tmm DaemonSet rollout: the data plane every Gateway programs.
+type TMM struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Found     bool   `json:"found"`
+	Desired   int32  `json:"desired"`
+	Ready     int32  `json:"ready"`
+	// Pending describes each TMM pod that is not Running, as
+	// "<pod> <phase>: <latest Warning event>" (event omitted when none).
+	Pending []string `json:"pending,omitempty"`
+}
+
+// Complete reports whether every scheduled TMM pod is ready.
+func (t TMM) Complete() bool { return t.Found && t.Desired > 0 && t.Ready >= t.Desired }
 
 // Legacy counts the 2.3 kinds still present.
 type Legacy struct {
@@ -254,6 +271,7 @@ type Index struct {
 	PersistenceProfiles []Object `json:"persistenceProfiles"`
 
 	Controller Controller `json:"controller"`
+	TMM        TMM        `json:"tmm"`
 	Legacy     Legacy     `json:"legacy"`
 	// Missing lists the kinds whose CRD the API server does not serve.
 	Missing []string `json:"missingCRDs,omitempty"`
@@ -287,6 +305,13 @@ func (idx *Index) problems(acceptLegacy bool) []string {
 	} else if !idx.Controller.Ready {
 		out = append(out, fmt.Sprintf("deployment %s/%s: %d/%d replicas available",
 			idx.Controller.Namespace, idx.Controller.Name, idx.Controller.Available, idx.Controller.Desired))
+	}
+	if idx.TMM.Found && !idx.TMM.Complete() {
+		msg := fmt.Sprintf("daemonset %s/%s: %d/%d TMM pods ready", idx.TMM.Namespace, idx.TMM.Name, idx.TMM.Ready, idx.TMM.Desired)
+		if len(idx.TMM.Pending) > 0 {
+			msg += "; " + strings.Join(idx.TMM.Pending, "; ")
+		}
+		out = append(out, msg)
 	}
 	if idx.Generation == Gen24 || idx.Generation == GenMixed {
 		if len(idx.Infras) == 0 {

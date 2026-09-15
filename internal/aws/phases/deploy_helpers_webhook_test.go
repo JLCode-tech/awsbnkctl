@@ -126,3 +126,26 @@ func TestWaitForConditionTrue(t *testing.T) {
 		t.Fatalf("want success once Programmed=True, got %v", err)
 	}
 }
+
+// A ResourceQuota whose usage the quota controller has not computed yet is a
+// transient admission failure and is retried like a missing webhook.
+func TestRetryWhileWebhookUnavailable_QuotaStatusUnknown(t *testing.T) {
+	quotaErr := errors.New(`SSA Infra f5-cne-system/infra: infras.gateway.k8s.f5.com "infra" is forbidden: status unknown for quota: f5-single-infra-quota, resources: count/infras.gateway.k8s.f5.com`)
+	if !isQuotaStatusUnknown(quotaErr) || !isTransientAdmission(quotaErr) {
+		t.Fatal("quota status unknown must be transient")
+	}
+	if isQuotaStatusUnknown(errors.New("exceeded quota: f5-single-infra-quota")) {
+		t.Fatal("an exceeded quota is not transient")
+	}
+	calls := 0
+	err := retryWhileWebhookUnavailable(context.Background(), time.Second, func() error {
+		calls++
+		if calls < 2 {
+			return quotaErr
+		}
+		return nil
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("err=%v calls=%d", err, calls)
+	}
+}

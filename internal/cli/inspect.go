@@ -523,10 +523,13 @@ var bnkComponents = []bnkComponent{
 	{"cis", "F5 BNK CIS controller", "f5-bnk", "app=f5-bnk-cis"},
 	{"cert-manager", "cert-manager", "cert-manager", "app.kubernetes.io/instance=cert-manager"},
 	{"cneinstance", "BIG-IP TMM data plane (CNEInstance pods)", "f5-bnk", "app.kubernetes.io/component=tmm"},
-	// BNK 2.4: the TMM pod's f5-fluentbit sidecar only forwards; the TMM lines
-	// (governance records included) are read from the f5-toda-fluentd stdout
-	// store awsbnkctl up (phase 24d) and bnk upgrade enable (k8s.EnableTMMLogStream).
-	{"tmm", "BIG-IP TMM data plane (TMM log stream on f5-toda-fluentd stdout, BNK 2.4)", k8s.TMMLogNamespace, k8s.TMMLogPodSelector},
+	// The TMM pod's f5-fluentbit sidecar forwards to f5-toda-fluentd on 2.3 and
+	// 2.4 (2.3 also prints to its own stdout); the TMM lines (governance
+	// records included) are read from the f5-toda-fluentd stdout store that
+	// awsbnkctl up (phase 24d), bnk upgrade and bnk heal enable. Both
+	// generations tag the records "pod_name":"f5-tmm". The forward needs the
+	// TMM pod to reach the service network (TMM_K8S_ROUTES, heal tmm-k8s-routes).
+	{"tmm", "BIG-IP TMM data plane (TMM log stream on f5-toda-fluentd stdout)", k8s.TMMLogNamespace, k8s.TMMLogPodSelector},
 }
 
 func runLogs(cmd *cobra.Command, args []string) error {
@@ -605,7 +608,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		// The stream only exists once the stdout store is on (awsbnkctl up phase
 		// 24d, bnk upgrade step 5).
 		if on, err := k8s.TMMLogStreamEnabled(cmd.Context(), kc.Clientset()); err == nil && !on {
-			return fmt.Errorf("the TMM log stream is off: the %s/%s ConfigMap has no `@type stdout` store; run `awsbnkctl up` or `awsbnkctl bnk upgrade` (phase 24d) to enable it", k8s.TMMLogNamespace, k8s.TMMLogCustomConfigMap)
+			return fmt.Errorf("the TMM log stream is off: the %s/%s ConfigMap has no `@type stdout` store; run `awsbnkctl bnk heal` (or `awsbnkctl up` phase 24d, `awsbnkctl bnk upgrade`) to enable it; if it is on but no TMM line arrives, `awsbnkctl doctor --backend k8s` row `bnk tmm k8s routes` tells whether the TMM pod can reach the service network", k8s.TMMLogNamespace, k8s.TMMLogCustomConfigMap)
 		}
 	}
 	if flagLogsNamespace != "" {

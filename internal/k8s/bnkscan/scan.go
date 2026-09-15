@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -20,6 +22,8 @@ type Options struct {
 	// Deployment. Empty values use the awsbnkctl defaults.
 	ControllerNamespace string
 	ControllerName      string
+	// TMMName is the TMM DaemonSet in ControllerNamespace (default f5-tmm).
+	TMMName string
 	// AcceptLegacy makes CheckReadiness treat a 2.3 cluster as ready when its
 	// controller is up (an Infra CR is only required on 2.4). Lifecycle gates
 	// that run on either generation set it; operator surfaces leave it false.
@@ -32,6 +36,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.ControllerName == "" {
 		o.ControllerName = DefaultControllerName
+	}
+	if o.TMMName == "" {
+		o.TMMName = DefaultTMMName
 	}
 	return o
 }
@@ -52,7 +59,7 @@ type raw struct {
 // recorded in Index.Missing; any other API error aborts the scan.
 func Scan(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, opts Options) (*Index, error) {
 	opts = opts.withDefaults()
-	idx := &Index{Controller: Controller{Namespace: opts.ControllerNamespace, Name: opts.ControllerName}}
+	idx := &Index{Controller: Controller{Namespace: opts.ControllerNamespace, Name: opts.ControllerName}, TMM: TMM{Namespace: opts.ControllerNamespace, Name: opts.TMMName}}
 	r := &raw{gatewayReady: map[string]bool{}}
 
 	groups, err := f5CRDGroups(ctx, dyn)
@@ -156,6 +163,9 @@ func Scan(ctx context.Context, dyn dynamic.Interface, cs kubernetes.Interface, o
 		case apierrors.IsNotFound(err):
 		default:
 			return nil, fmt.Errorf("get deployment %s/%s: %w", opts.ControllerNamespace, opts.ControllerName, err)
+		}
+		if err := scanTMM(ctx, cs, idx); err != nil {
+			return nil, err
 		}
 	}
 
@@ -355,4 +365,74 @@ func describe(c Condition) string {
 		s += " (" + c.Reason + ")"
 	}
 	return s
+}
+
+// scanTMM records the TMM DaemonSet rollout and, for every pod of it that is
+// not Running, the pod phase with its latest Warning event (for example the
+// kubelet's FailedCreatePodSandBox naming Multus). A missing DaemonSet is
+// not an error: FLO has not rendered it yet.
+func scanTMM(ctx context.Context, cs kubernetes.Interface, idx *Index) error {
+	ds, err := cs.AppsV1().DaemonSets(idx.TMM.Namespace).Get(ctx, idx.TMM.Name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil
+	case err != nil:
+		return fmt.Errorf("get daemonset %s/%s: %w", idx.TMM.Namespace, idx.TMM.Name, err)
+	}
+	idx.TMM.Found = true
+	idx.TMM.Desired = ds.Status.DesiredNumberScheduled
+	idx.TMM.Ready = ds.Status.NumberReady
+	if idx.TMM.Complete() || ds.Spec.Selector == nil {
+		return nil
+	}
+	sel := metav1.FormatLabelSelector(ds.Spec.Selector)
+	pods, err := cs.CoreV1().Pods(idx.TMM.Namespace).List(ctx, metav1.ListOptions{LabelSelector: sel})
+	if err != nil {
+		return nil //nolint:nilerr — the tally stands without pod detail
+	}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.Status.Phase == corev1.PodRunning {
+			continue
+		}
+		line := fmt.Sprintf("pod %s %s", p.Name, p.Status.Phase)
+		if ev := latestWarningEvent(ctx, cs, p.Namespace, p.Name); ev != "" {
+			line += ": " + ev
+		}
+		idx.TMM.Pending = append(idx.TMM.Pending, line)
+	}
+	sort.Strings(idx.TMM.Pending)
+	return nil
+}
+
+// latestWarningEvent returns "<reason>: <message>" of the newest Warning
+// event about the named pod, trimmed to one line; empty when none.
+func latestWarningEvent(ctx context.Context, cs kubernetes.Interface, ns, pod string) string {
+	events, err := cs.CoreV1().Events(ns).List(ctx, metav1.ListOptions{FieldSelector: "involvedObject.name=" + pod + ",type=Warning"})
+	if err != nil {
+		return ""
+	}
+	var best *corev1.Event
+	var bestTime time.Time
+	for i := range events.Items {
+		ev := &events.Items[i]
+		if ev.InvolvedObject.Name != pod || ev.Type != corev1.EventTypeWarning {
+			continue
+		}
+		ts := ev.LastTimestamp.Time
+		if ts.IsZero() {
+			ts = ev.EventTime.Time
+		}
+		if best == nil || ts.After(bestTime) {
+			best, bestTime = ev, ts
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	msg := strings.Join(strings.Fields(best.Message), " ")
+	if len(msg) > 240 {
+		msg = msg[:240] + "…"
+	}
+	return best.Reason + ": " + msg
 }
