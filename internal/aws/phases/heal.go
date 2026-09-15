@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s"
 	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
@@ -277,6 +278,25 @@ var Repairs = []Repair{
 		},
 		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
 			return fixTMMK8sRoutes(ctx, d)
+		},
+	},
+	{
+		Name: "test-namespace", Title: "awsbnkctl test namespace",
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			exists, err := execbackend.TestNamespaceExists(ctx, d.Clients.K8s)
+			switch {
+			case err != nil:
+				return false, "", err
+			case !exists:
+				return false, "namespace " + execbackend.K8sTestNamespace + " missing: test --backend k8s cannot create its probe Jobs", nil
+			}
+			return true, "namespace " + execbackend.K8sTestNamespace + " present for the test --backend k8s probe Jobs", nil
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			if _, err := execbackend.EnsureTestNamespace(ctx, d.Clients.K8s); err != nil {
+				return "", err
+			}
+			return "namespace " + execbackend.K8sTestNamespace + " created", nil
 		},
 	},
 }

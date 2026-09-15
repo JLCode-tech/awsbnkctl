@@ -122,7 +122,7 @@ phase_H() { skip_phase H "final cleanup (workspace teardown)"            "dry-ru
 phase_I()     { skip_phase I     "backend matrix — local execution backend"                "dry-run via CI; live apply gates on spike"; }
 phase_J()     { skip_phase J     "backend matrix — docker execution backend"               "dry-run via CI; live apply gates on spike"; }
 phase_K()     { skip_phase K     "backend matrix — multi-tool docker phase"                "dry-run via CI; live apply gates on spike"; }
-phase_L()     { skip_phase L     "backend matrix — k8s execution backend (iperf3 + ops pod)" "dry-run via CI; live apply gates on spike"; }
+phase_L()     { skip_phase L     "backend matrix — k8s execution backend (iperf3 Jobs)" "dry-run via CI; live apply gates on spike"; }
 phase_M()     { skip_phase M     "backend matrix — ssh execution backend"                  "dry-run via CI; live apply gates on spike"; }
 phase_N()     { skip_phase N     "backend matrix — mixed-mode integration"                 "dry-run via CI; live apply gates on spike"; }
 phase_L_DNS() { skip_phase L-DNS "AWS Route 53 GSLB-aware DNS probe (miekg/dns, cross-vantage)" "dry-run via CI; live apply gates on spike"; }

@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	execbackend "github.com/JLCode-tech/awsbnkctl/internal/exec"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
 	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
@@ -253,6 +254,13 @@ func Phase12K8sFoundation(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	// hold a kubeconfig token that expires; every later phase creates pods.
 	if _, err := k8swait.EnsureMultusTokenWatch(ctx, clients.K8s, false, os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "[phase 12] warn: multus token watch: %v\n", err)
+	}
+	// test --backend k8s runs its probe Jobs in awsbnkctl-test; create it here
+	// so doctor and bnk heal see a complete cluster after up.
+	if created, err := execbackend.EnsureTestNamespace(ctx, clients.K8s); err != nil {
+		fmt.Fprintf(os.Stderr, "[phase 12] warn: test namespace: %v\n", err)
+	} else if created {
+		fmt.Fprintf(os.Stderr, "[phase 12] namespace %s created\n", execbackend.K8sTestNamespace)
 	}
 	fmt.Fprintln(os.Stderr, "[phase 12] waiting for NetworkAttachmentDefinition CRD")
 	if err := k8swait.WaitForCRDExists(ctx, clients.Dynamic, "network-attachment-definitions.k8s.cni.cncf.io", certManagerCRDTimeout); err != nil {

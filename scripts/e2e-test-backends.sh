@@ -62,7 +62,7 @@ should_run() {
 #   gates on the operator-run spike) ──────────────────────────────────
 phase_I()     { skip_phase I     "SSH backend (awsbnkctl --backend ssh)"            "dry-run via CI; live apply gates on spike"; }
 phase_K()     { skip_phase K     "Docker backend (awsbnkctl --backend docker)"      "dry-run via CI; live apply gates on spike"; }
-phase_L()     { skip_phase L     "K8s backend (iperf3 + ops pod via --backend k8s)" "dry-run via CI; live apply gates on spike"; }
+phase_L()     { skip_phase L     "K8s backend (iperf3 Jobs via --backend k8s)" "dry-run via CI; live apply gates on spike"; }
 phase_L_DNS() { skip_phase L-DNS "AWS Route 53 GSLB DNS probe + cross-vantage compare (miekg/dns)" "dry-run via CI; live apply gates on spike"; }
 phase_M()     { skip_phase M     "cred-leak audit across all backends"              "CI implements; live exercise in spike"; }
 phase_N()     { skip_phase N     "mixed-mode lifecycle (backends share state)"      "CI implements; live exercise in spike"; }
