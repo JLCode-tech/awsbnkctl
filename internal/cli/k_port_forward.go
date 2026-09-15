@@ -14,10 +14,11 @@ var kPortForwardNamespace string
 
 func newKPortForwardCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "port-forward <pod> [-n <ns>] <local-port>[:<remote-port>] [...]",
+		Use:     "port-forward <pod>|svc/<service> [-n <ns>] <local-port>[:<remote-port>] [...]",
 		Aliases: []string{"port_forward"},
-		Short:   "Forward local port(s) to a pod via SPDY",
-		Long: `Forwards one or more local TCP ports to ports on the named pod.
+		Short:   "Forward local port(s) to a pod or a Service's pod via SPDY",
+		Long: `Forwards one or more local TCP ports to ports on the named pod, or on a
+Ready pod behind svc/<name> (Service ports map to their targetPort).
 Equivalent to kubectl port-forward; signal handling closes the tunnel
 cleanly on Ctrl+C.
 
@@ -30,7 +31,8 @@ Port spec:
 Examples:
 
   awsbnkctl k port-forward my-pod 8080:80
-  awsbnkctl k port-forward my-pod -n f5-bnk 9090:9090 8080:80`,
+  awsbnkctl k port-forward my-pod -n f5-bnk 9090:9090 8080:80
+  awsbnkctl k port-forward -n llm-egress svc/loki 3100:3100`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: runKPortForward,
 	}

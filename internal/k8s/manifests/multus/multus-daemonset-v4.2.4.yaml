@@ -185,6 +185,11 @@ spec:
         - "--multus-conf-file=auto"
         - "--multus-autoconfig-dir=/host/etc/cni/net.d"
         - "--cni-conf-dir=/host/etc/cni/net.d"
+        # awsbnkctl: enables the entrypoint watch loop that rewrites
+        # multus.kubeconfig whenever the projected service-account token
+        # rotates; without it the token expires and new pods fail with
+        # "Multus: ... error waiting for pod: Unauthorized".
+        - "--cleanup-config-on-exit=true"
         resources:
           requests:
             cpu: "100m"

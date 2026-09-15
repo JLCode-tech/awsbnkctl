@@ -51,9 +51,10 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `k exec` | Exec into a pod via SPDY |
 | `k get` | Get one or more resources |
 | `k logs` | Stream pod logs |
-| `k port-forward` | Forward local ports to a pod via SPDY |
+| `k port-forward` | Forward local ports to a pod, or to a Ready pod behind `svc/<name>`, via SPDY |
 | `get <resource> [name]` | Top-level alias of `k get` (`-n`, `-A`, `-l`, `-o yaml|json|wide|name|jsonpath=…`) |
 | `logs <component>` | Tail logs for a BNK component (`flo`, `cis`, `cert-manager`, `cneinstance`, `tmm`); `-f`, `--since`, `--tail`, `--previous`, `-c`; `--governance` / `--mcp` print only BNKGOV records as `[GOV] <status> <rpc_method> tool= session= latency= action=` |
+| `bnk heal` | Repair the cluster plumbing `up` (phase 12) and `bnk upgrade` (step 0) also fix, on 2.3 or 2.4: adds `--cleanup-config-on-exit=true` to the Multus DaemonSet so its kubeconfig follows the service-account token, rolls it when a pod hit `Multus ... Unauthorized` (`-f`, `--kubeconfig`, `--dry-run`, `-o json`) |
 | `bnk resync` | Force the F5 cne-controller to re-resolve stale TMM pool members |
 | `bnk migrate-2.4` | Translate the 2.3.x CRs of a running cluster into the 2.4 Infra / GatewaySettings model (`--dry-run` prints the manifests, `--apply` server-side-applies them; `-f`, `--kubeconfig`, `-n`, `--gateway-class`) |
 | `bnk upgrade -f <config>` | In-place upgrade: helm upgrade FLO, patch the CNEInstance (`manifestVersion`, `USE_GATEWAY_SETTINGS`), watch the controller and TMM come back (`--manifest-version`, `--flo-version`, `--dry-run`) |
@@ -71,7 +72,7 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `benchmark status` | Check the benchmark environment, jumphost and Forge linkage |
 | `benchmark daemon` | Run the persistent Forge benchmark agent daemon |
 | `benchmark ingest` | Parse aiperf artifacts offline into TTFT/ITL percentiles, token throughput and prefix-cache hit rate; compare TTFT between runs (`--expect-ttft-drop`), `--metrics-before`/`--metrics-after` scrape files, `--push` to Forge |
-| `forge register` | Register the workspace's EKS cluster with Forge (idempotent); `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
+| `forge register` | Register the workspace's EKS cluster with Forge (idempotent: an existing registration is kept and the link's REST and MCP URLs are refreshed to the ones in use); `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
 | `forge status` | Show this workspace's Forge registration state |
 | `forge unregister` | Remove this workspace's Forge registration |
 | `forge cleanup` | Delete all awsbnkctl benchmark artifacts from Forge for a workspace |

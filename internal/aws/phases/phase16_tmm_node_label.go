@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -15,8 +17,9 @@ import (
 )
 
 // Phase16TMMNodeLabel finds the first node with label role=bnk, labels it with
-// app=f5-tmm (idempotent via Patch), then resolves the EC2 instance ID via
-// DescribeInstances filtered on private-dns-name + instance-state-name=running.
+// app=f5-tmm (idempotent via Patch), then resolves the EC2 instance ID from the
+// node's providerID, falling back to DescribeInstances filtered on
+// private-dns-name + instance-state-name=running + this cluster's vpc-id.
 //
 // Persists TMM_NODE_NAME and TMM_INSTANCE_ID to state.env.
 // Dry-run: sets placeholder values and skips all k8s/EC2 mutations.
@@ -63,8 +66,11 @@ func Phase16TMMNodeLabel(ctx context.Context, cl *intent.Cluster, st *state.Stat
 	// Persist TMM_NODE_NAME.
 	st.Set("TMM_NODE_NAME", nodeName)
 
-	// Resolve EC2 instance ID via DescribeInstances.
-	instanceID, err := resolveEC2InstanceByPrivateDNS(ctx, clients.EC2, nodeName)
+	// Resolve the EC2 instance: the node's providerID is authoritative;
+	// DescribeInstances by private DNS name is scoped to this cluster's VPC
+	// because private names repeat across VPCs (seen live: a 10.0.1.181
+	// jumphost in another VPC was picked and the ENI attach failed on it).
+	instanceID, err := resolveEC2InstanceForNode(ctx, clients.EC2, &node, st.Get("VPC_ID"))
 	if err != nil {
 		return fmt.Errorf("phase16: resolving EC2 instance for node %s: %w", nodeName, err)
 	}
@@ -83,16 +89,43 @@ func Phase16TMMNodeLabelDown(_ context.Context, _ *intent.Cluster, st *state.Sta
 	return st.Save()
 }
 
+// instanceIDFromProviderID parses "aws:///<az>/<instance-id>" (the providerID
+// the AWS cloud provider sets on every EKS node). Empty when the format is not
+// that.
+func instanceIDFromProviderID(providerID string) string {
+	if !strings.HasPrefix(providerID, "aws:///") {
+		return ""
+	}
+	id := providerID[strings.LastIndex(providerID, "/")+1:]
+	if !strings.HasPrefix(id, "i-") {
+		return ""
+	}
+	return id
+}
+
+// resolveEC2InstanceForNode returns the EC2 instance backing node: from its
+// providerID when set, otherwise the running instance in vpcID whose
+// private-dns-name equals the node name.
+func resolveEC2InstanceForNode(ctx context.Context, ec2c EC2API, node *corev1.Node, vpcID string) (string, error) {
+	if id := instanceIDFromProviderID(node.Spec.ProviderID); id != "" {
+		return id, nil
+	}
+	return resolveEC2InstanceByPrivateDNS(ctx, ec2c, node.Name, vpcID)
+}
+
 // resolveEC2InstanceByPrivateDNS looks up a running EC2 instance whose
 // private-dns-name matches the given node name (EKS nodes use private DNS as
-// the k8s node name). Returns the InstanceId or an error if not found.
-func resolveEC2InstanceByPrivateDNS(ctx context.Context, ec2c EC2API, privateDNSName string) (string, error) {
-	out, err := ec2c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-		Filters: []ec2types.Filter{
-			{Name: ptr("private-dns-name"), Values: []string{privateDNSName}},
-			{Name: ptr("instance-state-name"), Values: []string{"running"}},
-		},
-	})
+// the k8s node name), limited to vpcID when non-empty. Returns the InstanceId
+// or an error if not found.
+func resolveEC2InstanceByPrivateDNS(ctx context.Context, ec2c EC2API, privateDNSName, vpcID string) (string, error) {
+	filters := []ec2types.Filter{
+		{Name: ptr("private-dns-name"), Values: []string{privateDNSName}},
+		{Name: ptr("instance-state-name"), Values: []string{"running"}},
+	}
+	if vpcID != "" {
+		filters = append(filters, ec2types.Filter{Name: ptr("vpc-id"), Values: []string{vpcID}})
+	}
+	out, err := ec2c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{Filters: filters})
 	if err != nil {
 		return "", fmt.Errorf("ec2:DescribeInstances (private-dns-name=%s): %w", privateDNSName, err)
 	}

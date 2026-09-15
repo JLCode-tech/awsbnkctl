@@ -188,6 +188,7 @@ type forgeTarget struct {
 	linkDir     string // directory where forge_link.json lives
 	label       string // human-facing identity label (workspace name or cluster name)
 	mcpURL      string // preferred MCP URL from intent ("" → fall through to flag/env/default)
+	restURL     string // Forge REST URL from intent forge.url ("" when unset)
 }
 
 // resolveForgeTarget returns a forgeTarget from either:
@@ -214,6 +215,9 @@ func resolveForgeTarget() (*forgeTarget, error) {
 		}
 		if cl.Forge != nil && cl.Forge.MCPURL != "" {
 			t.mcpURL = cl.Forge.MCPURL
+		}
+		if cl.Forge != nil {
+			t.restURL = cl.Forge.URL
 		}
 		return t, nil
 	}
@@ -291,6 +295,7 @@ func runForgeRegister(cmd *cobra.Command, _ []string) error {
 		Region:           t.region,
 		Kubeconfig:       kubeconfigYAML,
 		PostRegisterScan: flagForgeScan,
+		ForgeRESTURL:     t.restURL,
 	})
 	if err != nil {
 		return err
@@ -302,6 +307,12 @@ func runForgeRegister(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("  cluster:   %s (id=%d)\n", res.Link.ClusterName, res.Link.ClusterID)
 	fmt.Printf("  link:      %s\n", forge.LinkPath(t.linkDir))
 	fmt.Printf("  mcp:       %s\n", res.ForgeURL)
+	if res.Link.ForgeURL != "" {
+		fmt.Printf("  rest:      %s\n", res.Link.ForgeURL)
+	}
+	if res.LinkRefreshed {
+		fmt.Printf("  note:      existing registration kept; link URLs refreshed to the Forge above\n")
+	}
 	if flagForgeScan {
 		fmt.Printf("  scan:      %s\n", forgeScanSummary(res.ScanOutput))
 		fmt.Printf("  health:    %s\n", forgeHealthSummary(res.HealthCheck))

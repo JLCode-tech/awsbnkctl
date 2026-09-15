@@ -201,3 +201,43 @@ func TestPhase16TMMNodeLabelDown_ClearsState(t *testing.T) {
 		t.Errorf("TMM_INSTANCE_ID = %q after down, want empty", got)
 	}
 }
+
+// TestPhase16TMMNodeLabel_ProviderIDWins verifies the node's providerID is
+// used before any EC2 lookup: the mock would otherwise return a different
+// (wrong-VPC) instance, the failure seen live on 2026-09-14.
+func TestPhase16TMMNodeLabel_ProviderIDWins(t *testing.T) {
+	awsmw.ResetForTest()
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	cl := testCluster()
+
+	node := makeNode("ip-10-0-1-181.ap-southeast-2.compute.internal", map[string]string{"role": "bnk"})
+	node.Spec.ProviderID = "aws:///ap-southeast-2a/i-091c94725ed606694"
+	wrong := "i-04e1ec295fe6a9a5c"
+	ec2m := &mockEC2{describeInstancesOut: &ec2.DescribeInstancesOutput{
+		Reservations: []ec2types.Reservation{{Instances: []ec2types.Instance{{InstanceId: &wrong}}}},
+	}}
+	clients := &Clients{EC2: ec2m, STS: &mockSTSImpl{accountID: "111122223333"}, IAM: newMockIAM(), EKS: newMockEKS(), K8s: k8sfake.NewSimpleClientset(node), Profile: "test"}
+
+	if err := Phase16TMMNodeLabel(context.Background(), cl, st, clients, false); err != nil {
+		t.Fatalf("Phase16TMMNodeLabel: %v", err)
+	}
+	if got := st.Get("TMM_INSTANCE_ID"); got != "i-091c94725ed606694" {
+		t.Errorf("TMM_INSTANCE_ID = %q, want the providerID instance", got)
+	}
+}
+
+func TestInstanceIDFromProviderID(t *testing.T) {
+	cases := map[string]string{
+		"aws:///ap-southeast-2a/i-091c94725ed606694": "i-091c94725ed606694",
+		"aws:///i-0abc":            "i-0abc",
+		"gce://proj/zone/instance": "",
+		"aws:///ap-southeast-2a/":  "",
+		"":                         "",
+	}
+	for in, want := range cases {
+		if got := instanceIDFromProviderID(in); got != want {
+			t.Errorf("%q: got %q want %q", in, got, want)
+		}
+	}
+}

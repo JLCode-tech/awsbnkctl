@@ -151,6 +151,29 @@ func TestRegister_Idempotent(t *testing.T) {
 	if !equalSlices(got, want) {
 		t.Errorf("call order = %v, want %v", got, want)
 	}
+
+	// A later run against Forge at another address keeps the registration
+	// and rewrites the recorded URLs.
+	srv2 := httptest.NewServer(http.HandlerFunc(f.handler))
+	defer srv2.Close()
+	req.ForgeRESTURL = "http://host.docker.internal:8000"
+	res, err := Register(context.Background(), NewClient(srv2.URL+"/mcp/"), req)
+	if err != nil {
+		t.Fatalf("third Register: %v", err)
+	}
+	if !res.LinkRefreshed {
+		t.Error("expected LinkRefreshed")
+	}
+	link, err := ReadLink(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link.ForgeMCPURL != srv2.URL+"/mcp/" || link.ForgeURL != "http://host.docker.internal:8000" || link.ClusterID == 0 {
+		t.Errorf("link not refreshed: %+v", link)
+	}
+	if res2, err := Register(context.Background(), NewClient(srv2.URL+"/mcp/"), req); err != nil || res2.LinkRefreshed {
+		t.Errorf("fourth Register: refreshed=%v err=%v", res2.LinkRefreshed, err)
+	}
 }
 
 func TestRegister_WithScan(t *testing.T) {

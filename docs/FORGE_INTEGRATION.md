@@ -275,6 +275,7 @@ awsbnkctl forge scan -f ... -o json
 | `Infra` | `Programmed=True` |
 | `Gateway` (BNK class) | `Accepted=True` and `Programmed=True` |
 | `f5-cne-controller` | every desired replica available |
+| `f5-tmm` DaemonSet | every scheduled TMM pod ready; a pod that is not Running is listed with its phase and the kubelet's latest warning (for example `FailedCreatePodSandBox ... Multus ... Unauthorized`) |
 | `F5BigPersistenceProfile` | `Programmed=True` |
 
 `GatewaySettings`, `EgressGateway`, `SecPolicy`, `NetPolicy` and `HTTPRoute` are

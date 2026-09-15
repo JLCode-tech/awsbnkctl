@@ -270,3 +270,26 @@ func DeploymentReplicaStatus(ctx context.Context, clientset kubernetes.Interface
 	}
 	return d.Status.AvailableReplicas, d.Status.Replicas, nil
 }
+
+// WaitForDaemonSetRollout polls apps/v1 DaemonSet in ns/name until the
+// controller has observed the latest template generation and every scheduled
+// pod is updated, ready and available. Unlike WaitForDaemonSetReady this does
+// not return early while the pre-rollout pods are still the ready ones.
+func WaitForDaemonSetRollout(ctx context.Context, clientset kubernetes.Interface, ns, name string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		ds, err := clientset.AppsV1().DaemonSets(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return false, nil //nolint:nilerr
+		}
+		st := ds.Status
+		if st.ObservedGeneration < ds.Generation || st.DesiredNumberScheduled == 0 {
+			return false, nil
+		}
+		return st.UpdatedNumberScheduled == st.DesiredNumberScheduled &&
+			st.NumberReady == st.DesiredNumberScheduled &&
+			st.NumberAvailable == st.DesiredNumberScheduled, nil
+	})
+}

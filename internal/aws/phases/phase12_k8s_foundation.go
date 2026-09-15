@@ -249,10 +249,10 @@ func Phase12K8sFoundation(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		return fmt.Errorf("phase12: multus DaemonSet not ready: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "[phase 12] Multus DaemonSet ready")
-	// On a re-run against an existing cluster the Multus pods may be days old
-	// with an expired kubeconfig token; every later phase creates pods.
-	if _, err := k8swait.HealMultusToken(ctx, clients.K8s, 0, os.Stderr); err != nil {
-		fmt.Fprintf(os.Stderr, "[phase 12] warn: multus token heal: %v\n", err)
+	// Clusters installed before the manifest carried --cleanup-config-on-exit
+	// hold a kubeconfig token that expires; every later phase creates pods.
+	if _, err := k8swait.EnsureMultusTokenWatch(ctx, clients.K8s, false, os.Stderr); err != nil {
+		fmt.Fprintf(os.Stderr, "[phase 12] warn: multus token watch: %v\n", err)
 	}
 	fmt.Fprintln(os.Stderr, "[phase 12] waiting for NetworkAttachmentDefinition CRD")
 	if err := k8swait.WaitForCRDExists(ctx, clients.Dynamic, "network-attachment-definitions.k8s.cni.cncf.io", certManagerCRDTimeout); err != nil {
