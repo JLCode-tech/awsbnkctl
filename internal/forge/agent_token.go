@@ -14,7 +14,7 @@ import (
 
 // AgentTokenFileName is the on-disk file inside a workspace dir (next to
 // forge_link.json) that caches minted Forge benchmark agent JWT tokens.
-const AgentTokenFileName = "forge_agent_token.json"
+const AgentTokenFileName = "forge_agent_token.json" // #nosec G101 -- file name constant, not a hardcoded credential
 
 // AgentTokenPath returns the path to forge_agent_token.json inside workspaceDir.
 func AgentTokenPath(workspaceDir string) string {
@@ -54,7 +54,7 @@ func ReadAgentToken(workspaceDir, forgeURL, agentName string) (string, error) {
 	if workspaceDir == "" {
 		return "", os.ErrNotExist
 	}
-	data, err := os.ReadFile(AgentTokenPath(workspaceDir))
+	data, err := os.ReadFile(filepath.Clean(AgentTokenPath(workspaceDir))) // #nosec G304 -- path is derived from config-managed workspace directory, not user-tainted input
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", os.ErrNotExist
@@ -121,7 +121,7 @@ func WriteAgentToken(workspaceDir, forgeURL, agentName, token, expiresAt string)
 	schema := agentTokenFileSchema{
 		Tokens: make(map[string]StoredAgentToken),
 	}
-	if data, err := os.ReadFile(AgentTokenPath(workspaceDir)); err == nil {
+	if data, err := os.ReadFile(filepath.Clean(AgentTokenPath(workspaceDir))); err == nil { // #nosec G304 -- path is derived from config-managed workspace directory, not user-tainted input
 		_ = json.Unmarshal(data, &schema)
 		if schema.Tokens == nil {
 			schema.Tokens = make(map[string]StoredAgentToken)
@@ -179,8 +179,8 @@ func DeleteAgentToken(workspaceDir, forgeURL, agentName string) error {
 	if workspaceDir == "" {
 		return nil
 	}
-	final := AgentTokenPath(workspaceDir)
-	data, err := os.ReadFile(final)
+	final := filepath.Clean(AgentTokenPath(workspaceDir))
+	data, err := os.ReadFile(final) // #nosec G304 -- path is derived from config-managed workspace directory, not user-tainted input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
