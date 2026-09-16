@@ -39,6 +39,7 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/phases"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	"github.com/JLCode-tech/awsbnkctl/internal/config"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
@@ -75,6 +76,7 @@ var (
 	flagBenchForgeURL             string
 	flagBenchForgeUser            string
 	flagBenchForgePass            string
+	flagBenchAgentToken           string
 	flagBenchEnsure               bool
 	flagBenchResultID             string
 	flagBenchTimeout              time.Duration
@@ -205,6 +207,7 @@ When set, per-explicit flags (--concurrency/--num-requests/--isl/--osl/--stream)
 	f.StringVar(&flagBenchForgeUser, "forge-user", "", "forge username (default: admin)")
 	f.StringVar(&flagBenchForgePass, "forge-pass", "", "forge password (default: changeme)")
 	f.StringVar(&flagBenchForgePass, "forge-password", "", "forge password (default: changeme)")
+	f.StringVar(&flagBenchAgentToken, "forge-agent-token", "", "Forge benchmark agent JWT token (overrides env and cluster.yaml forge.agent_token)")
 	f.StringVar(&flagBenchAgentName, "agent-name", "", "name of the benchmark agent in forge")
 
 	// Access-method registration
@@ -447,10 +450,11 @@ func parseScenarioKeys(raw string) ([]string, error) {
 // forgeGraph holds the resolved forge object IDs for linking runs.
 // All fields are optional — zero means unset and will be omitted from pushes.
 type forgeGraph struct {
-	agentID           int // BenchmarkAgent.id (resolved from agent name)
-	targetID          int // BenchmarkTarget.id
-	configID          int // BenchmarkConfig.id (preset-specific, set per-run)
-	proxyDeploymentID int // ProxyDeployment.id (set per-front-end in shootout mode)
+	agentID           int    // BenchmarkAgent.id (resolved from agent name)
+	agentToken        string // Benchmark agent token
+	targetID          int    // BenchmarkTarget.id
+	configID          int    // BenchmarkConfig.id (preset-specific, set per-run)
+	proxyDeploymentID int    // ProxyDeployment.id (set per-front-end in shootout mode)
 }
 
 // hasNonBNKProxy reports whether the comma-separated proxy CSV contains at
@@ -565,6 +569,15 @@ func resolveBenchmarkContext(cmd *cobra.Command) error {
 					flagBenchForgePass = pass
 				}
 			}
+			if flagBenchAgentToken == "" && cl.Forge.ResolveAgentToken() != "" {
+				flagBenchAgentToken = cl.Forge.ResolveAgentToken()
+			}
+		}
+	}
+
+	if flagBenchAgentToken == "" {
+		if v := os.Getenv("AWSBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
+			flagBenchAgentToken = v
 		}
 	}
 
@@ -608,6 +621,42 @@ func resolveBenchmarkContext(cmd *cobra.Command) error {
 	return nil
 }
 
+func resolveWorkspaceDir() string {
+	if flagBenchConfig != "" {
+		if cl, err := intent.Load(flagBenchConfig); err == nil {
+			return cl.StateDir()
+		}
+	}
+	ws := flagBenchWorkspace
+	if ws == "" {
+		ws = flagWorkspace
+	}
+	if ws == "" {
+		if g, err := config.LoadGlobal(); err == nil && g.CurrentWorkspace != "" {
+			ws = g.CurrentWorkspace
+		}
+	}
+	if ws != "" {
+		return fmt.Sprintf(".awsbnkctl/%s", ws)
+	}
+	return ""
+}
+
+func effectiveAgentToken(agentName string) string {
+	if flagBenchAgentToken != "" {
+		return flagBenchAgentToken
+	}
+	if v := os.Getenv("AWSBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
+		return v
+	}
+	if agentName != "" {
+		if tok, err := forge.ReadAgentToken(resolveWorkspaceDir(), flagBenchForgeURL, agentName); err == nil && tok != "" {
+			return tok
+		}
+	}
+	return ""
+}
+
 func effectiveForgeCreds() forge.RestCreds {
 	u := flagBenchForgeUser
 	if u == "" {
@@ -648,6 +697,21 @@ func resolveForgeGraph(ctx context.Context, creds forge.RestCreds, agentName str
 	} else {
 		g.agentID = agentResp.ID
 		fmt.Fprintf(os.Stderr, "✓ forge agent registered: id=%d name=%s\n", agentResp.ID, agentResp.Name)
+
+		tokRes, tokErr := forge.AcquireAgentToken(ctx, forge.AcquireAgentTokenOptions{
+			RestURL:       flagBenchForgeURL,
+			OperatorToken: creds.Password,
+			AgentID:       agentResp.ID,
+			AgentName:     agentResp.Name,
+			ExplicitToken: flagBenchAgentToken,
+			WorkspaceDir:  resolveWorkspaceDir(),
+		})
+		if tokErr == nil && tokRes.Token != "" {
+			g.agentToken = tokRes.Token
+		}
+	}
+	if g.agentToken == "" {
+		g.agentToken = effectiveAgentToken(agentName)
 	}
 
 	// ── Step B: Resolve cluster_id from forge_link.json ──────────────────────
@@ -999,6 +1063,7 @@ func runBenchmarkSingle(cmd *cobra.Command, probOpts jumphost.ProbeOptions, cred
 	rawPushOpts := forge.RawAiperfPushOptions{
 		RestURL:           flagBenchForgeURL,
 		Creds:             creds,
+		AgentToken:        graph.agentToken,
 		RawJSON:           []byte(result.RawJSON),
 		GenAI:             result.GenAI,
 		Proxy:             flagBenchProxy,
@@ -1019,6 +1084,7 @@ func runBenchmarkSingle(cmd *cobra.Command, probOpts jumphost.ProbeOptions, cred
 		pushOpts := forge.BenchmarkPushOptions{
 			RestURL:           flagBenchForgeURL,
 			Creds:             creds,
+			AgentToken:        graph.agentToken,
 			ResultID:          flagBenchResultID,
 			RunLabel:          flagBenchRunLabel,
 			Proxy:             flagBenchProxy,
@@ -1288,9 +1354,11 @@ func pushAiperfResult(
 		effectiveVIP = flagBenchVIP
 	}
 
+	tok := effectiveAgentToken(agentName)
 	rawPushOpts := forge.RawAiperfPushOptions{
 		RestURL:           flagBenchForgeURL,
 		Creds:             creds,
+		AgentToken:        tok,
 		RawJSON:           []byte(result.RawJSON),
 		GenAI:             result.GenAI,
 		Proxy:             effectiveProxy,
@@ -1312,6 +1380,7 @@ func pushAiperfResult(
 		pushOpts := forge.BenchmarkPushOptions{
 			RestURL:           flagBenchForgeURL,
 			Creds:             creds,
+			AgentToken:        tok,
 			RunLabel:          label,
 			Proxy:             effectiveProxy,
 			AgentName:         agentName,

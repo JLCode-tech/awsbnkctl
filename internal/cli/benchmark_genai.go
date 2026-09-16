@@ -356,11 +356,12 @@ func runBenchmarkIngest(cmd *cobra.Command, args []string) error {
 				// so it goes through the structured endpoint the run command falls
 				// back to, carrying the percentiles and throughput it does have.
 				resp, err := pushBenchmarkResultFn(cmd.Context(), aiperfResultFromGenAI(rows[i].Metrics, flagBenchModel, flagBenchEndpoint), forge.BenchmarkPushOptions{
-					RestURL:   flagBenchForgeURL,
-					Creds:     effectiveForgeCreds(),
-					RunLabel:  label,
-					Proxy:     flagBenchProxy,
-					AgentName: flagBenchAgentName,
+					RestURL:    flagBenchForgeURL,
+					Creds:      effectiveForgeCreds(),
+					AgentToken: effectiveAgentToken(flagBenchAgentName),
+					RunLabel:   label,
+					Proxy:      flagBenchProxy,
+					AgentName:  flagBenchAgentName,
 					AiperfConfig: map[string]any{
 						"model":    flagBenchModel,
 						"endpoint": flagBenchEndpoint,
@@ -375,15 +376,16 @@ func runBenchmarkIngest(cmd *cobra.Command, args []string) error {
 				continue
 			}
 			resp, err := pushRawAiperfResultFn(cmd.Context(), forge.RawAiperfPushOptions{
-				RestURL:   flagBenchForgeURL,
-				Creds:     effectiveForgeCreds(),
-				RawJSON:   rows[i].raw,
-				GenAI:     rows[i].Metrics,
-				Proxy:     flagBenchProxy,
-				Model:     flagBenchModel,
-				URL:       optionalBaseURL(flagBenchVIP),
-				AgentName: flagBenchAgentName,
-				RunLabel:  label,
+				RestURL:    flagBenchForgeURL,
+				Creds:      effectiveForgeCreds(),
+				AgentToken: effectiveAgentToken(flagBenchAgentName),
+				RawJSON:    rows[i].raw,
+				GenAI:      rows[i].Metrics,
+				Proxy:      flagBenchProxy,
+				Model:      flagBenchModel,
+				URL:        optionalBaseURL(flagBenchVIP),
+				AgentName:  flagBenchAgentName,
+				RunLabel:   label,
 			})
 			if err != nil {
 				return fmt.Errorf("push %s: %w", rows[i].Label, err)

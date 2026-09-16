@@ -104,6 +104,8 @@ type BenchmarkPushOptions struct {
 	RestURL string
 	// Creds are the forge REST login credentials.
 	Creds RestCreds
+	// AgentToken is the Forge benchmark agent JWT token (overrides Creds login when set).
+	AgentToken string
 	// ResultID is the unique run identifier.
 	ResultID string
 	// RunLabel is a human label (e.g. "ci-run-1").
@@ -300,10 +302,16 @@ func PushBenchmarkResult(ctx context.Context, result *jumphost.AiperfResult, opt
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	// Login to obtain a bearer token using the injectable transport.
-	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
-	if err != nil {
-		return BenchmarkPushResponse{}, fmt.Errorf("forge benchmark push: login: %w", err)
+	var token string
+	if opts.AgentToken != "" {
+		token = opts.AgentToken
+	} else {
+		// Login to obtain a bearer token using the injectable transport.
+		tok, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+		if err != nil {
+			return BenchmarkPushResponse{}, fmt.Errorf("forge benchmark push: login: %w", err)
+		}
+		token = tok
 	}
 
 	payload := MapAiperfResultToPayload(result, opts)
@@ -323,6 +331,8 @@ type RawAiperfPushOptions struct {
 	RestURL string
 	// Creds are the forge REST login credentials.
 	Creds RestCreds
+	// AgentToken is the Forge benchmark agent JWT token (overrides Creds login when set).
+	AgentToken string
 	// RawJSON is the verbatim content of profile_export_aiperf.json.
 	// Must be a valid JSON object (starts with '{').
 	RawJSON []byte
@@ -378,9 +388,15 @@ func PushRawAiperfResult(ctx context.Context, opts RawAiperfPushOptions) (RawAip
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
-	if err != nil {
-		return RawAiperfPushResponse{}, fmt.Errorf("forge raw aiperf push: login: %w", err)
+	var token string
+	if opts.AgentToken != "" {
+		token = opts.AgentToken
+	} else {
+		tok, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+		if err != nil {
+			return RawAiperfPushResponse{}, fmt.Errorf("forge raw aiperf push: login: %w", err)
+		}
+		token = tok
 	}
 
 	proxy := opts.Proxy

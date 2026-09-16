@@ -340,6 +340,11 @@ type ForgeSpec struct {
 	// When multiple clusters share the same project, set this to the shared
 	// project name.
 	ProjectName string `yaml:"projectName,omitempty"`
+	// AgentToken is the Forge benchmark agent JWT token (role 'agent').
+	// Resolution order: CLI flag > AWSBNKCTL_FORGE_AGENT_TOKEN env > this field.
+	AgentToken string `yaml:"agent_token,omitempty"`
+	// AgentTokenCamel is a fallback alias for camelCase YAML configs (agentToken).
+	AgentTokenCamel string `yaml:"agentToken,omitempty"`
 }
 
 // DefaultForgeRESTURL is the fallback REST base when forge.url is not set.
@@ -382,6 +387,27 @@ func (f *ForgeSpec) ResolvePassword() (password string, usingDefault bool) {
 		return f.Password, false
 	}
 	return "changeme", true
+}
+
+// ResolveAgentToken returns the benchmark agent JWT token in priority order:
+//  1. AWSBNKCTL_FORGE_AGENT_TOKEN environment variable
+//  2. f.AgentToken (cluster.yaml forge.agent_token)
+//  3. f.AgentTokenCamel (cluster.yaml forge.agentToken)
+//
+// Returns empty string if unset.
+func (f *ForgeSpec) ResolveAgentToken() string {
+	if v := os.Getenv("AWSBNKCTL_FORGE_AGENT_TOKEN"); v != "" {
+		return v
+	}
+	if f != nil {
+		if f.AgentToken != "" {
+			return f.AgentToken
+		}
+		if f.AgentTokenCamel != "" {
+			return f.AgentTokenCamel
+		}
+	}
+	return ""
 }
 
 // ResolveEnvironment returns the forge project environment, in priority order:

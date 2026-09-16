@@ -72,7 +72,7 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `benchmark run` | Drive an aiperf run, preset (`--scenarios`), native Forge scenario sweep (`--scenario`), or proxy shootout (`--proxies`); `--prefix-prompt-length`, `--num-prefix-prompts`, `--random-seed` for shared-prefix workloads; `--metrics-pod-selector` / `--metrics-url` scrape vLLM or EPP metrics for the prefix-cache hit rate; `--genai-out`; `--help` lists the load-shape flags (`--concurrency`, `--num-requests`, `--isl`, `--osl`, `--stream`, …) |
 | `benchmark list` | List native Forge scenarios and smoke presets |
 | `benchmark status` | Check the benchmark environment, jumphost and Forge linkage |
-| `benchmark daemon` | Run the persistent Forge benchmark agent daemon |
+| `benchmark daemon` | Run the persistent Forge benchmark agent daemon with agent-bound token authentication (`--forge-agent-token`, cached token, or mint endpoint); terminates immediately with non-zero exit on auth rejection |
 | `benchmark ingest` | Parse aiperf artifacts offline into TTFT/ITL percentiles, token throughput and prefix-cache hit rate; compare TTFT between runs (`--expect-ttft-drop`), `--metrics-before`/`--metrics-after` scrape files, `--push` to Forge |
 | `forge register` | Register the workspace's EKS cluster with Forge (idempotent: an existing registration is kept and the link's REST and MCP URLs are refreshed to the ones in use); `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
 | `forge status` | Show this workspace's Forge registration state |
@@ -82,7 +82,7 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `forge telemetry` | Validate the MCP governance records in Loki against the schema Forge's LLM Observability panel reads; `--loki-url`, `--since`, `--file`, `--show` |
 | `forge benchmark` | Alias for `benchmark run` |
 
-Every `forge` command takes `-f <cluster.yaml>` and `--forge-mcp-url`.
+Every `forge` command takes `-f <cluster.yaml>` and `--forge-mcp-url`. Benchmark and daemon commands also accept `--forge-agent-token` to provide an explicit agent-bound bearer JWT.
 
 `awsbnkctl up --register-with-forge` registers after a successful apply; `down`
 unregisters unless `--keep-forge-link` is passed. The binary is an MCP *client*
@@ -127,6 +127,7 @@ The binary embeds no LLM; bring your own coding-agent CLI.
 | `AWSBNKCTL_FORGE_URL` | BNK Forge REST base URL (overrides `forge.url`; default `http://localhost:8000`) |
 | `AWSBNKCTL_FORGE_MCP_URL` | BNK Forge MCP endpoint (overrides `forge.mcpUrl`; default `http://localhost:8081/mcp/`) |
 | `AWSBNKCTL_FORGE_USERNAME` / `AWSBNKCTL_FORGE_PASSWORD` | Forge credentials; the password is never read from YAML in production use |
+| `AWSBNKCTL_FORGE_AGENT_TOKEN` | Forge benchmark agent JWT (role `agent` with `agent_id` claim; overrides `forge.agent_token` and cached token) |
 | `AWSBNKCTL_FORGE_PROJECT` | Forge project name to register into (overrides `forge.projectName`) |
 | `AWSBNKCTL_FORGE_ENVIRONMENT` | Forge project environment, e.g. `dev`, `staging`, `prod` (overrides `forge.environment`) |
 | `AWSBNKCTL_BIGIP_PASSWORD` | BIG-IP VE admin password for the `bigipVE` onboarding phase and the `bigip-cis` demo |
