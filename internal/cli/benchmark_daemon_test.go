@@ -85,6 +85,12 @@ func TestBenchmarkDaemon_EndToEndMock(t *testing.T) {
 				"name":   "daemon-test-agent",
 				"status": "connected",
 			})
+		case r.URL.Path == "/api/benchmarks/agents/99/token":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"token":      "daemon-agent-token",
+				"expires_at": time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+			})
 		case strings.HasPrefix(r.URL.Path, "/ws/benchmarks/agents/"):
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
@@ -122,7 +128,10 @@ func TestBenchmarkDaemon_EndToEndMock(t *testing.T) {
 	defer server.Close()
 
 	origRunAiperf := runAiperfFn
-	defer func() { runAiperfFn = origRunAiperf }()
+	defer func() {
+		runAiperfFn = origRunAiperf
+		flagBenchAgentToken = ""
+	}()
 
 	runAiperfFn = func(ctx context.Context, opts jumphost.AiperfRunOptions) (*jumphost.AiperfResult, error) {
 		return &jumphost.AiperfResult{

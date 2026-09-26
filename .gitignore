@@ -30,6 +30,8 @@ venv/
 # Operator-supplied per cluster.yaml; grant FAR pull + license rights.
 cne_pull_64.json
 *.jwt
+forge_agent_token.json
+forge_agent_tokens.json
 
 # --- Release / build outputs ---
 dist/

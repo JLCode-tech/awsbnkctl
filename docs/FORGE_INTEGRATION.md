@@ -89,18 +89,19 @@ Because AWS provisioning is time-consuming, a forge outage shouldn't break the w
 
 `forge status` shows the link; `forge unregister [--purge]` removes the cluster (and the project with `--purge`); `down` also deletes this cluster's benchmark targets and agent (phase 09b, `forge-benchmark-cleanup`); `forge cleanup -w <workspace> [--dry-run]` purges the shared `awsbnkctl-*` agents and configs.
 
-## 5. Configuration Overrides
+## 5. Configuration & Authentication
 
-It is unsafe to store passwords in `cluster.yaml`. You can override forge settings using environment variables:
+### Operator Credentials
+Used for cluster registration, access method provisioning, target discovery, and benchmark agent registration/minting.
 
-| Setting | Priority 1 (Env Var) | Priority 2 (YAML) | Default |
-|---|---|---|---|
-| **REST URL** | `AWSBNKCTL_FORGE_URL` | `forge.url` | `http://localhost:8000` |
-| **MCP URL** | `AWSBNKCTL_FORGE_MCP_URL` (see note) | `forge.mcpUrl` | `http://localhost:8081/mcp/` |
-| **Username** | `AWSBNKCTL_FORGE_USERNAME` (everything except Phase 09) | `forge.username` | `admin` |
-| **Password** | `AWSBNKCTL_FORGE_PASSWORD` | `forge.password` | *built-in dev default* (`changeme`, with a warning) |
-| **Project** | `AWSBNKCTL_FORGE_PROJECT` | `forge.projectName` | `awsbnkctl-<metadata.name>` |
-| **Environment** | `AWSBNKCTL_FORGE_ENVIRONMENT` | `forge.environment` | `dev` |
+| Setting | Priority 1 (CLI Flag) | Priority 2 (Env Var) | Priority 3 (YAML) | Default |
+|---|---|---|---|---|
+| **REST URL** | `--forge-rest-url` | `AWSBNKCTL_FORGE_URL` | `forge.url` | `http://localhost:8000` |
+| **MCP URL** | `--forge-mcp-url` | `AWSBNKCTL_FORGE_MCP_URL` (see note) | `forge.mcpUrl` | `http://localhost:8081/mcp/` |
+| **Username** | `--forge-user` | `AWSBNKCTL_FORGE_USERNAME` (see note) | `forge.username` | `admin` |
+| **Password** | `--forge-pass` / `--forge-password` | `AWSBNKCTL_FORGE_PASSWORD` | `forge.password` | *built-in dev default* (`changeme`, with a warning) |
+| **Project** | `--project-name` | `AWSBNKCTL_FORGE_PROJECT` | `forge.projectName` | `awsbnkctl-<metadata.name>` |
+| **Environment** | | `AWSBNKCTL_FORGE_ENVIRONMENT` | `forge.environment` | `dev` |
 
 Notes on the two exceptions to "env beats YAML":
 
@@ -114,6 +115,23 @@ Notes on the two exceptions to "env beats YAML":
 
 > [!WARNING]
 > Always use `AWSBNKCTL_FORGE_PASSWORD` in real environments!
+
+### Benchmark Agent Token
+Forge benchmark agent WebSockets (`/ws/benchmarks/agents/{agent_id}`) require an agent-bound bearer token with role `agent` and an `agent_id` claim matching the URL path ID. Operator or admin JWTs lack this claim and will be rejected.
+
+| Resolution Step | Source / Location | Description |
+|---|---|---|
+| **1. CLI Flag** | `--forge-agent-token <token>` | Explicit agent bearer JWT override for this invocation |
+| **2. Environment** | `AWSBNKCTL_FORGE_AGENT_TOKEN` | Explicit agent bearer JWT override via environment variable |
+| **3. Cluster Intent** | `forge.agent_token` / `forge.agentToken` in `cluster.yaml` | Workspace-level agent token configuration |
+| **4. Cached Token** | `.awsbnkctl/<workspace>/forge_agent_token.json` | Reusable token cached from prior minting, stored with permissions `0600` (directory `0750`) |
+| **5. Mint Endpoint** | `POST /api/benchmarks/agents/{agent_id}/token` | Minted using operator credentials on Forge >= 2.11 and cached locally |
+
+#### Understanding WebSocket Close Code 4401
+When Forge closes the benchmark agent WebSocket connection with close code `4401` (Unauthorized) or returns HTTP `401`/`403` on the handshake:
+- **Cause**: The connection presented an operator/admin token without an `agent_id` claim, or an agent token whose `agent_id` claim does not match the registered agent ID, or an expired/revoked token.
+- **Behavior**: When an invalid cached token is rejected with 4401, `awsbnkctl benchmark daemon` automatically invalidates `.awsbnkctl/<workspace>/forge_agent_token.json` and mints a fresh token. If an explicit or freshly minted token is rejected, the daemon logs a fatal error and terminates immediately with a non-zero exit code instead of reconnect looping.
+- **Fix**: Provide a valid agent token via `AWSBNKCTL_FORGE_AGENT_TOKEN` or `--forge-agent-token`, or ensure the Forge server is >= 2.11 so operator credentials can automatically mint an agent-bound token via `POST /api/benchmarks/agents/{agent_id}/token`.
 
 ---
 
