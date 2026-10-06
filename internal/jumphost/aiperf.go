@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +45,10 @@ type AiperfConfig struct {
 	// NumPrefixPrompts is the number of prefix prompts (--num-prefix-prompts).
 	// Zero means omit the flag.
 	NumPrefixPrompts int
+	// NumDatasetEntries is the number of distinct prompts aiperf generates
+	// (--num-dataset-entries). Zero: one per request for a timed open-loop run
+	// (see buildAiperfCmd), else aiperf's default of 100.
+	NumDatasetEntries int
 	// ExtraInputs is a list of "key:value" strings forwarded as repeated
 	// --extra-inputs flags. Empty means omit.
 	ExtraInputs []string
@@ -88,6 +94,18 @@ type AiperfConfig struct {
 	// Goodput maps to aiperf --goodput (space-joined string, e.g.
 	// "time_to_first_token:5000 inter_token_latency:100").
 	Goodput string
+
+	// ── Open-loop load (synthetic path) ─────────────────────────────────────
+	// RequestRate maps to aiperf --request-rate (req/s). When set, requests
+	// arrive on a schedule and --concurrency is only emitted if given.
+	RequestRate float64
+	// ArrivalPattern maps to aiperf --arrival-pattern (poisson, constant, gamma).
+	ArrivalPattern string
+	// WarmupDuration maps to aiperf --warmup-duration (seconds, not measured).
+	WarmupDuration float64
+	// BenchmarkDuration maps to aiperf --benchmark-duration (seconds). When
+	// set, --request-count is only emitted if given.
+	BenchmarkDuration float64
 }
 
 // aiperfMetricDist is the distribution shape used for most aiperf 0.10.0 metrics.
@@ -443,11 +461,20 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 	if cfg.EndpointType == "" {
 		cfg.EndpointType = "chat"
 	}
-	if cfg.Concurrency <= 0 {
+	// Closed-loop defaults apply only when no rate or duration drives the run:
+	// a forced --concurrency 1 would cap an open-loop run at one in flight, and
+	// a forced --request-count would end a timed step early.
+	openLoop := cfg.RequestRate > 0 || cfg.BenchmarkDuration > 0
+	if cfg.Concurrency <= 0 && !openLoop {
 		cfg.Concurrency = 1
 	}
-	if cfg.NumRequests <= 0 {
+	if cfg.NumRequests <= 0 && !openLoop {
 		cfg.NumRequests = 10
+	}
+	// aiperf cycles through 100 prompts by default; on a timed run that set fits in a
+	// KV cache whole and every request hits. Generate one per request instead.
+	if cfg.NumDatasetEntries <= 0 && cfg.NumRequests <= 0 && cfg.RequestRate > 0 && cfg.BenchmarkDuration > 0 {
+		cfg.NumDatasetEntries = int(math.Ceil(cfg.RequestRate * (cfg.WarmupDuration + cfg.BenchmarkDuration)))
 	}
 	if cfg.ISL <= 0 {
 		cfg.ISL = 512
@@ -481,8 +508,30 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 		"-m", shellSingleQuote(cfg.Model),
 		"-u", shellSingleQuote(fmt.Sprintf("http://%s", vip)),
 		"--endpoint-type", shellSingleQuote(cfg.EndpointType),
-		"--concurrency", fmt.Sprintf("%d", cfg.Concurrency),
-		"--request-count", fmt.Sprintf("%d", cfg.NumRequests),
+	}
+	if cfg.Concurrency > 0 {
+		args = append(args, "--concurrency", fmt.Sprintf("%d", cfg.Concurrency))
+	}
+	if cfg.NumRequests > 0 {
+		args = append(args, "--request-count", fmt.Sprintf("%d", cfg.NumRequests))
+	}
+	if cfg.RequestRate > 0 {
+		args = append(args, "--request-rate", strconv.FormatFloat(cfg.RequestRate, 'g', -1, 64))
+	}
+	if cfg.ArrivalPattern != "" {
+		args = append(args, "--arrival-pattern", shellSingleQuote(cfg.ArrivalPattern))
+	}
+	if cfg.WarmupDuration > 0 {
+		args = append(args, "--warmup-duration", strconv.FormatFloat(cfg.WarmupDuration, 'g', -1, 64))
+	}
+	if cfg.BenchmarkDuration > 0 {
+		args = append(args, "--benchmark-duration", strconv.FormatFloat(cfg.BenchmarkDuration, 'g', -1, 64))
+	}
+	if cfg.Goodput != "" {
+		args = append(args, "--goodput", shellSingleQuote(cfg.Goodput))
+	}
+	if cfg.RandomSeed > 0 {
+		args = append(args, "--random-seed", fmt.Sprintf("%d", cfg.RandomSeed))
 	}
 
 	// When SeqDist is set, emit --seq-dist and omit the ISL/OSL mean flags
@@ -506,6 +555,10 @@ func buildAiperfCmd(opts AiperfRunOptions) string {
 
 	if cfg.NumPrefixPrompts > 0 {
 		args = append(args, "--num-prefix-prompts", fmt.Sprintf("%d", cfg.NumPrefixPrompts))
+	}
+
+	if cfg.NumDatasetEntries > 0 {
+		args = append(args, "--num-dataset-entries", fmt.Sprintf("%d", cfg.NumDatasetEntries))
 	}
 
 	for _, ei := range cfg.ExtraInputs {
@@ -643,20 +696,20 @@ func EnsureAiperf(ctx context.Context, probOpts ProbeOptions) error {
 	_ = pushSSHPublicKeyFn(ctx, probOpts.Region, probOpts.InstanceID, pubKeyPath)
 
 	// Guarded install sequence:
-	// 1. Run `aiperf --version`; if it prints a version string containing
-	//    "0.10" or higher (NOT "0.1.0"), we're done.
-	// 2. Otherwise install python3.11 (AL2023 dnf) + pip install aiperf.
+	// 1. Run `aiperf --version`; if it prints 0.13.x (the version Forge's own
+	//    agent pins; open-loop flags such as --arrival-pattern need it), done.
+	// 2. Otherwise install python3.11 (AL2023 dnf) + pip install aiperf==0.13.0.
 	// 3. Re-verify; fail if still absent or placeholder.
 	//
 	// We detect the placeholder by checking for "0.1.0" in the version output.
 	checkCmd := `
 VER=$(aiperf --version 2>/dev/null || true)
-if echo "$VER" | grep -qv '^$' && ! echo "$VER" | grep -q '0\.1\.0'; then
+if echo "$VER" | grep -q '0\.13\.'; then
   echo "ok:$VER"
 else
   sudo dnf install -y python3.11 python3.11-pip >/dev/null 2>&1
   python3.11 -m ensurepip --user >/dev/null 2>&1 || true
-  python3.11 -m pip install --user aiperf >/tmp/aiperf_install.log 2>&1
+  python3.11 -m pip install --user aiperf==0.13.0 >/tmp/aiperf_install.log 2>&1
   VER2=$(aiperf --version 2>/dev/null || true)
   if echo "$VER2" | grep -qv '^$' && ! echo "$VER2" | grep -q '0\.1\.0'; then
     echo "installed:$VER2"
@@ -756,4 +809,17 @@ func parseAiperfJSON(raw string) (*AiperfResult, error) {
 	}
 
 	return result, nil
+}
+
+// FitTimeoutToDuration raises Timeout so a timed (open-loop) step keeps its SSH
+// session for warmup + duration + aiperf's 30 s grace period, plus start-up and
+// export; it never cuts a timed step short.
+func (c *AiperfConfig) FitTimeoutToDuration() {
+	if c.BenchmarkDuration <= 0 {
+		return
+	}
+	need := time.Duration(c.WarmupDuration+c.BenchmarkDuration+30)*time.Second + 5*time.Minute
+	if c.Timeout < need {
+		c.Timeout = need
+	}
 }

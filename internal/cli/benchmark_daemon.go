@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
+	"github.com/JLCode-tech/awsbnkctl/internal/scenarios/aiinferencee2e"
 	"github.com/spf13/cobra"
 )
 
@@ -129,17 +131,9 @@ func executeDispatchedRun(ctx context.Context, runID int, config map[string]any)
 		if flagBenchHostHeader != "" {
 			cfg.HostHeader = flagBenchHostHeader
 		} else {
-			cfg.HostHeader = "awsbnkctl-aiinference.local"
+			cfg.HostHeader = aiinferencee2e.Hostname
 		}
 	}
-
-	// Auto-resolve model name if placeholder or empty
-	if (cfg.Model == "" || cfg.Model == "auto-discovered/vllm") && flagBenchModel != "" {
-		cfg.Model = flagBenchModel
-	}
-
-	fmt.Fprintf(os.Stderr, "[Run #%d] Executing benchmark: model=%s vip=%s host=%s concurrency=%d requests=%d streaming=%v\n",
-		runID, cfg.Model, targetVIP, cfg.HostHeader, cfg.Concurrency, cfg.NumRequests, cfg.Streaming)
 
 	probOpts := jumphost.ProbeOptions{
 		Region:     flagBenchRegion,
@@ -148,6 +142,21 @@ func executeDispatchedRun(ctx context.Context, runID int, config map[string]any)
 		VIP:        targetVIP,
 		Hostname:   cfg.HostHeader,
 	}
+
+	// Auto-resolve model name if placeholder or empty: --model first, else ask
+	// the endpoint (a real vLLM rejects any name but its served model).
+	if cfg.Model == "" || cfg.Model == "auto-discovered/vllm" {
+		if flagBenchModel != "" {
+			cfg.Model = flagBenchModel
+		} else if model, err := resolveServedModelCached(ctx, probOpts, cfg.HostHeader); err == nil {
+			cfg.Model = model
+		} else {
+			fmt.Fprintf(os.Stderr, "[Run #%d] could not resolve the served model, keeping %q: %v\n", runID, cfg.Model, err)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "[Run #%d] Executing benchmark: model=%s vip=%s host=%s concurrency=%d requests=%d rate=%g streaming=%v\n",
+		runID, cfg.Model, targetVIP, cfg.HostHeader, cfg.Concurrency, cfg.NumRequests, cfg.RequestRate, cfg.Streaming)
 
 	runOpts := jumphost.AiperfRunOptions{
 		ProbeOptions: probOpts,
@@ -181,4 +190,21 @@ func executeDispatchedRun(ctx context.Context, runID int, config map[string]any)
 		return nil, fmt.Errorf("unmarshal result map: %w", err)
 	}
 	return resMap, nil
+}
+
+// servedModels caches the resolved model per VIP and Host header: every step
+// of a sweep targets the same endpoint, so one lookup per daemon is enough.
+var servedModels sync.Map
+
+func resolveServedModelCached(ctx context.Context, opts jumphost.ProbeOptions, hostHeader string) (string, error) {
+	key := opts.VIP + "|" + hostHeader
+	if v, ok := servedModels.Load(key); ok {
+		return v.(string), nil
+	}
+	model, err := jumphost.ResolveServedModel(ctx, opts, hostHeader)
+	if err != nil {
+		return "", err
+	}
+	servedModels.Store(key, model)
+	return model, nil
 }

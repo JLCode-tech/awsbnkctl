@@ -281,6 +281,15 @@ var Repairs = []Repair{
 		},
 	},
 	{
+		Name: "epp-namespaces", Title: "bnk f5 endpoint picker namespaces",
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			return detectEPPNamespaces(ctx, d.Clients)
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			return fixEPPNamespaces(ctx, d.Clients)
+		},
+	},
+	{
 		Name: "test-namespace", Title: "awsbnkctl test namespace",
 		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
 			exists, err := execbackend.TestNamespaceExists(ctx, d.Clients.K8s)
@@ -765,4 +774,35 @@ func sidecarServiceNetworkEvidence(log string) string {
 		}
 	}
 	return ""
+}
+
+// detectEPPNamespaces reports a BNK 2.4 CNEInstance without spec.eppNamespaces:
+// the controller then reconciles no F5EPP, so InferencePool routes get no picker.
+func detectEPPNamespaces(ctx context.Context, clients *Clients) (bool, string, error) {
+	cne, err := findCNEInstanceHeal(ctx, clients)
+	if err != nil {
+		return false, "", err
+	}
+	if cne == nil {
+		return true, "no CNEInstance (BNK not installed yet)", nil
+	}
+	if mv, _, _ := unstructured.NestedString(cne.Object, "spec", "manifestVersion"); strings.HasPrefix(mv, "2.3") {
+		return true, "manifestVersion " + mv + " has no F5 Endpoint Picker", nil
+	}
+	if ns, _, _ := unstructured.NestedStringSlice(cne.Object, "spec", "eppNamespaces"); len(ns) > 0 {
+		return true, "eppNamespaces " + strings.Join(ns, ",") + " on CNEInstance " + cne.GetName(), nil
+	}
+	return false, "CNEInstance " + cne.GetName() + " has no eppNamespaces: the controller reconciles no F5EPP", nil
+}
+
+func fixEPPNamespaces(ctx context.Context, clients *Clients) (string, error) {
+	cne, err := findCNEInstanceHeal(ctx, clients)
+	if err != nil || cne == nil {
+		return "", err
+	}
+	patch := `{"spec":{"eppNamespaces":["All"]}}`
+	if _, err := clients.Dynamic.Resource(healCNEInstanceGVR).Namespace(InstanceNamespace).Patch(ctx, cne.GetName(), types.MergePatchType, []byte(patch), metav1.PatchOptions{FieldManager: "awsbnkctl-heal"}); err != nil {
+		return "", fmt.Errorf("patch CNEInstance %s: %w", cne.GetName(), err)
+	}
+	return "eppNamespaces [All] set on CNEInstance " + cne.GetName(), nil
 }

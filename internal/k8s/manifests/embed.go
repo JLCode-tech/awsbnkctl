@@ -11,11 +11,12 @@
 //	sriov-external/        — variant manifests for sriov-external pattern (vfio/DPDK dataplane)
 //	nvidia-device-plugin/  — NVIDIA k8s-device-plugin v0.17.1 DaemonSet (GPU node groups)
 //	addons/lb-controller/  — AWS Load Balancer Controller IAM policy (v2.8.1, customer-managed)
+//	gie/                  — Gateway API Inference Extension v1.5.0 CRDs (upstream verbatim; InferencePool for the F5 EPP)
 package manifests
 
 import "embed"
 
 // FS is the embedded manifest filesystem.
 //
-//go:embed all:cert-manager all:multus all:shared all:host-device all:sriov-external all:nvidia-device-plugin all:addons
+//go:embed all:cert-manager all:multus all:shared all:host-device all:sriov-external all:nvidia-device-plugin all:addons all:gie
 var FS embed.FS

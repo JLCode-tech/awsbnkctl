@@ -210,6 +210,8 @@ AWS_PROFILE=<your-profile> awsbnkctl benchmark daemon \
 ```
 *Leave this running in a terminal tab. You will see heartbeat acknowledgments every 15 seconds.*
 
+With an agent token from Forge (`POST /api/benchmarks/agents/{id}/token`), pass `--forge-agent-token <token>` or set `AWSBNKCTL_FORGE_AGENT_TOKEN` instead of `--forge-user`/`--forge-pass`. When the target's model is the discovery placeholder, the daemon asks the endpoint for its served model.
+
 #### Step 3: Trigger Benchmarks from Forge Web UI
 1. Open the Forge Web UI (`http://localhost:3000`).
 2. Navigate to **Benchmarks** → **Run Benchmark** (or **Scenarios**).

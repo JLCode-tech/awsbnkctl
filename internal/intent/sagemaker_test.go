@@ -471,11 +471,11 @@ ai:
 	if synth.Replicas != 1 {
 		t.Errorf("Replicas = %d, want 1", synth.Replicas)
 	}
-	if synth.TTFTBaseMs != 100 {
-		t.Errorf("TTFTBaseMs = %d, want 100", synth.TTFTBaseMs)
+	if synth.Profile != DefaultSyntheticProfile {
+		t.Errorf("Profile = %q, want %q", synth.Profile, DefaultSyntheticProfile)
 	}
-	if synth.ITLMs != 15 {
-		t.Errorf("ITLMs = %d, want 15", synth.ITLMs)
+	if p := SyntheticProfiles[DefaultSyntheticProfile]; synth.TTFTBaseMs != p.TTFTBaseMs || synth.ITLMs != p.ITLMs || synth.Model != p.Model {
+		t.Errorf("timing/model = %d ms, %v ms, %q; want the %s profile", synth.TTFTBaseMs, synth.ITLMs, synth.Model, DefaultSyntheticProfile)
 	}
 }
 
@@ -512,6 +512,33 @@ ai:
 		t.Errorf("TTFTBaseMs = %d, want 50", synth.TTFTBaseMs)
 	}
 	if synth.ITLMs != 20 {
-		t.Errorf("ITLMs = %d, want 20", synth.ITLMs)
+		t.Errorf("ITLMs = %v, want 20", synth.ITLMs)
+	}
+}
+
+// TestSynthetic_Profile verifies a profile fills the timing and an unknown one is rejected.
+func TestSynthetic_Profile(t *testing.T) {
+	dir := t.TempDir()
+	c, err := Load(writeFile(t, dir, "cluster.yaml", minimalYAML+`
+ai:
+  synthetic:
+    enabled: true
+    profile: llama-3.3-70b
+    itlMs: 20
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := SyntheticProfiles["llama-3.3-70b"]
+	if s := c.AI.Synthetic; s.Model != p.Model || s.PrefillUsPerToken != p.PrefillUsPerToken || s.ITLMs != 20 {
+		t.Errorf("got model %q prefill %d µs ITL %v, want %q %d µs and the 20 ms override", s.Model, s.PrefillUsPerToken, s.ITLMs, p.Model, p.PrefillUsPerToken)
+	}
+	if _, err := Load(writeFile(t, dir, "bad.yaml", minimalYAML+`
+ai:
+  synthetic:
+    enabled: true
+    profile: llama-1t
+`)); err == nil || !strings.Contains(err.Error(), "ai.synthetic.profile") {
+		t.Errorf("unknown profile: err = %v, want an ai.synthetic.profile error", err)
 	}
 }

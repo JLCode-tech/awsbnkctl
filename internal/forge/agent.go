@@ -36,6 +36,9 @@ type BenchmarkAgentOptions struct {
 	Tags map[string]string
 	// Capabilities is an optional list of capability strings (e.g. ["aiperf"]).
 	Capabilities []string
+	// Token, when set, is sent as the bearer instead of logging in with Creds
+	// (an agent-bound token may re-register its own agent by name).
+	Token string
 }
 
 // BenchmarkAgentResponse is the subset of forge's BenchmarkAgent fields
@@ -60,9 +63,13 @@ func RegisterBenchmarkAgent(ctx context.Context, opts BenchmarkAgentOptions) (Be
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
-	if err != nil {
-		return BenchmarkAgentResponse{}, fmt.Errorf("forge benchmark agent: login: %w", err)
+	token := opts.Token
+	if token == "" {
+		var err error
+		token, err = restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+		if err != nil {
+			return BenchmarkAgentResponse{}, fmt.Errorf("forge benchmark agent: login: %w", err)
+		}
 	}
 
 	body := map[string]any{
