@@ -39,14 +39,22 @@ awsbnkctl demo run <demo-name> -f my-cluster.yaml
 
 ```mermaid
 flowchart LR
-    Client["Test Client<br/>(EC2 Jumphost via EICE)"]
-    VIP["Gateway VIP: 10.0.10.100:80<br/>Gateway: default-gateway"]
-    TMM["TMM Pod (host-device)<br/>Gateway API Controller"]
-    Echo["http-echo Pods<br/>Namespace: awsbnkctl-scn-http"]
+    Client([Jumphost Test Runner<br/>10.0.10.200])
 
-    Client -->|curl -s http://10.0.10.100/| VIP
-    VIP --> TMM
-    TMM -->|Proxy Pass (HTTP 200)| Echo
+    subgraph IngressNet["F5 BNK Data Plane (BNK_EXT: 10.0.10.0/24)"]
+        direction TB
+        VIP["Gateway VIP: 10.0.10.100:80<br/>(default-gateway)"]
+        TMM["TMM Microkernel (DPDK)<br/>(HTTPRoute: path /)"]
+        VIP --> TMM
+    end
+
+    subgraph PodNet["EKS Pod Network (10.0.64.0/19)"]
+        Echo[("http-echo Pods<br/>awsbnkctl-scn-http")]
+    end
+
+    Client -->|HTTP GET /| VIP
+    TMM -->|Direct Pod Forwarding| Echo
+    Echo -->|HTTP 200 OK| Client
 ```
 
 ---
@@ -60,16 +68,23 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    Client["Test Client<br/>(EC2 Jumphost)"]
-    VIP["Gateway VIP: 10.0.10.101:80<br/>HTTPRoute: split-route"]
-    TMM["TMM Data Plane Core<br/>Weighted Ratio Engine"]
-    BackendA["backend-a Pods<br/>(Weight: 70)"]
-    BackendB["backend-b Pods<br/>(Weight: 30)"]
+    Client([Jumphost Test Client])
 
-    Client -->|10 Consecutive Curls| VIP
-    VIP --> TMM
-    TMM -->|70% Traffic| BackendA
-    TMM -->|30% Traffic| BackendB
+    subgraph BNKGateway["F5 BNK Gateway (VIP: 10.0.10.101:80)"]
+        direction TB
+        Route["HTTPRoute: split-route"]
+        WeightEngine["Weighted Traffic Distribution<br/>(Round Robin Ratio)"]
+        Route --> WeightEngine
+    end
+
+    subgraph Workloads["EKS Canary Deployments"]
+        BackendA[("backend-a (v1)<br/>Weight: 70 (70%)")]
+        BackendB[("backend-b (v2)<br/>Weight: 30 (30%)")]
+    end
+
+    Client -->|10 Consecutive Requests| Route
+    WeightEngine -->|70% Requests| BackendA
+    WeightEngine -->|30% Requests| BackendB
 ```
 
 ---
@@ -82,14 +97,22 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    Client["gRPC Client / Jumphost<br/>grpcurl or probe"]
-    VIP["Gateway VIP: 10.0.10.108:50052<br/>GRPCRoute + L4Route"]
-    TMM["TMM Microkernel<br/>HTTP/2 gRPC Frame Dispatch"]
-    GRPCBin["kong/grpcbin Pods<br/>gRPC Stream Server"]
+    Client([Jumphost gRPC Client<br/>grpcurl / probe])
 
-    Client -->|RPC Stream :50052| VIP
-    VIP --> TMM
-    TMM -->|h2c Multiplexed RPC| GRPCBin
+    subgraph BNKGateway["F5 BNK Gateway (VIP: 10.0.10.108:50052)"]
+        direction TB
+        L4["L4Route TCP Listener (:50052)"]
+        H2["HTTP/2 Protocol Engine<br/>gRPC Stream Dispatcher"]
+        L4 --> H2
+    end
+
+    subgraph Workload["gRPC Service"]
+        GRPCBin[("kong/grpcbin Pods<br/>grpc.testing.TestService")]
+    end
+
+    Client -->|gRPC Stream over HTTP/2| L4
+    H2 -->|Multiplexed RPC Calls| GRPCBin
+    GRPCBin -->|gRPC Status: 0 OK| Client
 ```
 
 ---
@@ -104,16 +127,23 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    Client["TCP Client<br/>(Jumphost curl)"]
-    VIP["L4 VIP: 10.0.10.106:8080<br/>L4Route (TCP)"]
-    TMM["TMM TCP Forwarder<br/>Layer 4 Load Balancing"]
-    Marker1["Nginx Marker Pod 1"]
-    Marker2["Nginx Marker Pod 2"]
+    Client([TCP Client / Jumphost])
 
-    Client -->|Raw TCP Stream :8080| VIP
-    VIP --> TMM
-    TMM -->|Round Robin| Marker1
-    TMM -->|Round Robin| Marker2
+    subgraph L4Plane["F5 BNK L4 Gateway (VIP: 10.0.10.106:8080)"]
+        direction TB
+        L4R["L4Route (TCP Listener)"]
+        LB["TCP Load Balancer"]
+        L4R --> LB
+    end
+
+    subgraph Backends["Target Marker Services"]
+        M1[("nginx-marker-1<br/>Marker Pod 1")]
+        M2[("nginx-marker-2<br/>Marker Pod 2")]
+    end
+
+    Client -->|Raw TCP Stream :8080| L4R
+    LB -->|Round Robin Flow 1| M1
+    LB -->|Round Robin Flow 2| M2
 ```
 
 ---
@@ -126,14 +156,23 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    Client["UDP Client<br/>(socat / nc)"]
-    VIP["L4 VIP: 10.0.10.107:5353<br/>L4Route (UDP)"]
-    TMM["TMM UDP Microkernel<br/>Stateless Datagram Hash"]
-    UDPEcho["udp-echo Server Pods<br/>Namespace: awsbnkctl-scn-udpl4"]
+    Client([UDP Client<br/>socat / nc])
 
-    Client -->|UDP Datagrams :5353| VIP
-    VIP --> TMM
-    TMM -->|Datagram Forwarding| UDPEcho
+    subgraph L4Plane["F5 BNK L4 Gateway (VIP: 10.0.10.107:5353)"]
+        direction TB
+        L4R["L4Route (UDP Listener)"]
+        Hash["Stateless 5-Tuple Hash Engine"]
+        L4R --> Hash
+    end
+
+    subgraph Backends["UDP Echo Service"]
+        U1[("udp-echo Pod 1")]
+        U2[("udp-echo Pod 2")]
+    end
+
+    Client -->|UDP Datagrams :5353| L4R
+    Hash -->|Hash Bucket 1| U1
+    Hash -->|Hash Bucket 2| U2
 ```
 
 ---
@@ -170,14 +209,23 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    Client["Test Client<br/>(EC2 Jumphost)"]
-    VIP["Gateway VIP: 10.0.10.102:80<br/>Gateway: external-pool-gw"]
-    TMM["TMM Microkernel"]
-    ExtTarget["Non-Kubernetes Target<br/>Bare-Metal VM / RDS / ALB<br/>(Outside EKS Pod CIDR)"]
+    Client([Jumphost Test Client])
+
+    subgraph BNKGateway["F5 BNK Gateway (VIP: 10.0.10.102:80)"]
+        direction TB
+        VIP["Gateway VIP: 10.0.10.102:80"]
+        TMM["TMM Microkernel<br/>external-pool-gw"]
+        VIP --> TMM
+    end
+
+    subgraph ExtTargets["Targets Outside EKS Pod CIDR"]
+        RDS[("AWS RDS Database<br/>Private VPC Subnet")]
+        BareMetal[("Bare-Metal Server / VM<br/>Enterprise Network")]
+    end
 
     Client -->|HTTP GET /| VIP
-    VIP --> TMM
-    TMM -->|Direct L3 Forwarding| ExtTarget
+    TMM -->|Direct L3 Forwarding| RDS
+    TMM -->|Direct L3 Forwarding| BareMetal
 ```
 
 ---
@@ -189,21 +237,24 @@ flowchart LR
 - **Rating**: **Green**.
 
 ```mermaid
-flowchart TD
-    subgraph ControllerPlane["CNE Control Plane"]
-        CNE["Single f5-cne-controller<br/>Installed in f5-cne-system"]
+flowchart LR
+    subgraph ControlPlane["F5 CNE Control Plane"]
+        direction TB
+        CNE["Single f5-cne-controller<br/>Namespace: f5-cne-system"]
         CWC["ClusterWideWatch CR<br/>Watches All Namespaces"]
         CNE --- CWC
     end
 
-    subgraph DynamicTenant["Dynamically Created Tenant Namespace"]
-        TenantGW["Tenant Gateway (.105)<br/>Programmed by CNE"]
-        TenantRoute["Tenant HTTPRoute<br/>Host: cwatch.awsbnkctl.local"]
-        TenantPod["Tenant Backend Pod"]
+    subgraph Tenant["Dynamic Tenant Namespace"]
+        direction TB
+        GW["Tenant Gateway (.105)"]
+        Route["Tenant HTTPRoute<br/>Host: cwatch.awsbnkctl.local"]
+        Pod[("Tenant Backend Pod")]
+        GW --> Route --> Pod
     end
 
-    Client["Tenant Client / Jumphost"] -->|curl Host: cwatch.awsbnkctl.local| TenantGW
-    TenantGW --> TenantRoute --> TenantPod
+    Client([Tenant Client / Jumphost]) -->|Host: cwatch.awsbnkctl.local| GW
+    CWC -.->|Reconciles Tenant Gateway| GW
 ```
 
 ---
@@ -237,24 +288,31 @@ sequenceDiagram
 - **Rating**: **Green**.
 
 ```mermaid
-flowchart TD
-    subgraph Network["Single Secondary ENI (BNK_EXT)"]
-        VIP_A["VIP 1: 10.0.10.115:80<br/>Gateway A (App A)"]
-        VIP_B["VIP 2: 10.0.10.116:80<br/>Gateway B (App B)"]
+flowchart LR
+    ClientA([Client A])
+    ClientB([Client B])
+
+    subgraph ENI["Single Secondary ENI (BNK_EXT: 10.0.10.0/24)"]
+        VIP_A["VIP 1: 10.0.10.115:80<br/>Gateway A"]
+        VIP_B["VIP 2: 10.0.10.116:80<br/>Gateway B"]
     end
 
-    subgraph TMM_Listeners["TMM Listeners"]
-        TMM_1["Listener A (Virtual Server A)"]
-        TMM_2["Listener B (Virtual Server B)"]
+    subgraph TMMCore["F5 TMM Microkernel"]
+        VS_A["Virtual Server A"]
+        VS_B["Virtual Server B"]
+        VIP_A --> VS_A
+        VIP_B --> VS_B
     end
 
-    subgraph Apps["Isolated Backend Pods"]
-        PodA["App A Workload"]
-        PodB["App B Workload"]
+    subgraph Workloads["Isolated Workloads"]
+        PodA[("App A Pods<br/>Namespace A")]
+        PodB[("App B Pods<br/>Namespace B")]
+        VS_A --> PodA
+        VS_B --> PodB
     end
 
-    ClientA["Client A"] -->|curl 10.0.10.115| VIP_A --> TMM_1 --> PodA
-    ClientB["Client B"] -->|curl 10.0.10.116| VIP_B --> TMM_2 --> PodB
+    ClientA -->|Traffic to App A| VIP_A
+    ClientB -->|Traffic to App B| VIP_B
 ```
 
 ---
@@ -323,25 +381,29 @@ sequenceDiagram
 
 ### `ai-inference-e2e` (VIP `.112`)
 - **Objective**: Validates end-to-end LLM inference through BNK: a vLLM Deployment serving `Llama-3-8B-Instruct` on the GPU node group (requires a `gpu: true` node group and an `hf-token` Secret for the gated model).
-- **Traffic Path**: Jumphost `POST /v1/chat/completions` with `stream=true` $	o$ TMM VIP (`<subnet>.112`, `Gateway` + `HTTPRoute`) $	o$ vLLM pods on GPU nodes.
+- **Traffic Path**: Jumphost `POST /v1/chat/completions` with `stream=true` $\to$ TMM VIP (`<subnet>.112`, `Gateway` + `HTTPRoute`) $\to$ vLLM pods on GPU nodes.
 - **Assertions**: vLLM Deployment Available, Gateway Programmed, HTTPRoute Accepted, then HTTP 200 with SSE framing (`data:` chunks and `[DONE]` terminator) via the VIP.
 - **Synthetic mode** (`ai.synthetic` or `--synthetic`): `llm-d-inference-sim` pods stand in for vLLM. Each pod tokenizes with the real model tokenizer (a `vllm-render` sidecar), serves the profile's Hugging Face id (`llama3` is an alias), and publishes KV-cache events like vLLM: per pod on port 20080, replay on 20081. Endpoint pickers (the F5 EPP, llm-d) connect to each pod as they would to vLLM. For agentic benchmarks with long shared contexts, set `maxNumSeqs` to what the KV cache holds per request (for the 70B profile and 17k-token requests, `maxNumSeqs: 40`) and `timeFactorUnderLoad: 3`, so a busy replica slows down the way a real one does.
 - **Rating**: **Green** on `demo-ai` (real GPU) or with `--synthetic`.
 
 ```mermaid
 flowchart LR
-    Client["Jumphost Test Client<br/>(aiperf engine)"]
-    VIP["BNK Gateway VIP: 10.0.10.112:80<br/>Host: awsbnkctl-aiinference.local"]
-    TMM["TMM Microkernel<br/>HTTPRoute: scn-aiinference-route"]
-    
-    subgraph GPU_Nodes["GPU Worker Node (g5.2xlarge)"]
-        vLLM["vLLM Model Server<br/>meta-llama/Llama-3-8B-Instruct<br/>NVIDIA A10G Tensor Core"]
+    Client([Jumphost Test Client<br/>aiperf Engine])
+
+    subgraph Gateway["F5 BNK AI Gateway (VIP: 10.0.10.112:80)"]
+        direction TB
+        VIP["Gateway VIP: 10.0.10.112:80<br/>Host: awsbnkctl-aiinference.local"]
+        TMM["TMM Microkernel<br/>HTTPRoute: scn-aiinference-route"]
+        VIP --> TMM
+    end
+
+    subgraph InferenceNodes["Inference Worker Group"]
+        Model[("vLLM / Simulator<br/>meta-llama/Llama-3-8B-Instruct")]
     end
 
     Client -->|POST /v1/chat/completions (stream=true)| VIP
-    VIP --> TMM
-    TMM -->|Balanced Inference Traffic| vLLM
-    vLLM -->|SSE Stream (data: {...})| Client
+    TMM -->|Balanced Inference Stream| Model
+    Model -->|SSE Stream: data: {...}| Client
 ```
 
 *(For comprehensive benchmarking, multi-proxy shootouts, and TTFT latency analysis, see [`docs/BENCHMARKS.md`](BENCHMARKS.md).)*
@@ -358,29 +420,29 @@ flowchart LR
 - **Rating**: **Green**.
 
 ```mermaid
-flowchart TD
-    subgraph PodNetwork["Worker Node Pod Network"]
-        ClientPod["Client Pod in Scenario Namespace<br/>(Namespace selected by EgressGateway)"]
-        NodeRouter["Node Routing Policy"]
+flowchart LR
+    subgraph Pods["EKS Worker Node Pod Network"]
+        ClientPod[("Workload Pod<br/>(Selected Namespace)")]
+        Router["Node Routing Policy"]
+        ClientPod --> Router
     end
 
-    subgraph DataPlane["F5 BNK Data Plane"]
-        VXLAN["VXLAN Tunnel Interface<br/>(ext-vlan-infra / int-vlan-infra)"]
-        EGW["EgressGateway + GatewaySettings<br/>AUTOMAP SNAT Engine"]
-        SelfIP["TMM External Self-IP<br/>(10.0.10.224-254)"]
+    subgraph BNK["F5 BNK Data Plane (TMM)"]
+        Tunnel["VXLAN Tunnel Interface<br/>(ext-vlan-infra / int-vlan-infra)"]
+        SNAT["EgressGateway & AUTOMAP<br/>SNAT Engine"]
+        SelfIP["External Self-IP<br/>(10.0.10.224 - .254)"]
+        Tunnel --> SNAT --> SelfIP
     end
 
-    subgraph CloudEgress["AWS Cloud Egress"]
+    subgraph Egress["AWS Network Egress"]
         NAT["AWS NAT Gateway"]
-        Internet["External Public API / Registry"]
+        Internet([External SaaS API / Registry])
+        NAT --> Internet
     end
 
-    ClientPod --> NodeRouter
-    NodeRouter -->|Traffic Destined Outside VPC| VXLAN
-    NodeRouter -.->|Intra-VPC Traffic| InternalTarget["Stays on Node Network"]
-    VXLAN --> EGW
-    EGW -->|SNAT to Self-IP| SelfIP
-    SelfIP --> NAT --> Internet
+    Router -->|Out-of-VPC Egress Traffic| Tunnel
+    Router -.->|Intra-VPC Traffic (Bypasses TMM)| LocalVPC[("Local VPC Resources")]
+    SelfIP --> NAT
 ```
 
 ---
@@ -393,15 +455,25 @@ flowchart TD
 - **Rating**: **Green**.
 
 ```mermaid
-flowchart TD
-    Operator["Operator / Scenario Trigger<br/>spec.coreCollection.enabled=true"] --> CNE["CNEInstance Patch<br/>f5-cne-system/<cluster>-bnk"]
-    CNE --> FLO["F5 Lifecycle Operator (FLO)<br/>Reconciliation Engine"]
-    
-    subgraph CrashInfra["Crash Collection Stack"]
-        FLO -->|Applies| CoreCR["CoreMond CR (f5-cne-core)"]
-        FLO -->|Rolls| CoreDS["CoreMond DaemonSet (app=f5-coremond)"]
-        FLO -->|Updates Mounts| TMM_DS["f5-tmm DaemonSet"]
-        TMM_DS --> HostCrash["Host Crash Directory (/var/crash)<br/>Mounted into TMM Container"]
+flowchart LR
+    Trigger([Operator Patch<br/>coreCollection.enabled=true]) --> CNE["CNEInstance Patch<br/>(f5-cne-system)"]
+
+    subgraph Reconcile["F5 Lifecycle Operator (FLO)"]
+        FLO["FLO Controller"]
+        CNE --> FLO
+    end
+
+    subgraph DaemonSets["Cluster DaemonSets"]
+        CoreDS["CoreMond DaemonSet<br/>(app=f5-coremond)"]
+        TMM_DS["TMM DaemonSet<br/>(app=f5-tmm)"]
+        FLO -->|Applies CoreMond CR| CoreDS
+        FLO -->|Mounts Crash Volume| TMM_DS
+    end
+
+    subgraph Storage["Host Filesystem"]
+        CrashDir[("/var/crash<br/>Crash Dump Storage")]
+        TMM_DS --> CrashDir
+        CoreDS --> CrashDir
     end
 ```
 
@@ -417,45 +489,39 @@ In addition to automated tests, `awsbnkctl` includes 5 turnkey demonstrations wi
 - **Traffic Path**: Bedrock AgentCore Agent $\to$ Private Route 53 (`bnk-ingress.bnk-demo.internal`) $\to$ BNK Gateway VIP (`10.0.10.150:80/443`) $\to$ MCP Finance Tool Pod (`forecast`, `get_account_balance`).
 
 ```mermaid
-flowchart TD
-    subgraph Callers["AI Callers"]
-        Agent["Amazon Bedrock AgentCore Agent<br/>(VPC Mode, Private Subnet)"]
-        ExtCaller["External Caller / Jumphost<br/>(Unmanaged Script)"]
-        Stranger["Out-of-VPC Caller<br/>(Outside 10.0.0.0/16)"]
+flowchart LR
+    subgraph Callers["AI Agents & Callers"]
+        Agent([Amazon Bedrock AgentCore<br/>Private VPC Agent])
+        ExtCaller([External Caller / Script<br/>Jumphost])
+        Stranger([Out-of-VPC Source<br/>Outside 10.0.0.0/16])
     end
 
-    subgraph BNK_Security["F5 BNK Security & Governance Gateway (10.0.10.150)"]
-        L4_FW["L4 Firewall (F5BigFwPolicy)<br/>Resets traffic outside 10.0.0.0/16"]
-        Auth["Bearer Token Validator<br/>401 if missing token"]
-        ToolGov["Privileged Tool Rule<br/>Blocks get_account_balance for external (403)"]
-        RateLimit["Rate Limiting iRule<br/>10 req/min -> 429 on 11th"]
-        MCP_Persist["F5BigPersistenceProfile<br/>Pins MCP Session ID to pod"]
+    subgraph BNK["F5 BNK Governance Gateway (VIP: 10.0.10.150)"]
+        direction TB
+        FW["1. L4 Firewall Policy<br/>Drop out-of-VPC traffic"]
+        Auth["2. Bearer Authentication<br/>Require valid agent token"]
+        ToolGov["3. Tool Access Rule<br/>Block privileged tools for external"]
+        RateLimit["4. Rate Limiting iRule<br/>10 req/min rate limit"]
+        SessionPin["5. Session Persistence<br/>Pin MCP session to pod"]
+
+        FW --> Auth --> ToolGov --> RateLimit --> SessionPin
     end
 
-    subgraph ToolBackend["Kubernetes Tool Cluster"]
-        MCP_Pod["MCP Server Pod<br/>Tools: forecast, get_account_balance"]
+    subgraph Tools["Kubernetes Tool Cluster"]
+        MCPPod[("MCP Server Pod<br/>forecast, get_account_balance")]
     end
 
-    subgraph Telemetry["Observability Stack"]
-        Loki["Loki Server (llm-egress)"]
-        Forge["BNK Forge Web UI<br/>LLM Observability Dashboard"]
+    subgraph Observability["Telemetry Stream"]
+        Loki["Loki Server"]
+        Forge["BNK Forge UI"]
+        Loki --> Forge
     end
 
-    Agent -->|forecast NFLX (Agent Token)| Auth
-    ExtCaller -->|forecast NVDA (Ext Token)| Auth
-    ExtCaller -.->|get_account_balance (Ext Token)| ToolGov
-    Stranger -->|Any Request| L4_FW
-    
-    L4_FW -->|Reject| Drop["TCP Reset"]
-    Auth -->|Valid| ToolGov
-    ToolGov -->|Allowed| RateLimit
-    ToolGov -->|Denied| Forbidden["403 Forbidden"]
-    RateLimit -->|Under Quota| MCP_Persist
-    RateLimit -->|Over Quota| RateLimitExceeded["429 Too Many Requests"]
-    MCP_Persist --> MCP_Pod
-    
-    BNK_Security -.->|Stream BNKGOV Records| Loki
-    Loki -.->|Real-time Metrics| Forge
+    Stranger -->|Any Traffic| FW
+    Agent -->|Authorized Call| FW
+    ExtCaller -->|External Call| FW
+    SessionPin -->|Approved Execution| MCPPod
+    BNK -.->|Stream Audit Events| Loki
 ```
 
 ---
@@ -508,17 +574,20 @@ flowchart LR
 - **Validation**: CIS reconciles `VirtualServer` CRD and routes traffic through the external BIG-IP appliance.
 
 ```mermaid
-flowchart TD
-    subgraph InCluster["EKS Cluster (kube-system & demo-bigip-cis)"]
-        CIS["k8s-bigip-ctlr (CIS)<br/>Watching VirtualServer CRD"]
-        Backend["traefik/whoami Pods<br/>(app=cis-backend)"]
-    end
+flowchart LR
+    Client([Client / Jumphost])
 
     subgraph ExternalAppliance["External BIG-IP Virtual Edition (VE)"]
         VE["BIG-IP VE Appliance<br/>VIP: 10.0.10.120"]
     end
 
-    Client["Client / Jumphost"] -->|curl 10.0.10.120| VE
+    subgraph InCluster["EKS Cluster (kube-system & demo-bigip-cis)"]
+        direction TB
+        CIS["k8s-bigip-ctlr (CIS)<br/>Watching VirtualServer CRD"]
+        Backend[("traefik/whoami Pods<br/>app=cis-backend")]
+    end
+
+    Client -->|curl 10.0.10.120| VE
     CIS -.->|AS3 API Declarations| VE
     VE -->|Direct Cluster Pod Routing| Backend
 ```
@@ -534,20 +603,21 @@ flowchart TD
 - **Validation**: All 3 paths return HTTP 200 with the backend `Hostname` marker, proving seamless side-by-side migration.
 
 ```mermaid
-flowchart TD
-    Client["Test Client / Jumphost"]
+flowchart LR
+    Client([Test Client / Jumphost])
 
     subgraph IngressControllers["Simultaneous Ingress Front-Ends"]
+        direction TB
         BNK_GW["F5 BNK Gateway VIP: 10.0.10.113<br/>Host: web.bnk.migration.local"]
         Nginx_Ing["ingress-nginx Controller<br/>Host: web.nginx.migration.local"]
         HAProxy_Ing["haproxy-ingress Controller<br/>Host: web.haproxy.migration.local"]
     end
 
-    SharedBackend["Shared Backend Service<br/>traefik/whoami Deployment"]
+    SharedBackend[("Shared Backend Service<br/>traefik/whoami Deployment")]
 
     Client -->|Path 1: Modern Gateway API| BNK_GW --> SharedBackend
-    Client -->|Path 2: Legacy Ingress Nginx| Nginx_Ing --> SharedBackend
-    Client -->|Path 3: Legacy HAProxy Ingress| HAProxy_Ing --> SharedBackend
+    Client -->|Path 2: Ingress Nginx| Nginx_Ing --> SharedBackend
+    Client -->|Path 3: HAProxy Ingress| HAProxy_Ing --> SharedBackend
 ```
 
 ---

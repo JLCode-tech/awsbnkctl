@@ -22,43 +22,41 @@ Modern GenAI inference serving imposes unique demands on networking infrastructu
 Because F5 BNK's Gateway VIP lives on an isolated, non-routable secondary data-plane subnet (`BNK_EXT`, e.g. `10.0.10.0/24`), external workstations cannot hit the VIP directly. `awsbnkctl` solves this with a secure bidirectional architecture:
 
 ```mermaid
-flowchart TD
-    subgraph Operator["Operator Workstation / Laptop"]
-        UI["Forge Web UI (:3000)<br/>Real-time Charts & Controls"]
-        ForgeAPI["Forge REST/WebSocket (:8000)<br/>Task Dispatcher & Telemetry DB"]
-        Daemon["awsbnkctl benchmark daemon<br/>Persistent Agent Worker"]
+flowchart LR
+    subgraph Operator["Operator Workstation"]
+        direction TB
+        UI["Forge Web UI (:3000)<br/>Dashboard & Sweeps"]
+        Server["Forge Server (:8000)<br/>Dispatcher & Telemetry DB"]
+        Daemon["awsbnkctl daemon<br/>Persistent Agent Listener"]
+        UI --> Server
+        Server <--> Daemon
     end
 
-    subgraph AWSCloud["AWS VPC Private Data Plane"]
-        EICE["AWS EC2 Instance Connect Endpoint (EICE)<br/>Ephemeral IAM-Authenticated SSH"]
-        
-        subgraph JumphostNode["EC2 In-VPC Jumphost"]
-            JH["Jumphost (t3.xlarge)<br/>Python 3.11 + aiperf >= 0.10.0"]
-            JHENI["Secondary ENI (10.0.10.200)<br/>Direct L2/L3 in BNK_EXT Subnet"]
-        end
-
-        subgraph BNKIngress["F5 BIG-IP Next for Kubernetes (TMM)"]
-            VIP["BNK Gateway VIP: 10.0.10.100:80<br/>HTTPRoute: Host awsbnkctl-aiinference.local"]
-            TMM["TMM Pod (host-device / DPDK)<br/>Prefix Caching & Rate Limiting"]
-        end
-
-        subgraph ModelServing["Inference Cluster (EKS / SageMaker)"]
-            vLLM["vLLM / LMI GPU Pods<br/>Llama-3.1-8B / 70B"]
-            EPP["Disaggregated Prefill & Decode Workers<br/>/metrics Scraped via K8s Pod Proxy"]
-        end
+    subgraph VPC["AWS VPC Private Data Plane"]
+        direction TB
+        EICE["AWS EICE<br/>(IAM SSH Tunnel)"]
+        JH["In-VPC Jumphost<br/>(aiperf Runner: 10.0.10.200)"]
+        EICE --> JH
     end
 
-    UI -->|Run Benchmark| ForgeAPI
-    ForgeAPI <-->|WebSocket: agent dispatch & results| Daemon
-    Daemon -->|Ephemeral EICE Tunnel| EICE
-    EICE -->|SSH Run Commands| JH
-    JH --> JHENI
-    JHENI -->|L7 SSE Chat Completions| VIP
-    VIP --> TMM
-    TMM -->|Balanced Inference Traffic| vLLM
+    subgraph Ingress["F5 BNK Data Plane (Secondary ENI)"]
+        direction TB
+        VIP["Gateway VIP: 10.0.10.100:80<br/>(Host: awsbnkctl-aiinference.local)"]
+        TMM["TMM Microkernel (DPDK)<br/>Prefix Routing & Rate Limiting"]
+        VIP --> TMM
+    end
+
+    subgraph Serving["Inference Cluster (EKS)"]
+        direction TB
+        vLLM[("vLLM Model Serving<br/>Llama-3.1-8B GPU Pod")]
+        EPP[("Prefill & Decode Endpoints<br/>Prometheus /metrics")]
+    end
+
+    Daemon -->|Secure Command Tunnel| EICE
+    JH -->|L7 SSE Inference Stream| VIP
+    TMM -->|Inference Forwarding| vLLM
     TMM -->|Disaggregated Routing| EPP
-    Daemon -.->|Kubernetes API Proxy Scrapes| EPP
-    Daemon -->|POST /api/benchmarks/results| ForgeAPI
+    Daemon -.->|Scrape Prometheus Metrics| EPP
 ```
 
 ### Architecture Highlights
@@ -111,7 +109,7 @@ awsbnkctl benchmark run -f cluster.yaml --scenarios all
 
 ## 5. Native Forge Scenarios (`--scenario`)
 
-For exhaustive benchmarking and customer PoCs, `awsbnkctl` implements the full native Forge benchmark engine (WS-C1/WS-C2). Each scenario automatically expands into an ordered sequence of child runs (e.g. concurrency sweeps, multi-turn phases, or multi-round burst probes).
+For exhaustive performance benchmarking and characterization, `awsbnkctl` implements the full native Forge benchmark engine (WS-C1/WS-C2). Each scenario automatically expands into an ordered sequence of child runs (e.g. concurrency sweeps, multi-turn phases, or multi-round burst probes).
 
 ```bash
 # Run the baseline concurrency sweep
@@ -142,27 +140,27 @@ awsbnkctl benchmark run -f cluster.yaml --scenario prefix-cache,mooncake
 
 ## 6. Multi-Proxy Shootout Mode (`--proxies`)
 
-One of the most powerful capabilities for F5 sales engineers and architects is the **Multi-Proxy Shootout**. It runs identical synthetic or trace workloads against F5 BNK and competing proxy architectures deployed in the same cluster:
+The **Multi-Proxy Shootout** evaluates comparative performance by running identical synthetic or trace workloads against F5 BNK and alternative ingress architectures deployed side-by-side in the same cluster:
 
 ```mermaid
 flowchart LR
-    Client["aiperf Test Driver<br/>(EC2 Jumphost)"]
-    
-    subgraph Proxies["Proxy Competitors"]
-        BNK["F5 BNK (TMM)<br/>DPDK/Host-Device"]
+    Client([In-VPC Jumphost<br/>aiperf Runner])
+
+    subgraph Proxies["Proxy Architectures Under Test"]
+        BNK["F5 BNK (TMM)<br/>DPDK / Secondary ENI"]
         Envoy["Envoy Gateway<br/>Internal NLB"]
         HAProxy["HAProxy Ingress<br/>Internal NLB"]
         NGINX["NGINX Ingress<br/>Internal NLB"]
-        NodePort["Direct vLLM Pod<br/>(Baseline)"]
+        NodePort["Direct Pod IP<br/>(Direct Baseline)"]
     end
 
-    Backend["vLLM Model Serving<br/>Llama-3.1-8B GPU Pod"]
+    Backend[("vLLM Model Server<br/>Llama-3.1-8B GPU Pod")]
 
-    Client -->|Run 1| BNK --> Backend
-    Client -->|Run 2| Envoy --> Backend
-    Client -->|Run 3| HAProxy --> Backend
-    Client -->|Run 4| NGINX --> Backend
-    Client -->|Run 5| NodePort --> Backend
+    Client -->|Benchmark Run 1| BNK --> Backend
+    Client -->|Benchmark Run 2| Envoy --> Backend
+    Client -->|Benchmark Run 3| HAProxy --> Backend
+    Client -->|Benchmark Run 4| NGINX --> Backend
+    Client -->|Benchmark Run 5| NodePort --> Backend
 ```
 
 ### Running a Shootout
@@ -257,7 +255,7 @@ In synthetic mode, `awsbnkctl` simulates a realistic vLLM `Llama-3-8B` inference
    ```
 3. Open `http://localhost:3000` (Forge Web UI), navigate to **Benchmarks** → **Run Benchmark**, select the Jumphost Agent, choose `prefix-cache`, and click **Start**.
 
-### Scenario B: Fully Automated CLI Sweep for Customer Demos
+### Scenario B: Fully Automated CLI Sweep for Comparative Benchmarks
 ```bash
 # 1. Verify environment
 awsbnkctl benchmark status -f cluster.yaml
@@ -266,6 +264,6 @@ awsbnkctl benchmark status -f cluster.yaml
 awsbnkctl benchmark run -f cluster.yaml \
   --proxies f5-bnk,envoy,haproxy \
   --scenario baseline,prefix-cache \
-  --run-label customer-poc-shootout \
+  --run-label proxy-shootout \
   --genai-out /tmp/shootout.json
 ```
