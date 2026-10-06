@@ -103,6 +103,7 @@ awsbnkctl scenarios clean <scenario-name> -f my-cluster.yaml
 - **Objective**: Validates end-to-end LLM inference through BNK: a vLLM Deployment serving `Llama-3-8B-Instruct` on the GPU node group (requires a `gpu: true` node group and an `hf-token` Secret for the gated model).
 - **Traffic Path**: Jumphost `POST /v1/chat/completions` with `stream=true` $\to$ TMM VIP (`Gateway` + `HTTPRoute`) $\to$ vLLM pods on GPU nodes.
 - **Assertions**: vLLM Deployment Available, Gateway Programmed, HTTPRoute Accepted, then HTTP 200 with SSE framing (`data:` chunks and a `[DONE]` terminator) via the VIP.
+- **Synthetic mode** (`ai.synthetic` or `--synthetic`): `llm-d-inference-sim` pods stand in for vLLM. Each pod tokenizes with the real model tokenizer (a `vllm-render` sidecar), serves the profile's Hugging Face id (`llama3` is an alias), and publishes KV-cache events like vLLM: per pod on port 20080, replay on 20081. Endpoint pickers (the F5 EPP, llm-d) connect to each pod as they would to vLLM. For agentic benchmarks with long shared contexts, set `maxNumSeqs` to what the KV cache holds per request (for the 70B profile and 17k-token requests, `maxNumSeqs: 40`) and `timeFactorUnderLoad: 3`, so a busy replica slows down the way a real one does.
 
 ---
 

@@ -132,11 +132,13 @@ ai:
 	if !flagBenchSynthetic {
 		t.Error("flagBenchSynthetic = false, want true")
 	}
-	if flagBenchModel != "custom-llama" {
-		t.Errorf("flagBenchModel = %q, want 'custom-llama'", flagBenchModel)
+	// The simulator's primary model (its HF id), not the alias: KV events carry it.
+	if flagBenchModel != "NousResearch/Meta-Llama-3.1-8B-Instruct" {
+		t.Errorf("flagBenchModel = %q, want the profile's HF id", flagBenchModel)
 	}
-	if flagBenchVIP != "10.0.10.100" {
-		t.Errorf("flagBenchVIP = %q, want '10.0.10.100'", flagBenchVIP)
+	// The ai-inference-e2e Gateway VIP (.112), not the cluster default (.100).
+	if flagBenchVIP != "10.0.10.112" {
+		t.Errorf("flagBenchVIP = %q, want '10.0.10.112'", flagBenchVIP)
 	}
 	if flagBenchRegion != "us-west-2" {
 		t.Errorf("flagBenchRegion = %q, want 'us-west-2'", flagBenchRegion)

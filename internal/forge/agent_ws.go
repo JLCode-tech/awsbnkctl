@@ -141,14 +141,20 @@ func (w *BenchmarkAgentWorker) IsConnected() bool {
 func (w *BenchmarkAgentWorker) Run(ctx context.Context) error {
 	base := strings.TrimRight(w.opts.RestURL, "/")
 
-	// 1. Authenticate to Forge
-	token, err := restLogin(ctx, base, w.opts.Creds.restUsername(), w.opts.Creds.restPassword())
-	if err != nil {
-		return fmt.Errorf("forge agent login: %w", err)
+	// 1. Authenticate to Forge. An explicit agent token is enough to
+	// re-register its own agent, so no operator login is needed then (the
+	// token cannot be re-minted without one; a rejected token ends the daemon).
+	var token string
+	if w.opts.AgentToken == "" {
+		var err error
+		token, err = restLogin(ctx, base, w.opts.Creds.restUsername(), w.opts.Creds.restPassword())
+		if err != nil {
+			return fmt.Errorf("forge agent login: %w", err)
+		}
+		w.mu.Lock()
+		w.operatorToken = token
+		w.mu.Unlock()
 	}
-	w.mu.Lock()
-	w.operatorToken = token
-	w.mu.Unlock()
 
 	// 2. Register/upsert the agent record
 	agentResp, err := RegisterBenchmarkAgent(ctx, BenchmarkAgentOptions{
@@ -159,6 +165,7 @@ func (w *BenchmarkAgentWorker) Run(ctx context.Context) error {
 		IPAddress:    w.opts.IPAddress,
 		Tags:         w.opts.Tags,
 		Capabilities: w.opts.Capabilities,
+		Token:        w.opts.AgentToken,
 	})
 	if err != nil {
 		return fmt.Errorf("forge agent register: %w", err)

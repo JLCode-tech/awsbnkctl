@@ -134,7 +134,7 @@ ingress migration, BIG-IP CIS) on a cluster built with `demo.enabled: true`.
 | `k get\|apply\|logs\|exec …` | kubectl equivalents built in, no host kubectl |
 | `down -f <cluster.yaml> --yes` | remove everything `up` created, by tag, even if local state is lost |
 | `doctor` | check credentials and prerequisites; `--backend k8s` adds BNK readiness and the heal detections |
-| `bnk heal -f <cluster.yaml>` | detect and repair cluster plumbing (10 repairs); `--dry-run`, `--only` |
+| `bnk heal -f <cluster.yaml>` | detect and repair cluster plumbing (11 repairs); `--dry-run`, `--only` |
 | `manifest probe [version]` | list what a BNK release manifest ships |
 
 Command and flag reference: [`docs/COMMANDS.md`](docs/COMMANDS.md).

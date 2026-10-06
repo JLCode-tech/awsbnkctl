@@ -47,6 +47,10 @@ spec:
     enabled: true
   intelligentLB:
     enabled: true
+{{- if .EPP }}
+  # F5 Endpoint Picker (BNK 2.4): reconcile F5EPP resources in any namespace.
+  eppNamespaces: ["All"]
+{{- end }}
   tmmReplicas: 1
   advanced:
     coremon:

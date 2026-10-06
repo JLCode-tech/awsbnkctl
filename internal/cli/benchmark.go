@@ -43,6 +43,7 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
+	"github.com/JLCode-tech/awsbnkctl/internal/scenarios/aiinferencee2e"
 )
 
 // discoverProxiesFn is the injectable seam for forge.DiscoverProxies.
@@ -540,8 +541,10 @@ func resolveBenchmarkContext(cmd *cobra.Command) error {
 			flagBenchRegion = cl.Metadata.Region
 		}
 		if flagBenchVIP == "" {
+			// Benchmarks target the ai-inference-e2e Gateway by default (its Host
+			// header is the daemon default), which listens on its own VIP.
 			if v, err := cl.DefaultVIP(); err == nil && v != "" {
-				flagBenchVIP = v
+				flagBenchVIP = aiinferencee2e.GatewayVIP(v)
 			}
 		}
 		if cl.SyntheticAIEnabled() {
@@ -550,8 +553,10 @@ func resolveBenchmarkContext(cmd *cobra.Command) error {
 		if flagBenchModel == "" {
 			if cl.AI != nil && cl.AI.SageMaker != nil && cl.AI.SageMaker.Model != "" {
 				flagBenchModel = cl.AI.SageMaker.Model
-			} else if cl.AI != nil && cl.AI.Synthetic != nil && cl.AI.Synthetic.ServedModelName != "" {
-				flagBenchModel = cl.AI.Synthetic.ServedModelName
+			} else if cl.SyntheticAIEnabled() {
+				// The simulator serves the HF id first and labels its KV events with it,
+				// so endpoint pickers match requests for it (llama3 stays an alias).
+				flagBenchModel = cl.ResolvedSynthetic().Model
 			} else if flagBenchSynthetic {
 				flagBenchModel = "llama3"
 			}
@@ -1063,6 +1068,7 @@ func runBenchmarkSingle(cmd *cobra.Command, probOpts jumphost.ProbeOptions, cred
 	rawPushOpts := forge.RawAiperfPushOptions{
 		RestURL:           flagBenchForgeURL,
 		Creds:             creds,
+		Tags:              benchSimulatorTags(),
 		AgentToken:        graph.agentToken,
 		RawJSON:           []byte(result.RawJSON),
 		GenAI:             result.GenAI,
@@ -1084,6 +1090,7 @@ func runBenchmarkSingle(cmd *cobra.Command, probOpts jumphost.ProbeOptions, cred
 		pushOpts := forge.BenchmarkPushOptions{
 			RestURL:           flagBenchForgeURL,
 			Creds:             creds,
+			Tags:              benchSimulatorTags(),
 			AgentToken:        graph.agentToken,
 			ResultID:          flagBenchResultID,
 			RunLabel:          flagBenchRunLabel,
@@ -1358,6 +1365,7 @@ func pushAiperfResult(
 	rawPushOpts := forge.RawAiperfPushOptions{
 		RestURL:           flagBenchForgeURL,
 		Creds:             creds,
+		Tags:              benchSimulatorTags(),
 		AgentToken:        tok,
 		RawJSON:           []byte(result.RawJSON),
 		GenAI:             result.GenAI,
@@ -1380,6 +1388,7 @@ func pushAiperfResult(
 		pushOpts := forge.BenchmarkPushOptions{
 			RestURL:           flagBenchForgeURL,
 			Creds:             creds,
+			Tags:              benchSimulatorTags(),
 			AgentToken:        tok,
 			RunLabel:          label,
 			Proxy:             effectiveProxy,
@@ -2100,4 +2109,17 @@ func formatRunIDs(ids []int) string {
 		parts[i] = fmt.Sprintf("%d", id)
 	}
 	return strings.Join(parts, ",")
+}
+
+// benchSimulatorTags labels pushed results with the simulated model profile when
+// --config points at a cluster that runs the simulator (nil otherwise).
+func benchSimulatorTags() map[string]string {
+	if flagBenchConfig == "" {
+		return nil
+	}
+	cl, err := intent.Load(flagBenchConfig)
+	if err != nil {
+		return nil
+	}
+	return cl.SimulatorTags()
 }

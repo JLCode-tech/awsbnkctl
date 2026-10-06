@@ -10,6 +10,7 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
+	"github.com/JLCode-tech/awsbnkctl/internal/bnkconst"
 )
 
 // seedMockEKSCluster adds a cluster with OIDC identity to the mock EKS
@@ -426,5 +427,48 @@ func TestOIDCFederatedTrustPolicy(t *testing.T) {
 		if !strings.Contains(policy, want) {
 			t.Errorf("trust policy missing %q: %s", want, policy)
 		}
+	}
+}
+
+// With a jumphost SG in state, phase 18 opens exactly the benchmark proxy
+// NodePorts (single ports, not a range) from that SG only, and down revokes them.
+func TestPhase18IrsaOidc_BenchmarkProxyPortsFromJumphostOnly(t *testing.T) {
+	awsmw.ResetForTest()
+	st, _ := state.Load(t.TempDir())
+	cl := testCluster()
+	st.Set("SG_BNK_DATA", "sg-bnk-data-id")
+	st.Set("EKS_SECURITY_GROUP", "sg-eks-cluster-id")
+	st.Set("JUMPHOST_SG_ID", "sg-jumphost-id")
+	oidcARN := "arn:aws:iam::111122223333:oidc-provider/oidc.eks.ap-southeast-2.amazonaws.com/id/TESTOIDC"
+	st.Set("OIDC_PROVIDER_ARN", oidcARN)
+	iamMock := newMockIAM()
+	iamMock.oidcProviders[oidcARN] = "https://oidc.eks.ap-southeast-2.amazonaws.com/id/TESTOIDC"
+	ec2Mock := &mockEC2{}
+	eksMock := newMockEKS()
+	seedMockEKSCluster(eksMock, cl.Metadata.Name)
+	clients := &Clients{EC2: ec2Mock, STS: &mockSTSImpl{accountID: "111122223333"}, IAM: iamMock, EKS: eksMock, Profile: "test"}
+
+	if err := Phase18IRSAOIDC(context.Background(), cl, st, clients, false); err != nil {
+		t.Fatalf("Phase18IRSAOIDC: %v", err)
+	}
+	want := 2 + len(bnkconst.BenchmarkProxyNodePorts)
+	if len(ec2Mock.authorizeIngressInputs) != want {
+		t.Fatalf("authorize calls = %d, want %d", len(ec2Mock.authorizeIngressInputs), want)
+	}
+	for i, p := range bnkconst.BenchmarkProxyNodePorts {
+		in := ec2Mock.authorizeIngressInputs[2+i]
+		perm := in.IpPermissions[0]
+		if *in.GroupId != "sg-eks-cluster-id" || *perm.IpProtocol != "tcp" ||
+			*perm.FromPort != p.NodePort || *perm.ToPort != p.NodePort ||
+			*perm.UserIdGroupPairs[0].GroupId != "sg-jumphost-id" || len(perm.IpRanges) != 0 {
+			t.Errorf("%s rule = %+v, want tcp/%d from sg-jumphost-id only", p.Proxy, perm, p.NodePort)
+		}
+	}
+
+	if err := Phase18IrsaOidcDown(context.Background(), cl, st, clients, true); err != nil {
+		t.Fatalf("Phase18IrsaOidcDown: %v", err)
+	}
+	if got := len(ec2Mock.revokeIngressInputs); got != want {
+		t.Errorf("revoke calls = %d, want %d", got, want)
 	}
 }
