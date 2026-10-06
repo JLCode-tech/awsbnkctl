@@ -720,7 +720,21 @@
     "BNKNetPolicy",
     "cwatch",
     "socat",
-    "zerolog"
+    "zerolog",
+    "bottlenecked",
+    "mooncake",
+    "Mooncake",
+    "nodeport",
+    "JHENI",
+    "whoami",
+    "h2c",
+    "Bedrock",
+    "Loki",
+    "AgentCore",
+    "autonumber",
+    "ctlr",
+    "udpl4",
+    "traefik"
   ],
   "ignorePaths": [
     "go.sum",

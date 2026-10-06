@@ -87,7 +87,8 @@ Every `forge` command takes `-f <cluster.yaml>` and `--forge-mcp-url`. Benchmark
 `awsbnkctl up --register-with-forge` registers after a successful apply; `down`
 unregisters unless `--keep-forge-link` is passed. The binary is an MCP *client*
 to Forge; it does not ship an MCP server. See
-[`FORGE_INTEGRATION.md`](FORGE_INTEGRATION.md).
+[`BENCHMARKS.md`](BENCHMARKS.md) for benchmark presets and proxy shootouts, and
+[`FORGE_INTEGRATION.md`](FORGE_INTEGRATION.md) for Forge integration details.
 
 ## Agentic workflow
 
