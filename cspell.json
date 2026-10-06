@@ -733,7 +733,8 @@
     "AgentCore",
     "autonumber",
     "ctlr",
-    "udpl4"
+    "udpl4",
+    "traefik"
   ],
   "ignorePaths": [
     "go.sum",
