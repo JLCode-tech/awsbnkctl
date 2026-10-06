@@ -160,15 +160,21 @@ func TestBenchmarkDaemon_EndToEndMock(t *testing.T) {
 		errCh <- cmd.RunE(cmd, []string{})
 	}()
 
-	// Wait for connection
-	time.Sleep(150 * time.Millisecond)
-
-	mu.Lock()
-	conn := wsConn
-	mu.Unlock()
+	// Wait for connection with polling
+	var conn *websocket.Conn
+	connDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(connDeadline) {
+		mu.Lock()
+		conn = wsConn
+		mu.Unlock()
+		if conn != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	if conn == nil {
-		t.Fatalf("WebSocket did not connect to mock server")
+		t.Fatalf("WebSocket did not connect to mock server within 3s")
 	}
 
 	// Trigger a run from mock Forge
@@ -184,13 +190,20 @@ func TestBenchmarkDaemon_EndToEndMock(t *testing.T) {
 		t.Fatalf("WriteJSON run failed: %v", err)
 	}
 
-	// Wait for run completion to reach mock Forge
-	time.Sleep(200 * time.Millisecond)
-
-	mu.Lock()
-	hbCount := receivedHeartbeats
-	completed := receivedCompleted
-	mu.Unlock()
+	// Wait for run completion to reach mock Forge with polling
+	var completed map[string]any
+	var hbCount int
+	completionDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(completionDeadline) {
+		mu.Lock()
+		hbCount = receivedHeartbeats
+		completed = receivedCompleted
+		mu.Unlock()
+		if completed != nil && hbCount > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	if hbCount == 0 {
 		t.Errorf("expected heartbeats, got 0")
