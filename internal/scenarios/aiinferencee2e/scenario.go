@@ -21,7 +21,8 @@
 //  1. Wait vLLM Deployment Available (GPU model load takes several minutes;
 //     up to 20 min to absorb a liveness restart during cold model load).
 //  2. Wait Gateway scn-aiinference-gateway Programmed=True.
-//  3. Wait HTTPRoute scn-aiinference-route Accepted=True.
+//  3. Wait HTTPRoute scn-aiinference-route Accepted=True (BNK 2.4: and F5EPP
+//     vllm-pool-epp Available=True).
 //  4. Live HTTP probe via jumphost: POST /v1/chat/completions with stream=true,
 //     assert HTTP 200 + SSE framing (data: prefix + [DONE] terminator).
 //     The probe is retried for up to 5 minutes (15 s between attempts) so that
@@ -33,10 +34,13 @@ package aiinferencee2e
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -48,11 +52,18 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/jumphost"
+	k8sapply "github.com/JLCode-tech/awsbnkctl/internal/k8s"
+	"github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
 )
 
 //go:embed manifests/*.yaml
 var manifestFS embed.FS
+
+// simKVRelay is the KV-event relay sidecar script (see SimKVEventsEndpoint).
+//
+//go:embed sim_kv_relay.py
+var simKVRelay string
 
 const (
 	scnName      = "ai-inference-e2e"
@@ -114,6 +125,9 @@ Applies 5 templated manifests into the scenario namespace:
   vLLM Deployment (GPU nodeSelector + nvidia.com/gpu taint toleration,
   nvidia.com/gpu: "1", serves meta-llama/Meta-Llama-3-8B-Instruct) + Service,
   Gateway (spec.addresses=[VIP]), HTTPRoute (-> vllm:80).
+  BNK 2.4: the route's backend is InferencePool vllm-pool, fronted by F5EPP
+  vllm-pool-epp (the F5 Endpoint Picker); the Inference Extension CRDs are
+  installed when absent.
 
 HuggingFace auth: create a Secret named "hf-token" with key "token" before
 running if the model is gated. The Secret is optional in the Deployment.
@@ -121,7 +135,8 @@ running if the model is gated. The Secret is optional in the Deployment.
 Verify order:
   1. Wait vLLM Deployment Available (GPU model load -- up to 20 min).
   2. Wait Gateway scn-aiinference-gateway Programmed=True.
-  3. Wait HTTPRoute scn-aiinference-route Accepted=True.
+  3. Wait HTTPRoute scn-aiinference-route Accepted=True (BNK 2.4: and F5EPP
+     vllm-pool-epp Available=True).
   4. POST /v1/chat/completions (stream=true) via jumphost curl through the VIP;
      assert HTTP 200 + SSE framing (data: chunks + [DONE] terminator).
      Retried for up to 5 min (15 s between attempts) for cold-start resilience.
@@ -132,6 +147,18 @@ Cleanup: delete the scenario namespace (idempotent).
 `)
 }
 
+// SimKVEventsEndpoint is where the simulator publishes KV-cache events. The simulator
+// connects out while vLLM listens, so a relay sidecar takes the events here and serves
+// them on :20080 like vLLM; the simulator serves replay on :20081 itself.
+const SimKVEventsEndpoint = "tcp://127.0.0.1:5557"
+
+// SimKVRelayImage runs the KV-event relay sidecar (stdlib Python, no packages).
+const SimKVRelayImage = "python:3.12-slim"
+
+// SimRenderImage runs vLLM's render server next to the simulator, so the simulator tokenizes
+// like vLLM (CPU build; tokenizer and chat template only).
+const SimRenderImage = "vllm/vllm-openai-cpu:v0.21.0"
+
 // manifestVars holds the template variables for the 5 manifests.
 type manifestVars struct {
 	Namespace        string
@@ -140,12 +167,22 @@ type manifestVars struct {
 	VIP              string
 	ExternalCIDR     string
 	Synthetic        bool
-	Image            string
-	Model            string
-	ServedModelName  string
-	Replicas         int
-	TTFTBaseMs       int
-	ITLMs            int
+	// Sim is ai.synthetic with defaults applied (synthetic mode only).
+	Sim intent.SyntheticSpec
+	// KVEventsEndpoint is where the simulator publishes KV-cache events (the relay sidecar).
+	KVEventsEndpoint string
+	// KVRelayImage, KVRelayScript (indented for the ConfigMap) and KVRelaySHA (pod
+	// annotation, so a script change rolls the pods) describe the relay sidecar.
+	KVRelayImage  string
+	KVRelayScript string
+	KVRelaySHA    string
+	// RenderImage is the vLLM render sidecar the simulator tokenizes with.
+	RenderImage string
+	// EPP routes through the F5 Endpoint Picker (BNK 2.4+): F5EPP + InferencePool, the
+	// HTTPRoute backend is the pool.
+	EPP bool
+	// TokenizerModel is the HF repo the F5 EPP loads the tokenizer from.
+	TokenizerModel string
 }
 
 func (s *scenario) Manifests(ctx *scenarios.Context) ([]string, error) {
@@ -204,6 +241,14 @@ func (s *scenario) Apply(ctx *scenarios.Context) error {
 			}
 		} else {
 			fmt.Fprintf(ctx.Out, "[ai-inference-e2e] HF_TOKEN not set — skipping hf-token Secret creation (gated models will fail to pull)\n")
+		}
+	}
+	if eppEnabled(ctx) {
+		if err := ensureGIECRDs(ctx); err != nil {
+			return fmt.Errorf("installing Gateway API Inference Extension CRDs: %w", err)
+		}
+		if err := ensureFARSecret(ctx, ns); err != nil {
+			return fmt.Errorf("copying the FAR pull secret for the F5 EPP image: %w", err)
 		}
 	}
 	return scenarios.ApplyManifests(ctx, scnName)
@@ -311,6 +356,16 @@ func (s *scenario) Verify(ctx *scenarios.Context) scenarios.Result {
 		Got:         scenarios.ErrString(err),
 	})
 
+	// 3b. BNK 2.4: the F5 Endpoint Picker the InferencePool consults is up.
+	if eppEnabled(ctx) {
+		err = d.WaitConditionFn(ctx.Ctx, ctx, f5EPPGVR, ns, "vllm-pool-epp", "Available", 5*time.Minute)
+		res.Assertions = append(res.Assertions, scenarios.Assertion{
+			Description: "F5EPP vllm-pool-epp Available=True",
+			OK:          err == nil,
+			Got:         scenarios.ErrString(err),
+		})
+	}
+
 	// 4. Live SSE probe: POST /v1/chat/completions (stream=true) through VIP.
 	// Retry until HTTP 200 or the deadline — vLLM's HTTP server may not be
 	// serving immediately after the Deployment reports Available.
@@ -385,23 +440,7 @@ func isSynthetic(ctx *scenarios.Context) bool {
 	if v, ok := ctx.Options["synthetic"]; ok {
 		return strings.EqualFold(v, "true") || v == "1"
 	}
-	if ctx.Cluster != nil && ctx.Cluster.SyntheticAIEnabled() {
-		return true
-	}
-	// Fallback to synthetic if cluster intent has node groups but none are GPU
-	if ctx.Cluster != nil && ctx.Cluster.ClusterSpec != nil && len(ctx.Cluster.ClusterSpec.NodeGroups) > 0 {
-		hasGPU := false
-		for _, ng := range ctx.Cluster.ClusterSpec.NodeGroups {
-			if ng.IsGPU() {
-				hasGPU = true
-				break
-			}
-		}
-		if !hasGPU {
-			return true
-		}
-	}
-	return false
+	return ctx.Cluster.UsesSyntheticAI()
 }
 
 func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
@@ -428,38 +467,20 @@ func buildManifestVars(ctx *scenarios.Context) (manifestVars, error) {
 	// Use .112 — grpc-loadbalance owns .108 (see docs/SCENARIOS.md, "VIP plan").
 	v.VIP = withLastOctet(vip, strconv.Itoa(112))
 
-	synthetic := isSynthetic(ctx)
-	v.Synthetic = synthetic
-	if synthetic {
-		v.Image = intent.DefaultSyntheticImage
-		v.Model = "meta-llama/Meta-Llama-3-8B-Instruct"
-		v.ServedModelName = "llama3"
-		v.Replicas = 1
-		v.TTFTBaseMs = 100
-		v.ITLMs = 15
-
-		if ctx.Cluster != nil && ctx.Cluster.AI != nil && ctx.Cluster.AI.Synthetic != nil {
-			s := ctx.Cluster.AI.Synthetic
-			if s.Image != "" {
-				v.Image = s.Image
-			}
-			if s.Model != "" {
-				v.Model = s.Model
-			}
-			if s.ServedModelName != "" {
-				v.ServedModelName = s.ServedModelName
-			}
-			if s.Replicas > 0 {
-				v.Replicas = s.Replicas
-			}
-			if s.TTFTBaseMs > 0 {
-				v.TTFTBaseMs = s.TTFTBaseMs
-			}
-			if s.ITLMs > 0 {
-				v.ITLMs = s.ITLMs
-			}
-		}
+	v.Synthetic = isSynthetic(ctx)
+	// Ungated copy of the Llama-3-8B tokenizer the GPU branch serves.
+	v.TokenizerModel = "NousResearch/Meta-Llama-3-8B-Instruct"
+	if v.Synthetic {
+		v.Sim = ctx.Cluster.ResolvedSynthetic()
+		v.KVEventsEndpoint = SimKVEventsEndpoint
+		v.KVRelayImage = SimKVRelayImage
+		v.RenderImage = SimRenderImage
+		v.KVRelayScript = indent(simKVRelay, "    ")
+		sum := sha256.Sum256([]byte(simKVRelay))
+		v.KVRelaySHA = hex.EncodeToString(sum[:])[:12]
+		v.TokenizerModel = v.Sim.Model
 	}
+	v.EPP = eppEnabled(ctx)
 
 	return v, nil
 }
@@ -585,4 +606,101 @@ func runVLLMSSEProbe(ctx context.Context, sctx *scenarios.Context, vip string) (
 // shellSingleQuote wraps s in single quotes safe for /bin/sh.
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// Hostname is the HTTPRoute hostname the scenario's Gateway matches; clients
+// (the benchmark daemon) must send it as the Host header.
+const Hostname = scnHostname
+
+// GatewayVIP returns the scenario Gateway's VIP for the cluster's default VIP
+// (same rule buildManifestVars applies), so benchmarks target the address the
+// scenario actually listens on.
+func GatewayVIP(defaultVIP string) string {
+	return withLastOctet(defaultVIP, strconv.Itoa(112))
+}
+
+// eppEnabled reports whether the scenario routes through the F5 Endpoint Picker:
+// BNK 2.4+ (2.3 has no F5EPP), unless --option epp=false.
+func eppEnabled(ctx *scenarios.Context) bool {
+	if v, ok := ctx.Options["epp"]; ok {
+		return strings.EqualFold(v, "true") || v == "1"
+	}
+	return ctx.Cluster != nil && ctx.Cluster.Bnk != nil && !strings.HasPrefix(ctx.Cluster.Bnk.ManifestVersion, "2.3")
+}
+
+// giecrdManifest holds the InferencePool CRD the F5 EPP needs; BNK does not ship it.
+const giecrdManifest = "gie/gateway-api-inference-extension-v1.5.0.yaml"
+
+var f5EPPGVR = schema.GroupVersionResource{Group: "inference.k8s.f5.com", Version: "v1alpha1", Resource: "f5-epps"}
+
+var crdGVR = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
+
+// ensureGIECRDs installs the Gateway API Inference Extension CRDs only when the
+// InferencePool CRD is absent: it is cluster-wide and shared with other inference
+// gateways, so an installed version is never replaced.
+func ensureGIECRDs(ctx *scenarios.Context) error {
+	if ctx.Dynamic == nil {
+		return nil
+	}
+	_, err := ctx.Dynamic.Resource(crdGVR).Get(ctx.Ctx, "inferencepools.inference.networking.k8s.io", metav1.GetOptions{})
+	if err == nil {
+		fmt.Fprintf(ctx.Out, "[ai-inference-e2e] InferencePool CRD present — reusing\n")
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	data, err := manifests.FS.ReadFile(giecrdManifest)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(ctx.WorkspaceDir, "artifacts", "gie")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, filepath.Base(giecrdManifest))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(ctx.Out, "[ai-inference-e2e] installing %s\n", filepath.Base(giecrdManifest))
+	ao := &k8sapply.ApplyOptions{Filename: path, KubeconfigPath: ctx.KubeconfigPath}
+	return ao.Run(ctx.Ctx)
+}
+
+// farSecretName is the FAR pull secret the CNEInstance registry names; the
+// controller puts it on the F5 EPP pod, so it must exist in the pool namespace.
+const farSecretName = "far-secret"
+
+// ensureFARSecret copies the FAR pull secret from the BNK controller namespace
+// into ns, where the F5 EPP pulls its image from repo.f5.com.
+func ensureFARSecret(ctx *scenarios.Context, ns string) error {
+	if ctx.Clientset == nil {
+		return nil
+	}
+	secrets := ctx.Clientset.CoreV1()
+	src, err := secrets.Secrets("f5-cne-system").Get(ctx.Ctx, farSecretName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	dst := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: farSecretName, Namespace: ns},
+		Type:       src.Type,
+		Data:       src.Data,
+	}
+	_, err = secrets.Secrets(ns).Create(ctx.Ctx, dst, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		_, err = secrets.Secrets(ns).Update(ctx.Ctx, dst, metav1.UpdateOptions{})
+	}
+	return err
+}
+
+// indent prefixes every non-empty line of s with prefix (YAML block scalars).
+func indent(s, prefix string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		if l != "" {
+			lines[i] = prefix + l
+		}
+	}
+	return strings.Join(lines, "\n")
 }

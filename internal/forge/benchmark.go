@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -104,6 +105,8 @@ type BenchmarkPushOptions struct {
 	RestURL string
 	// Creds are the forge REST login credentials.
 	Creds RestCreds
+	// AgentToken is the Forge benchmark agent JWT token (overrides Creds login when set).
+	AgentToken string
 	// ResultID is the unique run identifier.
 	ResultID string
 	// RunLabel is a human label (e.g. "ci-run-1").
@@ -114,6 +117,8 @@ type BenchmarkPushOptions struct {
 	AgentName string
 	// AgentHostname is the jumphost's DNS name or IP.
 	AgentHostname string
+	// Tags are stored on the forge run (e.g. intent.Cluster.SimulatorTags).
+	Tags map[string]string
 	// AiperfConfig carries the benchmark config used (forwarded verbatim to forge).
 	AiperfConfig map[string]any
 	// TargetID links the result to a forge Target record (0 = unset, omitted).
@@ -235,11 +240,15 @@ func MapAiperfResultToPayload(result *jumphost.AiperfResult, opts BenchmarkPushO
 	totalInputTokens := int(result.AvgInputTokens * float64(result.TotalRequests))
 	totalOutputTokens := int(result.TotalOutputTokens)
 
+	tags := map[string]string{}
+	for k, v := range opts.Tags {
+		tags[k] = v
+	}
 	payload := BenchmarkResultPayload{
 		ResultID:          resultID,
 		ResultVersion:     "1.0",
 		Labels:            labels,
-		Tags:              map[string]string{},
+		Tags:              tags,
 		RunStart:          result.StartTime,
 		RunEnd:            result.EndTime,
 		DurationSeconds:   result.DurationSeconds,
@@ -300,10 +309,16 @@ func PushBenchmarkResult(ctx context.Context, result *jumphost.AiperfResult, opt
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	// Login to obtain a bearer token using the injectable transport.
-	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
-	if err != nil {
-		return BenchmarkPushResponse{}, fmt.Errorf("forge benchmark push: login: %w", err)
+	var token string
+	if opts.AgentToken != "" {
+		token = opts.AgentToken
+	} else {
+		// Login to obtain a bearer token using the injectable transport.
+		tok, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+		if err != nil {
+			return BenchmarkPushResponse{}, fmt.Errorf("forge benchmark push: login: %w", err)
+		}
+		token = tok
 	}
 
 	payload := MapAiperfResultToPayload(result, opts)
@@ -323,6 +338,8 @@ type RawAiperfPushOptions struct {
 	RestURL string
 	// Creds are the forge REST login credentials.
 	Creds RestCreds
+	// AgentToken is the Forge benchmark agent JWT token (overrides Creds login when set).
+	AgentToken string
 	// RawJSON is the verbatim content of profile_export_aiperf.json.
 	// Must be a valid JSON object (starts with '{').
 	RawJSON []byte
@@ -338,6 +355,8 @@ type RawAiperfPushOptions struct {
 	RunLabel string
 	// DatasetName forwarded as ?dataset_name=.
 	DatasetName string
+	// Tags forwarded as ?tags=<JSON>, stored as the forge run's tags.
+	Tags map[string]string
 	// TargetID forwarded as ?target_id= when non-zero.
 	TargetID int
 	// ConfigID forwarded as ?config_id= when non-zero.
@@ -378,9 +397,15 @@ func PushRawAiperfResult(ctx context.Context, opts RawAiperfPushOptions) (RawAip
 
 	base := strings.TrimRight(opts.RestURL, "/")
 
-	token, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
-	if err != nil {
-		return RawAiperfPushResponse{}, fmt.Errorf("forge raw aiperf push: login: %w", err)
+	var token string
+	if opts.AgentToken != "" {
+		token = opts.AgentToken
+	} else {
+		tok, err := restLogin(ctx, base, opts.Creds.restUsername(), opts.Creds.restPassword())
+		if err != nil {
+			return RawAiperfPushResponse{}, fmt.Errorf("forge raw aiperf push: login: %w", err)
+		}
+		token = tok
 	}
 
 	proxy := opts.Proxy
@@ -433,6 +458,13 @@ func PushRawAiperfResult(ctx context.Context, opts RawAiperfPushOptions) (RawAip
 	}
 	if opts.ProxyDeploymentID != 0 {
 		q.Set("proxy_deployment_id", fmt.Sprintf("%d", opts.ProxyDeploymentID))
+	}
+	if len(opts.Tags) > 0 {
+		tags, err := json.Marshal(opts.Tags)
+		if err != nil {
+			return RawAiperfPushResponse{}, err
+		}
+		q.Set("tags", string(tags))
 	}
 	req.URL.RawQuery = q.Encode()
 

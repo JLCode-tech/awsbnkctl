@@ -59,9 +59,9 @@ func TestRunHeal_EmptyClusterDetectsOnly(t *testing.T) {
 			if s.Healthy || !s.Skipped || !strings.Contains(s.Detail, "bnk heal -f") {
 				t.Errorf("metrics-server: %+v", s)
 			}
-		case "tmm-k8s-routes":
+		case "tmm-k8s-routes", "epp-namespaces":
 			if s.Error == "" { // no dynamic client → detect error, never a fix
-				t.Errorf("tmm-k8s-routes: expected an error without a dynamic client: %+v", s)
+				t.Errorf("%s: expected an error without a dynamic client: %+v", s.Name, s)
 			}
 		case "test-namespace":
 			if !s.Changed || !s.Healthy || !strings.Contains(s.Detail, "created") {

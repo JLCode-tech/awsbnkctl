@@ -17,6 +17,7 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/tags"
+	"github.com/JLCode-tech/awsbnkctl/internal/bnkconst"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
 
@@ -149,7 +150,50 @@ func Phase18IRSAOIDC(ctx context.Context, cl *intent.Cluster, st *state.State, c
 		fmt.Fprintf(os.Stderr, "[phase 18] warning: EKS_SECURITY_GROUP=%q SG_BNK_DATA=%q — skipping cluster SG ingress rule\n", clusterSG, sgBNKData)
 	}
 
+	// ── Step 7: cluster SG ← jumphost SG on the benchmark proxy NodePorts ───
+	// Forge pins a fixed NodePort on each benchmark proxy it deploys next to
+	// BNK (bnkconst.BenchmarkProxyNodePorts); the jumphost runs aiperf against
+	// them. Only those ports are opened, and only to the jumphost SG.
+	if jumphostSG := st.Get("JUMPHOST_SG_ID"); clusterSG != "" && jumphostSG != "" {
+		for _, p := range bnkconst.BenchmarkProxyNodePorts {
+			if err := ensureClusterSGProxyPortIngress(ctx, clients.EC2, clusterSG, jumphostSG, p); err != nil {
+				return fmt.Errorf("phase18: cluster SG benchmark proxy port: %w", err)
+			}
+		}
+	}
+
 	return st.Save()
+}
+
+// ensureClusterSGProxyPortIngress lets the jumphost reach one benchmark proxy
+// NodePort on the cluster nodes. Tolerates duplicate-rule errors (idempotent).
+func ensureClusterSGProxyPortIngress(ctx context.Context, ec2c EC2API, clusterSGID, jumphostSGID string, p bnkconst.BenchmarkProxyPort) error {
+	_, err := ec2c.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId:       ptr(clusterSGID),
+		IpPermissions: []ec2types.IpPermission{proxyPortPermission(jumphostSGID, p, true)},
+	})
+	if err != nil && !isEC2DuplicatePermission(err) {
+		return fmt.Errorf("ec2:AuthorizeSecurityGroupIngress cluster-SG %s ← jumphost SG %s tcp/%d (%s): %w",
+			clusterSGID, jumphostSGID, p.NodePort, p.Proxy, err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 18] cluster SG %s: tcp/%d (%s benchmark proxy) from jumphost SG %s added (or already present)\n",
+		clusterSGID, p.NodePort, p.Proxy, jumphostSGID)
+	return nil
+}
+
+// proxyPortPermission is the single-port rule for one benchmark proxy NodePort.
+func proxyPortPermission(jumphostSGID string, p bnkconst.BenchmarkProxyPort, withDescription bool) ec2types.IpPermission {
+	pair := ec2types.UserIdGroupPair{GroupId: ptr(jumphostSGID)}
+	if withDescription {
+		pair.Description = ptr("allow-jumphost-to-" + p.Proxy + "-benchmark-proxy")
+	}
+	port := p.NodePort
+	return ec2types.IpPermission{
+		IpProtocol:       ptr("tcp"),
+		FromPort:         &port,
+		ToPort:           &port,
+		UserIdGroupPairs: []ec2types.UserIdGroupPair{pair},
+	}
 }
 
 // Phase18IrsaOidcDown deletes the IRSA role and OIDC provider.
@@ -173,6 +217,19 @@ func Phase18IrsaOidcDown(ctx context.Context, cl *intent.Cluster, st *state.Stat
 		}
 		if err := revokeBNKDataSGIngress(ctx, clients.EC2, sgBNKData, clusterSG); err != nil {
 			fmt.Fprintf(os.Stderr, "[phase 18 down] warning: revoke BNK_DATA SG ingress: %v\n", err)
+		}
+	}
+	// The benchmark proxy rules reference the jumphost SG; revoke them so the
+	// jumphost SG can be deleted later in the teardown.
+	if jumphostSG := st.Get("JUMPHOST_SG_ID"); clusterSG != "" && jumphostSG != "" {
+		for _, p := range bnkconst.BenchmarkProxyNodePorts {
+			_, err := clients.EC2.RevokeSecurityGroupIngress(ctx, &ec2.RevokeSecurityGroupIngressInput{
+				GroupId:       ptr(clusterSG),
+				IpPermissions: []ec2types.IpPermission{proxyPortPermission(jumphostSG, p, false)},
+			})
+			if err != nil && !isInvalidPermissionNotFound(err) {
+				fmt.Fprintf(os.Stderr, "[phase 18 down] warning: revoke tcp/%d (%s) from jumphost SG: %v\n", p.NodePort, p.Proxy, err)
+			}
 		}
 	}
 

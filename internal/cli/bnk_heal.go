@@ -58,6 +58,8 @@ Repairs (--only <name> limits the run):
                              so the TMM pod reaches the service network (dSSM,
                              DNS, the fluentd log forward); on 2.3 detected from
                              the f5-fluentbit sidecar log
+  epp-namespaces             eppNamespaces [All] on a 2.4 CNEInstance, so the
+                             controller runs the F5 Endpoint Picker (F5EPP)
   test-namespace             namespace awsbnkctl-test, where test --backend k8s
                              runs its iperf3 and dns probe Jobs
 

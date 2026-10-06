@@ -3,6 +3,7 @@ package jumphost
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -94,6 +95,53 @@ func ConfigMapToAiperfConfig(m map[string]any) (AiperfConfig, string) {
 		cfg.ExtraInputs = append(cfg.ExtraInputs, extraStrList...)
 	}
 
+	// Workload shape
+	if v := getInt(m, "synthetic_input_tokens_stddev"); v > 0 {
+		cfg.ISLStddev = v
+	}
+	if v := getInt(m, "prefix_prompt_length"); v > 0 {
+		cfg.PrefixPromptLength = v
+	}
+	if v := getInt(m, "num_prefix_prompts"); v > 0 {
+		cfg.NumPrefixPrompts = v
+	}
+	if v, ok := m["seq_dist"].(string); ok && v != "" {
+		cfg.SeqDist = v
+	}
+	if v := getInt(m, "random_seed"); v > 0 {
+		cfg.RandomSeed = v
+	}
+	if v := getInt(m, "num_dataset_entries"); v > 0 {
+		cfg.NumDatasetEntries = v
+	}
+	if v, ok := m["goodput"].(string); ok && v != "" {
+		cfg.Goodput = v
+	}
+
+	// Open-loop load: a request rate or a fixed duration drives the run, so
+	// the closed-loop defaults (concurrency 1, 10 requests) must not apply
+	// unless Forge sent them.
+	if v := getFloat(m, "request_rate"); v > 0 {
+		cfg.RequestRate = v
+	}
+	if v, ok := m["arrival_pattern"].(string); ok && v != "" {
+		cfg.ArrivalPattern = v
+	}
+	if v := getFloat(m, "warmup_duration"); v > 0 {
+		cfg.WarmupDuration = v
+	}
+	if v := getFloat(m, "benchmark_duration"); v > 0 {
+		cfg.BenchmarkDuration = v
+	}
+	if cfg.RequestRate > 0 || cfg.BenchmarkDuration > 0 {
+		if getInt(m, "concurrency") <= 0 {
+			cfg.Concurrency = 0
+		}
+		if getInt(m, "request_count") <= 0 && getInt(m, "num_requests") <= 0 && getInt(m, "total_requests") <= 0 {
+			cfg.NumRequests = 0
+		}
+	}
+
 	// Trace URL / mooncake
 	if v, ok := m["trace_url"].(string); ok && v != "" {
 		cfg.TraceURL = v
@@ -104,6 +152,8 @@ func ConfigMapToAiperfConfig(m map[string]any) (AiperfConfig, string) {
 	if v, ok := m["fixed_schedule"].(bool); ok {
 		cfg.FixedSchedule = v
 	}
+
+	cfg.FitTimeoutToDuration()
 
 	// URL parsing for VIP
 	if rawURL, ok := m["url"].(string); ok && rawURL != "" {
@@ -120,6 +170,22 @@ func ConfigMapToAiperfConfig(m map[string]any) (AiperfConfig, string) {
 	}
 
 	return cfg, targetVIP
+}
+
+func getFloat(m map[string]any, key string) float64 {
+	switch n := m[key].(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case string:
+		if f, err := strconv.ParseFloat(n, 64); err == nil {
+			return f
+		}
+	}
+	return 0
 }
 
 func getInt(m map[string]any, key string) int {

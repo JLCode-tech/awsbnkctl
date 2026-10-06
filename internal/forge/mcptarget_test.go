@@ -140,3 +140,30 @@ func TestRegisterMCPTarget_Guards(t *testing.T) {
 		t.Errorf("no url: err = %v", err)
 	}
 }
+
+// A target of the same name that belongs to another cluster must not be
+// reused: Forge keys names globally, so the endpoint is registered under a
+// cluster-qualified name instead.
+func TestRegisterMCPTarget_NameTakenByOtherCluster(t *testing.T) {
+	srv := newObjectGraphServer(http.StatusConflict)
+	srv.existingTargets = []map[string]any{{"id": 5, "name": "mcp-default-mcp-financial-route", "cluster_id": 18}}
+	ts := httptest.NewServer(http.HandlerFunc(srv.handler))
+	defer ts.Close()
+
+	opts := forge.MCPTargetOptions{RestURL: ts.URL, Creds: forge.RestCreds{Username: "u", Password: "p"},
+		ClusterID: 21, ClusterName: "agent-core-singapore"}
+	got, err := forge.RegisterMCPTarget(context.Background(), opts, demoEndpoint())
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if got.ID == 5 || got.Name != "mcp-default-mcp-financial-route-agent-core-singapore" || got.ClusterID != 21 {
+		t.Errorf("got %+v, want a new target named mcp-default-mcp-financial-route-agent-core-singapore on cluster 21", got)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(srv.capturedPosts[forge.BenchmarkTargetEndpoint], &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["name"] != "mcp-default-mcp-financial-route-agent-core-singapore" || body["cluster_id"] != float64(21) {
+		t.Errorf("second POST body = %v", body)
+	}
+}

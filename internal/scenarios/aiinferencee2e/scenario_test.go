@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/yaml"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 	"github.com/JLCode-tech/awsbnkctl/internal/scenarios"
@@ -481,11 +482,20 @@ func TestManifestsRendered_Synthetic(t *testing.T) {
 			if strings.Contains(content, "awsbnkctl.io/gpu") {
 				t.Errorf("03-vllm.yaml should not contain awsbnkctl.io/gpu in synthetic mode:\n%s", content)
 			}
-			if !strings.Contains(content, "python:3.11-slim") {
-				t.Errorf("03-vllm.yaml missing python:3.11-slim image:\n%s", content)
+			for _, want := range []string{intent.DefaultSyntheticImage, "--model=NousResearch/Meta-Llama-3.1-8B-Instruct", "--inter-token-latency=4.6ms", "--zmq-endpoint=" + aiinferencee2e.SimKVEventsEndpoint,
+				"--kv-events-replay-endpoint=tcp://*:20081", "name: kv-relay", "image: " + aiinferencee2e.SimKVRelayImage, "name: kv-events\n          containerPort: 20080", "name: vllm-kv-relay", "def serve_publisher",
+				"--render-url=http://localhost:8082", "image: " + aiinferencee2e.SimRenderImage, "restartPolicy: Always",
+				"--use-vllm-map-event-format"} {
+				if !strings.Contains(content, want) {
+					t.Errorf("03-vllm.yaml missing %q:\n%s", want, content)
+				}
 			}
-			if !strings.Contains(content, "llama3") {
-				t.Errorf("03-vllm.yaml missing llama3 model:\n%s", content)
+			// The relay script is embedded in a block scalar: every document must still parse.
+			for _, doc := range strings.Split(content, "\n---\n") {
+				var obj map[string]any
+				if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+					t.Errorf("03-vllm.yaml document does not parse: %v\n%s", err, doc)
+				}
 			}
 		}
 	}

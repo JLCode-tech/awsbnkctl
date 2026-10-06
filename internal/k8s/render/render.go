@@ -338,6 +338,7 @@ type CNEInstanceVars struct {
 	HasInternal         bool   // list the internal NAD + internal ROBIN/PCIDEVICE env (dual-interface only)
 	Sriov               bool   // sriov-external: drop TMM_GENERIC_SOCKET_DRIVER + let the device plugin inject PCIDEVICE_INTEL_COM
 	ServiceCIDR         string // EKS serviceIpv4Cidr (state ServiceCIDRStateKey); rendered as TMM_K8S_ROUTES
+	EPP                 bool   // BNK 2.4+: let the CNE controller run F5 EPPs in every namespace (eppNamespaces: [All])
 }
 
 // RenderCNEInstance renders the CNEInstance CR template with vars derived
@@ -393,6 +394,7 @@ func RenderCNEInstance(tmpl []byte, cl *intent.Cluster, getter func(string) stri
 		HasInternal:         cl.HasInternalInterface(),
 		Sriov:               sriov,
 		ServiceCIDR:         getter(ServiceCIDRStateKey),
+		EPP:                 !strings.HasPrefix(cl.Bnk.ManifestVersion, "2.3"),
 	}
 	return Render(tmpl, vars)
 }
