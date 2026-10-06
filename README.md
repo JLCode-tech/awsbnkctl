@@ -18,11 +18,11 @@ Zero Terraform. Zero host `kubectl`. Zero host `helm`.
 
 ## Table of Contents
 
-- [Why awsbnkctl? (Stakeholder Value)](#why-awsbnkctl-stakeholder-value)
+- [Why awsbnkctl?](#why-awsbnkctl)
 - [System Architecture & Network Topology](#system-architecture--network-topology)
-- [AI Inference Benchmarking & Proxy Shootouts](#ai-inference-benchmarking--proxy-shootouts)
+- [AI Inference Benchmarking & Comparative Shootouts](#ai-inference-benchmarking--comparative-shootouts)
 - [15 Built-in Validation Scenarios](#15-built-in-validation-scenarios)
-- [Narrated Walkthrough Demos](#narrated-walkthrough-demos)
+- [Architecture & Protocol Demos](#architecture--protocol-demos)
 - [Quick Start](#quick-start)
 - [Interface Patterns](#interface-patterns)
 - [Pinned Ecosystem Versions](#pinned-ecosystem-versions)
@@ -31,14 +31,22 @@ Zero Terraform. Zero host `kubectl`. Zero host `helm`.
 
 ---
 
-## Why awsbnkctl? (Stakeholder Value)
+## Why awsbnkctl?
 
-| Stakeholder | Key Pain Point Solved | Value Delivered by `awsbnkctl` |
-|---|---|---|
-| **Enterprise Platform & Network Engineers** | Deploying BNK manually requires stitching together 2,000+ lines of Terraform, Helm charts, AWS CLI calls, and fragile Multus and hugepages host configurations. | **Zero-prerequisite single binary**: Turnkey deployment in ~25 minutes with a deterministic 41-phase state machine. Built-in `awsbnkctl bnk heal` provides self-healing across 10 common Kubernetes plumbing issues. |
-| **Cloud & AI Architects** | Traditional K8s ingress controllers (Envoy, NGINX) bottleneck under multi-tenant GenAI workloads and lack hardware-accelerated L4/L7 line-rate isolation. | **Carrier-grade TMM data plane**: Line-rate L4/L7 routing over secondary ENIs, Gateway API native (`gateway.k8s.f5.com`), automated prompt prefix caching, token rate-limiting, and Model Context Protocol (MCP) session persistence. |
-| **F5 Solutions Architects & Field SEs** | Setting up repeatable customer PoCs and demonstrating BNK differentiated performance takes days of custom scripting. | **Push-button PoCs & benchmarks**: One command (`up -f cluster.yaml`) brings up a full environment. Built-in `aiperf` benchmarking drives head-to-head shootouts against Envoy, HAProxy, and NGINX with real-time Forge dashboard telemetry. |
-| **Sales & Business Leadership** | Cloud PoCs often stall due to high infrastructure cost and leftover unmanaged cloud resources. | **Predictable cost & clean teardown**: Reference cluster runs on-demand for ~$3/hr. AWS tag-based state discovery ensures `down --yes` destroys 100% of provisioned resources with zero orphan residue. |
+Deploying F5 BIG-IP Next for Kubernetes (BNK) on AWS typically requires coordinating multiple infrastructure layers:
+- AWS VPC networking with dedicated subnets, route tables, and secondary Elastic Network Interfaces (ENIs).
+- EKS cluster lifecycle, OIDC identity providers, and least-privilege IAM roles for service accounts (IRSA).
+- Host-level Linux kernel tuning: hugepages reservation, DPDK/host-device attachment, and Multus CNI daemonsets.
+- Cloud-native F5 control-plane lifecycle (FLO, CNE, IPAM controllers) and Kubernetes Gateway API resources (`gateway.k8s.f5.com`).
+- Live data-plane traffic validation inside private subnets without exposing workloads to the public internet.
+
+`awsbnkctl` consolidates this entire workflow into a **single, dependency-free binary**:
+
+- **Zero Prerequisites**: No Terraform, Helm, or external `kubectl` required on the host—everything is driven natively via AWS SDK for Go v2 and client-go.
+- **Deterministic State Machine**: 41 sequential phases execute with full idempotency, resume safety, and explicit state verification.
+- **Built-in Diagnostics & Healing**: The `awsbnkctl bnk heal` command detects and automatically remediates 10 common Kubernetes plumbing issues (token expiration, metrics-server bindings, Multus mounts, and RBAC policies).
+- **In-VPC Validation**: 15 built-in automated test scenarios validate L4/L7 routing, canary splits, gRPC streams, and AI inference directly inside the VPC.
+- **Clean Teardown**: Tag-driven resource discovery ensures `awsbnkctl down -f cluster.yaml --yes` destroys 100% of provisioned AWS resources with zero orphaned remnants.
 
 ---
 
@@ -47,40 +55,38 @@ Zero Terraform. Zero host `kubectl`. Zero host `helm`.
 `awsbnkctl` provisions an AWS VPC with dedicated network segmentation for management and high-performance TMM traffic:
 
 ```mermaid
-flowchart TD
-    subgraph VPC["AWS VPC: 10.0.0.0/16"]
-        subgraph PublicSubnets["Public Subnets (IGW & NAT GW)"]
-            EKS_CP["EKS Control Plane (API Server)"]
-            NAT_GW["AWS NAT Gateway"]
-            JH["Test Jumphost EC2 (t3.xlarge)<br/>Python 3.11 + aiperf >= 0.10.0<br/>Accessed via Ephemeral AWS EICE SSH"]
-        end
-
-        subgraph PrivateSubnets["Private Worker Subnets"]
-            EKS_Nodes["EKS Worker Nodes (3 × m6i.4xlarge)<br/>AWS VPC CNI (eth0: Primary K8s Pod Network)"]
-            Pods["Backend Pods & Services<br/>http-echo, vLLM GPU, gRPC, Nginx"]
-        end
-
-        subgraph BNK_Ext["BNK External Data-Path Subnet: 10.0.10.0/24"]
-            VIP_Pool["Gateway VIP Pool: .100 - .117<br/>http-routing (.100), AI Gateway (.104, .112)"]
-            SelfIP_Ext["TMM External Self-IP Pool: .224 - .254<br/>Allocated via F5 IPAM Controller"]
-            JH_ENI["Jumphost Test ENI: 10.0.10.200<br/>Direct L2/L3 in BNK_EXT Subnet"]
-        end
-
-        subgraph BNK_Int["BNK Internal Data-Path Subnet: 10.0.20.0/24"]
-            SelfIP_Int["TMM Internal Self-IP Pool<br/>(Dual-Interface Pattern Only)"]
-        end
-
-        subgraph TMM_Core["F5 BNK Data Plane (f5-tmm Pods)"]
-            TMM["TMM Microkernel (host-device / DPDK)<br/>Hardware hugepages + Secondary ENIs"]
-        end
+flowchart LR
+    subgraph Mgmt["Management & Access"]
+        direction TB
+        CLI([Operator CLI]) -->|AWS EICE SSH| Jumphost["Test Jumphost<br/>(10.0.10.200)"]
+        K8sAPI["EKS Control Plane<br/>(API Server)"]
     end
 
-    JH -->|Direct L2/L3 Test Curls / aiperf| JH_ENI
-    JH_ENI -->|Traffic to Gateway VIPs| VIP_Pool
-    VIP_Pool --> TMM
-    TMM -->|Line-Rate Direct Routing| Pods
-    Pods -.->|Outbound Egress SNAT via VXLAN| TMM
-    TMM -.->|SNAT Automap to Self-IP| NAT_GW
+    subgraph BNK["F5 BNK Data Plane (Secondary ENI: 10.0.10.0/24)"]
+        direction TB
+        VIP["Gateway VIP Pool<br/>(10.0.10.100 - .117)"]
+        TMM["TMM Microkernel<br/>(DPDK / host-device)"]
+        VIP --> TMM
+    end
+
+    subgraph Workloads["EKS Worker Nodes"]
+        direction TB
+        AppPods["Application Pods<br/>(HTTP / gRPC / L4)"]
+        ModelPods["Model Servers<br/>(vLLM / GPU Workers)"]
+    end
+
+    subgraph Egress["Outbound Egress"]
+        direction TB
+        NAT["AWS NAT Gateway"]
+        Internet([External APIs / Registries])
+        NAT --> Internet
+    end
+
+    Jumphost -->|In-VPC Test Traffic| VIP
+    TMM -->|Line-Rate L4/L7 Routing| AppPods
+    TMM -->|Accelerated Inference Stream| ModelPods
+    AppPods -.->|Outbound Egress via VXLAN| TMM
+    TMM -.->|SNAT Automap| NAT
 ```
 
 ### Key Architectural Tenets
@@ -91,45 +97,48 @@ flowchart TD
 
 ---
 
-## AI Inference Benchmarking & Proxy Shootouts
+## AI Inference Benchmarking & Comparative Shootouts
 
-`awsbnkctl` embeds an enterprise-grade AI performance benchmarking engine using NVIDIA's `aiperf`. It measures real-world GenAI latency and throughput from within the VPC and synchronizes with **BNK Forge** for real-time visualization.
+`awsbnkctl` embeds an AI performance benchmarking engine powered by NVIDIA's `aiperf`. It measures real-world GenAI latency and throughput from within the private VPC data plane and synchronizes with **BNK Forge** for real-time visualization and comparative analysis.
 
 ### Benchmarking Execution Flow
 
 ```mermaid
-flowchart TD
-    subgraph Workstation["Operator Workstation / Laptop"]
-        ForgeUI["BNK Forge Web UI (:3000)<br/>Interactive Dashboard & Sweep Controls"]
-        ForgeServer["Forge REST & WebSocket (:8000)<br/>Dispatcher & Metrics Database"]
-        BenchDaemon["awsbnkctl benchmark daemon<br/>Persistent WebSocket Agent Listener"]
+flowchart LR
+    subgraph Orchestration["Benchmark Orchestration"]
+        direction TB
+        UI["Forge Web UI (:3000)<br/>Dashboard & Sweeps"]
+        Server["Forge Server (:8000)<br/>Dispatcher & DB"]
+        Daemon["awsbnkctl daemon<br/>Agent Listener"]
+        UI --> Server
+        Server <--> Daemon
     end
 
-    subgraph AWS_VPC["AWS VPC Data Plane"]
-        EICE["AWS EC2 Instance Connect Endpoint (EICE)<br/>Ephemeral IAM SSH Tunnel"]
-        JH["In-VPC Jumphost (aiperf engine)<br/>Secondary ENI: 10.0.10.200"]
-        TMM_VIP["F5 BNK Gateway VIP: 10.0.10.100<br/>Host: awsbnkctl-aiinference.local"]
-        
-        subgraph Proxies["Proxy Shootout Targets"]
-            BNK_TMM["F5 BNK (TMM DPDK)"]
-            Envoy["Envoy Gateway"]
-            HAProxy["HAProxy Ingress"]
-            NodePort["Direct Pod IP (Baseline)"]
-        end
-
-        LLM["vLLM / SageMaker GPU Backend<br/>meta-llama/Llama-3.1-8B-Instruct"]
+    subgraph VPC["Private VPC Data Plane"]
+        direction TB
+        EICE["AWS EICE<br/>(IAM SSH Tunnel)"]
+        JH["In-VPC Jumphost<br/>(aiperf Engine)"]
+        EICE --> JH
     end
 
-    ForgeUI -->|Trigger Benchmark| ForgeServer
-    ForgeServer <-->|WebSocket: Task & Telemetry| BenchDaemon
-    BenchDaemon -->|Ephemeral EICE Tunnel| EICE
-    EICE -->|Execute aiperf| JH
-    JH -->|Inference Requests| TMM_VIP
-    TMM_VIP --> BNK_TMM --> LLM
-    TMM_VIP -.-> Envoy --> LLM
-    TMM_VIP -.-> HAProxy --> LLM
-    TMM_VIP -.-> NodePort --> LLM
-    BenchDaemon -.->|Scrape /metrics| LLM
+    subgraph Targets["Inference Gateway Targets"]
+        direction TB
+        BNK["F5 BNK (TMM)"]
+        Envoy["Envoy Gateway"]
+        HAProxy["HAProxy Ingress"]
+        NodePort["Direct Pod IP"]
+    end
+
+    subgraph Backend["Inference Engine"]
+        LLM[("vLLM Model Server<br/>(GPU Worker)")]
+    end
+
+    Daemon -->|Secure Tunnel| EICE
+    JH -->|Generated Prompts| Targets
+    BNK -->|Inference Stream| LLM
+    Envoy -.->|Comparative Run| LLM
+    HAProxy -.->|Comparative Run| LLM
+    NodePort -.->|Baseline Run| LLM
 ```
 
 ### Built-in Smoke Presets (`--scenarios`)
@@ -143,7 +152,7 @@ flowchart TD
 
 ### Native Forge Scenarios (`--scenario`)
 
-For exhaustive evaluations and customer bake-offs, `awsbnkctl` supports 8 native synthetic Forge engines plus production trace replay:
+For exhaustive evaluations and performance characterization, `awsbnkctl` supports 8 native synthetic Forge engines plus production trace replay:
 
 - **`baseline`**: Concurrency sweep across 50, 100, 150, 200 concurrent streams.
 - **`high-concurrency`**: Heavy prompt pairs up to 300 concurrency with 10k token prompts.
@@ -163,7 +172,7 @@ Run head-to-head comparisons against Envoy, HAProxy, NGINX, and direct NodePort:
 awsbnkctl benchmark run -f cluster.yaml \
   --proxies f5-bnk,envoy,haproxy,nodeport \
   --scenario baseline,prefix-cache \
-  --run-label customer-shootout
+  --run-label proxy-shootout
 ```
 
 ### GenAI Metrics Captured
@@ -181,36 +190,43 @@ awsbnkctl benchmark run -f cluster.yaml \
 `awsbnkctl` includes 15 automated validation scenarios covering L4-L7 protocols, hybrid routing, multi-tenancy, AI policies, and outbound egress:
 
 ```mermaid
-flowchart TD
-    subgraph SCN_L7["Ingress & L7 Protocols"]
-        S1["http-routing-e2e (.100)"]
-        S2["http-traffic-split (.101)"]
-        S3["grpc-loadbalance (.108)"]
+flowchart LR
+    JH([Jumphost Test Runner])
+
+    subgraph L7["L7 Ingress"]
+        HTTP["http-routing-e2e (.100)"]
+        Split["http-traffic-split (.101)"]
+        GRPC["grpc-loadbalance (.108)"]
     end
 
-    subgraph SCN_L4["L4 Transport Protocols"]
-        S4["tcp-l4-loadbalance (.106)"]
-        S5["udp-l4-loadbalance (.107)"]
-        S6["proxy-protocol-l4 (.103)"]
+    subgraph L4["L4 Transport"]
+        TCP["tcp-l4-loadbalance (.106)"]
+        UDP["udp-l4-loadbalance (.107)"]
+        PP["proxy-protocol-l4 (.103)"]
     end
 
-    subgraph SCN_Hybrid["Hybrid & Multi-Tenancy"]
-        S7["external-resource-pool (.102)"]
-        S8["cluster-wide-watch (.105)"]
-        S9["cwc-admin-access (In-cluster)"]
-        S10["multi-vip (.115-.117)"]
+    subgraph Hybrid["Hybrid & Multi-Tenancy"]
+        Ext["external-resource-pool (.102)"]
+        CWC["cluster-wide-watch (.105)"]
+        MultiVIP["multi-vip (.115-.117)"]
     end
 
-    subgraph SCN_AI["AI Gateway"]
-        S11["ai-token-counting (.104)"]
-        S12["ai-semantic-cache (.109)"]
-        S13["ai-inference-e2e (.112)"]
+    subgraph AI["AI Gateway"]
+        Tokens["ai-token-counting (.104)"]
+        Cache["ai-semantic-cache (.109)"]
+        Infer["ai-inference-e2e (.112)"]
     end
 
-    subgraph SCN_Sec["Security & Diagnostics"]
-        S14["egress-snat (VXLAN)"]
-        S15["core-file-collection (CoreMond)"]
+    subgraph Diagnostics["Egress & Diagnostics"]
+        SNAT["egress-snat (VXLAN)"]
+        Core["core-file-collection"]
     end
+
+    JH -->|HTTP / gRPC| L7
+    JH -->|TCP / UDP| L4
+    JH -->|Hybrid Routing| Hybrid
+    JH -->|Inference Streams| AI
+    JH -->|Diagnostics| Diagnostics
 ```
 
 | Category | Scenario | VIP | Verification Method | Status |
@@ -235,9 +251,9 @@ flowchart TD
 
 ---
 
-## Narrated Walkthrough Demos & Solutions
+## Architecture & Protocol Demos
 
-Run interactive live demonstrations with narrations and ASCII status visualizers:
+Run interactive live demonstrations with terminal status visualizers and live verifications:
 
 ```bash
 # List all registered demos
@@ -249,31 +265,40 @@ awsbnkctl demo run <demo-name> -f cluster.yaml
 
 ### Featured: AgentCore AI Tool Governance Demo (`examples/agentcore-demo/`)
 
-Demonstrates enterprise governance of generative AI agents: an **Amazon Bedrock AgentCore** agent making Model Context Protocol (MCP) tool calls is authenticated, rate-limited, firewall-checked, and logged to Loki for real-time Forge observability.
+Demonstrates securing and governing Generative AI agent tool execution: an **Amazon Bedrock AgentCore** agent invoking Model Context Protocol (MCP) tools through F5 BNK Gateway policies (firewall rules, bearer token validation, tool-level access control, rate limiting, and session persistence).
 
 ```mermaid
-flowchart TD
-    subgraph Callers["AI Agent Callers"]
-        Agent["Amazon Bedrock AgentCore Agent<br/>(VPC Mode, Private Subnet)"]
-        ExtCaller["External Caller / Jumphost"]
+flowchart LR
+    subgraph Callers["AI Agents & Callers"]
+        Bedrock([Amazon Bedrock AgentCore<br/>Private VPC Agent])
+        ExtCaller([External Caller<br/>Jumphost / Script])
     end
 
-    subgraph Gateway["F5 BNK Security & Governance Gateway (10.0.10.150)"]
-        FW["L4 Firewall (F5BigFwPolicy)"]
-        Auth["Bearer Token Validator (401 if missing)"]
-        Rule["Privileged Tool Rule (403 for external)"]
-        Rate["Rate Limiting iRule (10 req/min -> 429)"]
-        Persist["F5BigPersistenceProfile (MCP Session Pinning)"]
+    subgraph Gateway["F5 BNK Security & Governance Gateway (VIP: 10.0.10.150)"]
+        direction TB
+        FW["1. L4 Firewall Policy<br/>Drop out-of-VPC traffic"]
+        Auth["2. Bearer Authentication<br/>Require authorized token"]
+        ToolGov["3. Tool Access Rule<br/>Block privileged tools for external"]
+        RateLimit["4. Rate Limiting iRule<br/>Enforce request burst limits"]
+        SessionPin["5. Session Persistence<br/>Pin MCP session to pod"]
+
+        FW --> Auth --> ToolGov --> RateLimit --> SessionPin
     end
 
-    subgraph Tool["Kubernetes Tool Cluster"]
-        MCP["MCP Finance Tool Pod<br/>(forecast, get_account_balance)"]
+    subgraph ToolBackend["Kubernetes Tool Cluster"]
+        MCPPod[("MCP Server Pod<br/>forecast, get_account_balance")]
     end
 
-    Agent -->|forecast NFLX| Auth
-    ExtCaller -->|forecast NVDA| Auth
-    Auth --> Rule --> Rate --> Persist --> MCP
-    Gateway -.->|Stream Decision Telemetry| Loki["Loki -> BNK Forge LLM Observability"]
+    subgraph Observability["Telemetry & Audit Stream"]
+        Loki["Loki Log Collector"]
+        Forge["BNK Forge Dashboard"]
+        Loki --> Forge
+    end
+
+    Bedrock -->|forecast NFLX| FW
+    ExtCaller -->|forecast NVDA| FW
+    SessionPin -->|Authorized Tool Execution| MCPPod
+    Gateway -.->|Stream Audit Events| Loki
 ```
 
 ### Built-in Protocol & Ingress Demos
