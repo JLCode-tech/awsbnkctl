@@ -32,7 +32,7 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `test throughput` | iperf3 throughput; deploys the server pod automatically |
 | `test traffic` | Drive HTTP traffic through TMM from the test jumphost (alias for `scenarios run http-routing-e2e`) |
 | `test list` | List available test suites |
-| `test hosts {add,clear,list,remove}` | Manage `test.connectivity.extra_hosts` in the workspace config |
+| `test hosts {add,clear,list,remove}` | Manage `test.connectivity.extra_hosts` in the workspace config (`awsbnkctl test hosts add|list|remove|clear`) |
 | `scenarios list` | Print registered scenarios with their rating |
 | `scenarios run <name>` | Run a scenario (or `--all`); `--vip` overrides the base VIP, `--synthetic` runs `ai-inference-e2e` without a GPU, `--dry-run` |
 | `scenarios clean <name>` | Invoke a scenario's Cleanup hook |
@@ -56,7 +56,7 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `k port-forward` | Forward local ports to a pod, or to a Ready pod behind `svc/<name>`, via SPDY |
 | `get <resource> [name]` | Top-level alias of `k get` (`-n`, `-A`, `-l`, `-o yaml|json|wide|name|jsonpath=…`) |
 | `logs <component>` | Tail logs for a BNK component (`flo`, `cis`, `cert-manager`, `cneinstance`, `tmm`); `-f`, `--since`, `--tail`, `--previous`, `-c`; `--governance` / `--mcp` print only BNKGOV records as `[GOV] <status> <rpc_method> tool= session= latency= action=` |
-| `bnk heal` | Detect and repair the cluster plumbing `up` and `bnk upgrade` also fix, on 2.3 or 2.4: Multus token watch, metrics-server add-on, TMM log stream, pod-manager cert mount and crash loop, cwc crash loop, dSSM probe overlay, controller EndpointSlice RBAC, controller IRSA, `TMM_K8S_ROUTES`, the `awsbnkctl-test` namespace for `test --backend k8s` (`-f` for the AWS-backed ones, `--kubeconfig`, `--only`, `--dry-run`, `-o json`); `doctor --backend k8s` shows the same detections |
+| `bnk heal` | Detect and repair the 11 cluster plumbing issues `up` and `bnk upgrade` also fix, on 2.3 or 2.4: Multus token watch (`multus-token-watch`), metrics-server add-on (`metrics-server`), TMM log stream (`tmm-log-stream`), pod-manager cert mount and crash loop (`pod-manager`), cwc crash loop (`cwc`), dSSM probe overlay (`dssm-probe`), controller EndpointSlice RBAC (`controller-endpointslices`), controller IRSA (`controller-irsa`), `TMM_K8S_ROUTES` (`tmm-k8s-routes`), EPP watched namespaces (`epp-namespaces` / `eppNamespaces`), and the `awsbnkctl-test` namespace (`test-namespace`) for `test --backend k8s` (`-f` for the AWS-backed ones, `--kubeconfig`, `--only`, `--dry-run`, `-o json`); `doctor --backend k8s` shows the same detections |
 | `bnk resync` | Force the F5 cne-controller to re-resolve stale TMM pool members (`-n`, `--all-in-ns`, `--gateway-class`, `--dry-run`; `--watch` with `--debounce` re-resyncs on EndpointSlice changes) |
 | `bnk migrate-2.4` | Translate the 2.3.x CRs of a running cluster into the 2.4 Infra / GatewaySettings model (`--dry-run` prints the manifests, `--apply` server-side-applies them; `-f`, `--kubeconfig`, `-n`, `--gateway-class`, `--infra-name`, `--single-self-ip`, `--wait`) |
 | `bnk upgrade -f <config>` | In-place upgrade: helm upgrade FLO, patch the CNEInstance (`manifestVersion`, `USE_GATEWAY_SETTINGS`), watch the controller and TMM come back (`--manifest-version`, `--flo-version`, `--service-cidr` sets `TMM_K8S_ROUTES`, `--instance`, `-n`, `--kubeconfig`, `--timeout`, `--dry-run`) |
@@ -73,7 +73,7 @@ clients on the jumphost, and requires `testing.jumphost.enabled: true`.
 | `benchmark list` | List native Forge scenarios and smoke presets |
 | `benchmark status` | Check the benchmark environment, jumphost and Forge linkage |
 | `benchmark daemon` | Run the persistent Forge benchmark agent daemon with agent-bound token authentication (`--forge-agent-token`, cached token, or mint endpoint); terminates immediately with non-zero exit on auth rejection |
-| `benchmark ingest` | Parse aiperf artifacts offline into TTFT/ITL percentiles, token throughput and prefix-cache hit rate; compare TTFT between runs (`--expect-ttft-drop`), `--metrics-before`/`--metrics-after` scrape files, `--push` to Forge |
+| `benchmark ingest` | Parse aiperf artifacts offline (`awsbnkctl benchmark ingest`) into TTFT/ITL percentiles, token throughput and prefix-cache hit rate; compare TTFT between runs (`--expect-ttft-drop`), `--metrics-before`/`--metrics-after` scrape files, `--push` to Forge |
 | `forge register` | Register the workspace's EKS cluster with Forge (idempotent: an existing registration is kept and the link's REST and MCP URLs are refreshed to the ones in use); `--cluster-name`, `--kubeconfig`, `--project-name`, `--scan` |
 | `forge status` | Show this workspace's Forge registration state |
 | `forge unregister` | Remove this workspace's Forge registration (`--purge` also deletes the project) |

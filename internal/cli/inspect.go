@@ -168,7 +168,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	// happens to be active on the host.
 	kcPath := resolveKubeconfigForStatus(st)
 	if kcPath == "" {
-		fmt.Fprintln(tw, "Kubeconfig:\t(none — run `awsbnkctl kubeconfig --download`)")
+		fmt.Fprintln(tw, "Kubeconfig:\t(none — run awsbnkctl up --phase 24 or aws eks update-kubeconfig)")
 		return nil
 	}
 	fmt.Fprintf(tw, "Kubeconfig:\t%s\n", kcPath)

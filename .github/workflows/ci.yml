@@ -27,9 +27,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           # Track go.mod's `go` directive — testcontainers-go's
           # transitive otel deps require Go 1.25+, and pinning here
@@ -92,9 +92,9 @@ jobs:
       # `TestIntegration_Connect_Whoami`.
       TESTCONTAINERS_RYUK_DISABLED: "true"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           # Track go.mod's `go` directive rather than hard-coding here —
           # the testcontainers-go dependency chain (docker → otel) pulls
@@ -120,9 +120,9 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -174,9 +174,9 @@ jobs:
       AWS_REGION: us-east-1
       AWS_EC2_METADATA_DISABLED: "true"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -201,9 +201,9 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -256,9 +256,9 @@ jobs:
       AWS_REGION: us-east-1
       AWS_EC2_METADATA_DISABLED: "true"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -358,7 +358,7 @@ jobs:
       - name: Upload dry-run logs
         # Always upload so a red run leaves debug context behind.
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: test-dryrun-logs
           path: artifacts/
@@ -383,9 +383,9 @@ jobs:
       AWS_REGION: us-east-1
       AWS_EC2_METADATA_DISABLED: "true"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
@@ -479,7 +479,7 @@ jobs:
       - name: Upload up/down dry-run logs
         # Always upload so a red run leaves debug context behind.
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: up-dryrun-logs
           path: artifacts/
@@ -489,9 +489,9 @@ jobs:
     name: windows build
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
@@ -501,9 +501,9 @@ jobs:
     name: goreleaser config sanity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
@@ -522,7 +522,7 @@ jobs:
     # words land via a cspell.json edit on the same PR.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: cspell (docs/**/*.md + README + CONTRIBUTING)
         # Hard-fail on any unknown-word finding.
@@ -568,7 +568,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           # gitleaks needs the full git history to scan past commits
           # (the default fetch-depth: 1 only gives the worktree, not
@@ -577,7 +577,7 @@ jobs:
           # fetch is bounded (~5 MB repo today).
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
