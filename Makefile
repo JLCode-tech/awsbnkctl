@@ -27,7 +27,7 @@ run: build
 	$(BIN) --help
 
 clean:
-	rm -rf bin/
+	rm -rf bin/ dist/ coverage.out
 
 .PHONY: release stamp-changelog goreleaser-check goreleaser-snapshot \
         staticcheck build-integration-tags
@@ -48,7 +48,7 @@ GORELEASER_IMAGE ?= goreleaser/goreleaser:latest
 # manually dated).
 stamp-changelog:
 	@if grep -q '2026-MM-DD' CHANGELOG.md; then \
-	    sed -i "s/2026-MM-DD/$(RELEASE_DATE)/" CHANGELOG.md; \
+	    perl -pi -e "s/2026-MM-DD/$(RELEASE_DATE)/g" CHANGELOG.md; \
 	    echo "    CHANGELOG.md v1.0.0 date stamped: $(RELEASE_DATE)"; \
 	else \
 	    echo "    CHANGELOG.md v1.0.0 date already stamped (skip)"; \
