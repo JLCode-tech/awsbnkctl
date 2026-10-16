@@ -33,6 +33,7 @@ func ListRunsForCommit(ctx context.Context, sha string, limit int) ([]WorkflowRu
 		"--limit", fmt.Sprintf("%d", fetch),
 		"--json", "databaseId,name,status,conclusion,event,headSha,createdAt,updatedAt,url",
 	}
+	// #nosec G204 -- args are fixed flags and formatted integer limit
 	out, err := exec.CommandContext(ctx, "gh", args...).Output()
 	if err != nil {
 		return nil, ghError("gh run list", err)
@@ -83,6 +84,7 @@ func LoadJobs(ctx context.Context, repo string, runID int64) ([]Job, error) {
 	ctx, cancel := context.WithTimeout(ctx, viewTimeout)
 	defer cancel()
 	path := fmt.Sprintf("repos/%s/actions/runs/%d/jobs?per_page=100", repo, runID)
+	// #nosec G204 -- repo and runID come from local git remote and GitHub API run ID
 	out, err := exec.CommandContext(ctx, "gh", "api", path).Output()
 	if err != nil {
 		return nil, ghError("gh api runs/<id>/jobs", err)
@@ -131,6 +133,7 @@ func FailedLogTail(ctx context.Context, runID, jobID int64, lines int) (string, 
 		"--log-failed",
 		"--job", fmt.Sprintf("%d", jobID),
 	}
+	// #nosec G204 -- args are fixed flags and numeric IDs
 	out, err := exec.CommandContext(ctx, "gh", args...).Output()
 	if err != nil {
 		return "", ghError("gh run view --log-failed", err)

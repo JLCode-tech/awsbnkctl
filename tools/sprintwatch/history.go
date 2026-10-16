@@ -27,6 +27,7 @@ func Burndown(ctx context.Context, root string, sprintNum int, roles []string) (
 
 	args := []string{"-C", root, "log", "--reverse", "--format=%H %ct", "--"}
 	args = append(args, paths...)
+	// #nosec G204 -- git log over local repository sprint issue paths
 	out, err := exec.CommandContext(ctx, "git", args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
@@ -43,7 +44,7 @@ func Burndown(ctx context.Context, root string, sprintNum int, roles []string) (
 		}
 		sha := parts[0]
 		var ts int64
-		fmt.Sscanf(parts[1], "%d", &ts)
+		_, _ = fmt.Sscanf(parts[1], "%d", &ts)
 		snaps = append(snaps, Snapshot{Time: time.Unix(ts, 0), Open: openAt(ctx, root, sha, sprintNum, roles)})
 	}
 
@@ -61,10 +62,12 @@ func openAt(ctx context.Context, root, sha string, sprintNum int, roles []string
 	for _, role := range roles {
 		issuePath := filepath.Join("issues", fmt.Sprintf("issue_sprint%d_%s.md", sprintNum, role))
 		resolvedPath := filepath.Join("issues", fmt.Sprintf("resolved_sprint%d_%s.md", sprintNum, role))
+		// #nosec G204 -- git show on commit SHA and local issue path
 		issue, _ := exec.CommandContext(ctx, "git", "-C", root, "show", sha+":"+issuePath).Output()
 		if len(issue) == 0 {
 			continue
 		}
+		// #nosec G204 -- git show on commit SHA and local resolved path
 		resolved, _ := exec.CommandContext(ctx, "git", "-C", root, "show", sha+":"+resolvedPath).Output()
 		open += countRoleOpen(string(issue), string(resolved))
 	}
@@ -75,11 +78,13 @@ func openNow(root string, sprintNum int, roles []string) int {
 	open := 0
 	for _, role := range roles {
 		issuePath := filepath.Join(root, "issues", fmt.Sprintf("issue_sprint%d_%s.md", sprintNum, role))
+		// #nosec G304 -- reading local sprint issue markdown file
 		issue, err := os.ReadFile(issuePath)
 		if err != nil {
 			continue
 		}
 		resolvedPath := filepath.Join(root, "issues", fmt.Sprintf("resolved_sprint%d_%s.md", sprintNum, role))
+		// #nosec G304 -- reading local sprint resolved markdown file
 		resolved, _ := os.ReadFile(resolvedPath) // ignore missing
 		open += countRoleOpen(string(issue), string(resolved))
 	}
