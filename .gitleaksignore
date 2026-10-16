@@ -38,4 +38,5 @@ b538685cbf69d424fd1e897d2873841791775c47:internal/aws/phases/phase17f_bigip_onbo
 344aca9bdb699db4cc93d9105fa9c11ddbeb9b46:internal/k8s/mcpsession/mcpsession.go:generic-api-key:159
 # Synthetic test JWT fixture in jwt_test.go and demo curl bearer token in agentcore-demo README.
 c9ebff33a97829e6d85d9cfbd3fa47fdbd026a7b:internal/jwt/jwt_test.go:jwt:13
+fe37199874eaa7c94596aab13877dcde9bfc6689:internal/jwt/jwt_test.go:jwt:13
 67704ca6fc8b7f87d9d87fda1039d1e74f52ae4f:examples/agentcore-demo/README.md:curl-auth-header:112
