@@ -2,6 +2,7 @@ package scenarios
 
 import (
 	"net"
+	"strings"
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
@@ -70,7 +71,22 @@ func TemplateVars(cl *intent.Cluster, st *state.State) map[string]any {
 	m["VpcNet"], m["VpcPrefixLen"] = nv.VpcNet, nv.VpcPrefixLen
 	m["ExtGateway"], m["IntGateway"] = nv.ExtGateway, nv.IntGateway
 	m["TMMExtSelfIP"], m["TMMIntSelfIP"] = nv.TMMExtSelfIP, nv.TMMIntSelfIP
+	if cl != nil {
+		if vip, err := cl.DefaultVIP(); err == nil {
+			m["VIP"] = vip
+			m["AgentCoreVIP"] = withLastOctetNetvars(vip, "150")
+		}
+	}
 	return m
+}
+
+func withLastOctetNetvars(ip, octet string) string {
+	parts := strings.Split(ip, ".")
+	if len(parts) != 4 {
+		return ip
+	}
+	parts[3] = octet
+	return strings.Join(parts, ".")
 }
 
 // SplitCIDR returns the network address and prefix length of cidr ("" / 0 if invalid).

@@ -94,9 +94,9 @@ func Phase23License(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 		return fmt.Errorf("phase23: rendering license-cr: %w", err)
 	}
 
-	// Apply via dynamic client (SSA).
+	// Apply via dynamic client (SSA) with transient admission quota retry.
 	fmt.Fprintf(os.Stderr, "[phase 23] applying License %s in %s\n", licenseCRName, OperatorNamespace)
-	if err := applyRawYAML(ctx, clients, rendered); err != nil {
+	if err := retryWhileWebhookUnavailable(ctx, phase23CRDWait, func() error { return applyRawYAML(ctx, clients, rendered) }); err != nil {
 		return fmt.Errorf("phase23: applying License CR: %w", err)
 	}
 
