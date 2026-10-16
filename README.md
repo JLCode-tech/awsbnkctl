@@ -402,7 +402,7 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 | **Kubernetes (EKS)** | `1.35` | `cluster.kubernetesVersion` | Tested on 1.34 (floor) and 1.35. |
 | **cert-manager** | `v1.21.1` | Embedded upstream YAML | Applied via client-go without Helm. |
 | **FLO Chart** | `v2.30.0-0.5.2` | `addons.flo.version` | Paired per release in `manifest.KnownReleases`. |
-| **Go Runtime** | `1.26` | `go.mod` | Complied with AWS SDK for Go v2 (`v1.42.0`). |
+| **Go Runtime** | `1.26` | `go.mod` | Compiled with AWS SDK for Go v2 (`v1.42.0`). |
 
 ---
 
@@ -435,6 +435,8 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 - [`docs/COMMANDS.md`](docs/COMMANDS.md) — Full CLI flags and environment variables reference.
 - [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) — Peer-read integration with BNK Forge GUI and telemetry schemas.
 - [`docs/UPGRADE-2.4.md`](docs/UPGRADE-2.4.md) — Step-by-step in-place upgrade from BNK 2.3 to 2.4.
+- [`docs/ALIGNMENT.md`](docs/ALIGNMENT.md) — Cross-cloud architectural alignment across the `*bnkctl` family.
+- [`docs/PHASES.md`](docs/PHASES.md) — Detailed reference of all 41 provisioning and teardown phases.
 - [`docs/BGP-ROUTE-SERVER.md`](docs/BGP-ROUTE-SERVER.md) — BGP dynamic routing and ZebOS Route Server peering.
 - [`examples/`](examples/) — Ready-to-deploy reference manifests (`full-cluster`, `egress-demo`, `demo-ai`, `agentcore-demo`).
 
