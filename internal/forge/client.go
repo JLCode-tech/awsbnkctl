@@ -178,6 +178,27 @@ func (c *Client) CreateProject(ctx context.Context, req CreateProjectRequest) (C
 	return out, nil
 }
 
+// ListProjectsResponse captures projects returned by the list_projects MCP tool.
+type ListProjectsResponse struct {
+	Projects []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"projects"`
+}
+
+// ListProjects queries forge's list_projects MCP tool.
+func (c *Client) ListProjects(ctx context.Context) (ListProjectsResponse, error) {
+	r, err := c.mcp.CallTool(ctx, "list_projects", map[string]any{})
+	if err != nil {
+		return ListProjectsResponse{}, err
+	}
+	var out ListProjectsResponse
+	if err := r.UnmarshalToolJSON(&out); err != nil {
+		return ListProjectsResponse{}, err
+	}
+	return out, nil
+}
+
 // DeleteProject removes a project. force bypasses the active/only-project
 // safety check on forge's side. confirm confirms the destructive operation.
 func (c *Client) DeleteProject(ctx context.Context, projectID int, force bool) error {

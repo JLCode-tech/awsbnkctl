@@ -308,6 +308,15 @@ var Repairs = []Repair{
 			return "namespace " + execbackend.K8sTestNamespace + " created", nil
 		},
 	},
+	{
+		Name: "persistence-profile-sync", Title: "bnk persistence profile sync",
+		Detect: func(ctx context.Context, d *HealDeps) (bool, string, error) {
+			return detectPersistenceProfileSync(ctx, d.Clients)
+		},
+		Fix: func(ctx context.Context, d *HealDeps) (string, error) {
+			return fixPersistenceProfileSync(ctx, d.Clients)
+		},
+	},
 }
 
 // RunHeal detects and, when unhealthy, fixes each repair. only limits the run
@@ -805,4 +814,75 @@ func fixEPPNamespaces(ctx context.Context, clients *Clients) (string, error) {
 		return "", fmt.Errorf("patch CNEInstance %s: %w", cne.GetName(), err)
 	}
 	return "eppNamespaces [All] set on CNEInstance " + cne.GetName(), nil
+}
+
+var healPersistenceProfileGVR = schema.GroupVersionResource{Group: "k8s.f5net.com", Version: "v1", Resource: "f5-big-persistence-profiles"}
+
+func detectPersistenceProfileSync(ctx context.Context, clients *Clients) (bool, string, error) {
+	if clients.Dynamic == nil {
+		return true, "dynamic client not available", nil
+	}
+	list, err := clients.Dynamic.Resource(healPersistenceProfileGVR).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return true, "F5BigPersistenceProfile CRD not installed", nil
+		}
+		return false, "", err
+	}
+	var unmirrored []string
+	for _, item := range list.Items {
+		ns := item.GetNamespace()
+		name := item.GetName()
+		if ns != "" && ns != InstanceNamespace {
+			_, err := clients.Dynamic.Resource(healPersistenceProfileGVR).Namespace(InstanceNamespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil && apierrors.IsNotFound(err) {
+				unmirrored = append(unmirrored, ns+"/"+name)
+			}
+		}
+	}
+	if len(unmirrored) > 0 {
+		return false, fmt.Sprintf("persistence profile(s) %s missing from %s (CNE controller only reconciles in %s)", strings.Join(unmirrored, ", "), InstanceNamespace, InstanceNamespace), nil
+	}
+	return true, "persistence profiles synchronized with " + InstanceNamespace, nil
+}
+
+func fixPersistenceProfileSync(ctx context.Context, clients *Clients) (string, error) {
+	if clients.Dynamic == nil {
+		return "", fmt.Errorf("dynamic client not available")
+	}
+	list, err := clients.Dynamic.Resource(healPersistenceProfileGVR).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return "", err
+	}
+	var synced []string
+	for _, item := range list.Items {
+		ns := item.GetNamespace()
+		name := item.GetName()
+		if ns != "" && ns != InstanceNamespace {
+			_, err := clients.Dynamic.Resource(healPersistenceProfileGVR).Namespace(InstanceNamespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil && apierrors.IsNotFound(err) {
+				copyItem := item.DeepCopy()
+				copyItem.SetNamespace(InstanceNamespace)
+				copyItem.SetResourceVersion("")
+				copyItem.SetUID("")
+				if _, createErr := clients.Dynamic.Resource(healPersistenceProfileGVR).Namespace(InstanceNamespace).Create(ctx, copyItem, metav1.CreateOptions{FieldManager: "awsbnkctl-heal"}); createErr != nil {
+					return "", fmt.Errorf("sync profile %s to %s: %w", name, InstanceNamespace, createErr)
+				}
+				if secretName, ok, _ := unstructured.NestedString(copyItem.Object, "spec", "passphraseSecret"); ok && secretName != "" && clients.K8s != nil {
+					if sec, err := clients.K8s.CoreV1().Secrets(ns).Get(ctx, secretName, metav1.GetOptions{}); err == nil {
+						secCopy := sec.DeepCopy()
+						secCopy.Namespace = InstanceNamespace
+						secCopy.ResourceVersion = ""
+						secCopy.UID = ""
+						_, _ = clients.K8s.CoreV1().Secrets(InstanceNamespace).Create(ctx, secCopy, metav1.CreateOptions{FieldManager: "awsbnkctl-heal"})
+					}
+				}
+				synced = append(synced, name)
+			}
+		}
+	}
+	if len(synced) == 0 {
+		return "no unmirrored persistence profiles found", nil
+	}
+	return fmt.Sprintf("mirrored %s to %s for CNE controller reconciliation", strings.Join(synced, ", "), InstanceNamespace), nil
 }

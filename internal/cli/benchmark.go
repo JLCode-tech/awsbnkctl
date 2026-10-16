@@ -189,10 +189,11 @@ When set, per-explicit flags (--concurrency/--num-requests/--isl/--osl/--stream)
 	// Accepts an ordered comma-list of keys (e.g. baseline,mooncake) to run in
 	// sequence; a pluggable reset seam fires between consecutive scenarios.
 	scenarioUsage := fmt.Sprintf(
-		"ordered comma-list of native forge scenario keys to run (e.g. baseline,mooncake).\n"+
+		"ordered comma-list of native forge scenario keys to run (e.g. inferencex-agentx-mvp,baseline,mooncake).\n"+
 			"Each key expands into N ordered child aiperf runs (concurrency sweep and/or phases).\n"+
 			"For multiple keys the reset seam fires between consecutive scenarios.\n"+
 			"Mutually exclusive with --scenarios.\n"+
+			"Defaults to inferencex-agentx-mvp when no workload mode is specified.\n"+
 			"Available keys: %s.",
 		strings.Join(forgeScenarioKeys(), ", "),
 	)
@@ -876,9 +877,15 @@ func runForgeBenchmark(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--model is required (or specify in cluster.yaml ai block)")
 	}
 
-	// --scenario and --scenarios are mutually exclusive.
-	if flagBenchScenario != "" && flagBenchScenarios != "" {
+	// --scenario and --scenarios are mutually exclusive when both explicitly provided.
+	if cmd.Flags().Changed("scenario") && flagBenchScenarios != "" {
 		return fmt.Errorf("--scenario and --scenarios are mutually exclusive; use one or the other")
+	}
+
+	// Default to the agentic benchmark scenario (inferencex-agentx-mvp) when no other workload mode is specified.
+	if flagBenchScenario == "" && flagBenchScenarios == "" && flagBenchProxies == "" && flagBenchDirectPodIP == "" &&
+		!cmd.Flags().Changed("concurrency") && !cmd.Flags().Changed("num-requests") {
+		flagBenchScenario = "inferencex-agentx-mvp"
 	}
 
 	// Parse and validate --scenario keys up front — before any network operation
@@ -1461,7 +1468,10 @@ func runNativeScenarioCollect(
 		fmt.Fprintf(os.Stderr, "\n── child: %s label=%s ──\n", child.VariantLabel, label)
 
 		cfg := child.Config
-		if cfg.SeqDist != "" {
+		if cfg.Scenario != "" {
+			fmt.Fprintf(os.Stderr, "→ Running aiperf (scenario=%s dataset=%s concurrency=%d duration=%.0fs stream=%v)\n",
+				cfg.Scenario, cfg.PublicDataset, cfg.Concurrency, cfg.BenchmarkDuration, cfg.Streaming)
+		} else if cfg.SeqDist != "" {
 			fmt.Fprintf(os.Stderr, "→ Running aiperf (concurrency=%d requests=%d seq-dist=%q stream=%v)\n",
 				cfg.Concurrency, cfg.NumRequests, cfg.SeqDist, cfg.Streaming)
 		} else {

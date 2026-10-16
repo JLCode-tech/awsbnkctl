@@ -44,7 +44,7 @@ Deploying F5 BIG-IP Next for Kubernetes (BNK) on AWS typically requires coordina
 
 - **Zero Prerequisites**: No Terraform, Helm, or external `kubectl` required on the host—everything is driven natively via AWS SDK for Go v2 and client-go.
 - **Deterministic State Machine**: 41 sequential phases execute with full idempotency, resume safety, and explicit state verification.
-- **Built-in Diagnostics & Healing**: The `awsbnkctl bnk heal` command detects and automatically remediates 10 common Kubernetes plumbing issues (token expiration, metrics-server bindings, Multus mounts, and RBAC policies).
+- **Built-in Diagnostics & Healing**: The `awsbnkctl bnk heal` command detects and automatically remediates 11 common Kubernetes plumbing issues (token expiration, metrics-server bindings, Multus mounts, EPP watched namespaces, and RBAC policies).
 - **In-VPC Validation**: 15 built-in automated test scenarios validate L4/L7 routing, canary splits, gRPC streams, and AI inference directly inside the VPC.
 - **Clean Teardown**: Tag-driven resource discovery ensures `awsbnkctl down -f cluster.yaml --yes` destroys 100% of provisioned AWS resources with zero orphaned remnants.
 
@@ -308,7 +308,7 @@ flowchart LR
 - **`bigip-cis`** (VIP `.120`): Contrasts BNK's in-cluster TMM Gateway API against the traditional external BIG-IP Virtual Edition (VE) managed by CIS (`k8s-bigip-ctlr`).
 - **`ingress-migration`** (VIP `.113`): Demonstrates zero-downtime side-by-side migration by running `ingress-nginx`, `haproxy-ingress`, and BNK Gateway simultaneously in front of ONE shared backend.
 
-*(All 15 scenarios and 5 demos include individual architecture diagrams in [`docs/SCENARIOS.md`](docs/SCENARIOS.md).)*
+*(All 15 scenarios and 4 CLI demos (plus the `agentcore-demo` example) include individual architecture diagrams in [`docs/SCENARIOS.md`](docs/SCENARIOS.md).)*
 
 ---
 
@@ -343,6 +343,7 @@ Edit `cluster.yaml` to set your desired AWS region, cluster name, and paths to y
 metadata:
   name: bnk-prod-eks
   region: ap-southeast-2
+network:
   azs: [ap-southeast-2a, ap-southeast-2b, ap-southeast-2c]
 bnk:
   manifestVersion: "2.4.0"
@@ -401,7 +402,7 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 | **Kubernetes (EKS)** | `1.35` | `cluster.kubernetesVersion` | Tested on 1.34 (floor) and 1.35. |
 | **cert-manager** | `v1.21.1` | Embedded upstream YAML | Applied via client-go without Helm. |
 | **FLO Chart** | `v2.30.0-0.5.2` | `addons.flo.version` | Paired per release in `manifest.KnownReleases`. |
-| **Go Runtime** | `1.26` | `go.mod` | Complied with AWS SDK for Go v2 (`v1.42.0`). |
+| **Go Runtime** | `1.26` | `go.mod` | Compiled with AWS SDK for Go v2 (`v1.42.0`). |
 
 ---
 
@@ -414,11 +415,12 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 - **Data Plane Scenarios**: `scenarios` (`list`, `run`, `clean`) — 15 automated validation scenarios.
 - **Walkthrough Demos**: `demo` (`list`, `run`, `clean`, `preview`) — 4 narrated protocol walkthroughs.
 - **Kubernetes Passthrough**: `k` (`apply`, `delete`, `describe`, `exec`, `get`, `logs`, `port-forward`), aliases `get` and `logs`.
-- **BNK Runtime & Self-Healing**: `bnk` (`heal`, `resync`, `upgrade`, `migrate-2.4`, `mcp-session`), `manifest probe`.
-  - `bnk heal`: 10-point automated repair suite resolving Multus tokens, metrics-server, TMM log forwarding, EndpointSlice RBAC, and IRSA.
+- **BNK Runtime & Self-Healing**: `bnk` (`heal`, `resync`, `upgrade`, `migrate-2.4`, `mcp-session`), `manifest` (`probe`).
+  - `bnk heal`: 11-point automated repair suite resolving Multus tokens (`multus-token-watch`), metrics-server (`metrics-server`), TMM log forwarding (`tmm-log-stream`), pod-manager (`pod-manager`), cwc (`cwc`), dSSM probe (`dssm-probe`), EndpointSlice RBAC (`controller-endpointslices`), IRSA (`controller-irsa`), TMM routes (`tmm-k8s-routes`), EPP watched namespaces (`epp-namespaces`), and test namespace (`test-namespace`).
 - **AI & Benchmarking**: `benchmark` (`setup`, `run`, `list`, `status`, `daemon`, `ingest`).
 - **Fleet & Forge**: `forge` (`register`, `status`, `unregister`, `cleanup`, `scan`, `telemetry`, `benchmark`).
-- **Workspaces & Targets**: `workspaces` (`list`, `current`, `new`, `use`, `delete`), `targets` (`scan`, `add`, `list`).
+- **Agentic Workflow**: `agent` (`init`), `journal` (`add`, `list`, `report`).
+- **Workspaces, Targets & Maintenance**: `workspaces` (`list`, `current`, `new`, `use`, `delete`), `targets` (`scan`, `add`, `list`, `remove`, `show`), `install`, `self` (`update`).
 
 *(Complete command and flag reference: [`docs/COMMANDS.md`](docs/COMMANDS.md)).*
 
@@ -433,6 +435,8 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 - [`docs/COMMANDS.md`](docs/COMMANDS.md) — Full CLI flags and environment variables reference.
 - [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) — Peer-read integration with BNK Forge GUI and telemetry schemas.
 - [`docs/UPGRADE-2.4.md`](docs/UPGRADE-2.4.md) — Step-by-step in-place upgrade from BNK 2.3 to 2.4.
+- [`docs/ALIGNMENT.md`](docs/ALIGNMENT.md) — Cross-cloud architectural alignment across the `*bnkctl` family.
+- [`docs/PHASES.md`](docs/PHASES.md) — Detailed reference of all 41 provisioning and teardown phases.
 - [`docs/BGP-ROUTE-SERVER.md`](docs/BGP-ROUTE-SERVER.md) — BGP dynamic routing and ZebOS Route Server peering.
 - [`examples/`](examples/) — Ready-to-deploy reference manifests (`full-cluster`, `egress-demo`, `demo-ai`, `agentcore-demo`).
 
@@ -443,8 +447,10 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 |---|---|---|---|
 | **`awsbnkctl`** | AWS EKS | Secondary ENIs (host-device / SR-IOV DPDK), Multus | [JLCode-tech/awsbnkctl](https://github.com/JLCode-tech/awsbnkctl) |
 | **`gkebnkctl`** | GCP GKE | Secondary VPC interfaces (host-device), Multus | [JLCode-tech/gkebnkctl](https://github.com/JLCode-tech/gkebnkctl) |
+| **`azrbnkctl`** | Azure AKS | MANA / Accelerated Networking + Multus + Secondary NICs | [JLCode-tech/azrbnkctl](https://github.com/JLCode-tech/azrbnkctl) |
 | **`roksbnkctl`** | IBM Cloud ROKS / OpenShift | IBM Cloud VPC secondary subnets, Calico / OVN | [jgruberf5/roksbnkctl](https://github.com/jgruberf5/roksbnkctl) |
 | **`ocibnkctl`** | Local OCI / k3s | Container netns virtio demo mode, Anycast BGP | [mwiget/ocibnkctl](https://github.com/mwiget/ocibnkctl) |
+| **`bnkctl`** | Multi-Cloud Unified CLI | Unified F5 BNK lifecycle dispatcher | [JLCode-tech/bnkctl](https://github.com/JLCode-tech/bnkctl) |
 | **`bnkctl-index`** | BNK Forge Catalog | Unified Forge runner module index | [mwiget/bnkctl-index](https://github.com/mwiget/bnkctl-index) |
 
 ---

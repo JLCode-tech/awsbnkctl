@@ -22,6 +22,18 @@ spec:
         - /bin/sh
         - -c
         - |
+          # Wait up to 30s for secondary ENIs to finish kernel hotplug
+          for attempt in $(seq 1 30); do
+            count=0
+            for d in /host/sys/class/net/*; do
+              [ -e "$d/device" ] && [ -s "$d/address" ] && count=$((count + 1))
+            done
+            if [ "$count" -ge 3 ] || [ "$attempt" -ge 15 ]; then
+              break
+            fi
+            sleep 1
+          done
+
           out='{'
           sep=''
           for d in /host/sys/class/net/*; do

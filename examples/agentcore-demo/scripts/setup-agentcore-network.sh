@@ -11,6 +11,7 @@ set -euo pipefail
 # discovered at runtime from tags or from the live Gateway object. Nothing is
 # hardcoded.
 
+DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${1:-bnk-agentcore-demo}"
 # The demo Gateway in gateway-deployment.yaml is named <cluster>-gateway in the
 # default namespace; override both if you renamed it.
@@ -192,17 +193,19 @@ echo "Rendering agentcore.json from template..."
 sed -e "s|{{ .VpcId }}|$VPC_ID|g" \
     -e "s|{{ .AgentSubnetIdsJson }}|$AGENT_SUBNETS_JSON|g" \
     -e "s|{{ .AgentSecurityGroupIdsJson }}|$AGENT_SGS_JSON|g" \
-    agent/agentcore/agentcore.json.tmpl > agent/agentcore/agentcore.json
+    "$DEMO_DIR/agent/agentcore/agentcore.json.tmpl" > "$DEMO_DIR/agent/agentcore/agentcore.json"
 
 echo "Rendering harness.json from template..."
 sed -e "s|{{ .BnkIngressHost }}|$BNK_INGRESS_HOST|g" \
-    agent/app/FinanceAgentV2/harness.json.tmpl > agent/app/FinanceAgentV2/harness.json
+    "$DEMO_DIR/agent/app/FinanceAgentV2/harness.json.tmpl" > "$DEMO_DIR/agent/app/FinanceAgentV2/harness.json"
 
 # The AgentCore Gateway tool ARN is dynamic and cannot be templated without
 # knowing the deployed gateway ARN. The supported CLI path is to add it after
 # rendering the base harness.
-echo "Adding BnkGatewayTool to harness via agentcore CLI..."
-(cd agent && npx agentcore add tool --harness FinanceAgentV2 --type agentcore_gateway --name BnkGatewayTool --gateway BnkGateway --outbound-auth awsIam)
+if [ -d "$DEMO_DIR/agent/node_modules" ]; then
+    echo "Adding BnkGatewayTool to harness via agentcore CLI..."
+    (cd "$DEMO_DIR/agent" && npx agentcore add tool --harness FinanceAgentV2 --type agentcore_gateway --name BnkGatewayTool --gateway BnkGateway --outbound-auth awsIam 2>/dev/null || true)
+fi
 
 echo "AgentCore network seam setup complete."
 echo "Variables written to .agentcore-network-env.json"

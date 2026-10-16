@@ -151,6 +151,7 @@ func resolveSHA(root, ref string, pr int) (string, error) {
 	case pr > 0:
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		// #nosec G204 -- pr is an integer flag
 		out, err := exec.CommandContext(ctx, "gh", "pr", "view", fmt.Sprintf("%d", pr), "--json", "headRefOid").Output()
 		if err != nil {
 			return "", fmt.Errorf("gh pr view %d: %w", pr, err)

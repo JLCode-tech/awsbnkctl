@@ -32,8 +32,7 @@ var targetsCmd = &cobra.Command{
 	Use:   "targets",
 	Short: "Manage SSH targets used by --on; discover MCP endpoints for Forge",
 	Long: `Targets are named SSH endpoints stored under the workspace's
-` + "`targets:`" + ` block. They become reachable via the persistent --on flag
-on commands like ` + "`awsbnkctl exec`" + `, ` + "`awsbnkctl shell`" + `, ` + "`awsbnkctl kubectl`" + `, etc.
+` + "`targets:`" + ` block. Useful before running awsbnkctl k or awsbnkctl ssh.
 
 A jumphost target is auto-populated after a successful ` + "`awsbnkctl up`" + `
 when the upstream HCL provisions one (testing_tgw_jumphost outputs).`,

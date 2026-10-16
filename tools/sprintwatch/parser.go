@@ -121,7 +121,7 @@ func LoadSprints(root string) ([]Sprint, error) {
 			continue
 		}
 		var n int
-		fmt.Sscanf(m[1], "%d", &n)
+		_, _ = fmt.Sscanf(m[1], "%d", &n)
 		roleEntries, err := os.ReadDir(filepath.Join(promptsDir, e.Name()))
 		if err != nil {
 			continue
@@ -180,6 +180,7 @@ func LoadSprints(root string) ([]Sprint, error) {
 // README. Returns "" if the file is absent or the line is missing — sprints
 // without a theme just render without one.
 func readTheme(path string) string {
+	// #nosec G304 -- reading local sprint README file
 	f, err := os.Open(path)
 	if err != nil {
 		return ""
@@ -195,6 +196,7 @@ func readTheme(path string) string {
 }
 
 func parseIssueFile(r *Role, path string) error {
+	// #nosec G304 -- reading local sprint issue markdown file
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -282,6 +284,7 @@ func OverlayResolved(r *Role, resolvedContent string) {
 func ApplyRoadmapRule(r *Role) { applyRoadmapRule(r) }
 
 func overlayResolved(r *Role, path string) error {
+	// #nosec G304 -- reading local sprint resolved markdown file
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -303,7 +306,7 @@ func applyRoadmapRule(r *Role) {
 func parseIssueHeader(line string) *Issue {
 	rest := strings.TrimPrefix(line, "## Issue ")
 	var num int
-	fmt.Sscanf(rest, "%d", &num)
+	_, _ = fmt.Sscanf(rest, "%d", &num)
 	i := 0
 	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
 		i++

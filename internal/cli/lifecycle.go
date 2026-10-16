@@ -224,11 +224,17 @@ func registerWithForgePostApply(ctx context.Context, cl *intent.Cluster) error {
 		fmt.Fprintf(os.Stderr, "→ forge MCP: %s\n", fc.URL())
 	}
 
+	projName := ""
+	if cl.Forge != nil && cl.Forge.ProjectName != "" {
+		projName = cl.Forge.ProjectName
+	}
+
 	regCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	res, err := forge.Register(regCtx, fc, forge.RegisterRequest{
 		WorkspaceName: clusterName,
 		WorkspaceDir:  linkDir,
+		ProjectName:   projName,
 		ClusterName:   clusterName,
 		Region:        region,
 		Kubeconfig:    []byte(yaml),

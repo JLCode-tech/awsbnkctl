@@ -3,6 +3,7 @@
   "language": "en",
   "words": [
     "bnkscan",
+    "cursorrules",
     "Qkview",
     "fluentd",
     "toda",
@@ -85,6 +86,7 @@
     "awssqs",
     "AZ",
     "AZs",
+    "azrbnkctl",
     "backends",
     "bastion",
     "BE",

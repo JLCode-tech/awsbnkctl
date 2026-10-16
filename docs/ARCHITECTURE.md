@@ -120,7 +120,7 @@ The ordered list of all 41 phases is in [`PHASES.md`](PHASES.md).
 
 ### Cluster-side repairs
 
-The fixes the phases apply to a running cluster (Multus token watch, metrics-server, TMM log stream, pod-manager, cwc, dSSM probe, controller EndpointSlice RBAC, controller IRSA, `TMM_K8S_ROUTES`, the `awsbnkctl-test` namespace) live in one registry, `internal/aws/phases/heal.go`. `awsbnkctl bnk heal` runs them on any 2.3 or 2.4 cluster and `awsbnkctl doctor --backend k8s` prints the detections. `bnk upgrade` and `bnk migrate-2.4` move a 2.3 cluster to 2.4 (section 7).
+The 11 fixes the phases apply to a running cluster (Multus token watch, metrics-server, TMM log stream, pod-manager, cwc, dSSM probe, controller EndpointSlice RBAC, controller IRSA, `TMM_K8S_ROUTES`, EPP watched namespaces (`epp-namespaces`), and the `awsbnkctl-test` namespace) live in one registry, `internal/aws/phases/heal.go`. `awsbnkctl bnk heal` runs them on any 2.3 or 2.4 cluster and `awsbnkctl doctor --backend k8s` prints the detections. `bnk upgrade` and `bnk migrate-2.4` move a 2.3 cluster to 2.4 (section 7).
 
 ### `awsbnkctl down`
 
