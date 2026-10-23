@@ -4,6 +4,29 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [2.5.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.4.0...v2.5.0) (2026-10-23)
+
+
+### Features
+
+* **benchmark:** open-loop Poisson scenarios, daemon dispatch, and sim KV relay sidecar ([bada8ea](https://github.com/JLCode-tech/awsbnkctl/commit/bada8eaef9abd916d8316cdefc41fded4a19b071))
+* **benchmark:** open-loop Poisson scenarios, daemon dispatch, and sim KV relay sidecar ([78265e4](https://github.com/JLCode-tech/awsbnkctl/commit/78265e4f249df2f8f84bbedc0e4ee34c458ed15a))
+* **ci,docs:** align CI workflows, go toolchain, local gates, and docs truthfulness ([#76](https://github.com/JLCode-tech/awsbnkctl/issues/76)) ([40e7472](https://github.com/JLCode-tech/awsbnkctl/commit/40e7472053a9e05c7a87fa2bd3d347488d8da0c6))
+* **parity:** align aiperf native flags, bnkscan CNF CRDs, forge reuse, and heal phase ([4616094](https://github.com/JLCode-tech/awsbnkctl/commit/46160946396ca777058e8636ba6d6e53bfc719f7))
+* **parity:** align CI, docs, aiperf native flags, bnkscan CNF CRDs, and heal phase ([cf6f8cb](https://github.com/JLCode-tech/awsbnkctl/commit/cf6f8cb6b56ec4078aee826d700d8a4976d00fe8))
+* sync unified bnkctls teardown/forge/2.4.1 improvements, local-zone examples, and Forge visual docs ([75148d3](https://github.com/JLCode-tech/awsbnkctl/commit/75148d32066281aa1a36621c2f8ba94548e5d01c))
+* sync unified bnkctls teardown/forge/2.4.1 improvements, local-zone examples, and Forge visual docs ([a886514](https://github.com/JLCode-tech/awsbnkctl/commit/a886514830df1c9b06392d94d4da13bab8b081bb))
+
+
+### Bug Fixes
+
+* **agentcore-demo:** run on any cluster name; own Forge target per cluster ([76d6cb1](https://github.com/JLCode-tech/awsbnkctl/commit/76d6cb16ac12bb9684be5e18b61e8ec965c559b2))
+* **agentcore-demo:** run on any cluster name; own Forge target per cluster ([703f30d](https://github.com/JLCode-tech/awsbnkctl/commit/703f30d9935278c163c36e2096404f7d03257ec9))
+* **ci:** bump containerd, allow Seqs in cspell, and poll in daemon mock test ([4ec4713](https://github.com/JLCode-tech/awsbnkctl/commit/4ec47138ec39a24137d28b50f224f4717268be91))
+* **forge:** annotate false-positive credentials and file path findings for gosec ([5433da0](https://github.com/JLCode-tech/awsbnkctl/commit/5433da0944db48f3b6b988dd0c10ac7806c89101))
+* **forge:** use an agent-bound token for the benchmark agent and fail on auth rejection ([ad4bb54](https://github.com/JLCode-tech/awsbnkctl/commit/ad4bb54c568d07dc85414063fe1eec94d0282e3c))
+* **phases:** add JWT preflight check and defensive CRD listing guard in bnkscan ([fe37199](https://github.com/JLCode-tech/awsbnkctl/commit/fe37199874eaa7c94596aab13877dcde9bfc6689))
+
 ## [2.4.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.3.0...v2.4.0) (2026-09-15)
 
 
