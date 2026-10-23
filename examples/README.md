@@ -45,14 +45,14 @@ allocated by IPAM from `.224`–`.254` and recorded as `TMM_EXT_SELFIP` in
 ## Rules every `cluster.yaml` follows
 
 - **Credentials are files you supply.** `bnk.farArchive` and `bnk.jwt` point at
-  `./cne_pull_64.json` and `./license.jwt`, relative to the `cluster.yaml`
-  directory. Both names are gitignored, so they cannot be committed by accident.
+  your F5 Artifact Registry (FAR) service account key and BNK license JWT,
+  relative to the `cluster.yaml` directory (see the **[F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html)** for obtaining licensing and registry credentials). Both are gitignored so they cannot be committed by accident.
 - **`metadata.name` must be unique in your account.** It tags every AWS resource
   and names the state directory `.awsbnkctl/<name>/`; `down` finds resources by
   that tag even if the state directory is gone.
 - **Secrets never go in YAML.** `AWSBNKCTL_FORGE_PASSWORD`,
   `AWSBNKCTL_BIGIP_PASSWORD` and `HF_TOKEN` come from the environment.
-- **`forge:` is on** and points at `localhost:8000`. Without a Forge instance the
+- **`forge:` is on** and points at `localhost:8000` ([BNK Forge](https://github.com/JLCode-tech/bnk-forge)). Without a Forge instance the
   registration phase warns and `up` still succeeds.
 - **`bnk.bgp: true` is on.** It only opens the BGP/BFD ports; nothing peers until
   you build a Route Server ([`docs/BGP-ROUTE-SERVER.md`](../docs/BGP-ROUTE-SERVER.md)).

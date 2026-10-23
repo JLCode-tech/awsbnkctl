@@ -1,6 +1,6 @@
 # Forge Integration
 
-`awsbnkctl` can optionally register the clusters it provisions with **forge**, a GUI for operating BNK deployments.
+`awsbnkctl` can optionally register the clusters it provisions with **[BNK Forge](https://github.com/JLCode-tech/bnk-forge)**, a GUI for operating BNK deployments.
 
 This integration is a **write-only handoff**: `awsbnkctl` operates AWS infrastructure, reports the cluster connection details to forge, and then forge connects directly to the cluster.
 
@@ -65,7 +65,7 @@ inside it. The project name resolves as `AWSBNKCTL_FORGE_PROJECT` env >
 - **Automatic Active-Project Deactivation on Purge.** Forge rejects `DELETE /api/projects/{id}` with HTTP 400 when a project has `is_active: true`. Before deleting a project, `awsbnkctl` automatically checks `/api/projects/{id}`, activates a sibling project if available, or sends `PATCH /api/projects/{id}` with `{"is_active": false}` so teardown and `forge unregister --purge` never fail on an active project.
 - **Automatic AI Governance & Token Accounting Seeding.** When registering or linking a cluster (`EnsureClusterAIGovernanceConfig`), `awsbnkctl` resolves the cluster ID (via `/api/clusters` and `/api/projects/{id}/clusters` fallback) and seeds `/api/clusters/{id}/ai-governance/config` with `enabled: true`, `token_rate_limiting_enabled: true`, `loki_url: http://loki.llm-egress.svc.cluster.local:3100`, and `prometheus_url: http://prometheus.llm-egress.svc.cluster.local:9090` (preserving any operator-customized settings if already enabled).
 
-### BNK Forge Visual Tour
+### [BNK Forge](https://github.com/JLCode-tech/bnk-forge) Visual Tour
 
 | Platform Overview | Multi-Cloud Cluster Fleet |
 |---|---|
@@ -333,12 +333,7 @@ awsbnkctl forge scan -f ... -o json
 | `f5-tmm` DaemonSet | every scheduled TMM pod ready; a pod that is not Running is listed with its phase and the kubelet's latest warning (for example `FailedCreatePodSandBox ... Multus ... Unauthorized`) |
 | `F5BigPersistenceProfile` | `Programmed=True` |
 
-`GatewaySettings`, `EgressGateway`, `SecPolicy`, `NetPolicy` and `HTTPRoute` are
-listed with their conditions. On BNK `2.4.1` clusters with `f5inference.f5.com` CRDs installed (`bnk.aiGateway.enabled: true`), `bnkscan` also indexes and reports all 6 AI Gateway CRD kinds (`AIGateway`, `AIGatewayRoute`, `AIGatewayBackend`, `AIGatewayConfig`, `AIGatewayPolicy`, and `AIGatewayPlugin`) and checks whether Forge's server-side index includes `f5inference.f5.com` (`IndexesF5Inference()`). Legacy `F5BnkGateway`, `BNKSecPolicy`,
-`BNKNetPolicy`, `F5SPKVlan` and `F5SPKEgress` objects are counted, never
-required. `--remote` warns when Forge indexed a 2.4 cluster without the
-`gateway.k8s.f5.com` group: that Forge predates BNK 2.4 and its Fleet view
-misses the 2.4 kinds.
+Routing, egress, and security policy resources are listed with their readiness conditions. On BNK `2.4.1` clusters with the **F5 BNK AI Service Plane** enabled, `bnkscan` also indexes and reports AI Service Plane readiness and verifies that [BNK Forge](https://github.com/JLCode-tech/bnk-forge)'s server-side index covers the AI Service Plane resources. For details on BNK architecture and capabilities, see the **[F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html)**. `--remote` warns when Forge indexed a 2.4 cluster without 2.4 API support.
 
 An `HTTPRoute` is an MCP endpoint when it carries the annotation
 `bnk.f5.com/protocol: mcp` or a path match containing `/mcp`. Optional

@@ -57,12 +57,13 @@ cluster:
       desiredSize: 3
 
 bnk:                          # Supply-chain credentials and release
-  farArchive: ./cne_pull_64.json
+  farArchive: ./far-auth.json # F5 Artifact Registry key (see CloudDocs link below)
   jwt: ./license.jwt
   manifestVersion: "2.4.0"    # default; a 2.3.x build can be pinned here
 ```
 
 **Key Points:**
+- **F5 Licensing & Credentials:** See the **[F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html)** for obtaining F5 Artifact Registry credentials and your BNK license JWT.
 - **Strict Validation:** Typos are caught immediately. Unknown fields cause a validation error.
 - **Explicit AZs:** `network.azs` is explicit to ensure reproducible deployments.
 - **`metadata.name`:** Becomes the AWS resource tag (`awsbnkctl:cluster`) and the local state folder name.
