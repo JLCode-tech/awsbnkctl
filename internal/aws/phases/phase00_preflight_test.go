@@ -2,6 +2,8 @@ package phases
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
+	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
 )
 
@@ -50,10 +53,10 @@ func makeInstanceTypesOut(typ string, maxENIs int32, vcpus int32, memoryMiB int6
 }
 
 func TestCheckHostDeviceCapacity_OK(t *testing.T) {
-	cl := newHostDeviceCluster("m5.xlarge")
-	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.xlarge", 4, 16, 65536)}
+	cl := newHostDeviceCluster("m5.2xlarge")
+	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.2xlarge", 4, 8, 32768)}
 	if err := checkHostDeviceCapacity(context.Background(), cl, m); err != nil {
-		t.Fatalf("expected nil error for m5.xlarge, got %v", err)
+		t.Fatalf("expected nil error for m5.2xlarge, got %v", err)
 	}
 }
 
@@ -77,9 +80,9 @@ func TestCheckHostDeviceCapacity_TooSmall(t *testing.T) {
 // dual-interface floor on the ENI axis (other axes still apply).
 func TestCheckCapacity_DualInterface_ENIFloor3(t *testing.T) {
 	cl := newPatternCluster("dual-interface", "m5.xlarge")
-	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.xlarge", 3, 16, 65536)}
+	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.xlarge", 3, 8, 32768)}
 	if err := checkHostDeviceCapacity(context.Background(), cl, m); err != nil {
-		t.Fatalf("expected nil for dual-interface with 3 ENIs/16 vCPU/64GiB, got %v", err)
+		t.Fatalf("expected nil for dual-interface with 3 ENIs/8 vCPU/32GiB, got %v", err)
 	}
 }
 
@@ -87,13 +90,13 @@ func TestCheckCapacity_DualInterface_ENIFloor3(t *testing.T) {
 // 2: a 2-ENI type passes, a 1-ENI type fails the ENI check.
 func TestCheckCapacity_ExternalOnly_ENIFloor2(t *testing.T) {
 	ok := newPatternCluster("external-only", "m5.xlarge")
-	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.xlarge", 2, 16, 65536)}
+	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.xlarge", 2, 8, 32768)}
 	if err := checkHostDeviceCapacity(context.Background(), ok, m); err != nil {
-		t.Fatalf("expected nil for external-only with 2 ENIs/16 vCPU/64GiB, got %v", err)
+		t.Fatalf("expected nil for external-only with 2 ENIs/8 vCPU/32GiB, got %v", err)
 	}
 
 	bad := newPatternCluster("external-only", "small.type")
-	m2 := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("small.type", 1, 16, 65536)}
+	m2 := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("small.type", 1, 8, 32768)}
 	err := checkHostDeviceCapacity(context.Background(), bad, m2)
 	if err == nil {
 		t.Fatal("expected error for external-only with 1 ENI, got nil")
@@ -135,7 +138,7 @@ func TestCheckHostDeviceCapacity_EmptyInstanceType_OK(t *testing.T) {
 func TestCheckHostDeviceCapacity_InsufficientCPU(t *testing.T) {
 	cl := newHostDeviceCluster("m5.xlarge")
 	// 4 ENIs but only 4 vCPUs — should fail on vCPU check.
-	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.xlarge", 4, 4, 65536)}
+	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.xlarge", 4, 4, 32768)}
 	err := checkHostDeviceCapacity(context.Background(), cl, m)
 	if err == nil {
 		t.Fatal("expected error for insufficient vCPUs, got nil")
@@ -143,15 +146,15 @@ func TestCheckHostDeviceCapacity_InsufficientCPU(t *testing.T) {
 	if !strings.Contains(err.Error(), "vCPUs") {
 		t.Errorf("error %q does not mention 'vCPUs'", err)
 	}
-	if !strings.Contains(err.Error(), "16") {
-		t.Errorf("error %q does not mention required count '16'", err)
+	if !strings.Contains(err.Error(), "8") {
+		t.Errorf("error %q does not mention required count '8'", err)
 	}
 }
 
 func TestCheckHostDeviceCapacity_InsufficientMemory(t *testing.T) {
 	cl := newHostDeviceCluster("m5.xlarge")
-	// 4 ENIs + 16 vCPUs but only 16384 MiB — should fail on memory check.
-	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.xlarge", 4, 16, 16384)}
+	// 4 ENIs + 8 vCPUs but only 16384 MiB — should fail on memory check.
+	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.xlarge", 4, 8, 16384)}
 	err := checkHostDeviceCapacity(context.Background(), cl, m)
 	if err == nil {
 		t.Fatal("expected error for insufficient memory, got nil")
@@ -159,16 +162,16 @@ func TestCheckHostDeviceCapacity_InsufficientMemory(t *testing.T) {
 	if !strings.Contains(err.Error(), "memory") {
 		t.Errorf("error %q does not mention 'memory'", err)
 	}
-	if !strings.Contains(err.Error(), "65536") {
-		t.Errorf("error %q does not mention required MiB '65536'", err)
+	if !strings.Contains(err.Error(), "32768") {
+		t.Errorf("error %q does not mention required MiB '32768'", err)
 	}
 }
 
 func TestCheckHostDeviceCapacity_InsufficientDesiredSize(t *testing.T) {
-	cl := newHostDeviceCluster("m6i.4xlarge")
+	cl := newHostDeviceCluster("m5.2xlarge")
 	cl.ClusterSpec.NodeGroups[0].DesiredSize = 1
-	// 8 ENIs + 16 vCPUs + 64 GiB — all instance checks pass, but desiredSize=1.
-	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m6i.4xlarge", 8, 16, 65536)}
+	// 4 ENIs + 8 vCPUs + 32 GiB — all instance checks pass, but desiredSize=1.
+	m := &mockEC2{describeInstanceTypesOut: makeInstanceTypesOut("m5.2xlarge", 4, 8, 32768)}
 	err := checkHostDeviceCapacity(context.Background(), cl, m)
 	if err == nil {
 		t.Fatal("expected error for desiredSize=1, got nil")
@@ -203,3 +206,50 @@ func TestCheckHostDeviceCapacity_AllFailures(t *testing.T) {
 type errStub string
 
 func (e errStub) Error() string { return string(e) }
+
+func TestPhase00Preflight_WithJWT(t *testing.T) {
+	dir := t.TempDir()
+	st, err := state.Load(dir)
+	if err != nil {
+		t.Fatalf("state.Load: %v", err)
+	}
+
+	jwtFile := filepath.Join(dir, "license.jwt")
+	testToken := "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCIsImtpZCI6InYxIiwiamt1IjoiaHR0cHM6Ly9wcm9kdWN0LXRzdC5hcGlzLmY1bmV0d29ya3MubmV0L2VlL3YxL2tleXMvandrcyJ9.eyJzdWIiOiJUU1QtMTIzNDUiLCJpc3MiOiJGNSBJbmMuIiwiZjVfc2F0IjoxODA3ODMzNjAwfQ.sig"
+	if err := os.WriteFile(jwtFile, []byte(testToken), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cl := &intent.Cluster{
+		Metadata: intent.Metadata{Name: "test-cluster", Region: "us-west-2"},
+		Bnk: &intent.BnkSpec{
+			JWT: "license.jwt",
+		},
+		SourcePath: filepath.Join(dir, "cluster.yaml"),
+	}
+
+	// 1. With valid test token
+	if err := Phase00Preflight(context.Background(), cl, st, nil, true); err != nil {
+		t.Fatalf("Phase00Preflight with test token: %v", err)
+	}
+
+	// 2. With invalid token content (non-fatal warning note)
+	if err := os.WriteFile(jwtFile, []byte("invalid-jwt-data"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := Phase00Preflight(context.Background(), cl, st, nil, true); err != nil {
+		t.Fatalf("Phase00Preflight with invalid token: %v", err)
+	}
+
+	// 3. With non-existent JWT path (silently skipped if file cannot be read)
+	cl.Bnk.JWT = "non-existent.jwt"
+	if err := Phase00Preflight(context.Background(), cl, st, nil, true); err != nil {
+		t.Fatalf("Phase00Preflight with non-existent token: %v", err)
+	}
+
+	// 4. With nil cl.Bnk
+	cl.Bnk = nil
+	if err := Phase00Preflight(context.Background(), cl, st, nil, true); err != nil {
+		t.Fatalf("Phase00Preflight with nil Bnk: %v", err)
+	}
+}

@@ -40,6 +40,7 @@ var bnkNamespaces = []string{
 	"f5-cne-system",
 	"f5-bnk-instance",
 	"f5-utils",
+	"bnk-demo",
 }
 
 // farSecretNamespaces is the set of namespaces that receive the FAR pull secret
@@ -331,7 +332,7 @@ func Phase12K8sFoundationDown(ctx context.Context, cl *intent.Cluster, st *state
 
 	// 4. Delete the three F5 namespaces (cascades secrets within them).
 	// Do NOT delete cert-manager (deleted with YAML in step 2) or default.
-	f5Namespaces := []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils"}
+	f5Namespaces := []string{"f5-cne-core", "f5-cne-system", "f5-bnk-instance", "f5-utils", "bnk-demo"}
 	for _, ns := range f5Namespaces {
 		fmt.Fprintf(os.Stderr, "[phase 12 down] deleting namespace %s\n", ns)
 		err := clients.K8s.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})

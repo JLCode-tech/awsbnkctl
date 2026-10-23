@@ -38,7 +38,7 @@ AWSBNKCTL_SKIP_AUTH=1 ./bin/awsbnkctl down -f examples/full-cluster/cluster.yaml
 cmd/awsbnkctl/           # CLI entrypoint (main.go)
 internal/
 ├── aws/                 # aws-sdk-go-v2 wrappers: VPC, EKS, EC2, IAM, S3, STS, Service Quotas; tags/ and state/ subpackages
-│   └── phases/          # Exactly 41 ordered provisioning and teardown phases (phaseNN_*.go), orchestrated by internal/cli/lifecycle.go; heal.go is the 10-entry repair registry shared by up, bnk upgrade, bnk heal and doctor --backend k8s
+│   └── phases/          # Exactly 41 ordered provisioning and teardown phases (phaseNN_*.go), orchestrated by internal/cli/lifecycle.go; heal.go is the 11-entry repair registry shared by up, bnk upgrade, bnk heal and doctor --backend k8s
 ├── bnkconst/            # BNK-wide constants shared across packages
 ├── cli/                 # Cobra command tree — every command lives here; Version/Commit/BuildDate vars in root.go are stamped via -ldflags
 ├── config/              # Workspace paths ($AWSBNKCTL_HOME) and global config — NOT the cluster.yaml schema

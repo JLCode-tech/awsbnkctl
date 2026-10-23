@@ -13,6 +13,7 @@ import (
 
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	"github.com/JLCode-tech/awsbnkctl/internal/jwt"
 )
 
 // bnkMinENIs returns the minimum number of network interfaces an EC2 instance
@@ -35,12 +36,14 @@ func bnkMinENIs(cl *intent.Cluster) int {
 }
 
 // HostDeviceMinVCPUs is the minimum vCPU count required for a BNK pattern.
-// BNK 2.3 Small profile requires at least 16 vCPUs on the TMM node.
-const HostDeviceMinVCPUs = 16
+// BNK requires at least 8 vCPUs on the TMM node: 2 pinned to DPDK
+// (PalCpuSet "0,2"), leaving 6 vCPUs for Linux kernel, kubelet, and CNE control pods.
+const HostDeviceMinVCPUs = 8
 
 // HostDeviceMinMemoryMiB is the minimum memory (MiB) required for a BNK pattern.
-// BNK 2.3 Small profile requires at least 64 GiB.
-const HostDeviceMinMemoryMiB = 65536
+// BNK requires at least 32 GiB (32768 MiB) — 4 GiB hugepages + 8 GiB TMM + 20 GiB
+// for system, kubelet, and dSSM quorum pods.
+const HostDeviceMinMemoryMiB = 32768
 
 // HostDeviceMinDesiredSize is the minimum node group desired size for a BNK
 // pattern. dSSM requires a quorum of ≥3 nodes.
@@ -59,6 +62,16 @@ const HostDeviceMinDesiredSize = 3
 func Phase00Preflight(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients, dryRun bool) error {
 	fmt.Fprintf(os.Stderr, "[phase 00] preflight: cluster=%s region=%s\n",
 		cl.Metadata.Name, cl.Metadata.Region)
+
+	if cl.Bnk != nil && cl.Bnk.JWT != "" {
+		jwtPath := resolveConfigPath(cl.SourcePath, cl.Bnk.JWT)
+		// #nosec G304 -- jwtPath is user-configured license path from cluster.yaml
+		if data, err := os.ReadFile(jwtPath); err == nil {
+			if _, chkErr := jwt.CheckPreflight(string(data), os.Stderr); chkErr != nil {
+				fmt.Fprintf(os.Stderr, "[phase 00] note: JWT parsing failed (%v) - skipping claims inspection\n", chkErr)
+			}
+		}
+	}
 
 	if clients == nil {
 		// Credential-free dry-run sentinel: no AWS service clients available.
@@ -142,23 +155,23 @@ func checkHostDeviceCapacity(ctx context.Context, cl *intent.Cluster, ec2c EC2AP
 		}
 	}
 
-	// vCPU check (BNK 2.3 Small minimum).
+	// vCPU check (BNK minimum: 8 vCPUs).
 	if info.VCpuInfo != nil && info.VCpuInfo.DefaultVCpus != nil {
 		vcpus := int(*info.VCpuInfo.DefaultVCpus)
 		if vcpus < HostDeviceMinVCPUs {
 			errs = append(errs, fmt.Errorf(
-				"pattern %s requires at least %d vCPUs (BNK 2.3 Small minimum); %q has %d vCPUs",
+				"pattern %s requires at least %d vCPUs (BNK minimum); %q has %d vCPUs",
 				cl.Pattern, HostDeviceMinVCPUs, instanceType, vcpus,
 			))
 		}
 	}
 
-	// Memory check (BNK 2.3 Small minimum: 64 GiB).
+	// Memory check (BNK minimum: 32 GiB).
 	if info.MemoryInfo != nil && info.MemoryInfo.SizeInMiB != nil {
 		memMiB := *info.MemoryInfo.SizeInMiB
 		if memMiB < HostDeviceMinMemoryMiB {
 			errs = append(errs, fmt.Errorf(
-				"pattern %s requires at least %d MiB memory (64 GiB, BNK 2.3 Small minimum); %q has %d MiB",
+				"pattern %s requires at least %d MiB memory (32 GiB, BNK minimum); %q has %d MiB",
 				cl.Pattern, HostDeviceMinMemoryMiB, instanceType, memMiB,
 			))
 		}

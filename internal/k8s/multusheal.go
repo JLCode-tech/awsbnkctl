@@ -80,6 +80,14 @@ func MultusWatchEnabled(ds *appsv1.DaemonSet) bool {
 		if c.Name != MultusContainer {
 			continue
 		}
+		if strings.Contains(c.Image, "thick") {
+			return true
+		}
+		for _, cmd := range c.Command {
+			if strings.Contains(cmd, "multus-daemon") {
+				return true
+			}
+		}
 		cleanup, skip, auto := false, false, true
 		for _, a := range c.Args {
 			switch {

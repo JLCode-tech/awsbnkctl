@@ -264,17 +264,21 @@ func findRTBByTagAndVPC(ctx context.Context, ec2c EC2API, clusterName, vpcID, vi
 }
 
 // collectRTBIDs returns all non-main route tables for the cluster.
+// Always merges state + tag/VPC discovery so stateless teardown or partial
+// state never misses a custom route table (which would block VPC deletion).
 func collectRTBIDs(ctx context.Context, ec2c EC2API, clusterName, vpcID string, st *state.State) []string {
+	seen := make(map[string]bool)
 	var ids []string
-	for _, key := range []string{"PUBLIC_RTB", "PRIVATE_RTB"} {
-		if id := st.Get(key); id != "" {
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
 			ids = append(ids, id)
 		}
 	}
-	if len(ids) > 0 {
-		return ids
+	for _, key := range []string{"PUBLIC_RTB", "PRIVATE_RTB"} {
+		add(st.Get(key))
 	}
-	// Tag-discovery fallback.
+	// Tag-discovery fallback (also sweeps VPC if vpcID is known).
 	filters := []ec2types.Filter{tags.ClusterFilter(clusterName)}
 	if vpcID != "" {
 		filters = append(filters, ec2types.Filter{
@@ -285,12 +289,18 @@ func collectRTBIDs(ctx context.Context, ec2c EC2API, clusterName, vpcID string, 
 	out, err := ec2c.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{
 		Filters: filters,
 	})
-	if err != nil {
-		return nil
-	}
-	for _, rt := range out.RouteTables {
-		if rt.RouteTableId != nil {
-			ids = append(ids, *rt.RouteTableId)
+	if err == nil {
+		for _, rt := range out.RouteTables {
+			isMain := false
+			for _, assoc := range rt.Associations {
+				if assoc.Main != nil && *assoc.Main {
+					isMain = true
+					break
+				}
+			}
+			if !isMain && rt.RouteTableId != nil {
+				add(*rt.RouteTableId)
+			}
 		}
 	}
 	return ids

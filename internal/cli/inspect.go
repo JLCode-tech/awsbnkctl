@@ -168,7 +168,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	// happens to be active on the host.
 	kcPath := resolveKubeconfigForStatus(st)
 	if kcPath == "" {
-		fmt.Fprintln(tw, "Kubeconfig:\t(none — run `awsbnkctl kubeconfig --download`)")
+		fmt.Fprintln(tw, "Kubeconfig:\t(none — run awsbnkctl up --phase 24 or aws eks update-kubeconfig)")
 		return nil
 	}
 	fmt.Fprintf(tw, "Kubeconfig:\t%s\n", kcPath)
@@ -519,10 +519,10 @@ type bnkComponent struct {
 }
 
 var bnkComponents = []bnkComponent{
-	{"flo", "F5 Lifecycle Operator", "f5-bnk", "app.kubernetes.io/name=f5-lifecycle-operator"},
-	{"cis", "F5 BNK CIS controller", "f5-bnk", "app=f5-bnk-cis"},
+	{"flo", "F5 Lifecycle Operator", "f5-cne-core", "app.kubernetes.io/name=f5-lifecycle-operator"},
+	{"cis", "F5 BNK CIS controller", "f5-cne-system", "app=f5-bnk-cis"},
 	{"cert-manager", "cert-manager", "cert-manager", "app.kubernetes.io/instance=cert-manager"},
-	{"cneinstance", "BIG-IP TMM data plane (CNEInstance pods)", "f5-bnk", "app.kubernetes.io/component=tmm"},
+	{"cneinstance", "BIG-IP TMM data plane (CNEInstance pods)", "f5-cne-system", "app.kubernetes.io/component=tmm"},
 	// The TMM pod's f5-fluentbit sidecar forwards to f5-toda-fluentd on 2.3 and
 	// 2.4 (2.3 also prints to its own stdout); the TMM lines (governance
 	// records included) are read from the f5-toda-fluentd stdout store that

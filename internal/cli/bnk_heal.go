@@ -30,13 +30,13 @@ type bnkHealResult struct {
 var bnkHealCmd = &cobra.Command{
 	Use:   "heal",
 	Short: "Detect and repair the cluster-side plumbing awsbnkctl up and bnk upgrade also fix, on any BNK generation",
-	Long: `awsbnkctl bnk heal runs the idempotent repairs that awsbnkctl up and
+	Long: `awsbnkctl bnk heal runs the 11 idempotent repairs that awsbnkctl up and
 awsbnkctl bnk upgrade apply, without provisioning or upgrading anything. Each
 repair is detected first and fixed only when needed; --dry-run prints what
 would change. awsbnkctl doctor --backend k8s shows the same detections as
 rows. Works on 2.3 and 2.4 clusters.
 
-Repairs (--only <name> limits the run):
+Repairs (11 total; --only <name> limits the run):
   multus-token-watch         kube-multus-ds writes its kubeconfig once at pod
                              start unless started with --cleanup-config-on-exit;
                              the expired token fails every new pod with

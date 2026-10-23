@@ -88,6 +88,7 @@ func LoadDAGs(repoRoot string) map[string]*DAG {
 }
 
 func parseWorkflow(path string) (*DAG, error) {
+	// #nosec G304 -- path is a workflow file inside local .github/workflows directory
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
