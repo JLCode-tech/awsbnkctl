@@ -167,6 +167,7 @@ func Phase11bEBSCSIHugepagesDown(ctx context.Context, cl *intent.Cluster, st *st
 		} else {
 			fmt.Fprintf(os.Stderr, "[phase 11b down] aws-ebs-csi-driver addon delete requested; waiting for removal\n")
 			deadline := time.Now().Add(90 * time.Second)
+		addonWaitLoop:
 			for time.Now().Before(deadline) {
 				_, dErr := clients.EKS.DescribeAddon(ctx, &eks.DescribeAddonInput{
 					ClusterName: &name,
@@ -180,7 +181,7 @@ func Phase11bEBSCSIHugepagesDown(ctx context.Context, cl *intent.Cluster, st *st
 				}
 				select {
 				case <-ctx.Done():
-					break
+					break addonWaitLoop
 				case <-time.After(5 * time.Second):
 				}
 			}
