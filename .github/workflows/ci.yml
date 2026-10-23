@@ -211,19 +211,14 @@ jobs:
       - uses: helm/kind-action@v1
         with:
           wait: 120s
-          version: v0.24.0
+          version: v0.27.0
 
       - name: Pre-load test images into kind
-        # Pull busybox:1.36 on the host docker daemon, then `kind load`
-        # it into the kind node so kubelet doesn't have to pull from
-        # Docker Hub (rate-limited on cold runners, often times out
-        # against the 3m k8sJobReadyTimeout in internal/exec/k8s.go).
-        # The same pull also serves the docker-backend integration
-        # test that runs alongside in this job (busybox bind-mount
-        # round-trip).
+        # Pull busybox:1.36 on the host docker daemon and inside the kind
+        # containerd namespace so kubelet doesn't have to pull cold during tests.
         run: |
           docker pull busybox:1.36
-          kind load docker-image busybox:1.36 --name chart-testing
+          docker exec chart-testing-control-plane ctr --namespace=k8s.io images pull docker.io/library/busybox:1.36 || kind load docker-image busybox:1.36 --name chart-testing
 
       - name: go test (integration tag — exec/k8s + cli/ops)
         # Tests self-skip when no kubeconfig is reachable, so a kind
