@@ -95,7 +95,7 @@ The jobs in `.github/workflows/ci.yml` run on every PR and on pushes to `main` /
 | **Dry-run smoke** | `test-dryrun` | Builds the binary and runs `awsbnkctl test {connectivity,dns,throughput} --dry-run` against a materialised fake workspace |
 | **Plan smoke** | `up-dryrun` | `awsbnkctl validate` plus `up` / `down --dry-run` on the examples |
 | **Portability** | `windows-build`, `goreleaser-check` | Windows cross-build and goreleaser config sanity |
-| **Docs** | `docs-spellcheck` | cspell over the Markdown (`cspell.json` holds the word list) |
+| **Docs** | `docs-spellcheck` | cspell over the Markdown (`.github/cspell.json` holds the word list) |
 | **Security** | `security-audit` | gosec, govulncheck, gitleaks |
 | **Live e2e** | `e2e-full.yml` | Real AWS account + real EKS cluster — on demand only |
 

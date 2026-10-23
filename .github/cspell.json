@@ -749,5 +749,6 @@
     "docs/audits/**",
     "docs/adr/**",
     "docs/upstream-issues/**"
-  ]
+  ],
+  "globRoot": ".."
 }

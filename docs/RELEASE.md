@@ -34,7 +34,7 @@ make goreleaser-snapshot  # local unpublished build
 
 ## Tools images
 
-`tools-images.yml` publishes `ghcr.io/jlcode-tech/awsbnkctl-tools-aws` and `ghcr.io/jlcode-tech/awsbnkctl-tools-iperf3` (multi-arch): `:<tag>` and `:latest` on a tag push, `:dev` on a push to `main`. The docker execution backend pulls them (`internal/exec/docker.go`). `runner.Dockerfile` builds a container with a released binary; no workflow publishes it.
+`tools-images.yml` publishes `ghcr.io/jlcode-tech/awsbnkctl-tools-aws` and `ghcr.io/jlcode-tech/awsbnkctl-tools-iperf3` (multi-arch): `:<tag>` and `:latest` on a tag push, `:dev` on a push to `main`. The docker execution backend pulls them (`internal/exec/docker.go`). `tools/docker/runner.Dockerfile` builds a container with a released binary; no workflow publishes it.
 
 ## Self upgrade
 

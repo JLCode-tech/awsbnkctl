@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hack/ci-local.sh — Mirror all GitHub Actions CI gates locally before pushing.
+# scripts/ci-local.sh — Mirror all GitHub Actions CI gates locally before pushing.
 #
 # Runs the exact checks from .github/workflows/ci.yml in fail-fast order:
 #   1. gofmt (clean check)
@@ -15,7 +15,7 @@
 #  11. govulncheck + gitleaks
 #
 # Usage:
-#   ./hack/ci-local.sh
+#   ./scripts/ci-local.sh
 
 set -euo pipefail
 
@@ -146,12 +146,12 @@ step "8/11" "awsbnkctl test --dry-run"
 pass "test --dry-run"
 
 # 9. cspell
-step "9/11" "cspell (docs/**/*.md README.md CONTRIBUTING.md)"
+step "9/11" "cspell (docs/**/*.md README.md .github/CONTRIBUTING.md)"
 if command -v cspell >/dev/null 2>&1; then
-  cspell --config cspell.json "docs/**/*.md" README.md CONTRIBUTING.md
+  cspell --config .github/cspell.json "docs/**/*.md" README.md .github/CONTRIBUTING.md
   pass "cspell"
 elif command -v npx >/dev/null 2>&1; then
-  npx --yes cspell@8 --config cspell.json "docs/**/*.md" README.md CONTRIBUTING.md
+  npx --yes cspell@8 --config .github/cspell.json "docs/**/*.md" README.md .github/CONTRIBUTING.md
   pass "cspell (via npx)"
 else
   skip "cspell / npx not installed"
@@ -180,7 +180,7 @@ else
 fi
 
 if command -v gitleaks >/dev/null 2>&1; then
-  gitleaks detect --source . --no-banner --redact
+  gitleaks detect --source . --gitleaks-ignore-path .github/.gitleaksignore --no-banner --redact
   pass "gitleaks"
 else
   skip "gitleaks not installed"

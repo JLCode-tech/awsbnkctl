@@ -154,4 +154,4 @@ The binary embeds no LLM; bring your own coding-agent CLI.
   the project.
 
 The full schema is `internal/intent/cluster.go`; the repository layout is in
-[`CLAUDE.md`](../CLAUDE.md).
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
