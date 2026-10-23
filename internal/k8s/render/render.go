@@ -5,6 +5,7 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -339,6 +340,35 @@ type CNEInstanceVars struct {
 	Sriov               bool   // sriov-external: drop TMM_GENERIC_SOCKET_DRIVER + let the device plugin inject PCIDEVICE_INTEL_COM
 	ServiceCIDR         string // EKS serviceIpv4Cidr (state ServiceCIDRStateKey); rendered as TMM_K8S_ROUTES
 	EPP                 bool   // BNK 2.4+: let the CNE controller run F5 EPPs in every namespace (eppNamespaces: [All])
+	AIGateway           bool   // BNK 2.4.1+: emit spec.controllers.aiGateway when enabled or by default on 2.4.1+
+	AIMetrics           bool   // BNK 2.4.1+: spec.controllers.aiGateway.aiMetrics (default true when AIGateway is enabled)
+}
+
+// isAIGatewayManifestVersion returns true when manifestVersion is >= 2.4.1
+// (e.g. "2.4.1-4099.1-3-0.2.36"). BNK 2.4.1+ introduces spec.controllers.aiGateway
+// in CNEInstance CRDs to reconcile f5inference InferencePools/InferenceModels.
+func isAIGatewayManifestVersion(manifestVersion string) bool {
+	ver := strings.TrimPrefix(strings.TrimSpace(manifestVersion), "v")
+	if dash := strings.IndexByte(ver, '-'); dash > 0 {
+		ver = ver[:dash]
+	}
+	parts := strings.Split(ver, ".")
+	if len(parts) < 3 {
+		return false
+	}
+	maj, err1 := strconv.Atoi(parts[0])
+	min, err2 := strconv.Atoi(parts[1])
+	pat, err3 := strconv.Atoi(parts[2])
+	if err1 != nil || err2 != nil || err3 != nil {
+		return false
+	}
+	if maj != 2 {
+		return maj > 2
+	}
+	if min != 4 {
+		return min > 4
+	}
+	return pat >= 1
 }
 
 // RenderCNEInstance renders the CNEInstance CR template with vars derived
@@ -362,6 +392,14 @@ func RenderCNEInstance(tmpl []byte, cl *intent.Cluster, getter func(string) stri
 	externalNAD := "external-netdevice"
 	if sriov {
 		externalNAD = "external-sriov"
+	}
+	// Enable AI Gateway controller by default on BNK 2.4.1+, or when explicitly
+	// requested via bnk.aiGateway.enabled in cluster.yaml.
+	aiGateway := isAIGatewayManifestVersion(cl.Bnk.ManifestVersion) || isAIGatewayManifestVersion(cl.Bnk.Version)
+	aiMetrics := aiGateway
+	if cl.Bnk.AIGateway != nil {
+		aiGateway = cl.Bnk.AIGateway.Enabled
+		aiMetrics = cl.Bnk.AIGateway.AIMetrics || cl.Bnk.AIGateway.Enabled
 	}
 	vars := CNEInstanceVars{
 		// Operator-knobs
@@ -395,6 +433,8 @@ func RenderCNEInstance(tmpl []byte, cl *intent.Cluster, getter func(string) stri
 		Sriov:               sriov,
 		ServiceCIDR:         getter(ServiceCIDRStateKey),
 		EPP:                 !strings.HasPrefix(cl.Bnk.ManifestVersion, "2.3"),
+		AIGateway:           aiGateway,
+		AIMetrics:           aiMetrics,
 	}
 	return Render(tmpl, vars)
 }

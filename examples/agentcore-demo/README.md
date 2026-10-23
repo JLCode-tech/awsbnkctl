@@ -71,8 +71,8 @@ one before it.
 | 2 | `awsbnkctl k apply -f mcp-tool/` | the directory, not a file: Kustomize generates the ConfigMap and the bearer-token Secret |
 | 3 | `awsbnkctl k apply --config cluster.yaml -f gateway-deployment.yaml` | the `GatewaySettings`, the Gateway with listeners on 80 and 443 and both `HTTPRoute`s; `--config` fills in the GatewayClass and CA issuer names from the cluster state |
 | 4 | `scripts/setup-agentcore-network.sh` | reads the VIP off the live Gateway; creates the agent security group, SG-to-SG ingress and the private Route 53 zone |
-| 5 | `awsbnkctl k apply -f mcp-persistence.yaml` | the passphrase Secret and the `MODEL_CONTEXT_PROTOCOL` persistence profile the NetPolicies reference. BNK 2.4.0 programs an `F5BigPersistenceProfile` only in the instance namespace (`f5-cne-system`) while a `NetPolicy` looks it up in its own namespace, so the profile in `default` stays unprogrammed and the iRules still attach; `awsbnkctl doctor --backend k8s` reports it |
-| 6 | `awsbnkctl k apply -f mcp-security-policy.yaml` | the rate-limit iRule, persistence and firewall attach to listeners that must already exist |
+| 5 | `awsbnkctl k apply -f mcp-persistence.yaml` | the passphrase Secret and the `MODEL_CONTEXT_PROTOCOL` persistence profile the NetPolicies reference |
+| 6 | `awsbnkctl k apply -f mcp-security-policy.yaml && ./scripts/setup-llm-gateway.sh` | the rate-limit iRule, persistence, firewall, and the BNK 2.4.1 7-step `inference.k8s.f5.com/v1alpha1` AI Gateway chain (`AITenant`, `AICredential`, `AIProvider`, `AIModel`, `AIGatewayProfile`) + `AppPolicy` (`gateway.k8s.f5.com/v1alpha1`) + `F5BigDnsCache` (`net-resolver`) + `F5SPKStaticRoute` |
 | 7 | `awsbnkctl k apply -f mcp-observability.yaml`, then `scripts/rebuild.sh` step 7 | Loki and the collectors in `llm-egress`; the Bedrock token shipper (`llm-egress`) and the traffic generator (`default`). Apply those two through `rebuild.sh`: it substitutes the account id into the shipper and the live VIP into the generator |
 | 8 | `cd agent && npx agentcore deploy --target demo-v2` | the AgentCore runtime, VPC mode, in the private subnets |
 | 9 | `scripts/setup-stranger.sh` (optional) | an EC2 caller with one NIC inside `10.0.0.0/16` and one outside, so the firewall's reject branch can be shown |
@@ -119,14 +119,20 @@ for i in $(seq 1 12); do curl -s -o /dev/null -w '%{http_code} ' -X POST http://
 ```
 
 The decisions, in Forge: **Gateway Topology** shows the iRule under each
-listener and the firewall under Security Policies; **LLM Observability** for
-cluster `bnk-agentcore-demo` shows request counts, the 429s and latency. Every
-record also carries `rpc_method`, `tool`, `session` and `transport`.
+listener and the firewall under Security Policies; **Multi-Cluster AI Gateway**
+shows the BNK 2.4.1 `inference.k8s.f5.com/v1alpha1` dependency chain;
+**LLM Observability** for cluster `bnk-agentcore-demo` shows request counts, the
+429s and latency. Every record also carries `rpc_method`, `tool`, `session` and
+`transport`.
 
-From the CLI, `awsbnkctl forge scan -f cluster.yaml` lists the 2.4 readiness
-checks and the MCP endpoint with its persistence profile and iRule;
-`--register-targets` writes the endpoint into Forge's Target Catalog and
-`--probe` records its tools. `awsbnkctl forge telemetry` (after
+From the CLI, `awsbnkctl forge scan -f cluster.yaml` lists the BNK 2.4.1 readiness
+checks (`AITenant`, `AICredential`, `AIProvider`, `AIModel`, `AIGatewayProfile`,
+`AppPolicy`) and the MCP endpoint with its persistence profile and
+iRule; `awsbnkctl forge governance overview -f cluster.yaml` queries Forge's
+Multi-Cluster AI Gateway & Dependency Fabric (`/api/k8s/clusters/{id}/governance/overview`),
+`awsbnkctl forge governance remediate -f cluster.yaml --action heal_aigw_profile`
+triggers healing, and `awsbnkctl forge governance test-request -f cluster.yaml`
+runs a live verification probe. `awsbnkctl forge telemetry` (after
 `awsbnkctl k port-forward -n llm-egress svc/loki 3100:3100`) checks every
 record against the schema the panel reads. Without Forge, query Loki directly:
 
@@ -135,19 +141,16 @@ kubectl run lq --rm -i --restart=Never -n llm-egress --image=curlimages/curl:8.8
   -s --get 'http://loki:3100/loki/api/v1/query_range' --data-urlencode 'query={job="llm-gateway"}' --data-urlencode 'limit=5'
 ```
 
-BNK's records carry zero tokens, honestly: it is in the path of the tool call,
-not the model call. Two more sources feed the same Loki stream, each labelled
-with `source`:
+Two live model telemetry sources feed the Loki stream, each labelled with `source`:
 
 - `source=bedrock-logs`: `mcp-bedrock-token-shipper.yaml` polls the Bedrock
   model-invocation log group and ships real token counts and costs. Needs
   Bedrock invocation logging turned on in the account.
-- `source=synthetic`: `traffic-generator-deployment.yaml` posts a simulated
-  model call to the shipper every 30 seconds. Its tokens, latency and cost are
-  random numbers; they keep the Forge panels moving on an account without
-  Bedrock logging and are not spend.
+- `source=aigateway-241`: `traffic-generator-deployment.yaml` probes the live
+  BNK 2.4.1 AI Gateway (`http://10.0.10.150/v1/chat/completions`) and
+  records real HTTP response statuses, latency, and usage token counts.
 
-The generator also drives the live VIP every cycle: a forecast with the agent
+The generator also drives the live MCP VIP every cycle: a forecast with the agent
 token (200), a privileged tool with the external token (403), discovery (200)
 and an unauthenticated call (401). It uses four of the external caller's ten
 requests per minute, so `demo.sh` Act 4 reaches its 429 sooner than on a quiet
@@ -156,7 +159,7 @@ cluster.
 ## Scenarios and BGP
 
 All 15 `awsbnkctl scenarios` run here with no VIP override: the demo Gateway sits
-on `.150`, outside the scenario range. `ai-inference-e2e` needs `--synthetic`.
+on `.150`, outside the scenario range.
 `bnk.bgp: true` opens the BGP/BFD ports; to peer, follow
 [`docs/BGP-ROUTE-SERVER.md`](../../docs/BGP-ROUTE-SERVER.md) and apply
 [`bgp-route-server.yaml`](bgp-route-server.yaml).
@@ -190,7 +193,8 @@ awsbnkctl down -f examples/agentcore-demo/cluster.yaml --yes
 
 | File | Contains |
 | --- | --- |
-| `cluster.yaml` | the awsbnkctl intent |
+| `cluster.yaml` | the awsbnkctl intent (K8s `1.35`, BNK `2.4.1`, FLO `v2.30.1-0.0.8`, `aiGateway` enabled) |
+| `k8s/bnk-llm-gateway.yaml` (`aigateway-241.yaml`) | BNK 2.4.1 7-step `inference.k8s.f5.com/v1alpha1` chain (`AITenant`, `AICredential`, `AIProvider`, `AIModel`, `AIGatewayProfile`) + `AppPolicy` + `F5BigDnsCache` (`net-resolver`) + `F5SPKStaticRoute` |
 | `mcp-tool/` | the MCP finance tool: `mcp-server.py` and the Kustomize base that generates its ConfigMap and token Secret |
 | `gateway-deployment.yaml` | the `GatewaySettings`, the BNK `Gateway` (80 and 443) and both `HTTPRoute`s |
 | `mcp-persistence.yaml` | passphrase `Secret` and the `F5BigPersistenceProfile` (`MODEL_CONTEXT_PROTOCOL`) that pins each MCP session to one pod |

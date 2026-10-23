@@ -25,6 +25,17 @@ import (
 // Catches obvious typos (e.g. "T3.small", "t3small") without an exhaustive list.
 var instanceTypeRE = regexp.MustCompile(`^[a-z][0-9a-z]+\.[a-z0-9]+$`)
 
+// BnkAIGatewaySpec configures the BNK 2.4.1+ Multi-Cluster AI Gateway (inference.k8s.f5.com/v1alpha1).
+type BnkAIGatewaySpec struct {
+	Enabled            bool   `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	AIMetrics          bool   `yaml:"aiMetrics,omitempty" json:"aiMetrics,omitempty"`
+	ConsoleURL         string `yaml:"consoleUrl,omitempty" json:"consoleUrl,omitempty"`
+	DefaultEgressRoute bool   `yaml:"defaultEgressRoute,omitempty" json:"defaultEgressRoute,omitempty"`
+	DNSResolver        bool   `yaml:"dnsResolver,omitempty" json:"dnsResolver,omitempty"`
+	DSSMSentinel       bool   `yaml:"dssmSentinel,omitempty" json:"dssmSentinel,omitempty"`
+	MultiNUMASpanning  bool   `yaml:"multiNumaSpanning,omitempty" json:"multiNumaSpanning,omitempty"`
+}
+
 // BnkSpec holds the operator-supplied BNK supply-chain credentials required by
 // Phase 12 (k8s install foundation). The bnk: block is optional at schema load
 // time (slices 1–4 don't need it); Phase 12 returns a clear error if absent.
@@ -57,6 +68,10 @@ type BnkSpec struct {
 	// aws-gpu-setup MANIFEST_VERSION — the FLO chart version
 	// (e.g. v2.30.0-0.5.2 for 2.4.0) is paired per release in manifest.KnownReleases.
 	ManifestVersion string `yaml:"manifestVersion,omitempty"`
+	// Version is an optional alias for ManifestVersion.
+	Version string `yaml:"version,omitempty"`
+	// FLOVersion is an optional alias for addons.flo.version under the bnk stanza.
+	FLOVersion string `yaml:"floVersion,omitempty"`
 	// TmmMtu is the TMM interface MTU. Default 9000.
 	TmmMtu int `yaml:"tmmMtu,omitempty"`
 	// TmmCpu is the TMM CPU request (string form for k8s ResourceList). Default "4".
@@ -82,6 +97,8 @@ type BnkSpec struct {
 	BGP bool `yaml:"bgp,omitempty"`
 	// DynamicRouting is an alias for BGP.
 	DynamicRouting bool `yaml:"dynamicRouting,omitempty"`
+	// AIGateway configures BNK 2.4.1+ Multi-Cluster AI Gateway settings.
+	AIGateway *BnkAIGatewaySpec `yaml:"aiGateway,omitempty" json:"aiGateway,omitempty"`
 }
 
 // DataPathSpec describes the TMM data-plane subnets required by every BNK
@@ -588,6 +605,9 @@ func (f *FloSpec) FLOVersion() string {
 func (c *Cluster) FLOVersion() string {
 	if c != nil && c.Addons != nil && c.Addons.Flo != nil && c.Addons.Flo.Version != "" {
 		return c.Addons.Flo.Version
+	}
+	if c != nil && c.Bnk != nil && c.Bnk.FLOVersion != "" {
+		return c.Bnk.FLOVersion
 	}
 	if c != nil && c.Bnk != nil && c.Bnk.ManifestVersion != "" {
 		if chart, ok := manifest.FLOChartFor(c.Bnk.ManifestVersion); ok {

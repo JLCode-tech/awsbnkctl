@@ -51,6 +51,11 @@ spec:
   # F5 Endpoint Picker (BNK 2.4): reconcile F5EPP resources in any namespace.
   eppNamespaces: ["All"]
 {{- end }}
+{{- if .AIGateway }}
+  aiGateway:
+    enabled: true
+    aiMetrics: {{ .AIMetrics }}
+{{- end }}
   tmmReplicas: 1
   advanced:
     coremon:

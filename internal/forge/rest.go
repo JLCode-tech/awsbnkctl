@@ -54,6 +54,22 @@ func (c RestCreds) restPassword() string {
 	return "changeme"
 }
 
+func resolveRESTBaseURL(restURL string) string {
+	u := strings.TrimSpace(restURL)
+	if u == "" {
+		for _, k := range []string{"AWSBNKCTL_FORGE_URL", "BNKCTL_FORGE_URL", "FORGE_URL"} {
+			if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+				u = v
+				break
+			}
+		}
+	}
+	if u == "" {
+		u = "http://localhost:8000"
+	}
+	return strings.TrimRight(u, "/")
+}
+
 // benchmarkHTTPDoFn is the single injectable HTTP transport seam used by all
 // forge REST operations (lifecycle, agents, targets, proxies, configs, results).
 // Default: http.DefaultClient.Do. Tests replace it via the BenchmarkHTTPDoFn
@@ -437,10 +453,16 @@ func restDeleteCluster(ctx context.Context, base, token string, projectID, clust
 
 // restDeleteProject deletes a project; force=true purges an active project
 // shell on Forge builds that would otherwise refuse, and is ignored by the
-// ones that cascade anyway.
+// ones that cascade anyway. If the server still refuses with "Cannot delete
+// active project", we deactivate the project via PUT first and retry.
 func restDeleteProject(ctx context.Context, base, token string, projectID int) error {
 	url := fmt.Sprintf("%s/api/projects/%d?force=true", base, projectID)
-	return restDelete(ctx, url, token)
+	err := restDelete(ctx, url, token)
+	if err != nil && strings.Contains(err.Error(), "Cannot delete active project") {
+		_ = restPut(ctx, fmt.Sprintf("%s/api/projects/%d", base, projectID), token, map[string]any{"enabled": false}, nil)
+		err = restDelete(ctx, url, token)
+	}
+	return err
 }
 
 // restPost sends a POST request with JSON body and decodes the JSON response
