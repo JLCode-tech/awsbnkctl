@@ -12,7 +12,7 @@ Zero Terraform. Zero host `kubectl`. Zero host `helm`.
 
 ---
 
-`awsbnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on AWS EKS. From a single declarative `cluster.yaml`, it provisions the AWS VPC, EKS cluster, secondary data-plane ENIs, Multus CNI attachments, hugepages, and the full F5 BNK 2.4 (`2.4.0` / `2.4.1`) software stack. It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), **native BNK Forge integration**, and **ready-to-deploy AWS Local Zone & AI Gateway topologies**.
+`awsbnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on AWS EKS. From a single declarative `cluster.yaml`, it provisions the AWS VPC, EKS cluster, secondary data-plane ENIs, Multus CNI attachments, hugepages, and the full F5 BNK 2.4 (`2.4.0` / `2.4.1`) software stack. It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), **native [BNK Forge](https://github.com/JLCode-tech/bnk-forge) integration**, and **ready-to-deploy AWS Local Zone & F5 BNK AI Service Plane topologies**.
 
 ---
 
@@ -39,7 +39,7 @@ Deploying F5 BIG-IP Next for Kubernetes (BNK) on AWS typically requires coordina
 - AWS VPC networking with dedicated subnets, route tables, and secondary Elastic Network Interfaces (ENIs).
 - EKS cluster lifecycle, OIDC identity providers, and least-privilege IAM roles for service accounts (IRSA).
 - Host-level Linux kernel tuning: hugepages reservation, DPDK/host-device attachment, and Multus CNI daemonsets.
-- Cloud-native F5 control-plane lifecycle (FLO, CNE, IPAM controllers) and Kubernetes Gateway API resources (`gateway.k8s.f5.com`).
+- Cloud-native F5 control-plane lifecycle and Kubernetes Gateway API traffic and security management (see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html)).
 - Live data-plane traffic validation inside private subnets without exposing workloads to the public internet.
 
 `awsbnkctl` consolidates this entire workflow into a **single, dependency-free binary**:
@@ -52,9 +52,9 @@ Deploying F5 BIG-IP Next for Kubernetes (BNK) on AWS typically requires coordina
 
 ---
 
-## What You Can Build with `awsbnkctl` + BNK Forge
+## What You Can Build with `awsbnkctl` + [BNK Forge](https://github.com/JLCode-tech/bnk-forge)
 
-When `forge.enabled: true` is configured in `cluster.yaml`, `awsbnkctl` automatically registers your AWS EKS cluster with **BNK Forge** (Phase 09), seeds its **AI Governance & Token Accounting** configuration (`EnsureClusterAIGovernanceConfig`), and indexes all Gateway API (`gateway.k8s.f5.com`) and BNK 2.4.1 AI Gateway (`f5inference.f5.com`) resources.
+When `forge.enabled: true` is configured in `cluster.yaml`, `awsbnkctl` automatically registers your AWS EKS cluster with [**BNK Forge**](https://github.com/JLCode-tech/bnk-forge) (Phase 09), seeds its **AI Governance & Token Accounting** configuration (`EnsureClusterAIGovernanceConfig`), and indexes your cluster's L4/L7 traffic routing and **F5 BNK AI Service Plane** posture.
 
 ### 1. Multi-Cloud Cluster Fleet & Real-Time BNK Telemetry
 Register and monitor AWS EKS clusters alongside Azure AKS and GCP GKE from a single control plane. `awsbnkctl` hands off a bootstrap kubeconfig and seeds the cluster's Loki (`http://loki.llm-egress.svc.cluster.local:3100`) and Prometheus endpoints automatically.
@@ -63,15 +63,15 @@ Register and monitor AWS EKS clusters alongside Azure AKS and GCP GKE from a sin
 |---|---|
 | ![BNK Forge Platform Overview](docs/assets/forge-platform-overview.png) | ![Multi-Cloud Cluster Fleet](docs/assets/forge-multi-cloud-cluster-fleet.png) |
 
-### 2. Visual Policy Builder & Blueprints Catalog
-Compose and deploy Kubernetes Gateway API (`Gateway`, `HTTPRoute`, `L4Route`), security policies (`SecPolicy`, `NetPolicy`), and full-stack AI Gateway blueprints without hand-writing boilerplate YAML.
+### 2. Visual Network Security & Traffic Policy Management
+Author, visualize, and enforce L4/L7 traffic routing, carrier-grade network translation, DNS delivery, and zero-trust security policies across your Kubernetes clusters from a single visual interface or declaratively via `awsbnkctl`. For complete details on F5 BIG-IP Next for Kubernetes traffic and security capabilities, see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html).
 
 | Blueprints Catalog | Visual BNK Policy Builder |
 |---|---|
 | ![Forge Blueprints Catalog](docs/assets/forge-blueprints-catalog.png) | ![BNK Policy Builder](docs/assets/forge-bnk-policy-builder.png) |
 
-### 3. Enterprise AI Token Governance, Guardrails & AWS Bedrock Observability
-With BNK 2.4.1 (`bnk.aiGateway.enabled: true`) and the `examples/agentcore-demo` stack, F5 BNK inspects every LLM inference request and Model Context Protocol (MCP) tool call—enforcing token rate limits, prompt injection guardrails, and streaming per-request token usage into Forge's AI Governance dashboard.
+### 3. F5 BNK AI Service Plane: Token Governance & Data Guardrails
+Deliver enterprise-grade AI traffic governance with real-time token accounting, budget and rate enforcement, sensitive data (PII/DLP) guardrails, and prompt-injection protection managed through [**BNK Forge**](https://github.com/JLCode-tech/bnk-forge). Learn more about F5's cloud-native data plane and AI traffic capabilities in the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html).
 
 | AI Token Governance Overview | AI Governance Guardrails |
 |---|---|
@@ -92,7 +92,7 @@ Route inference traffic across Amazon Bedrock, in-cluster vLLM GPU pools, and mu
 |---|---|
 | ![LLM Router Topology](docs/assets/forge-llm-router-topology.png) | ![Benchmark Dashboard](docs/assets/forge-benchmark-dashboard.png) |
 
-*(See [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) for the complete BNK Forge setup, AI governance seeding, and benchmark daemon guide.)*
+*(See [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) for the complete [BNK Forge](https://github.com/JLCode-tech/bnk-forge) setup, AI governance seeding, and benchmark daemon guide.)*
 
 ---
 
@@ -139,13 +139,13 @@ flowchart LR
 1. **Isolated Data Path**: TMM attaches to dedicated secondary ENIs (`BNK_EXT` on `10.0.10.0/24` and `BNK_INT` on `10.0.20.0/24`) using Multus and Linux host-device (or SR-IOV `vfio-pci`). It bypasses the standard Linux kernel network stack for microsecond packet processing.
 2. **Deterministic IP Allocation**: VIPs live in a fixed pool (`.100` through `.117`), the jumphost test client owns `.200`, and TMM self-IPs are managed in a `/27` pool (`.224` through `.254`) by the F5 IPAM controller.
 3. **Transparent Outbound Egress**: Outbound pod traffic to external APIs or registries routes over a VXLAN tunnel directly into TMM, where it is SNAT-translated to TMM's external self-IP and forwarded to the AWS NAT Gateway. Pod-to-VPC traffic remains local on the node.
-4. **Gateway API Native**: BNK 2.4 uses the modern `gateway.k8s.f5.com` API group (`Gateway`, `HTTPRoute`, `L4Route`, `SecPolicy`, `NetPolicy`, `EgressGateway`, and `Infra`), completely replacing legacy 2.3 CRDs.
+4. **Gateway API Native**: BNK 2.4 uses Kubernetes Gateway API resources for unified L4/L7 routing, egress, and security policy enforcement (see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html)).
 
 ---
 
 ## AI Inference Benchmarking & Comparative Shootouts
 
-`awsbnkctl` embeds an AI performance benchmarking engine powered by NVIDIA's `aiperf`. It measures real-world GenAI latency and throughput from within the private VPC data plane and synchronizes with **BNK Forge** for real-time visualization and comparative analysis.
+`awsbnkctl` embeds an AI performance benchmarking engine powered by NVIDIA's `aiperf`. It measures real-world GenAI latency and throughput from within the private VPC data plane and synchronizes with [**BNK Forge**](https://github.com/JLCode-tech/bnk-forge) for real-time visualization and comparative analysis.
 
 ### Benchmarking Execution Flow
 
@@ -257,7 +257,7 @@ flowchart LR
         MultiVIP["multi-vip (.115-.117)"]
     end
 
-    subgraph AI["AI Gateway"]
+    subgraph AI["F5 BNK AI Service Plane"]
         Tokens["ai-token-counting (.104)"]
         Cache["ai-semantic-cache (.109)"]
         Infer["ai-inference-e2e (.112)"]
@@ -287,7 +287,7 @@ flowchart LR
 | | `cluster-wide-watch` | `.105` | Dynamic tenant namespace routing via single CNE controller | Green |
 | | `cwc-admin-access` | – | Client cert + Bearer token auth on CWC admin endpoints | Green |
 | | `multi-vip` | `.115`–`.117` | Multi-VIP isolation and concurrent traffic on single ENI | Green |
-| **AI Gateway** | `ai-token-counting` | `.104` | Token quota metering and HTTP 503 overload enforcement | Amber |
+| **F5 BNK AI Service Plane** | `ai-token-counting` | `.104` | Token quota metering and HTTP 503 overload enforcement | Amber |
 | | `ai-semantic-cache` | `.109` | Semantic similarity prompt cache hit verification | Amber |
 | | `ai-inference-e2e` | `.112` | End-to-end vLLM Llama-3-8B GPU inference (`--synthetic` for CPU) | Green |
 | **Security & Egress** | `egress-snat` | – | Transparent pod egress over VXLAN $\to$ TMM AUTOMAP SNAT | Green |
@@ -347,8 +347,8 @@ flowchart LR
     Gateway -.->|Stream Audit Events| Loki
 ```
 
-#### BNK 2.4.1 Native AI Gateway (`examples/agentcore-demo/aigateway-241.yaml`)
-On BNK `2.4.1` (`floVersion: "v2.30.0-0.11.4"`), setting `bnk.aiGateway.enabled: true` in `cluster.yaml` automatically enables the native `f5inference.f5.com/v1alpha1` CNF stack (`AIGateway`, `AIGatewayRoute`, `AIGatewayBackend`, `AIGatewayConfig`, `AIGatewayPolicy`, and `AIGatewayPlugin`) and `aiMetrics` in the rendered `CNEInstance`. `awsbnkctl forge scan` and `awsbnkctl status` natively index and report all 6 `f5inference.f5.com` CRD kinds.
+#### BNK 2.4.1 F5 BNK AI Service Plane (`examples/agentcore-demo/`)
+On BNK `2.4.1` (`floVersion: "v2.30.0-0.11.4"`), setting `bnk.aiGateway.enabled: true` in `cluster.yaml` automatically enables the native **F5 BNK AI Service Plane** and AI telemetry in the rendered BNK deployment. `awsbnkctl forge scan` and `awsbnkctl status` natively index and report F5 BNK AI Service Plane readiness for [BNK Forge](https://github.com/JLCode-tech/bnk-forge). For complete architectural details, see the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html).
 
 ### Built-in Protocol & Ingress Demos
 
@@ -409,7 +409,7 @@ Copy the reference example:
 cp -r examples/full-cluster my-cluster && cd my-cluster
 ```
 
-Edit `cluster.yaml` to set your desired AWS region, cluster name, and paths to your F5 FAR container archive and JWT licence token:
+Follow the [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html) to obtain your F5 subscription JWT (`license.jwt`) and F5 Artifact Registry (`repo.f5.com`) credentials, then edit `cluster.yaml` to set your desired AWS region and cluster name:
 
 ```yaml
 metadata:
@@ -419,8 +419,7 @@ network:
   azs: [ap-southeast-2a, ap-southeast-2b, ap-southeast-2c]
 bnk:
   manifestVersion: "2.4.0"
-  farArchive: "/path/to/cne-release-2.4.0.tar.gz"
-  jwt: "/path/to/f5-licence.jwt"
+  jwt: "./license.jwt"
 ```
 
 ### 3. Validate & Dry-Run
@@ -470,7 +469,7 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 
 | Component | Pinned Version | Config Key / Location | Notes |
 |---|:---:|---|---|
-| **F5 BNK Release** | `2.4.0` / `2.4.1` | `bnk.manifestVersion` | Default `2.4.0`; `2.4.1` adds native `f5inference.f5.com` AI Gateway CRDs. Supports `2.3.x` overrides. |
+| **F5 BNK Release** | `2.4.0` / `2.4.1` | `bnk.manifestVersion` | Default `2.4.0`; `2.4.1` adds native **F5 BNK AI Service Plane** capabilities (see [F5 CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html)). Supports `2.3.x` overrides. |
 | **Kubernetes (EKS)** | `1.35` | `cluster.kubernetesVersion` | Tested on 1.34 (floor) and 1.35. |
 | **cert-manager** | `v1.21.1` | Embedded upstream YAML | Applied via client-go without Helm. |
 | **FLO Chart** | `v2.30.0-0.5.2` / `v2.30.0-0.11.4` | `addons.flo.version` / `bnk.floVersion` | `v2.30.0-0.5.2` (2.4.0) or `v2.30.0-0.11.4` (2.4.1). |
@@ -501,16 +500,17 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 ## Documentation & The `*bnkctl` Family
 
 ### Deep-Dive Guides
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Phased state machine (41 phases), CNEInstance / Infra / GatewaySettings models, and version policies.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Phased state machine (41 phases), BNK deployment models, and version policies.
 - [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) — Comprehensive AI inference benchmarking guide, presets, native Forge scenarios, and proxy shootout recipes.
 - [`docs/SCENARIOS.md`](docs/SCENARIOS.md) — In-depth breakdown of all 15 scenarios, assertions, and IP plans.
 - [`docs/COMMANDS.md`](docs/COMMANDS.md) — Full CLI flags and environment variables reference.
-- [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) — Peer-read integration with BNK Forge GUI and telemetry schemas.
+- [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) — Peer-read integration with [BNK Forge](https://github.com/JLCode-tech/bnk-forge) GUI and telemetry schemas.
 - [`docs/UPGRADE-2.4.md`](docs/UPGRADE-2.4.md) — Step-by-step in-place upgrade from BNK 2.3 to 2.4.
 - [`docs/ALIGNMENT.md`](docs/ALIGNMENT.md) — Cross-cloud architectural alignment across the `*bnkctl` family.
 - [`docs/PHASES.md`](docs/PHASES.md) — Detailed reference of all 41 provisioning and teardown phases.
 - [`docs/BGP-ROUTE-SERVER.md`](docs/BGP-ROUTE-SERVER.md) — BGP dynamic routing and ZebOS Route Server peering.
 - [`examples/`](examples/) — Ready-to-deploy reference manifests (`full-cluster`, `egress-demo`, `demo-ai`, `agentcore-demo`).
+- [F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html) — Official F5 product documentation, architecture guides, and prerequisite setup.
 
 ### The `*bnkctl` Multi-Cloud Family
 `awsbnkctl` is part of a unified family of single-binary CLIs bringing declarative F5 BNK management across clouds and on-premises environments:
