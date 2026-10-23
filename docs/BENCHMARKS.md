@@ -1,6 +1,6 @@
 # AI Inference Benchmarking & Proxy Shootout Guide
 
-`awsbnkctl` provides an enterprise-grade AI performance benchmarking engine tailored for **F5 BIG-IP Next for Kubernetes (BNK)**. It drives real-world and synthetic LLM inference workloads using NVIDIA's [`aiperf`](https://github.com/triton-inference-server/perf_analyzer) tool directly from an in-VPC test jumphost, measures critical GenAI metrics (TTFT, ITL, token throughput, and prefix cache hit rates), and pushes telemetry into [BNK Forge](https://github.com/f5devcentral/bnk-forge) for real-time visualization and multi-proxy shootout analysis.
+`awsbnkctl` provides an enterprise-grade AI performance benchmarking engine tailored for **F5 BIG-IP Next for Kubernetes (BNK)**. It drives real-world and synthetic LLM inference workloads using NVIDIA's [`aiperf`](https://github.com/triton-inference-server/perf_analyzer) tool directly from an in-VPC test jumphost, measures critical GenAI metrics (TTFT, ITL, token throughput, and prefix cache hit rates), and pushes telemetry into [BNK Forge](https://github.com/JLCode-tech/bnk-forge) for real-time visualization and multi-proxy shootout analysis.
 
 ---
 

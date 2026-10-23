@@ -1,6 +1,6 @@
 # Scenarios & Demos Catalogue for awsbnkctl
 
-This document provides a comprehensive, diagram-rich breakdown of all **15 automated validation scenarios** and **5 curated demonstration walkthroughs** (including the **AgentCore AI Gateway demo**) built into `awsbnkctl`.
+This document provides a comprehensive, diagram-rich breakdown of all **15 automated validation scenarios** and **5 curated demonstration walkthroughs** (including the **AgentCore F5 BNK AI Service Plane demo**) built into `awsbnkctl`.
 
 Scenarios validate live data-plane traffic, protocol handshakes, and security policies against the provisioned EKS cluster and F5 BIG-IP Next for Kubernetes (BNK) TMM interfaces. They run from the in-VPC EC2 jumphost via an ephemeral AWS EC2 Instance Connect (EICE) tunnel, providing end-to-end assurance directly inside the isolated VPC data plane.
 
@@ -317,11 +317,11 @@ flowchart LR
 
 ---
 
-## 4. AI Gateway Scenarios
+## 4. F5 BNK AI Service Plane Scenarios
 
 ### `ai-token-counting` (VIP `.104`)
-- **Objective**: Validates AI Gateway LLM token measurement, quota enforcement, and rate-limiting.
-- **Traffic Path**: Client HTTP POST with chat completions payload $\to$ TMM AI Gateway (`<subnet>.104`) $\to$ Model endpoint.
+- **Objective**: Validates F5 BNK AI Service Plane LLM token measurement, quota enforcement, and rate-limiting.
+- **Traffic Path**: Client HTTP POST with chat completions payload $\to$ TMM F5 BNK AI Service Plane (`<subnet>.104`) $\to$ Model endpoint.
 - **Assertions**: Control plane always — backend Deployment Available, Gateway Programmed, HTTPRoute Accepted, annotation `k8s.f5.com/ai-token-counting` persists. Live vLLM data path asserts token metering and HTTP 503 on overload.
 - **Rating**: **Amber** (control plane only unless live vLLM backend is pointed at; full data path on `demo-ai`).
 
@@ -357,7 +357,7 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant Client as Client / Jumphost
-    participant TMM as TMM AI Gateway (.109)
+    participant TMM as TMM F5 BNK AI Service Plane (.109)
     participant Cache as Semantic Vector Cache
     participant LLM as vLLM Inference Engine
 
@@ -390,7 +390,7 @@ sequenceDiagram
 flowchart LR
     Client([Jumphost Test Client<br/>aiperf Engine])
 
-    subgraph Gateway["F5 BNK AI Gateway (VIP: 10.0.10.112:80)"]
+    subgraph Gateway["F5 BNK AI Service Plane (VIP: 10.0.10.112:80)"]
         direction TB
         VIP["Gateway VIP: 10.0.10.112:80<br/>Host: awsbnkctl-aiinference.local"]
         TMM["TMM Microkernel<br/>HTTPRoute: scn-aiinference-route"]

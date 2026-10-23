@@ -1,6 +1,6 @@
 # awsbnkctl — BNK Forge Module
 
-This directory packages **`awsbnkctl`** as a [BNK Forge](https://github.com/f5devcentral/bnk-forge) container-runner module.
+This directory packages **`awsbnkctl`** as a [BNK Forge](https://github.com/JLCode-tech/bnk-forge) container-runner module.
 
 ## Module Details
 

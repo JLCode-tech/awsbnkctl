@@ -30,11 +30,11 @@ All top-level commands across the `*bnkctl` family:
 | `k` | Embedded `client-go` Kubernetes CLI (`get`, `apply`, `describe`, `delete`, `logs`, `exec`, `port-forward`) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `doctor` | Preflight + live cluster readiness and heal diagnostics | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `test` | Data-plane verification (`connectivity`, `dns`, `throughput` / `egress`, `traffic`) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `scenarios` | End-to-end BNK 2.4 traffic & AI gateway scenarios (`list`, `run`, `clean`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `scenarios` | End-to-end BNK 2.4 traffic & F5 BNK AI Service Plane scenarios (`list`, `run`, `clean`) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `demo` | Interactive protocol & architecture walkthroughs (`list`, `run`, `clean`, `preview`) | ✓ | — | — | — | — |
 | `benchmark` | Run `aiperf` benchmarks from the in-VPC/VNet jumphost against BNK VIPs | ✓ | ✓ | ✓ | — | — |
 | `bnk` | Day-2 BNK operations (`heal`, `resync`, `upgrade`, `migrate-2.4`, `mcp-session`) | ✓ | ✓ | ✓ | — | — |
-| `forge` | BNK Forge integration (`register`, `status`, `unregister`, `cleanup`, `scan`, `telemetry`, `benchmark`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `forge` | [BNK Forge](https://github.com/JLCode-tech/bnk-forge) integration (`register`, `status`, `unregister`, `cleanup`, `scan`, `telemetry`, `benchmark`) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `topology` | Discover and print live BNK data-plane / node / ENI / VF topology | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `manifest` | Inspect and probe F5 FAR release manifests (`probe`) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `journal` | Append-only operational journal (`add`, `list`, `report`) | ✓ | ✓ | ✓ | ✓ | ✓ |

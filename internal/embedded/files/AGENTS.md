@@ -37,7 +37,7 @@ init  →  validate  →  up  →  scenarios run  →  down
 
 - `awsbnkctl validate <file>` validates your intent schema and prerequisite parameters without calling AWS APIs.
 - `awsbnkctl up -f <file>` provisions all 39 phases end-to-end (VPC, subnets, IGW, NAT, EKS, NodeGroups, IRSA, Multus, host-device secondary ENIs, BNK activation, jumphost, forge registration).
-- `awsbnkctl scenarios run <name>` validates data plane connectivity, L4/L7 routing, or AI Gateway features from inside the VPC.
+- `awsbnkctl scenarios run <name>` validates data plane connectivity, L4/L7 routing, or F5 BNK AI Service Plane features from inside the VPC.
 - `awsbnkctl down -f <file> --yes` safely tears down all AWS resources in reverse dependency order.
 
 ---

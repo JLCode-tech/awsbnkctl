@@ -19,9 +19,9 @@ US$6/hour and is what the former `ai-rig` example was.
 
 ## Prerequisites
 
-- F5 credentials next to `cluster.yaml` (`cne_pull_64.json`, `license.jwt`).
+- F5 Artifact Registry credentials and BNK license JWT configured in `cluster.yaml` (see the **[F5 BIG-IP Next for Kubernetes CloudDocs](https://clouddocs.f5.com/bigip-next-for-kubernetes/latest/overview.html)** for obtaining licensing and registry credentials).
 - A Hugging Face token in `.hf_token` for the gated models.
-- A reachable BNK Forge instance if you want benchmarks; its password via
+- A reachable [BNK Forge](https://github.com/JLCode-tech/bnk-forge) instance if you want benchmarks; its password via
   `AWSBNKCTL_FORGE_PASSWORD`.
 - Quota for one `g5.xlarge` and one SageMaker `ml.g6.12xlarge` (or `ml.g5.xlarge`) endpoint.
 
