@@ -163,8 +163,9 @@ done
 [ "$PP" = "True" ] && ok "persistence profile programmed" \
   || warn "persistence profile not Programmed yet — it may settle; forge scan will confirm"
 
-step "Governance policy  (iRule, NetPolicies with persistence, firewall, SecPolicy)"
+step "Governance policy & BNK 2.4.1 AI Gateway  (iRule, NetPolicies, 6-CRD inference.k8s.f5.com/v1alpha1 chain, AppPolicy)"
 kubectl apply -f "$DEMO_DIR/mcp-security-policy.yaml" || die "policy apply failed"
+kubectl apply -f "$DEMO_DIR/aigateway-241.yaml" || die "aigateway-241.yaml apply failed"
 for i in $(seq 1 40); do
   IR=$(kubectl get f5-big-cne-irules mcp-rate-limit-irule -n default \
        -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
@@ -173,7 +174,7 @@ for i in $(seq 1 40); do
 done
 [ "$IR" = "True" ] || warn "iRule not Programmed yet — it may settle; demo.sh will confirm"
 POL=$(kubectl get netpolicies.gateway.k8s.f5.com -n default --no-headers 2>/dev/null | wc -l | tr -d ' ')
-[ "${POL:-0}" -ge 2 ] && ok "iRule + $POL NetPolicies attached" \
+[ "${POL:-0}" -ge 2 ] && ok "iRule + $POL NetPolicies + BNK 2.4.1 AI Gateway CRDs attached" \
   || warn "expected 2 NetPolicies, found ${POL:-0}"
 
 # ── 6. observability ─────────────────────────────────────────────────────────
@@ -237,8 +238,8 @@ grep -q "<account-id>" "$TMP" && die "account-id substitution failed"
 kubectl apply -f "$TMP" || die "token shipper apply failed"
 ok "shipper applied with account $ACCT (tracked file left with its placeholder)"
 
-# The generator's Leg A is synthetic (random tokens, labelled source=synthetic);
-# Leg B drives the live VIP, read off the Gateway rather than hardcoded.
+# Both legs drive the live VIP (Leg A hits BNK 2.4.1 AI Gateway :8443/v1/chat/completions;
+# Leg B hits BNK MCP Gateway /v1/mcp/forecast), read off the live Gateway object.
 VIP=$(kubectl get gateway "$GW" -n default -o jsonpath='{.spec.addresses[0].value}' 2>/dev/null)
 [ -n "$VIP" ] || die "could not read the VIP off gateway $CLUSTER-gateway"
 TMPG=$(mktemp -t traffic-gen.XXXXXX.yaml) || die "mktemp failed"
@@ -246,7 +247,7 @@ trap 'rm -f "$TMP" "$TMPG"' EXIT
 sed -e "s/^\( *value: \)\"10\.0\.10\.150\"$/\1\"$VIP\"/" \
     "$DEMO_DIR/traffic-generator-deployment.yaml" > "$TMPG"
 kubectl apply -f "$TMPG" || die "traffic generator apply failed"
-ok "traffic generator deployed against VIP $VIP (Leg A synthetic, Leg B live)"
+ok "traffic generator deployed against live VIP $VIP (Leg A BNK 2.4.1 AI Gateway, Leg B MCP)"
 
 # ── 8. the stranger ──────────────────────────────────────────────────────────
 step "Path 3 stranger + the firewall's out-of-range source"

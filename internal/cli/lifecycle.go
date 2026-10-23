@@ -749,6 +749,10 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 		return fmt.Errorf("down: loading state: %w", err)
 	}
 
+	if !dryRun && clients != nil {
+		phases.HydrateMissingStateFromAWS(ctx, cl, st, clients)
+	}
+
 	if dryRun {
 		printDownPlan(os.Stderr, cl, st, flagKeepIRSA, flagKeepForgeLink)
 		return nil
@@ -766,6 +770,9 @@ func runPhasedDown(ctx context.Context, configPath string, yes bool, dryRun bool
 		if err := clients.AttachK8s(kubeconfigPath); err != nil {
 			// Log and continue — kubeconfig may be absent if phase 11 never ran.
 			fmt.Fprintf(os.Stderr, "down: warning: could not attach k8s clients (%v) — phase 12/14/15 down will log warning and skip\n", err)
+		} else {
+			phases.CleanupBNKOverlayCRs(ctx, clients)
+			phases.CleanupBNKPVCsAndServices(ctx, clients)
 		}
 	}
 	// Demo use-case teardown — runs before infra teardown while kubeconfig is

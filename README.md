@@ -1,6 +1,6 @@
 # awsbnkctl
 
-![BNK](https://img.shields.io/badge/BNK-2.4.0-0a3a5c)
+![BNK](https://img.shields.io/badge/BNK-2.4.0--2.4.1-0a3a5c)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-1.34--1.35-326ce5?logo=kubernetes&logoColor=white)
 ![AWS EKS](https://img.shields.io/badge/AWS-EKS-ff9900?logo=amazon-aws&logoColor=white)
 [![CI](https://github.com/JLCode-tech/awsbnkctl/actions/workflows/ci.yml/badge.svg)](https://github.com/JLCode-tech/awsbnkctl/actions/workflows/ci.yml)
@@ -12,17 +12,19 @@ Zero Terraform. Zero host `kubectl`. Zero host `helm`.
 
 ---
 
-`awsbnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on AWS EKS. From a single declarative `cluster.yaml`, it provisions the AWS VPC, EKS cluster, secondary data-plane ENIs, Multus CNI attachments, hugepages, and the full F5 BNK 2.4 software stack. It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), and **four narrated demonstration walkthroughs**.
+`awsbnkctl` automates the entire lifecycle of enterprise F5 BNK deployments on AWS EKS. From a single declarative `cluster.yaml`, it provisions the AWS VPC, EKS cluster, secondary data-plane ENIs, Multus CNI attachments, hugepages, and the full F5 BNK 2.4 (`2.4.0` / `2.4.1`) software stack. It includes **15 built-in automated traffic validation scenarios**, an enterprise **AI inference benchmarking suite** (`aiperf`), **native BNK Forge integration**, and **ready-to-deploy AWS Local Zone & AI Gateway topologies**.
 
 ---
 
 ## Table of Contents
 
 - [Why awsbnkctl?](#why-awsbnkctl)
+- [What You Can Build with awsbnkctl + BNK Forge](#what-you-can-build-with-awsbnkctl--bnk-forge)
 - [System Architecture & Network Topology](#system-architecture--network-topology)
 - [AI Inference Benchmarking & Comparative Shootouts](#ai-inference-benchmarking--comparative-shootouts)
 - [15 Built-in Validation Scenarios](#15-built-in-validation-scenarios)
 - [Architecture & Protocol Demos](#architecture--protocol-demos)
+- [AWS Local Zones & Hybrid Topologies](#aws-local-zones--hybrid-topologies)
 - [Quick Start](#quick-start)
 - [Interface Patterns](#interface-patterns)
 - [Pinned Ecosystem Versions](#pinned-ecosystem-versions)
@@ -46,7 +48,51 @@ Deploying F5 BIG-IP Next for Kubernetes (BNK) on AWS typically requires coordina
 - **Deterministic State Machine**: 41 sequential phases execute with full idempotency, resume safety, and explicit state verification.
 - **Built-in Diagnostics & Healing**: The `awsbnkctl bnk heal` command detects and automatically remediates 11 common Kubernetes plumbing issues (token expiration, metrics-server bindings, Multus mounts, EPP watched namespaces, and RBAC policies).
 - **In-VPC Validation**: 15 built-in automated test scenarios validate L4/L7 routing, canary splits, gRPC streams, and AI inference directly inside the VPC.
-- **Clean Teardown**: Tag-driven resource discovery ensures `awsbnkctl down -f cluster.yaml --yes` destroys 100% of provisioned AWS resources with zero orphaned remnants.
+- **Clean, Stateless Teardown**: Tag-driven AWS resource discovery (`HydrateMissingStateFromAWS`) plus pre-teardown Kubernetes CRD finalizer and EBS CSI PVC cleanup ensures `awsbnkctl down -f cluster.yaml --yes` destroys 100% of provisioned AWS resources with zero orphaned remnants—even if local `.awsbnkctl/state.env` was deleted.
+
+---
+
+## What You Can Build with `awsbnkctl` + BNK Forge
+
+When `forge.enabled: true` is configured in `cluster.yaml`, `awsbnkctl` automatically registers your AWS EKS cluster with **BNK Forge** (Phase 09), seeds its **AI Governance & Token Accounting** configuration (`EnsureClusterAIGovernanceConfig`), and indexes all Gateway API (`gateway.k8s.f5.com`) and BNK 2.4.1 AI Gateway (`f5inference.f5.com`) resources.
+
+### 1. Multi-Cloud Cluster Fleet & Real-Time BNK Telemetry
+Register and monitor AWS EKS clusters alongside Azure AKS and GCP GKE from a single control plane. `awsbnkctl` hands off a bootstrap kubeconfig and seeds the cluster's Loki (`http://loki.llm-egress.svc.cluster.local:3100`) and Prometheus endpoints automatically.
+
+| Platform Overview | Multi-Cloud Cluster Fleet |
+|---|---|
+| ![BNK Forge Platform Overview](docs/assets/forge-platform-overview.png) | ![Multi-Cloud Cluster Fleet](docs/assets/forge-multi-cloud-cluster-fleet.png) |
+
+### 2. Visual Policy Builder & Blueprints Catalog
+Compose and deploy Kubernetes Gateway API (`Gateway`, `HTTPRoute`, `L4Route`), security policies (`SecPolicy`, `NetPolicy`), and full-stack AI Gateway blueprints without hand-writing boilerplate YAML.
+
+| Blueprints Catalog | Visual BNK Policy Builder |
+|---|---|
+| ![Forge Blueprints Catalog](docs/assets/forge-blueprints-catalog.png) | ![BNK Policy Builder](docs/assets/forge-bnk-policy-builder.png) |
+
+### 3. Enterprise AI Token Governance, Guardrails & AWS Bedrock Observability
+With BNK 2.4.1 (`bnk.aiGateway.enabled: true`) and the `examples/agentcore-demo` stack, F5 BNK inspects every LLM inference request and Model Context Protocol (MCP) tool call—enforcing token rate limits, prompt injection guardrails, and streaming per-request token usage into Forge's AI Governance dashboard.
+
+| AI Token Governance Overview | AI Governance Guardrails |
+|---|---|
+| ![AI Token Governance Overview](docs/assets/forge-ai-token-governance-overview.png) | ![AI Governance Guardrails](docs/assets/forge-ai-governance-guardrails.png) |
+
+| AWS EKS Governance & Token Accounting | MCP Server Tool Discovery & Access Control |
+|---|---|
+| ![AWS Governance Telemetry](docs/assets/forge-aws-governance.png) | ![MCP Server Tools](docs/assets/forge-mcp-server-tools.png) |
+
+### 4. Smart LLM Router Pools, Topology & `aiperf` Benchmarking
+Route inference traffic across Amazon Bedrock, in-cluster vLLM GPU pools, and multi-cloud model endpoints while measuring real-time TTFT, ITL, and token throughput with `awsbnkctl benchmark`.
+
+| AWS LLM Router Pools | Smart LLM Router Fleet |
+|---|---|
+| ![AWS LLM Router Pools](docs/assets/forge-aws-llm-router-pools.png) | ![Smart LLM Router Fleet](docs/assets/forge-smart-llm-router-fleet.png) |
+
+| Interactive LLM Router Topology | `aiperf` Benchmark Dashboard |
+|---|---|
+| ![LLM Router Topology](docs/assets/forge-llm-router-topology.png) | ![Benchmark Dashboard](docs/assets/forge-benchmark-dashboard.png) |
+
+*(See [`docs/FORGE_INTEGRATION.md`](docs/FORGE_INTEGRATION.md) for the complete BNK Forge setup, AI governance seeding, and benchmark daemon guide.)*
 
 ---
 
@@ -301,6 +347,9 @@ flowchart LR
     Gateway -.->|Stream Audit Events| Loki
 ```
 
+#### BNK 2.4.1 Native AI Gateway (`examples/agentcore-demo/aigateway-241.yaml`)
+On BNK `2.4.1` (`floVersion: "v2.30.0-0.11.4"`), setting `bnk.aiGateway.enabled: true` in `cluster.yaml` automatically enables the native `f5inference.f5.com/v1alpha1` CNF stack (`AIGateway`, `AIGatewayRoute`, `AIGatewayBackend`, `AIGatewayConfig`, `AIGatewayPolicy`, and `AIGatewayPlugin`) and `aiMetrics` in the rendered `CNEInstance`. `awsbnkctl forge scan` and `awsbnkctl status` natively index and report all 6 `f5inference.f5.com` CRD kinds.
+
 ### Built-in Protocol & Ingress Demos
 
 - **`diameter`** (VIP `.110`): Demonstrates telecom Diameter protocol (RFC 6733) load balancing over SCTP/TCP with CER $\leftrightarrow$ CEA capabilities exchange verification.
@@ -309,6 +358,29 @@ flowchart LR
 - **`ingress-migration`** (VIP `.113`): Demonstrates zero-downtime side-by-side migration by running `ingress-nginx`, `haproxy-ingress`, and BNK Gateway simultaneously in front of ONE shared backend.
 
 *(All 15 scenarios and 4 CLI demos (plus the `agentcore-demo` example) include individual architecture diagrams in [`docs/SCENARIOS.md`](docs/SCENARIOS.md).)*
+
+---
+
+## AWS Local Zones & Hybrid Topologies
+
+`awsbnkctl` provides 6 production-ready reference architectures under `examples/local-zone-*` for deploying low-latency F5 BNK data planes across AWS Parent Regions and AWS Local Zones (e.g., `ap-southeast-2-akl-1a`, `us-west-2-lax-1a`):
+
+| Example Directory | Architecture Pattern | North-South Ingress Mechanism |
+|---|---|---|
+| [`examples/local-zone-cluster`](examples/local-zone-cluster) | Hybrid Parent Region + Local Zone node groups | Standard VPC secondary ENI VIPs across parent and edge AZs |
+| [`examples/local-zone-parent-alb`](examples/local-zone-parent-alb) | Parent-Region ALB $\to$ Local Zone / Parent TMM | AWS Load Balancer Controller ALB (`ip` mode) targeting TMM VIPs |
+| [`examples/local-zone-parent-nlb`](examples/local-zone-parent-nlb) | Parent-Region NLB $\to$ Local Zone / Parent TMM | AWS NLB (`ip` target group) forwarding L4/L7 traffic to TMM VIPs |
+| [`examples/local-zone-parent-eip-tmm`](examples/local-zone-parent-eip-tmm) | Direct Elastic IP on Parent-Region TMM ENI | Public EIP bound directly to TMM's external secondary ENI |
+| [`examples/local-zone-dedicated-tmm`](examples/local-zone-dedicated-tmm) | Dedicated TMM Edge Node Pool in Local Zone | Isolated `role=bnk` TMM nodes in the Local Zone with workload separation |
+| [`examples/local-zone-all-in-lz`](examples/local-zone-all-in-lz) | 100% Local Zone Data Plane | All TMM and application worker nodes co-located in the Local Zone for sub-5ms metro latency |
+
+Ready-to-deploy **Global Metro Local Zone** configurations with pre-mapped parent regions, Local Zone AZs, and non-overlapping VPC CIDRs:
+- [`examples/local-zone-boston`](examples/local-zone-boston) (`us-east-1-bos-1a`, `10.104.0.0/16`)
+- [`examples/local-zone-losangeles`](examples/local-zone-losangeles) (`us-west-2-lax-1a`, `10.103.0.0/16`)
+- [`examples/local-zone-hamburg`](examples/local-zone-hamburg) (`eu-central-1-ham-1a`, `10.101.0.0/16`)
+- [`examples/local-zone-warsaw`](examples/local-zone-warsaw) (`eu-central-1-waw-1a`, `10.105.0.0/16`)
+- [`examples/local-zone-perth`](examples/local-zone-perth) (`ap-southeast-2-per-1a`, `10.100.0.0/16`)
+- [`examples/local-zone-manila`](examples/local-zone-manila) (`ap-southeast-1-mnl-1a`, `10.102.0.0/16`)
 
 ---
 
@@ -398,10 +470,10 @@ All ecosystem components are pinned to validated, enterprise-tested versions:
 
 | Component | Pinned Version | Config Key / Location | Notes |
 |---|:---:|---|---|
-| **F5 BNK Release** | `2.4.0` | `bnk.manifestVersion` | Default. Supports 2.3.0–2.3.3 overrides. |
+| **F5 BNK Release** | `2.4.0` / `2.4.1` | `bnk.manifestVersion` | Default `2.4.0`; `2.4.1` adds native `f5inference.f5.com` AI Gateway CRDs. Supports `2.3.x` overrides. |
 | **Kubernetes (EKS)** | `1.35` | `cluster.kubernetesVersion` | Tested on 1.34 (floor) and 1.35. |
 | **cert-manager** | `v1.21.1` | Embedded upstream YAML | Applied via client-go without Helm. |
-| **FLO Chart** | `v2.30.0-0.5.2` | `addons.flo.version` | Paired per release in `manifest.KnownReleases`. |
+| **FLO Chart** | `v2.30.0-0.5.2` / `v2.30.0-0.11.4` | `addons.flo.version` / `bnk.floVersion` | `v2.30.0-0.5.2` (2.4.0) or `v2.30.0-0.11.4` (2.4.1). |
 | **Go Runtime** | `1.26` | `go.mod` | Compiled with AWS SDK for Go v2 (`v1.42.0`). |
 
 ---

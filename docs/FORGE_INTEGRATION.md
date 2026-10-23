@@ -62,6 +62,34 @@ inside it. The project name resolves as `AWSBNKCTL_FORGE_PROJECT` env >
   removed. `AWSBNKCTL_FORGE_PROJECT` does not protect a shared project; set
   `forge.projectName` for that. `awsbnkctl down --keep-forge-link` skips the unregister entirely and
   preserves `forge_link.json`.
+- **Automatic Active-Project Deactivation on Purge.** Forge rejects `DELETE /api/projects/{id}` with HTTP 400 when a project has `is_active: true`. Before deleting a project, `awsbnkctl` automatically checks `/api/projects/{id}`, activates a sibling project if available, or sends `PATCH /api/projects/{id}` with `{"is_active": false}` so teardown and `forge unregister --purge` never fail on an active project.
+- **Automatic AI Governance & Token Accounting Seeding.** When registering or linking a cluster (`EnsureClusterAIGovernanceConfig`), `awsbnkctl` resolves the cluster ID (via `/api/clusters` and `/api/projects/{id}/clusters` fallback) and seeds `/api/clusters/{id}/ai-governance/config` with `enabled: true`, `token_rate_limiting_enabled: true`, `loki_url: http://loki.llm-egress.svc.cluster.local:3100`, and `prometheus_url: http://prometheus.llm-egress.svc.cluster.local:9090` (preserving any operator-customized settings if already enabled).
+
+### BNK Forge Visual Tour
+
+| Platform Overview | Multi-Cloud Cluster Fleet |
+|---|---|
+| ![BNK Forge Platform Overview](assets/forge-platform-overview.png) | ![Multi-Cloud Cluster Fleet](assets/forge-multi-cloud-cluster-fleet.png) |
+
+| Blueprints Catalog | Visual BNK Policy Builder |
+|---|---|
+| ![Forge Blueprints Catalog](assets/forge-blueprints-catalog.png) | ![BNK Policy Builder](assets/forge-bnk-policy-builder.png) |
+
+| AI Token Governance Overview | AI Governance Guardrails |
+|---|---|
+| ![AI Token Governance Overview](assets/forge-ai-token-governance-overview.png) | ![AI Governance Guardrails](assets/forge-ai-governance-guardrails.png) |
+
+| AWS EKS Governance & Token Accounting | AWS LLM Router Pools |
+|---|---|
+| ![AWS Governance Telemetry](assets/forge-aws-governance.png) | ![AWS LLM Router Pools](assets/forge-aws-llm-router-pools.png) |
+
+| Smart LLM Router Fleet | Interactive LLM Router Topology |
+|---|---|
+| ![Smart LLM Router Fleet](assets/forge-smart-llm-router-fleet.png) | ![LLM Router Topology](assets/forge-llm-router-topology.png) |
+
+| `aiperf` Benchmark Dashboard | MCP Server Tool Discovery |
+|---|---|
+| ![Benchmark Dashboard](assets/forge-benchmark-dashboard.png) | ![MCP Server Tools](assets/forge-mcp-server-tools.png) |
 
 ---
 
@@ -306,7 +334,7 @@ awsbnkctl forge scan -f ... -o json
 | `F5BigPersistenceProfile` | `Programmed=True` |
 
 `GatewaySettings`, `EgressGateway`, `SecPolicy`, `NetPolicy` and `HTTPRoute` are
-listed with their conditions. Legacy `F5BnkGateway`, `BNKSecPolicy`,
+listed with their conditions. On BNK `2.4.1` clusters with `f5inference.f5.com` CRDs installed (`bnk.aiGateway.enabled: true`), `bnkscan` also indexes and reports all 6 AI Gateway CRD kinds (`AIGateway`, `AIGatewayRoute`, `AIGatewayBackend`, `AIGatewayConfig`, `AIGatewayPolicy`, and `AIGatewayPlugin`) and checks whether Forge's server-side index includes `f5inference.f5.com` (`IndexesF5Inference()`). Legacy `F5BnkGateway`, `BNKSecPolicy`,
 `BNKNetPolicy`, `F5SPKVlan` and `F5SPKEgress` objects are counted, never
 required. `--remote` warns when Forge indexed a 2.4 cluster without the
 `gateway.k8s.f5.com` group: that Forge predates BNK 2.4 and its Fleet view

@@ -25,16 +25,23 @@ venv/
 # --- awsbnkctl-managed cluster state (never commit) ---
 # Per-cluster kubeconfig, IDs cache, ephemeral keys.
 .awsbnkctl/
+.bnkctl/
+state.env
+forge_link.json
+*kubeconfig*
 
 # --- BNK supply-chain credentials (never commit) ---
 # Operator-supplied per cluster.yaml; grant FAR pull + license rights.
 cne_pull_64.json
+*pull*.json
 *.jwt
+*.pem
 forge_agent_token.json
 forge_agent_tokens.json
 
 # --- Release / build outputs ---
 dist/
+cdk.out/
 
 # --- Generated HTML mirrors of Markdown docs (do not track) ---
 docs/DEMOS.html

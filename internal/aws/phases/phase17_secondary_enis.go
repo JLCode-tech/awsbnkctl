@@ -187,29 +187,40 @@ func assignSelfIPIfNeeded(ctx context.Context, ec2c EC2API, eniID, selfIP, tag s
 }
 
 // Phase17SecondaryENIsDown detaches and deletes the TMM secondary ENIs.
-// Tolerates NotFound and AlreadyDetached.
+// Tolerates NotFound and AlreadyDetached. Sweeps all ENIs matching the
+// cluster+component tags in addition to any IDs recorded in state so
+// stateless teardown or multi-node clusters leave zero orphaned ENIs.
 func Phase17SecondaryENIsDown(ctx context.Context, cl *intent.Cluster, st *state.State, clients *Clients) error {
 	checkAuthOrDie(clients)
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 17 down] secondary ENIs: cluster=%s\n", name)
 
 	for _, key := range []string{"EXTERNAL_ENI", "INTERNAL_ENI"} {
-		eniID := st.Get(key)
-		if eniID == "" {
-			// Tag-discovery fallback.
-			comp := tags.CompENIInternal
-			if key == "EXTERNAL_ENI" {
-				comp = tags.CompENIExternal
-			}
-			eniID = lookupENIByTag(ctx, clients.EC2, name, comp)
+		comp := tags.CompENIInternal
+		if key == "EXTERNAL_ENI" {
+			comp = tags.CompENIExternal
 		}
-		if eniID == "" {
+		seen := make(map[string]bool)
+		var eniIDs []string
+		if id := st.Get(key); id != "" {
+			seen[id] = true
+			eniIDs = append(eniIDs, id)
+		}
+		for _, id := range lookupENIsByTag(ctx, clients.EC2, name, comp) {
+			if !seen[id] {
+				seen[id] = true
+				eniIDs = append(eniIDs, id)
+			}
+		}
+		if len(eniIDs) == 0 {
 			fmt.Fprintf(os.Stderr, "[phase 17 down] %s not found, skipping\n", key)
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "[phase 17 down] detaching + deleting %s (%s)\n", key, eniID)
-		if err := detachAndDeleteENI(ctx, clients.EC2, eniID); err != nil {
-			return fmt.Errorf("phase17 down: %s: %w", key, err)
+		for _, eniID := range eniIDs {
+			fmt.Fprintf(os.Stderr, "[phase 17 down] detaching + deleting %s (%s)\n", key, eniID)
+			if err := detachAndDeleteENI(ctx, clients.EC2, eniID); err != nil {
+				return fmt.Errorf("phase17 down: %s (%s): %w", key, eniID, err)
+			}
 		}
 		st.Set(key, "")
 	}
@@ -401,6 +412,15 @@ func eniMAC(ctx context.Context, ec2c EC2API, eniID string) (string, error) {
 // lookupENIByTag looks up a network interface by cluster + component tags.
 // Returns "" if not found or on error.
 func lookupENIByTag(ctx context.Context, ec2c EC2API, clusterName, component string) string {
+	ids := lookupENIsByTag(ctx, ec2c, clusterName, component)
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
+}
+
+// lookupENIsByTag returns all network interface IDs matching cluster + component tags.
+func lookupENIsByTag(ctx context.Context, ec2c EC2API, clusterName, component string) []string {
 	out, err := ec2c.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
 		Filters: []ec2types.Filter{
 			tags.ClusterFilter(clusterName),
@@ -408,10 +428,13 @@ func lookupENIByTag(ctx context.Context, ec2c EC2API, clusterName, component str
 		},
 	})
 	if err != nil || len(out.NetworkInterfaces) == 0 {
-		return ""
+		return nil
 	}
-	if out.NetworkInterfaces[0].NetworkInterfaceId == nil {
-		return ""
+	var ids []string
+	for _, ni := range out.NetworkInterfaces {
+		if ni.NetworkInterfaceId != nil && *ni.NetworkInterfaceId != "" {
+			ids = append(ids, *ni.NetworkInterfaceId)
+		}
 	}
-	return *out.NetworkInterfaces[0].NetworkInterfaceId
+	return ids
 }

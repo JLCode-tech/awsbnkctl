@@ -165,7 +165,25 @@ func Phase11bEBSCSIHugepagesDown(ctx context.Context, cl *intent.Cluster, st *st
 				fmt.Fprintf(os.Stderr, "[phase 11b down] warning: delete EBS CSI addon: %v\n", err)
 			}
 		} else {
-			fmt.Fprintf(os.Stderr, "[phase 11b down] aws-ebs-csi-driver addon delete requested\n")
+			fmt.Fprintf(os.Stderr, "[phase 11b down] aws-ebs-csi-driver addon delete requested; waiting for removal\n")
+			deadline := time.Now().Add(90 * time.Second)
+			for time.Now().Before(deadline) {
+				_, dErr := clients.EKS.DescribeAddon(ctx, &eks.DescribeAddonInput{
+					ClusterName: &name,
+					AddonName:   aws.String(ebsCSIAddonName),
+				})
+				if dErr != nil {
+					var apiErr smithy.APIError
+					if errors.As(dErr, &apiErr) && apiErr.ErrorCode() == "ResourceNotFoundException" {
+						break
+					}
+				}
+				select {
+				case <-ctx.Done():
+					break
+				case <-time.After(5 * time.Second):
+				}
+			}
 		}
 	}
 

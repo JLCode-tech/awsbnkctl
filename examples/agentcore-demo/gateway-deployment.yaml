@@ -23,7 +23,7 @@ spec:
   dnsNames:
   - bnk-ingress.bnk-demo.internal
   issuerRef:
-    name: {{.BNK_CA_ISSUER}}
+    name: bnk-agentcore-demo-ca-cluster-issuer
     kind: ClusterIssuer
     group: cert-manager.io
 ---
@@ -33,6 +33,13 @@ metadata:
   name: bnk-agentcore-demo
   namespace: default
 spec:
+  egressConfigs:
+  - hardwareAcceleration: none
+    name: default-egress
+    networkRef:
+      name: int-vlan-infra
+    sourceNATConfig:
+      type: Automap
   ingressConfig:
     defaultListenerNetwork:
       ipamRefs:
@@ -48,7 +55,7 @@ metadata:
   name: bnk-agentcore-demo-gateway
   namespace: default
 spec:
-  gatewayClassName: {{.GATEWAYCLASS_NAME}}
+  gatewayClassName: bnk-agentcore-demo-gatewayclass
   infrastructure:
     parametersRef:
       group: gateway.k8s.f5.com
@@ -78,7 +85,7 @@ spec:
       - kind: HTTPRoute
   addresses:
   - type: IPAddress
-    value: {{.AgentCoreVIP}}
+    value: 10.0.10.150
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -135,7 +142,7 @@ metadata:
   annotations:
     k8s.f5.com/ai-token-counting: "true"
 spec:
-  gatewayClassName: {{.GATEWAYCLASS_NAME}}
+  gatewayClassName: bnk-agentcore-demo-gatewayclass
   infrastructure:
     parametersRef:
       group: gateway.k8s.f5.com
@@ -158,7 +165,7 @@ spec:
       - kind: HTTPRoute
   addresses:
   - type: IPAddress
-    value: {{.AgentCoreVIP}}
+    value: 10.0.10.150
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

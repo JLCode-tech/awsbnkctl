@@ -857,3 +857,43 @@ func TestRenderCNEInstance_OmitsK8sRoutesWithoutServiceCIDR(t *testing.T) {
 		t.Errorf("rendered CNEInstance must not carry %s without %s in state:\n%s", TMMK8sRoutesEnv, ServiceCIDRStateKey, out)
 	}
 }
+
+func TestRenderCNEInstance_AIGateway241(t *testing.T) {
+	tmplBytes, err := manifests.FS.ReadFile("shared/cneinstance.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read cneinstance template: %v", err)
+	}
+	cl := cneInstanceCluster()
+	cl.Bnk.ManifestVersion = "2.4.1-3.2850.1-0.0.9"
+	out, err := RenderCNEInstance(tmplBytes, cl, func(key string) string {
+		if key == "VPC_ID" {
+			return "vpc-0abc12345"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("RenderCNEInstance 2.4.1: %v", err)
+	}
+	rendered := string(out)
+	for _, want := range []string{
+		"aiGateway:",
+		"enabled: true",
+		"aiMetrics: true",
+		"loggingSubsystem:\n      enabled: true",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered shared CNEInstance 2.4.1 missing %q:\n%s", want, rendered)
+		}
+	}
+
+	for _, v := range []string{"2.4.1", "v2.4.1-3.2850.1-0.0.9", "2.4.3", "2.5.0", "3.0.0"} {
+		if !isAIGatewayManifestVersion(v) {
+			t.Errorf("expected isAIGatewayManifestVersion(%q) = true", v)
+		}
+	}
+	for _, v := range []string{"", "2.3.0", "2.4.0", "2.4.0-3.2882.0", "v2.4.0"} {
+		if isAIGatewayManifestVersion(v) {
+			t.Errorf("expected isAIGatewayManifestVersion(%q) = false", v)
+		}
+	}
+}
