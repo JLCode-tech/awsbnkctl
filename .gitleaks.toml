@@ -16,4 +16,5 @@ no longer matches; this path-scoped allowlist is a version-stable belt-and-suspe
 """
 paths = [
   '''internal/exec/k8s\.go''',
+  '''examples/.*/traffic-generator-deployment\.yaml''',
 ]
