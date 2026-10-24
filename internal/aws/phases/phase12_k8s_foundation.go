@@ -181,7 +181,7 @@ func Phase12K8sFoundation(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	}
 
 	// 12.2 — Supply-chain Secrets.
-	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData); err != nil {
+	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData, cl.Bnk.RegistryHost); err != nil {
 		return fmt.Errorf("phase12: FAR secrets: %w", err)
 	}
 	if err := applyLicenseJWTSecret(ctx, clients, operatorNS, jwtData); err != nil {
@@ -401,9 +401,9 @@ func ensureNamespaces(ctx context.Context, clients *Clients, namespaces []string
 // applyFARSecrets creates/patches the FAR pull secret (kubernetes.io/dockerconfigjson)
 // in each target namespace. Uses Get-first + Create/Update (create-or-update pattern)
 // via the typed client for reliability with both real and fake clientsets.
-func applyFARSecrets(ctx context.Context, clients *Clients, namespaces []string, farData []byte) error {
+func applyFARSecrets(ctx context.Context, clients *Clients, namespaces []string, farData []byte, registryHost string) error {
 	for _, ns := range namespaces {
-		sec := buildFARSecret(ns, farData)
+		sec := buildFARSecret(ns, farData, registryHost)
 		if err := applySecretTyped(ctx, clients.K8s, sec); err != nil {
 			return fmt.Errorf("apply FAR secret in %s: %w", ns, err)
 		}
@@ -427,24 +427,31 @@ func applyLicenseJWTSecret(ctx context.Context, clients *Clients, ns string, jwt
 //
 // IMPORTANT: F5's FAR archive (`cne_pull_64.json`) is NOT a raw dockerconfigjson.
 // It is a base64-encoded GCP service-account JSON used as the password for
-// repo.f5.com (helm registry login -u _json_key_base64). We must wrap it as a
-// dockerconfigjson before stuffing into Secret.Data.
+// the F5 registry host (helm registry login -u _json_key_base64). We must
+// wrap it as a dockerconfigjson before stuffing into Secret.Data.
+//
+// registryHost is cl.Bnk.RegistryHost (default "repo.f5.com" — see
+// BnkSpec.RegistryHost). It must match the host used by the FLO values
+// template's image.repository and the CNEInstance CR's spec.registry.uri
+// (render.FLOValuesVarsFromCluster / render.RenderCNEInstance both source the
+// same field), since kubelet looks up this Secret's auths map by the exact
+// host string referenced in each image pull.
 //
 // Wrapping per aws-gpu-setup/deploy-bnk.sh lines 61-63:
 //
 //	FAR_KEY_B64   = strings.TrimSpace(file_contents)              // already base64
 //	AUTH_B64      = base64("_json_key_base64:" + FAR_KEY_B64)     // docker-auth value
-//	DOCKER_CFG_JSON = {"auths":{"repo.f5.com":{"auth":"$AUTH_B64"}}}
+//	DOCKER_CFG_JSON = {"auths":{"<registryHost>":{"auth":"$AUTH_B64"}}}
 //
 // Secret.Data is map[string][]byte — client-go base64-encodes for the wire.
 // We pass DOCKER_CFG_JSON as raw bytes; the API server sees decoded JSON and
 // validates it.
-func buildFARSecret(ns string, farData []byte) *corev1.Secret {
+func buildFARSecret(ns string, farData []byte, registryHost string) *corev1.Secret {
 	farKeyB64 := strings.TrimSpace(string(farData))
 	authValue := base64.StdEncoding.EncodeToString([]byte("_json_key_base64:" + farKeyB64))
 	dockerCfg := map[string]any{
 		"auths": map[string]any{
-			"repo.f5.com": map[string]any{
+			registryHost: map[string]any{
 				"auth": authValue,
 			},
 		},

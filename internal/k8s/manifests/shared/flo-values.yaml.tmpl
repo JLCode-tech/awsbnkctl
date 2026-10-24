@@ -6,6 +6,8 @@
 #   {{ .FARSecretName }} — far-secret (slice-5 pull secret name)
 #   {{ .JWT }}           — raw JWT token contents from cl.Bnk.JWT
 #   {{ .ClusterName }}   — cl.Metadata.Name (used in friendlyName)
+#   {{ .RegistryHost }}  — cl.Bnk.RegistryHost (default "repo.f5.com"; see
+#                          BnkSpec.RegistryHost for why this is overridable)
 ---
 global:
   certmgr:
@@ -14,21 +16,21 @@ global:
     - name: {{ .FARSecretName }}
 containerPlatform: AWS
 image:
-  repository: repo.f5.com/images
+  repository: {{ .RegistryHost }}/images
   pullPolicy: Always
 fluentbit_sidecar:
   enabled: false
 f5-spk-crds-common:
   versionValidator:
     image:
-      repository: repo.f5.com/images
+      repository: {{ .RegistryHost }}/images
 f5-spk-crds-service-proxy:
   versionValidator:
     image:
-      repository: repo.f5.com/images
+      repository: {{ .RegistryHost }}/images
 f5-ipam-operator:
   image:
-    repository: repo.f5.com/images
+    repository: {{ .RegistryHost }}/images
     pullPolicy: Always
   namespace: "default"
   nameOverride: "f5-ipam-operator"

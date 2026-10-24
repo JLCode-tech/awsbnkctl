@@ -49,6 +49,18 @@ type BnkSpec struct {
 	// JWT is the path to F5's subscription JWT file.
 	// Type: Opaque, key: license.jwt. File must be readable + non-empty.
 	JWT string `yaml:"jwt"`
+	// RegistryHost is the F5 OCI/Docker registry that the FLO Helm chart,
+	// FLO/CNE container images, the far-secret dockerconfigjson, and the
+	// CNEInstance CR's spec.registry.uri are pulled from / authenticated
+	// against. Default "repo.f5.com" (F5's production registry). Some F5
+	// credential sets (e.g. dev/staging GCP service accounts scoped to an
+	// F5-internal project) only have access to "devrepo.f5.com" instead —
+	// set this field to match whichever registry your bnk.farArchive
+	// credential actually has registry.downloadArtifacts permission on.
+	// A mismatch surfaces as 401 (helm registry login) or 403
+	// ("Permission 'registry.downloadArtifacts' denied") at Phase 14, or as
+	// an ImagePullBackOff / FLO reconcile error downstream.
+	RegistryHost string `yaml:"registryHost,omitempty"`
 	// CertManagerVersion pins the embedded cert-manager YAML version.
 	// Default EmbeddedCertManagerVersion. Must match the embedded YAML or phase 12 errors.
 	CertManagerVersion string `yaml:"certManagerVersion,omitempty"`
@@ -967,6 +979,9 @@ func applyDefaults(c *Cluster) {
 	if c.Bnk != nil {
 		if c.Bnk.CertManagerVersion == "" {
 			c.Bnk.CertManagerVersion = EmbeddedCertManagerVersion
+		}
+		if c.Bnk.RegistryHost == "" {
+			c.Bnk.RegistryHost = manifest.FARRegistryHost
 		}
 		// Slice-7 BnkSpec defaults.
 		if c.Bnk.DeploymentSize == "" {

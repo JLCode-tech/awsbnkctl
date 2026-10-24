@@ -346,7 +346,7 @@ func TestBnkUpgrade_DryRun(t *testing.T) {
 	helm := &fakeUpgradeHelm{}
 	dyn := fakeMigrateDynamic(t)
 	var gotFAR string
-	bnkUpgradeDeps = func(_ string, far string) (migrate.UpgradeDeps, error) {
+	bnkUpgradeDeps = func(_ string, far string, _ string) (migrate.UpgradeDeps, error) {
 		gotFAR = far
 		return migrate.UpgradeDeps{Helm: helm, Dyn: dyn}, nil
 	}

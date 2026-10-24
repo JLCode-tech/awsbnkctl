@@ -350,7 +350,7 @@ func TestPhase12_FreshApply_CreatesNamespacesAndSecrets(t *testing.T) {
 
 	// Sub-test: apply FAR secrets.
 	farData := []byte(`{"auths":{}}`)
-	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData); err != nil {
+	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData, "repo.f5.com"); err != nil {
 		t.Fatalf("applyFARSecrets: %v", err)
 	}
 
@@ -413,7 +413,7 @@ func TestPhase12_IdempotentSecrets(t *testing.T) {
 	jwtData := []byte("jwt-token-content")
 
 	// First invocation — creates secrets.
-	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData); err != nil {
+	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData, "repo.f5.com"); err != nil {
 		t.Fatalf("first applyFARSecrets: %v", err)
 	}
 	if err := applyLicenseJWTSecret(ctx, clients, operatorNS, jwtData); err != nil {
@@ -424,7 +424,7 @@ func TestPhase12_IdempotentSecrets(t *testing.T) {
 	cs.ClearActions()
 
 	// Second invocation — should update (Get+Update), never create.
-	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData); err != nil {
+	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData, "repo.f5.com"); err != nil {
 		t.Fatalf("second applyFARSecrets (idempotent): %v", err)
 	}
 	if err := applyLicenseJWTSecret(ctx, clients, operatorNS, jwtData); err != nil {
