@@ -69,6 +69,23 @@ const (
 	multusNamespace     = "kube-system"
 	multusVersion       = "v4.2.4"
 
+	// gieYAMLPath is the upstream Gateway API Inference Extension v1.5.0 CRD
+	// bundle (InferencePool, InferencePoolImport, etc. under
+	// inference.networking.k8s.io). BNK 2.4+ defaults EPP (F5's endpoint
+	// picker, CNEInstanceVars.EPP / spec.eppNamespaces) to enabled, and the
+	// f5-cne-controller's "f5epp" source watches *v1.InferencePool at
+	// manager startup — without this CRD installed, the controller-runtime
+	// manager fails with "timed out waiting for cache to be synced for Kind
+	// *v1.InferencePool" and CrashLoopBackOffs indefinitely (exit code 0,
+	// not a panic — it's a clean but repeated manager-startup failure).
+	// Install this CRD bundle unconditionally alongside Multus: it's cheap,
+	// idempotent, and every BNK 2.4+ cluster needs it regardless of whether
+	// the operator explicitly touched bnk.aiGateway/eppNamespaces in
+	// cluster.yaml (EPP defaults on; see CNEInstanceVars.EPP in render.go).
+	gieYAMLPath   = "gie/gateway-api-inference-extension-v1.5.0.yaml"
+	gieCRDName    = "inferencepools.inference.networking.k8s.io"
+	gieCRDTimeout = 2 * time.Minute
+
 	phase12FieldManager = "awsbnkctl-phase12"
 
 	// Timeouts
@@ -236,6 +253,26 @@ func Phase12K8sFoundation(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	}
 	fmt.Fprintf(os.Stderr, "[phase 12] CA certificate %s is Ready\n", vars.CACertName)
 
+	// 12.4b — Gateway API Inference Extension CRDs (InferencePool etc.).
+	// Required by the f5-cne-controller's EPP ("f5epp") manager source, which
+	// BNK 2.4+ enables by default (CNEInstanceVars.EPP / spec.eppNamespaces).
+	// Without this, Phase 21/23's f5-cne-controller CrashLoopBackOffs
+	// indefinitely: "timed out waiting for cache to be synced for Kind
+	// *v1.InferencePool" kills the controller-runtime manager on every start.
+	gieYAML, err := k8smanifests.FS.ReadFile(gieYAMLPath)
+	if err != nil {
+		return fmt.Errorf("phase12: reading embedded gateway-api-inference-extension YAML: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 12] applying Gateway API Inference Extension CRDs (%d bytes)\n", len(gieYAML))
+	if err := applyRawYAML(ctx, clients, gieYAML); err != nil {
+		return fmt.Errorf("phase12: applying gateway-api-inference-extension YAML: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 12] waiting for CRD %s\n", gieCRDName)
+	if err := k8swait.WaitForCRDExists(ctx, clients.Dynamic, gieCRDName, gieCRDTimeout); err != nil {
+		return fmt.Errorf("phase12: CRD %s not established: %w", gieCRDName, err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 12] CRD %s is established\n", gieCRDName)
+
 	// 12.5 — Multus CNI install (slice 7+). Required before Phase 20 NADs apply.
 	// NetworkAttachmentDefinition CRD (k8s.cni.cncf.io/v1) is registered by Multus.
 	multusYAML, err := k8smanifests.FS.ReadFile(multusYAMLPath)
@@ -304,6 +341,16 @@ func Phase12K8sFoundationDown(ctx context.Context, cl *intent.Cluster, st *state
 	fmt.Fprintln(os.Stderr, "[phase 12 down] deleting Multus CNI resources")
 	if mErr := deleteMultusResources(ctx, clients); mErr != nil {
 		fmt.Fprintf(os.Stderr, "[phase 12 down] warning: multus delete had errors: %v\n", mErr)
+	}
+
+	// 0b. Delete Gateway API Inference Extension CRDs. Best-effort: deleting
+	// InferencePool CRDs while CRs still reference them is harmless (CRs are
+	// cleaned up with their namespace), and tolerating errors here matches
+	// the Multus delete above.
+	if gieYAML, gErr := k8smanifests.FS.ReadFile(gieYAMLPath); gErr != nil {
+		fmt.Fprintf(os.Stderr, "[phase 12 down] warning: reading embedded gie YAML: %v\n", gErr)
+	} else if gErr := deleteRawYAML(ctx, clients, gieYAML); gErr != nil {
+		fmt.Fprintf(os.Stderr, "[phase 12 down] warning: gie delete had errors: %v\n", gErr)
 	}
 
 	// 1. Delete cert chain CRs via dynamic client (tolerate NotFound).
