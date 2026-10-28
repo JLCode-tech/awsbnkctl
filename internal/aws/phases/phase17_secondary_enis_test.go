@@ -374,3 +374,60 @@ func TestPhase17SecondaryENIs_RecordsNominalSelfIPsOnly(t *testing.T) {
 		t.Errorf("TMM_INT_SELFIP = %q, want the nominal self IP", got)
 	}
 }
+
+func TestPhase17SecondaryENIs_DisablesPrimaryENISourceDestCheck(t *testing.T) {
+	awsmw.ResetForTest()
+	st, _ := stateWithENIPrereqs(t)
+	st.Set("INTERNAL_ENI", "eni-existing-int")
+	st.Set("EXTERNAL_ENI", "eni-existing-ext")
+	cl := eniTestCluster()
+
+	instanceID := "i-0123456789abcdef0"
+	mac := "0a:1b:2c:3d:4e:5f"
+	primMAC := "0E:AA:BB:CC:DD:00"
+	primENI := "eni-primary-0"
+	devIdx0 := int32(0)
+
+	ec2m := &mockEC2{
+		describeInstancesOut: &ec2.DescribeInstancesOutput{
+			Reservations: []ec2types.Reservation{{
+				Instances: []ec2types.Instance{{
+					InstanceId: &instanceID,
+					NetworkInterfaces: []ec2types.InstanceNetworkInterface{{
+						NetworkInterfaceId: &primENI,
+						MacAddress:         &primMAC,
+						Attachment:         &ec2types.InstanceNetworkInterfaceAttachment{DeviceIndex: &devIdx0},
+					}},
+				}},
+			}},
+		},
+		describeENIsOut: &ec2.DescribeNetworkInterfacesOutput{
+			NetworkInterfaces: []ec2types.NetworkInterface{{
+				NetworkInterfaceId: ptr("eni-existing-int"),
+				MacAddress:         &mac,
+				Attachment:         &ec2types.NetworkInterfaceAttachment{InstanceId: &instanceID},
+			}},
+		},
+	}
+
+	if err := Phase17SecondaryENIs(context.Background(), cl, st, testClients(ec2m), false); err != nil {
+		t.Fatalf("Phase17SecondaryENIs: %v", err)
+	}
+	if got := st.Get("PRIMARY_ENI_ID"); got != primENI {
+		t.Errorf("PRIMARY_ENI_ID = %q, want %q", got, primENI)
+	}
+	if got := st.Get("PRIMARY_ENI_MAC"); got != "0e:aa:bb:cc:dd:00" {
+		t.Errorf("PRIMARY_ENI_MAC = %q, want 0e:aa:bb:cc:dd:00", got)
+	}
+	found := false
+	for _, in := range ec2m.modifyENIAttrInputs {
+		if in.NetworkInterfaceId != nil && *in.NetworkInterfaceId == primENI &&
+			in.SourceDestCheck != nil && in.SourceDestCheck.Value != nil && !*in.SourceDestCheck.Value {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected ModifyNetworkInterfaceAttribute(SourceDestCheck=false) on %s, got %+v", primENI, ec2m.modifyENIAttrInputs)
+	}
+}
