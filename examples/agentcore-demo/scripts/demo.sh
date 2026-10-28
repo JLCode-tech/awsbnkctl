@@ -112,8 +112,8 @@ POLICIES=$(kubectl get netpolicies.gateway.k8s.f5.com -n default --no-headers 2>
 [ "$POLICIES" -ge 2 ] && ok "$POLICIES listener-scoped NetPolicies attached" \
   || bad "expected 2 NetPolicies (one per listener), found $POLICIES"
 
-AIGW_COUNT=$(kubectl get aigatewayprofiles.inference.k8s.f5.com,apppolicies.gateway.k8s.f5.com -n f5-bnk --no-headers 2>/dev/null | wc -l | tr -d ' ')
-[ "${AIGW_COUNT:-0}" -ge 2 ] && ok "BNK 2.4.1 AI Gateway (AITenant/AICredential/AIProvider/AIModel/AIGatewayProfile/AppPolicy in f5-bnk) present" \
+AIGW_COUNT=$(kubectl get aigatewayprofiles.inference.k8s.f5.com,apppolicies.gateway.k8s.f5.com -n f5-cne-system --no-headers 2>/dev/null | wc -l | tr -d ' ')
+[ "${AIGW_COUNT:-0}" -ge 2 ] && ok "BNK 2.4.1 AI Gateway (AITenant/AICredential/AIProvider/AIModel/AIGatewayProfile/AppPolicy in f5-cne-system) present" \
   || warn "BNK 2.4.1 AI Gateway not applied yet (./scripts/setup-llm-gateway.sh)"
 
 TOOL_READY=$(kubectl get deploy mcp-financial-tool -n default \
@@ -382,7 +382,7 @@ pause
 say "Act 7 — the evidence, in Forge"
 CLUSTER_ID=""
 TOKEN=$(curl -s -X POST "$FORGE/api/auth/login" -H 'Content-Type: application/json' \
-  -d "{\"username\":\"${AWSBNKCTL_FORGE_USERNAME:-admin}\",\"password\":\"${AWSBNKCTL_FORGE_PASSWORD:-changeme}\"}" --max-time 8 2>/dev/null \
+  -d '{"username":"admin","password":"admin123"}' --max-time 8 2>/dev/null \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))' 2>/dev/null)
 if [ -n "$TOKEN" ]; then
   CLUSTER_ID=$(curl -s -H "Authorization: Bearer $TOKEN" "$FORGE/api/k8s/clusters" --max-time 8 2>/dev/null \

@@ -100,6 +100,17 @@ func TestKnownReleases_24Default(t *testing.T) {
 	}
 }
 
+func TestKnownReleases_241(t *testing.T) {
+	for _, ver := range []string{"2.4.1", "2.4.1-3.2850.1-0.0.9"} {
+		if got, ok := FLOChartFor(ver); !ok || got != "v2.30.1-0.0.8" {
+			t.Errorf("FLOChartFor(%s) = %q,%v want v2.30.1-0.0.8,true", ver, got, ok)
+		}
+		if !IsKnownRelease(ver) {
+			t.Errorf("IsKnownRelease(%s) = false, want true", ver)
+		}
+	}
+}
+
 // TestFindManifestFile covers the 2.4.0 chart layout, where the OCI tag
 // (2.4.0-3.3175.0-0.0.380) no longer matches the manifest file name
 // (bigip-k8s-manifest-2.4.0.yaml).

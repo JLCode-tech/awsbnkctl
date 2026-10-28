@@ -253,3 +253,65 @@ func TestPhase00Preflight_WithJWT(t *testing.T) {
 		t.Fatalf("Phase00Preflight with nil Bnk: %v", err)
 	}
 }
+
+func TestCheckVPCQuota_UnderLimit(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	cl := &intent.Cluster{Metadata: intent.Metadata{Name: "new-cluster", Region: "ap-southeast-2"}}
+	m := &mockEC2{
+		describeVpcsOut: &ec2.DescribeVpcsOutput{
+			Vpcs: []ec2types.Vpc{
+				{VpcId: ptr("vpc-1")},
+				{VpcId: ptr("vpc-2")},
+				{VpcId: ptr("vpc-3")},
+			},
+		},
+	}
+	if err := checkVPCQuota(context.Background(), cl, st, m); err != nil {
+		t.Fatalf("expected nil when 3/5 VPCs in use, got %v", err)
+	}
+}
+
+func TestCheckVPCQuota_AtLimitFails(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	cl := &intent.Cluster{Metadata: intent.Metadata{Name: "new-cluster", Region: "ap-southeast-2"}}
+	m := &mockEC2{
+		describeVpcsOut: &ec2.DescribeVpcsOutput{
+			Vpcs: []ec2types.Vpc{
+				{VpcId: ptr("vpc-1"), Tags: []ec2types.Tag{{Key: ptr("Name"), Value: ptr("other-1")}}},
+				{VpcId: ptr("vpc-2"), Tags: []ec2types.Tag{{Key: ptr("Name"), Value: ptr("other-2")}}},
+				{VpcId: ptr("vpc-3"), Tags: []ec2types.Tag{{Key: ptr("Name"), Value: ptr("other-3")}}},
+				{VpcId: ptr("vpc-4"), Tags: []ec2types.Tag{{Key: ptr("Name"), Value: ptr("other-4")}}},
+				{VpcId: ptr("vpc-5"), Tags: []ec2types.Tag{{Key: ptr("Name"), Value: ptr("other-5")}}},
+			},
+		},
+	}
+	err := checkVPCQuota(context.Background(), cl, st, m)
+	if err == nil {
+		t.Fatal("expected VPC quota error when 5/5 VPCs exist, got nil")
+	}
+	if !strings.Contains(err.Error(), "VpcLimitExceeded") {
+		t.Errorf("expected error to mention VpcLimitExceeded, got: %v", err)
+	}
+}
+
+func TestCheckVPCQuota_ExistingClusterVPCSkips(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	cl := &intent.Cluster{Metadata: intent.Metadata{Name: "my-cluster", Region: "ap-southeast-2"}}
+	m := &mockEC2{
+		describeVpcsOut: &ec2.DescribeVpcsOutput{
+			Vpcs: []ec2types.Vpc{
+				{VpcId: ptr("vpc-1"), Tags: []ec2types.Tag{{Key: ptr("awsbnkctl:cluster"), Value: ptr("my-cluster")}}},
+				{VpcId: ptr("vpc-2")},
+				{VpcId: ptr("vpc-3")},
+				{VpcId: ptr("vpc-4")},
+				{VpcId: ptr("vpc-5")},
+			},
+		},
+	}
+	if err := checkVPCQuota(context.Background(), cl, st, m); err != nil {
+		t.Fatalf("expected nil when cluster VPC already exists among 5 VPCs, got %v", err)
+	}
+}

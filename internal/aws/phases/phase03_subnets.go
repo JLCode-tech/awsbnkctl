@@ -262,35 +262,49 @@ func makeDryRunSubnetIDs(label string, n int) []string {
 	return ids
 }
 
-// collectSubnetIDs returns all subnet IDs for the cluster from state first,
-// falling back to tag-discovery.
+// collectSubnetIDs returns all subnet IDs for the cluster by merging state keys
+// with tag-discovery and VPC-discovery so partial state never leaves orphaned subnets.
 func collectSubnetIDs(ctx context.Context, ec2c EC2API, clusterName string, st *state.State) []string {
+	seen := make(map[string]bool)
 	var ids []string
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+
 	for _, csv := range []string{st.Get("PUBLIC_SUBNETS"), st.Get("PRIVATE_SUBNETS")} {
 		if csv == "" {
 			continue
 		}
 		for _, id := range strings.Split(csv, ",") {
-			id = strings.TrimSpace(id)
-			if id != "" {
-				ids = append(ids, id)
+			add(id)
+		}
+	}
+
+	// Tag-discovery (always merged in case state.env was only partially populated).
+	if out, err := ec2c.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{
+		Filters: []ec2types.Filter{tags.ClusterFilter(clusterName)},
+	}); err == nil && out != nil {
+		for _, s := range out.Subnets {
+			if s.SubnetId != nil {
+				add(*s.SubnetId)
 			}
 		}
 	}
-	if len(ids) > 0 {
-		return ids
-	}
 
-	// Tag-discovery fallback.
-	out, err := ec2c.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{
-		Filters: []ec2types.Filter{tags.ClusterFilter(clusterName)},
-	})
-	if err != nil {
-		return nil
-	}
-	for _, s := range out.Subnets {
-		if s.SubnetId != nil {
-			ids = append(ids, *s.SubnetId)
+	// VPC-discovery fallback for any untagged/auxiliary subnets inside the cluster VPC.
+	if vpcID := st.Get("VPC_ID"); vpcID != "" {
+		if out, err := ec2c.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{
+			Filters: []ec2types.Filter{{Name: ptr("vpc-id"), Values: []string{vpcID}}},
+		}); err == nil && out != nil {
+			for _, s := range out.Subnets {
+				if s.SubnetId != nil {
+					add(*s.SubnetId)
+				}
+			}
 		}
 	}
 	return ids

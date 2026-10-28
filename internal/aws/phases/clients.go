@@ -84,6 +84,7 @@ type EC2API interface {
 	AuthorizeSecurityGroupIngress(ctx context.Context, in *ec2.AuthorizeSecurityGroupIngressInput, opts ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error)
 	AuthorizeSecurityGroupEgress(ctx context.Context, in *ec2.AuthorizeSecurityGroupEgressInput, opts ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error)
 	RevokeSecurityGroupIngress(ctx context.Context, in *ec2.RevokeSecurityGroupIngressInput, opts ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error)
+	RevokeSecurityGroupEgress(ctx context.Context, in *ec2.RevokeSecurityGroupEgressInput, opts ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error)
 
 	// EBS volumes (Phase 11b down: PVC volumes the CSI driver leaves behind)
 	DescribeVolumes(ctx context.Context, in *ec2.DescribeVolumesInput, opts ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
@@ -406,6 +407,27 @@ func ignoreNotFound(err error) error {
 		return nil
 	}
 	return err
+}
+
+// isDependencyViolation returns true if the error chain contains a DependencyViolation API error.
+func isDependencyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	type coder interface{ ErrorCode() string }
+	e := err
+	for e != nil {
+		if ce, ok := e.(coder); ok && ce.ErrorCode() == "DependencyViolation" {
+			return true
+		}
+		type unwrapper interface{ Unwrap() error }
+		if u, ok := e.(unwrapper); ok {
+			e = u.Unwrap()
+		} else {
+			break
+		}
+	}
+	return false
 }
 
 // tagSpecification builds the EC2 TagSpecification for resource creation.

@@ -87,6 +87,12 @@ func Phase17SecondaryENIs(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		}
 	}
 
+	// Ensure Source/Dest check is disabled on the BNK worker node's primary ENI
+	// (device-index 0) so pod-to-VIP and TMM return traffic is not dropped by AWS VPC fabric.
+	if err := disablePrimaryENISourceDestCheck(ctx, clients.EC2, st, instanceID); err != nil {
+		return fmt.Errorf("phase17: primary ENI source/dest check: %w", err)
+	}
+
 	// External ENI: device-index 3 → ens8 (every BNK pattern).
 	extENI, err := ensureSecondaryENI(ctx, clients.EC2, name, extSubnet, sgID,
 		tags.CompENIExternal, "ens8", cl.Tags, cl.Metadata.Labels, st, "EXTERNAL_ENI")
@@ -226,7 +232,43 @@ func Phase17SecondaryENIsDown(ctx context.Context, cl *intent.Cluster, st *state
 	}
 	st.Set("INTERNAL_ENI_MAC", "")
 	st.Set("EXTERNAL_ENI_MAC", "")
+	st.Set("PRIMARY_ENI_MAC", "")
+	st.Set("PRIMARY_ENI_ID", "")
 	return st.Save()
+}
+
+// disablePrimaryENISourceDestCheck finds the BNK worker node's primary ENI
+// (device-index 0) via DescribeInstances, records PRIMARY_ENI_ID and
+// PRIMARY_ENI_MAC in state, and disables SourceDestCheck on it.
+func disablePrimaryENISourceDestCheck(ctx context.Context, ec2c EC2API, st *state.State, instanceID string) error {
+	out, err := ec2c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	})
+	if err != nil {
+		return fmt.Errorf("ec2:DescribeInstances %s: %w", instanceID, err)
+	}
+	for _, r := range out.Reservations {
+		for _, inst := range r.Instances {
+			for _, ni := range inst.NetworkInterfaces {
+				if ni.Attachment != nil && ni.Attachment.DeviceIndex != nil && *ni.Attachment.DeviceIndex == 0 {
+					if ni.MacAddress != nil {
+						st.Set("PRIMARY_ENI_MAC", strings.ToLower(*ni.MacAddress))
+					}
+					if ni.NetworkInterfaceId != nil {
+						st.Set("PRIMARY_ENI_ID", *ni.NetworkInterfaceId)
+						if _, err := ec2c.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
+							NetworkInterfaceId: ni.NetworkInterfaceId,
+							SourceDestCheck:    &ec2types.AttributeBooleanValue{Value: boolPtr(false)},
+						}); err != nil {
+							return fmt.Errorf("ec2:ModifyNetworkInterfaceAttribute --no-source-dest-check %s: %w", *ni.NetworkInterfaceId, err)
+						}
+					}
+					return nil
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ensureSecondaryENI looks up an ENI by state key first, then by tag, then

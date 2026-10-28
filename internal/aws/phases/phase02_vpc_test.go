@@ -132,3 +132,58 @@ func TestIgnoreNotFound_PassesThroughOtherErrors(t *testing.T) {
 		t.Error("ignoreNotFound should not swallow AccessDenied")
 	}
 }
+
+func TestPhase02VPCDown_SweepsResidualsAndMultipleTaggedVPCs(t *testing.T) {
+	awsmw.ResetForTest()
+	dir := t.TempDir()
+	st, _ := state.Load(dir)
+	st.Set("VPC_ID", "vpc-state-1")
+
+	ec2m := &mockEC2{
+		describeVpcsOut: &ec2.DescribeVpcsOutput{
+			Vpcs: []ec2types.Vpc{
+				{VpcId: strPtr("vpc-state-1")},
+				{VpcId: strPtr("vpc-orphan-2")},
+			},
+		},
+		describeENIsOut: &ec2.DescribeNetworkInterfacesOutput{
+			NetworkInterfaces: []ec2types.NetworkInterface{
+				{NetworkInterfaceId: strPtr("eni-avail-1"), Status: ec2types.NetworkInterfaceStatusAvailable},
+			},
+		},
+		describeSGsOut: &ec2.DescribeSecurityGroupsOutput{
+			SecurityGroups: []ec2types.SecurityGroup{
+				{GroupId: strPtr("sg-default"), GroupName: strPtr("default")},
+				{
+					GroupId:   strPtr("sg-agent"),
+					GroupName: strPtr("tracer-agent"),
+					IpPermissions: []ec2types.IpPermission{
+						{IpProtocol: strPtr("-1"), UserIdGroupPairs: []ec2types.UserIdGroupPair{{GroupId: strPtr("sg-jumphost")}}},
+					},
+					IpPermissionsEgress: []ec2types.IpPermission{
+						{IpProtocol: strPtr("-1"), UserIdGroupPairs: []ec2types.UserIdGroupPair{{GroupId: strPtr("sg-jumphost")}}},
+					},
+				},
+			},
+		},
+	}
+
+	if err := Phase02VPCDown(context.Background(), testCluster(), st, testClients(ec2m)); err != nil {
+		t.Fatalf("Phase02VPCDown: %v", err)
+	}
+	if ec2m.deleteVpcCalls != 2 {
+		t.Errorf("deleteVpcCalls = %d, want 2 (state VPC + extra tagged orphan VPC)", ec2m.deleteVpcCalls)
+	}
+	if ec2m.deleteENICalls == 0 {
+		t.Errorf("expected residual available ENI to be swept, deleteENICalls = 0")
+	}
+	if ec2m.revokeIngressCalls == 0 {
+		t.Errorf("expected ingress rules on residual SG to be revoked, revokeIngressCalls = 0")
+	}
+	if ec2m.revokeEgressCalls == 0 {
+		t.Errorf("expected egress rules on residual SG to be revoked, revokeEgressCalls = 0")
+	}
+	if ec2m.deleteSGCalls == 0 {
+		t.Errorf("expected non-default residual SG to be deleted, deleteSGCalls = 0")
+	}
+}

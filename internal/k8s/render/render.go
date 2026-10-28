@@ -571,6 +571,9 @@ type InfraVars struct {
 	EgressSubnet  string // InfraEgressSubnet
 	EgressPort    int    // InfraEgressPort
 	VpcCidr       string // network.vpcCidr, e.g. 10.0.0.0/16
+	ServiceCIDR   string // Kubernetes ClusterIP CIDR, e.g. 172.20.0.0/16
+	PodSubnetA    string // First private pod subnet CIDR, e.g. 10.0.11.0/24
+	PodSubnetB    string // Second private pod subnet CIDR, e.g. 10.0.12.0/24
 	TunnelGateway string // AWS router of the tunnel VLAN's subnet, e.g. 10.0.20.1
 	ExtGateway    string // AWS router of the external subnet, e.g. 10.0.10.1
 	RouteVPC      string // InfraRouteVPC
@@ -623,6 +626,13 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 	if hasInternal {
 		tunnelGW, _ = intent.DeriveSelfIP(cl.Network.DataPath.Internal.CIDR, 1)
 	}
+	var podSubnetA, podSubnetB string
+	if len(cl.Network.Subnets.Private) > 0 {
+		podSubnetA = strings.TrimSpace(cl.Network.Subnets.Private[0].CIDR)
+	}
+	if len(cl.Network.Subnets.Private) > 1 {
+		podSubnetB = strings.TrimSpace(cl.Network.Subnets.Private[1].CIDR)
+	}
 	vars := InfraVars{
 		InfraName:       InfraName,
 		InstanceNS:      cneInstanceNamespace,
@@ -646,6 +656,9 @@ func RenderInfra(tmpl []byte, cl *intent.Cluster, hasInternal bool) ([]byte, err
 		EgressSubnet:    InfraEgressSubnet,
 		EgressPort:      InfraEgressPort,
 		VpcCidr:         cl.Network.VPCCidr,
+		ServiceCIDR:     "172.20.0.0/16",
+		PodSubnetA:      podSubnetA,
+		PodSubnetB:      podSubnetB,
 		TunnelGateway:   tunnelGW,
 		ExtGateway:      extGW,
 		RouteVPC:        InfraRouteVPC,
