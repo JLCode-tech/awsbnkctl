@@ -245,7 +245,8 @@ func Phase17bJumphostDown(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		}
 	}
 
-	// Delete EICE.
+	// Delete EICE and wait for delete-complete so its AWS-managed ENI is
+	// detached from the public subnet before Phase03SubnetsDown runs.
 	eiceID := st.Get("JUMPHOST_EICE_ID")
 	if eiceID == "" {
 		eiceID = lookupEICEByTag(ctx, clients.EC2, name, tags.CompJumphostEICE)
@@ -258,21 +259,28 @@ func Phase17bJumphostDown(ctx context.Context, cl *intent.Cluster, st *state.Sta
 			if e := ignoreNotFound(err); e != nil {
 				return fmt.Errorf("phase17b down: DeleteInstanceConnectEndpoint %s: %w", eiceID, err)
 			}
+		} else if err := waitEICEDeleted(ctx, clients.EC2, eiceID); err != nil {
+			return fmt.Errorf("phase17b down: waiting for EICE %s deleted: %w", eiceID, err)
 		}
 	}
 
-	// Delete jumphost SG.
+	// Delete jumphost SG (after revoking any cross-SG ingress rules referencing it).
 	jumphostSGID := st.Get("JUMPHOST_SG_ID")
 	if jumphostSGID == "" {
 		jumphostSGID = lookupSGByTag(ctx, clients.EC2, name, tags.CompJumphostSG)
 	}
 	if jumphostSGID != "" && jumphostSGID != "sg-dry-run-jumphost" {
+		revokeReferencesToSG(ctx, clients.EC2, st.Get("VPC_ID"), jumphostSGID)
 		fmt.Fprintf(os.Stderr, "[phase 17b down] deleting jumphost SG %s\n", jumphostSGID)
 		if _, err := clients.EC2.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{
 			GroupId: ptr(jumphostSGID),
 		}); err != nil {
 			if e := ignoreNotFound(err); e != nil {
-				return fmt.Errorf("phase17b down: DeleteSecurityGroup jumphost %s: %w", jumphostSGID, err)
+				if isDependencyViolation(e) {
+					fmt.Fprintf(os.Stderr, "[phase 17b down] warning: jumphost SG %s still has dependencies (%v); deferring to phase 02 vpc sweep\n", jumphostSGID, e)
+				} else {
+					return fmt.Errorf("phase17b down: DeleteSecurityGroup jumphost %s: %w", jumphostSGID, err)
+				}
 			}
 		}
 	}
@@ -847,6 +855,127 @@ func waitEICEReady(ctx context.Context, ec2c EC2API, eiceID string) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(eicePollInterval):
+		}
+	}
+}
+
+// waitEICEDeleted polls until the EICE is gone or reaches "delete-complete".
+func waitEICEDeleted(ctx context.Context, ec2c EC2API, eiceID string) error {
+	deadline := time.Now().Add(eiceReadyTimeout)
+	for {
+		out, err := ec2c.DescribeInstanceConnectEndpoints(ctx, &ec2.DescribeInstanceConnectEndpointsInput{
+			InstanceConnectEndpointIds: []string{eiceID},
+		})
+		if err != nil {
+			if ignoreNotFound(err) == nil {
+				return nil
+			}
+		} else if len(out.InstanceConnectEndpoints) == 0 {
+			return nil
+		} else {
+			e := out.InstanceConnectEndpoints[0]
+			switch e.State {
+			case ec2types.Ec2InstanceConnectEndpointStateDeleteComplete:
+				return nil
+			case ec2types.Ec2InstanceConnectEndpointStateDeleteFailed:
+				msg := ""
+				if e.StateMessage != nil {
+					msg = *e.StateMessage
+				}
+				return fmt.Errorf("EICE %s delete-failed: %s", eiceID, msg)
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for EICE %s to reach delete-complete", eiceID)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(eicePollInterval):
+		}
+	}
+}
+
+// revokeReferencesToSG revokes ingress rules on targetSGID and any other SG in
+// the VPC that references targetSGID so DeleteSecurityGroup will not fail with
+// DependencyViolation due to cross-SG rules (e.g., from <cluster>-agent SG).
+func revokeReferencesToSG(ctx context.Context, ec2c EC2API, vpcID, targetSGID string) {
+	if targetSGID == "" {
+		return
+	}
+	if vpcID == "" {
+		desc, err := ec2c.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
+			GroupIds: []string{targetSGID},
+		})
+		if err == nil && len(desc.SecurityGroups) > 0 && desc.SecurityGroups[0].VpcId != nil {
+			vpcID = *desc.SecurityGroups[0].VpcId
+		}
+	}
+	var input *ec2.DescribeSecurityGroupsInput
+	if vpcID != "" {
+		input = &ec2.DescribeSecurityGroupsInput{
+			Filters: []ec2types.Filter{
+				{Name: ptr("vpc-id"), Values: []string{vpcID}},
+			},
+		}
+	} else {
+		input = &ec2.DescribeSecurityGroupsInput{
+			GroupIds: []string{targetSGID},
+		}
+	}
+	out, err := ec2c.DescribeSecurityGroups(ctx, input)
+	if err != nil {
+		return
+	}
+	for _, sg := range out.SecurityGroups {
+		if sg.GroupId == nil {
+			continue
+		}
+		sgID := *sg.GroupId
+		if sgID == targetSGID {
+			if len(sg.IpPermissions) > 0 {
+				_, _ = ec2c.RevokeSecurityGroupIngress(ctx, &ec2.RevokeSecurityGroupIngressInput{
+					GroupId:       ptr(sgID),
+					IpPermissions: sg.IpPermissions,
+				})
+			}
+			if len(sg.IpPermissionsEgress) > 0 {
+				_, _ = ec2c.RevokeSecurityGroupEgress(ctx, &ec2.RevokeSecurityGroupEgressInput{
+					GroupId:       ptr(sgID),
+					IpPermissions: sg.IpPermissionsEgress,
+				})
+			}
+			continue
+		}
+		var matchingIngress []ec2types.IpPermission
+		for _, perm := range sg.IpPermissions {
+			for _, pair := range perm.UserIdGroupPairs {
+				if pair.GroupId != nil && *pair.GroupId == targetSGID {
+					matchingIngress = append(matchingIngress, perm)
+					break
+				}
+			}
+		}
+		if len(matchingIngress) > 0 {
+			_, _ = ec2c.RevokeSecurityGroupIngress(ctx, &ec2.RevokeSecurityGroupIngressInput{
+				GroupId:       ptr(sgID),
+				IpPermissions: matchingIngress,
+			})
+		}
+		var matchingEgress []ec2types.IpPermission
+		for _, perm := range sg.IpPermissionsEgress {
+			for _, pair := range perm.UserIdGroupPairs {
+				if pair.GroupId != nil && *pair.GroupId == targetSGID {
+					matchingEgress = append(matchingEgress, perm)
+					break
+				}
+			}
+		}
+		if len(matchingEgress) > 0 {
+			_, _ = ec2c.RevokeSecurityGroupEgress(ctx, &ec2.RevokeSecurityGroupEgressInput{
+				GroupId:       ptr(sgID),
+				IpPermissions: matchingEgress,
+			})
 		}
 	}
 }

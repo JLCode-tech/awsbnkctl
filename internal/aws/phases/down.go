@@ -43,8 +43,10 @@ func HydrateMissingStateFromAWS(ctx context.Context, cl *intent.Cluster, st *sta
 	}
 	vpcID := st.Get("VPC_ID")
 
-	// 2. Subnets
-	if st.Get("PUBLIC_SUBNETS") == "" && st.Get("PRIVATE_SUBNETS") == "" {
+	// 2. Subnets (hydrate any missing subnet keys — including BNK_EXT_SUBNET and
+	// BNK_INT_SUBNET when PUBLIC_SUBNETS/PRIVATE_SUBNETS were already populated).
+	if st.Get("PUBLIC_SUBNETS") == "" || st.Get("PRIVATE_SUBNETS") == "" ||
+		st.Get("BNK_EXT_SUBNET") == "" || st.Get("BNK_INT_SUBNET") == "" {
 		filters := []ec2types.Filter{clusterFilter}
 		if vpcID != "" {
 			filters = append(filters, ec2types.Filter{Name: ptr("vpc-id"), Values: []string{vpcID}})
@@ -56,7 +58,7 @@ func HydrateMissingStateFromAWS(ctx context.Context, cl *intent.Cluster, st *sta
 					continue
 				}
 				sid := *sn.SubnetId
-				var role, sname string
+				var role, comp, sname string
 				for _, t := range sn.Tags {
 					if t.Key == nil || t.Value == nil {
 						continue
@@ -64,29 +66,31 @@ func HydrateMissingStateFromAWS(ctx context.Context, cl *intent.Cluster, st *sta
 					switch *t.Key {
 					case "bnk:subnet-role", "f5-bnk:subnet-role":
 						role = *t.Value
+					case tags.KeyComponent:
+						comp = *t.Value
 					case "Name":
 						sname = *t.Value
 					}
 				}
 				switch {
-				case role == "bnk-external" || strings.HasSuffix(sname, "-bnk-ext"):
+				case comp == tags.CompSubnetBNKExt || role == "bnk-external" || strings.HasSuffix(sname, "-bnk-ext"):
 					if st.Get("BNK_EXT_SUBNET") == "" {
 						st.Set("BNK_EXT_SUBNET", sid)
 					}
-				case role == "bnk-internal" || strings.HasSuffix(sname, "-bnk-int"):
+				case comp == tags.CompSubnetBNKInt || role == "bnk-internal" || strings.HasSuffix(sname, "-bnk-int"):
 					if st.Get("BNK_INT_SUBNET") == "" {
 						st.Set("BNK_INT_SUBNET", sid)
 					}
-				case strings.Contains(sname, "public"):
+				case comp == tags.CompSubnetPublic || strings.Contains(sname, "public"):
 					pub = append(pub, sid)
-				case strings.Contains(sname, "private"):
+				case comp == tags.CompSubnetPrivate || strings.Contains(sname, "private"):
 					priv = append(priv, sid)
 				}
 			}
-			if len(pub) > 0 {
+			if st.Get("PUBLIC_SUBNETS") == "" && len(pub) > 0 {
 				st.Set("PUBLIC_SUBNETS", strings.Join(pub, ","))
 			}
-			if len(priv) > 0 {
+			if st.Get("PRIVATE_SUBNETS") == "" && len(priv) > 0 {
 				st.Set("PRIVATE_SUBNETS", strings.Join(priv, ","))
 			}
 		}

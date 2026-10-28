@@ -23,6 +23,7 @@ type mockEC2 struct {
 	createVpcOut    *ec2.CreateVpcOutput
 	createVpcErr    error
 	createVpcCalls  int
+	deleteVpcCalls  int
 
 	// Subnet
 	describeSubnetsOut *ec2.DescribeSubnetsOutput
@@ -81,6 +82,9 @@ type mockEC2 struct {
 	revokeIngressCalls     int
 	revokeIngressErr       error
 	revokeIngressInputs    []*ec2.RevokeSecurityGroupIngressInput
+	revokeEgressCalls      int
+	revokeEgressErr        error
+	revokeEgressInputs     []*ec2.RevokeSecurityGroupEgressInput
 
 	// Network Interfaces (slice 7+)
 	describeENIsOut   *ec2.DescribeNetworkInterfacesOutput
@@ -163,6 +167,7 @@ func (m *mockEC2) ModifyVpcAttribute(_ context.Context, _ *ec2.ModifyVpcAttribut
 	return &ec2.ModifyVpcAttributeOutput{}, nil
 }
 func (m *mockEC2) DeleteVpc(_ context.Context, _ *ec2.DeleteVpcInput, _ ...func(*ec2.Options)) (*ec2.DeleteVpcOutput, error) {
+	m.deleteVpcCalls++
 	return &ec2.DeleteVpcOutput{}, nil
 }
 
@@ -308,6 +313,11 @@ func (m *mockEC2) RevokeSecurityGroupIngress(_ context.Context, in *ec2.RevokeSe
 	m.revokeIngressCalls++
 	m.revokeIngressInputs = append(m.revokeIngressInputs, in)
 	return &ec2.RevokeSecurityGroupIngressOutput{}, m.revokeIngressErr
+}
+func (m *mockEC2) RevokeSecurityGroupEgress(_ context.Context, in *ec2.RevokeSecurityGroupEgressInput, _ ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
+	m.revokeEgressCalls++
+	m.revokeEgressInputs = append(m.revokeEgressInputs, in)
+	return &ec2.RevokeSecurityGroupEgressOutput{}, m.revokeEgressErr
 }
 func (m *mockEC2) DescribeVolumes(_ context.Context, _ *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
 	out := &ec2.DescribeVolumesOutput{}
@@ -456,8 +466,16 @@ func (m *mockEC2) DescribeInstanceConnectEndpoints(_ context.Context, _ *ec2.Des
 	}
 	return m.describeEICEsOut, m.describeEICEsErr
 }
-func (m *mockEC2) DeleteInstanceConnectEndpoint(_ context.Context, _ *ec2.DeleteInstanceConnectEndpointInput, _ ...func(*ec2.Options)) (*ec2.DeleteInstanceConnectEndpointOutput, error) {
+func (m *mockEC2) DeleteInstanceConnectEndpoint(_ context.Context, in *ec2.DeleteInstanceConnectEndpointInput, _ ...func(*ec2.Options)) (*ec2.DeleteInstanceConnectEndpointOutput, error) {
 	m.deleteEICECalls++
+	if m.deleteEICEErr == nil && m.describeEICEsOut != nil && in != nil && in.InstanceConnectEndpointId != nil {
+		for i := range m.describeEICEsOut.InstanceConnectEndpoints {
+			ep := &m.describeEICEsOut.InstanceConnectEndpoints[i]
+			if ep.InstanceConnectEndpointId != nil && *ep.InstanceConnectEndpointId == *in.InstanceConnectEndpointId {
+				ep.State = ec2types.Ec2InstanceConnectEndpointStateDeleteComplete
+			}
+		}
+	}
 	return &ec2.DeleteInstanceConnectEndpointOutput{}, m.deleteEICEErr
 }
 func (m *mockEC2) DescribeImages(_ context.Context, _ *ec2.DescribeImagesInput, _ ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {

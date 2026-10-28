@@ -49,9 +49,14 @@ const HostDeviceMinMemoryMiB = 32768
 // pattern. dSSM requires a quorum of ≥3 nodes.
 const HostDeviceMinDesiredSize = 3
 
+// DefaultVPCQuota is the standard AWS per-region VPC limit (L-F678F1CE).
+// Override with AWSBNKCTL_VPC_QUOTA if the target account has an applied quota increase.
+const DefaultVPCQuota = 5
+
 // Phase00Preflight runs the pre-flight checks before any provisioning begins:
 //   - SSO sentinel check (hard-exits if auth failed during a previous API call)
 //   - sts:GetCallerIdentity to verify credentials are live
+//   - VPC quota check (ensures creating a new VPC will not fail with VpcLimitExceeded)
 //   - For pattern=host-device: validates that the node group instance type
 //     supports at least HostDeviceMinENIs ENIs (queries ec2:DescribeInstanceTypes)
 //   - Ensures .awsbnkctl/<cluster>/ exists and persists CLUSTER_NAME + AWS_REGION
@@ -90,6 +95,12 @@ func Phase00Preflight(ctx context.Context, cl *intent.Cluster, st *state.State, 
 		}
 		fmt.Fprintf(os.Stderr, "[phase 00] authenticated: account=%s\n", account)
 
+		if !dryRun && clients.EC2 != nil {
+			if err := checkVPCQuota(ctx, cl, st, clients.EC2); err != nil {
+				return fmt.Errorf("phase00: %w", err)
+			}
+		}
+
 		// Validate instance type + node group capacity for BNK interface patterns.
 		if !dryRun && cl.IsBNKPattern() {
 			if err := checkHostDeviceCapacity(ctx, cl, clients.EC2); err != nil {
@@ -108,6 +119,70 @@ func Phase00Preflight(ctx context.Context, cl *intent.Cluster, st *state.State, 
 	}
 
 	fmt.Fprintf(os.Stderr, "[phase 00] preflight OK\n")
+	return nil
+}
+
+// checkVPCQuota verifies that the region has headroom to create a new VPC when
+// the cluster does not already own one in state or via tags. Prevents failing
+// mid-apply with VpcLimitExceeded after IAM/KMS resources are already created.
+func checkVPCQuota(ctx context.Context, cl *intent.Cluster, st *state.State, ec2c EC2API) error {
+	if st != nil && st.Get("VPC_ID") != "" {
+		return nil
+	}
+
+	quota := DefaultVPCQuota
+	if envQuota := os.Getenv("AWSBNKCTL_VPC_QUOTA"); envQuota != "" {
+		var parsed int
+		if _, err := fmt.Sscanf(envQuota, "%d", &parsed); err == nil && parsed > 0 {
+			quota = parsed
+		}
+	}
+
+	out, err := ec2c.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{})
+	if err != nil {
+		return fmt.Errorf("ec2:DescribeVpcs quota check: %w", err)
+	}
+
+	clusterName := ""
+	region := ""
+	if cl != nil {
+		clusterName = cl.Metadata.Name
+		region = cl.Metadata.Region
+	}
+
+	for _, v := range out.Vpcs {
+		for _, t := range v.Tags {
+			if aws.ToString(t.Key) == "awsbnkctl:cluster" && clusterName != "" && aws.ToString(t.Value) == clusterName {
+				// Cluster VPC already exists; Phase02VPC will reuse it.
+				return nil
+			}
+		}
+	}
+
+	count := len(out.Vpcs)
+	if count >= quota {
+		var vpcSummaries []string
+		for _, v := range out.Vpcs {
+			id := aws.ToString(v.VpcId)
+			name := ""
+			for _, t := range v.Tags {
+				if aws.ToString(t.Key) == "Name" {
+					name = aws.ToString(t.Value)
+					break
+				}
+			}
+			if name != "" {
+				vpcSummaries = append(vpcSummaries, fmt.Sprintf("%s (%s)", id, name))
+			} else {
+				vpcSummaries = append(vpcSummaries, id)
+			}
+		}
+		return fmt.Errorf(
+			"VPC quota exhausted (VpcLimitExceeded) in region %s: %d/%d VPCs in use %v; delete unused/orphaned VPCs with 'awsbnkctl down' or set AWSBNKCTL_VPC_QUOTA if your account limit is higher",
+			region, count, quota, vpcSummaries,
+		)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 00] VPC quota OK: %d/%d VPCs in use\n", count, quota)
 	return nil
 }
 
