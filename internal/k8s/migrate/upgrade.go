@@ -104,6 +104,10 @@ type UpgradeOptions struct {
 	// DNS, dSSM and log forwarding reachable over eth0 after the Infra CR gives
 	// it a default route. Empty leaves the env alone.
 	ServiceCIDR string
+	// RegistryHost is the F5 OCI registry the FLO chart is pulled from
+	// (cl.Bnk.RegistryHost, default "repo.f5.com" — see BnkSpec.RegistryHost).
+	// Empty falls back to manifest.FARRegistryHost.
+	RegistryHost string
 	// Log receives progress lines.
 	Log io.Writer
 }
@@ -221,14 +225,19 @@ func Upgrade(ctx context.Context, deps UpgradeDeps, opts UpgradeOptions) (*Upgra
 	if values == nil {
 		values = existing.Config
 	}
+	registryHost := opts.RegistryHost
+	if registryHost == "" {
+		registryHost = manifest.FARRegistryHost
+	}
+	floChartRef := "oci://" + registryHost + "/charts/f5-lifecycle-operator"
 	switch {
 	case res.FLOFrom == floChart:
 		fmt.Fprintf(opts.Log, "[upgrade] step 1: FLO release %s already at %s\n", phases.FLOReleaseName, floChart)
 	case opts.DryRun:
-		fmt.Fprintf(opts.Log, "[upgrade] step 1: dry-run: would helm upgrade %s %s -> %s (%s)\n", phases.FLOReleaseName, res.FLOFrom, floChart, phases.FLOChartRef)
+		fmt.Fprintf(opts.Log, "[upgrade] step 1: dry-run: would helm upgrade %s %s -> %s (%s)\n", phases.FLOReleaseName, res.FLOFrom, floChart, floChartRef)
 	default:
-		fmt.Fprintf(opts.Log, "[upgrade] step 1: pulling %s@%s\n", phases.FLOChartRef, floChart)
-		ch, err := deps.Helm.PullAndLoad(phases.FLOChartRef, floChart)
+		fmt.Fprintf(opts.Log, "[upgrade] step 1: pulling %s@%s\n", floChartRef, floChart)
+		ch, err := deps.Helm.PullAndLoad(floChartRef, floChart)
 		if err != nil {
 			return res, fmt.Errorf("pull FLO chart %s: %w", floChart, err)
 		}

@@ -82,8 +82,8 @@ var (
 		}
 		return phases.Phase21IRSASA(ctx, cl, st, clients, false)
 	}
-	bnkUpgradeDeps = func(kubeconfigPath, farKeyB64 string) (migrate.UpgradeDeps, error) {
-		helm, err := phases.NewHelmInstaller(kubeconfigPath, farKeyB64)
+	bnkUpgradeDeps = func(kubeconfigPath, farKeyB64, registryHost string) (migrate.UpgradeDeps, error) {
+		helm, err := phases.NewHelmInstaller(kubeconfigPath, farKeyB64, registryHost)
 		if err != nil {
 			return migrate.UpgradeDeps{}, fmt.Errorf("helm: %w", err)
 		}
@@ -320,7 +320,7 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("bnk upgrade: %w", err)
 	}
-	deps, err := bnkUpgradeDeps(kubeconfigPath, farKey)
+	deps, err := bnkUpgradeDeps(kubeconfigPath, farKey, cl.Bnk.RegistryHost)
 	if err != nil {
 		return fmt.Errorf("bnk upgrade: %w", err)
 	}
@@ -350,6 +350,7 @@ func runBnkUpgrade(cmd *cobra.Command, _ []string) error {
 		Timeout:         flagBnkUpgradeTimeout,
 		ControllerRBAC:  rbacYAML,
 		ServiceCIDR:     serviceCIDR,
+		RegistryHost:    cl.Bnk.RegistryHost,
 		Log:             os.Stderr,
 	})
 	if err == nil && !flagBnkUpgradeDryRun {

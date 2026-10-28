@@ -131,6 +131,22 @@ func TestFLOValuesVarsFromCluster_Names(t *testing.T) {
 	}
 }
 
+// TestFLOValuesVarsFromCluster_RegistryHost verifies cl.Bnk.RegistryHost
+// (set by intent.Load's applyDefaults, or explicitly in cluster.yaml) flows
+// through to the rendered flo-values.yaml.tmpl image.repository fields —
+// this is what lets an operator whose FAR credential only has
+// registry.downloadArtifacts on devrepo.f5.com point FLO there instead of
+// the default repo.f5.com.
+func TestFLOValuesVarsFromCluster_RegistryHost(t *testing.T) {
+	cl := clusterFixture("my-cluster")
+	cl.Bnk = &intent.BnkSpec{RegistryHost: "devrepo.f5.com"}
+	v := FLOValuesVarsFromCluster(cl, "my-jwt")
+
+	if v.RegistryHost != "devrepo.f5.com" {
+		t.Errorf("RegistryHost: got %q, want devrepo.f5.com", v.RegistryHost)
+	}
+}
+
 // ─── OTEL certs render tests ─────────────────────────────────────────────────
 
 func TestRenderOTELCerts_Substitution(t *testing.T) {
@@ -427,6 +443,7 @@ func cneInstanceCluster() *intent.Cluster {
 			DeploymentSize:   "Small",
 			StorageClassName: "gp3",
 			ManifestVersion:  "2.21.13",
+			RegistryHost:     "repo.f5.com",
 			TmmMtu:           9000,
 			TmmCpu:           "4",
 			TmmMemory:        "16Gi",
@@ -485,6 +502,7 @@ func TestRenderCNEInstance_HappyPath(t *testing.T) {
 		`deploymentSize: "Small"`,
 		"storageClassName: gp3",
 		`manifestVersion: "2.21.13"`,
+		"uri: repo.f5.com", // registry.uri from cl.Bnk.RegistryHost
 		`cpu: "4"`,
 		"memory: \"16Gi\"",
 		"hugepages-2Mi: \"8Gi\"",
@@ -511,6 +529,39 @@ func TestRenderCNEInstance_HappyPath(t *testing.T) {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("rendered CNEInstance missing constant %q:\n%s", want, rendered)
 		}
+	}
+}
+
+// TestRenderCNEInstance_RegistryHostOverride verifies that setting
+// cl.Bnk.RegistryHost (e.g. to devrepo.f5.com, for F5 credentials that only
+// have registry.downloadArtifacts permission on F5's dev/staging registry
+// rather than the default repo.f5.com) flows into the CNEInstance CR's
+// spec.registry.uri — this is what lets the F5 Lifecycle Operator pull the
+// BNK release manifest from the matching registry instead of always
+// defaulting to repo.f5.com.
+func TestRenderCNEInstance_RegistryHostOverride(t *testing.T) {
+	tmplBytes, err := manifests.FS.ReadFile("shared/cneinstance.yaml.tmpl")
+	if err != nil {
+		t.Fatalf("read cneinstance template: %v", err)
+	}
+	cl := cneInstanceCluster()
+	cl.Bnk.RegistryHost = "devrepo.f5.com"
+	getter := func(key string) string {
+		if key == "VPC_ID" {
+			return "vpc-0abc12345"
+		}
+		return ""
+	}
+	out, err := RenderCNEInstance(tmplBytes, cl, getter)
+	if err != nil {
+		t.Fatalf("RenderCNEInstance: %v", err)
+	}
+	rendered := string(out)
+	if !strings.Contains(rendered, "uri: devrepo.f5.com") {
+		t.Errorf("rendered CNEInstance registry.uri not overridden:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "uri: repo.f5.com") {
+		t.Errorf("rendered CNEInstance still contains default repo.f5.com uri:\n%s", rendered)
 	}
 }
 

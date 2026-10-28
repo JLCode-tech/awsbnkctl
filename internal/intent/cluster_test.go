@@ -832,6 +832,9 @@ bnk:
 	if c.Bnk.ManifestVersion != manifest.DefaultManifestVersion {
 		t.Errorf("ManifestVersion: got %q, want %q", c.Bnk.ManifestVersion, manifest.DefaultManifestVersion)
 	}
+	if c.Bnk.RegistryHost != manifest.FARRegistryHost {
+		t.Errorf("RegistryHost: got %q, want %q", c.Bnk.RegistryHost, manifest.FARRegistryHost)
+	}
 	if c.Bnk.TmmMtu != 9000 {
 		t.Errorf("TmmMtu: got %d, want 9000", c.Bnk.TmmMtu)
 	}
@@ -863,6 +866,7 @@ bnk:
   deploymentSize: Medium
   storageClassName: gp2
   manifestVersion: "2.20.0"
+  registryHost: devrepo.f5.com
   tmmMtu: 1500
   tmmCpu: "8"
   tmmMemory: "32Gi"
@@ -883,6 +887,9 @@ bnk:
 	}
 	if c.Bnk.ManifestVersion != "2.20.0" {
 		t.Errorf("ManifestVersion: got %q, want 2.20.0", c.Bnk.ManifestVersion)
+	}
+	if c.Bnk.RegistryHost != "devrepo.f5.com" {
+		t.Errorf("RegistryHost: got %q, want devrepo.f5.com", c.Bnk.RegistryHost)
 	}
 	if c.Bnk.TmmMtu != 1500 {
 		t.Errorf("TmmMtu: got %d, want 1500", c.Bnk.TmmMtu)

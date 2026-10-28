@@ -69,6 +69,23 @@ const (
 	multusNamespace     = "kube-system"
 	multusVersion       = "v4.2.4"
 
+	// gieYAMLPath is the upstream Gateway API Inference Extension v1.5.0 CRD
+	// bundle (InferencePool, InferencePoolImport, etc. under
+	// inference.networking.k8s.io). BNK 2.4+ defaults EPP (F5's endpoint
+	// picker, CNEInstanceVars.EPP / spec.eppNamespaces) to enabled, and the
+	// f5-cne-controller's "f5epp" source watches *v1.InferencePool at
+	// manager startup — without this CRD installed, the controller-runtime
+	// manager fails with "timed out waiting for cache to be synced for Kind
+	// *v1.InferencePool" and CrashLoopBackOffs indefinitely (exit code 0,
+	// not a panic — it's a clean but repeated manager-startup failure).
+	// Install this CRD bundle unconditionally alongside Multus: it's cheap,
+	// idempotent, and every BNK 2.4+ cluster needs it regardless of whether
+	// the operator explicitly touched bnk.aiGateway/eppNamespaces in
+	// cluster.yaml (EPP defaults on; see CNEInstanceVars.EPP in render.go).
+	gieYAMLPath   = "gie/gateway-api-inference-extension-v1.5.0.yaml"
+	gieCRDName    = "inferencepools.inference.networking.k8s.io"
+	gieCRDTimeout = 2 * time.Minute
+
 	phase12FieldManager = "awsbnkctl-phase12"
 
 	// Timeouts
@@ -181,7 +198,7 @@ func Phase12K8sFoundation(ctx context.Context, cl *intent.Cluster, st *state.Sta
 	}
 
 	// 12.2 — Supply-chain Secrets.
-	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData); err != nil {
+	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData, cl.Bnk.RegistryHost); err != nil {
 		return fmt.Errorf("phase12: FAR secrets: %w", err)
 	}
 	if err := applyLicenseJWTSecret(ctx, clients, operatorNS, jwtData); err != nil {
@@ -235,6 +252,26 @@ func Phase12K8sFoundation(ctx context.Context, cl *intent.Cluster, st *state.Sta
 		return fmt.Errorf("phase12: CA certificate %s not ready: %w", vars.CACertName, err)
 	}
 	fmt.Fprintf(os.Stderr, "[phase 12] CA certificate %s is Ready\n", vars.CACertName)
+
+	// 12.4b — Gateway API Inference Extension CRDs (InferencePool etc.).
+	// Required by the f5-cne-controller's EPP ("f5epp") manager source, which
+	// BNK 2.4+ enables by default (CNEInstanceVars.EPP / spec.eppNamespaces).
+	// Without this, Phase 21/23's f5-cne-controller CrashLoopBackOffs
+	// indefinitely: "timed out waiting for cache to be synced for Kind
+	// *v1.InferencePool" kills the controller-runtime manager on every start.
+	gieYAML, err := k8smanifests.FS.ReadFile(gieYAMLPath)
+	if err != nil {
+		return fmt.Errorf("phase12: reading embedded gateway-api-inference-extension YAML: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 12] applying Gateway API Inference Extension CRDs (%d bytes)\n", len(gieYAML))
+	if err := applyRawYAML(ctx, clients, gieYAML); err != nil {
+		return fmt.Errorf("phase12: applying gateway-api-inference-extension YAML: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 12] waiting for CRD %s\n", gieCRDName)
+	if err := k8swait.WaitForCRDExists(ctx, clients.Dynamic, gieCRDName, gieCRDTimeout); err != nil {
+		return fmt.Errorf("phase12: CRD %s not established: %w", gieCRDName, err)
+	}
+	fmt.Fprintf(os.Stderr, "[phase 12] CRD %s is established\n", gieCRDName)
 
 	// 12.5 — Multus CNI install (slice 7+). Required before Phase 20 NADs apply.
 	// NetworkAttachmentDefinition CRD (k8s.cni.cncf.io/v1) is registered by Multus.
@@ -304,6 +341,16 @@ func Phase12K8sFoundationDown(ctx context.Context, cl *intent.Cluster, st *state
 	fmt.Fprintln(os.Stderr, "[phase 12 down] deleting Multus CNI resources")
 	if mErr := deleteMultusResources(ctx, clients); mErr != nil {
 		fmt.Fprintf(os.Stderr, "[phase 12 down] warning: multus delete had errors: %v\n", mErr)
+	}
+
+	// 0b. Delete Gateway API Inference Extension CRDs. Best-effort: deleting
+	// InferencePool CRDs while CRs still reference them is harmless (CRs are
+	// cleaned up with their namespace), and tolerating errors here matches
+	// the Multus delete above.
+	if gieYAML, gErr := k8smanifests.FS.ReadFile(gieYAMLPath); gErr != nil {
+		fmt.Fprintf(os.Stderr, "[phase 12 down] warning: reading embedded gie YAML: %v\n", gErr)
+	} else if gErr := deleteRawYAML(ctx, clients, gieYAML); gErr != nil {
+		fmt.Fprintf(os.Stderr, "[phase 12 down] warning: gie delete had errors: %v\n", gErr)
 	}
 
 	// 1. Delete cert chain CRs via dynamic client (tolerate NotFound).
@@ -401,9 +448,9 @@ func ensureNamespaces(ctx context.Context, clients *Clients, namespaces []string
 // applyFARSecrets creates/patches the FAR pull secret (kubernetes.io/dockerconfigjson)
 // in each target namespace. Uses Get-first + Create/Update (create-or-update pattern)
 // via the typed client for reliability with both real and fake clientsets.
-func applyFARSecrets(ctx context.Context, clients *Clients, namespaces []string, farData []byte) error {
+func applyFARSecrets(ctx context.Context, clients *Clients, namespaces []string, farData []byte, registryHost string) error {
 	for _, ns := range namespaces {
-		sec := buildFARSecret(ns, farData)
+		sec := buildFARSecret(ns, farData, registryHost)
 		if err := applySecretTyped(ctx, clients.K8s, sec); err != nil {
 			return fmt.Errorf("apply FAR secret in %s: %w", ns, err)
 		}
@@ -427,24 +474,31 @@ func applyLicenseJWTSecret(ctx context.Context, clients *Clients, ns string, jwt
 //
 // IMPORTANT: F5's FAR archive (`cne_pull_64.json`) is NOT a raw dockerconfigjson.
 // It is a base64-encoded GCP service-account JSON used as the password for
-// repo.f5.com (helm registry login -u _json_key_base64). We must wrap it as a
-// dockerconfigjson before stuffing into Secret.Data.
+// the F5 registry host (helm registry login -u _json_key_base64). We must
+// wrap it as a dockerconfigjson before stuffing into Secret.Data.
+//
+// registryHost is cl.Bnk.RegistryHost (default "repo.f5.com" — see
+// BnkSpec.RegistryHost). It must match the host used by the FLO values
+// template's image.repository and the CNEInstance CR's spec.registry.uri
+// (render.FLOValuesVarsFromCluster / render.RenderCNEInstance both source the
+// same field), since kubelet looks up this Secret's auths map by the exact
+// host string referenced in each image pull.
 //
 // Wrapping per aws-gpu-setup/deploy-bnk.sh lines 61-63:
 //
 //	FAR_KEY_B64   = strings.TrimSpace(file_contents)              // already base64
 //	AUTH_B64      = base64("_json_key_base64:" + FAR_KEY_B64)     // docker-auth value
-//	DOCKER_CFG_JSON = {"auths":{"repo.f5.com":{"auth":"$AUTH_B64"}}}
+//	DOCKER_CFG_JSON = {"auths":{"<registryHost>":{"auth":"$AUTH_B64"}}}
 //
 // Secret.Data is map[string][]byte — client-go base64-encodes for the wire.
 // We pass DOCKER_CFG_JSON as raw bytes; the API server sees decoded JSON and
 // validates it.
-func buildFARSecret(ns string, farData []byte) *corev1.Secret {
+func buildFARSecret(ns string, farData []byte, registryHost string) *corev1.Secret {
 	farKeyB64 := strings.TrimSpace(string(farData))
 	authValue := base64.StdEncoding.EncodeToString([]byte("_json_key_base64:" + farKeyB64))
 	dockerCfg := map[string]any{
 		"auths": map[string]any{
-			"repo.f5.com": map[string]any{
+			registryHost: map[string]any{
 				"auth": authValue,
 			},
 		},

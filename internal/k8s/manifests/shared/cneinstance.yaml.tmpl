@@ -28,7 +28,7 @@ spec:
   deploymentSize: "{{ .DeploymentSize }}"
   storageClassName: {{ .StorageClassName }}
   registry:
-    uri: repo.f5.com
+    uri: {{ .RegistryHost }}
     imagePullSecrets:
       - name: {{ .FARSecretName }}
     imagePullPolicy: Always

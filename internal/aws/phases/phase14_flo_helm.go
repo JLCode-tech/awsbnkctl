@@ -22,12 +22,17 @@ import (
 	k8swait "github.com/JLCode-tech/awsbnkctl/internal/k8s"
 	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
 	"github.com/JLCode-tech/awsbnkctl/internal/k8s/render"
+	"github.com/JLCode-tech/awsbnkctl/internal/manifest"
 )
 
 const (
-	floReleaseName    = "f5-lifecycle-operator"
-	floChartRef       = "oci://repo.f5.com/charts/f5-lifecycle-operator"
-	floRegistryHost   = "repo.f5.com"
+	floReleaseName = "f5-lifecycle-operator"
+	// floChartPath is the OCI repository path (without host) for the FLO
+	// Helm chart. The host is resolved per-cluster from cl.Bnk.RegistryHost
+	// (default manifest.FARRegistryHost = "repo.f5.com") via floRegistryHostFor
+	// and floChartRefFor, since some F5 credential sets only have
+	// registry.downloadArtifacts permission on devrepo.f5.com instead.
+	floChartPath      = "charts/f5-lifecycle-operator"
 	floNamespace      = "f5-cne-core"
 	floFieldManager   = "awsbnkctl-phase14"
 	floValuesYAMLPath = "shared/flo-values.yaml.tmpl"
@@ -47,6 +52,24 @@ const (
 	// Phase 13 postflight.
 	floDeployName = "f5-lifecycle-operator"
 )
+
+// floRegistryHostFor returns the F5 OCI registry host to use for this
+// cluster: cl.Bnk.RegistryHost when set (applyDefaults always sets it to
+// manifest.FARRegistryHost if the operator left it blank in cluster.yaml),
+// falling back to manifest.FARRegistryHost directly when cl.Bnk is nil
+// (dry-run-without-bnk path).
+func floRegistryHostFor(cl *intent.Cluster) string {
+	if cl != nil && cl.Bnk != nil && cl.Bnk.RegistryHost != "" {
+		return cl.Bnk.RegistryHost
+	}
+	return manifest.FARRegistryHost
+}
+
+// floChartRefFor returns the full oci:// chart reference for this cluster's
+// configured registry host.
+func floChartRefFor(cl *intent.Cluster) string {
+	return "oci://" + floRegistryHostFor(cl) + "/" + floChartPath
+}
 
 // helmInstaller is the testability interface wrapping the four Helm SDK actions
 // used by Phase 14. Production injects realHelmInstaller; tests inject a fake.
@@ -243,7 +266,7 @@ func Phase14FLOHelm(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 
 	// Build Helm action configuration with OCI registry client.
 	farKeyB64 := strings.TrimSpace(string(farData))
-	helmInstaller, err := buildHelmInstaller(st, farKeyB64)
+	helmInstaller, err := buildHelmInstaller(st, farKeyB64, floRegistryHostFor(cl))
 	if err != nil {
 		return fmt.Errorf("phase14: building helm installer: %w", err)
 	}
@@ -271,8 +294,9 @@ func helmValuesEqual(a, b map[string]interface{}) bool {
 // Extracted for testability (accepts helmInstaller interface).
 func runFLOHelmInstall(ctx context.Context, h helmInstaller, cl *intent.Cluster, st *state.State, floVersion string, valuesMap map[string]interface{}, clients *Clients) error {
 	// Pull the chart.
-	fmt.Fprintf(os.Stderr, "[phase 14] pulling chart %s@%s\n", floChartRef, floVersion)
-	ch, err := h.PullAndLoad(floChartRef, floVersion)
+	chartRef := floChartRefFor(cl)
+	fmt.Fprintf(os.Stderr, "[phase 14] pulling chart %s@%s\n", chartRef, floVersion)
+	ch, err := h.PullAndLoad(chartRef, floVersion)
 	if err != nil {
 		return fmt.Errorf("phase14: pulling FLO chart: %w", err)
 	}
@@ -329,22 +353,23 @@ func runFLOHelmInstall(ctx context.Context, h helmInstaller, cl *intent.Cluster,
 }
 
 // buildHelmInstaller creates an OCI-authenticated Helm installer using the
-// kubeconfig path from state and the FAR key for registry login.
-func buildHelmInstaller(st *state.State, farKeyB64 string) (helmInstaller, error) {
-	return newHelmInstaller(st.Get("KUBECONFIG_PATH"), farKeyB64)
+// kubeconfig path from state and the FAR key for registry login, against the
+// given registry host (see floRegistryHostFor / cl.Bnk.RegistryHost).
+func buildHelmInstaller(st *state.State, farKeyB64, registryHost string) (helmInstaller, error) {
+	return newHelmInstaller(st.Get("KUBECONFIG_PATH"), farKeyB64, registryHost)
 }
 
 // newHelmInstaller is buildHelmInstaller without the state dependency.
-func newHelmInstaller(kubeconfigPath, farKeyB64 string) (helmInstaller, error) {
+func newHelmInstaller(kubeconfigPath, farKeyB64, registryHost string) (helmInstaller, error) {
 	regClient, err := registry.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("create helm registry client: %w", err)
 	}
 
-	if err := regClient.Login(floRegistryHost,
+	if err := regClient.Login(registryHost,
 		registry.LoginOptBasicAuth("_json_key_base64", farKeyB64),
 	); err != nil {
-		return nil, fmt.Errorf("helm registry login %s: %w", floRegistryHost, err)
+		return nil, fmt.Errorf("helm registry login %s: %w", registryHost, err)
 	}
 
 	settings := cli.New()
@@ -396,7 +421,7 @@ func Phase14FLOHelmDown(ctx context.Context, cl *intent.Cluster, st *state.State
 		return st.Save()
 	}
 
-	h, err := buildHelmInstaller(st, farKeyB64)
+	h, err := buildHelmInstaller(st, farKeyB64, floRegistryHostFor(cl))
 	if err != nil {
 		// Non-fatal: log and continue so teardown doesn't block.
 		fmt.Fprintf(os.Stderr, "[phase 14 down] warning: helm installer build error: %v\n", err)

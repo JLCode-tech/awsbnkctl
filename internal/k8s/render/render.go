@@ -65,6 +65,7 @@ type FLOValuesVars struct {
 	FARSecretName string // far-secret
 	JWT           string // raw JWT token contents (NOT base64)
 	ClusterName   string // cl.Metadata.Name
+	RegistryHost  string // cl.Bnk.RegistryHost (default "repo.f5.com")
 }
 
 // FLOValuesVarsFromCluster derives the FLO values template variables from the
@@ -72,11 +73,16 @@ type FLOValuesVars struct {
 // derivable from the intent struct alone.
 func FLOValuesVarsFromCluster(cl *intent.Cluster, jwt string) FLOValuesVars {
 	cvars := CertChainVarsFromCluster(cl)
+	registryHost := ""
+	if cl.Bnk != nil {
+		registryHost = cl.Bnk.RegistryHost
+	}
 	return FLOValuesVars{
 		CAIssuer:      cvars.CAIssuer,
 		FARSecretName: "far-secret",
 		JWT:           jwt,
 		ClusterName:   cl.Metadata.Name,
+		RegistryHost:  registryHost,
 	}
 }
 
@@ -317,6 +323,7 @@ type CNEInstanceVars struct {
 	TmmMemory        string // default "16Gi"
 	TmmHugepages     string // default "8Gi"
 	PalCpuSet        string // default "0-3"
+	RegistryHost     string // default manifest.FARRegistryHost ("repo.f5.com")
 
 	// State-derived
 	InstanceNameCR      string // <cluster>-bnk
@@ -411,6 +418,7 @@ func RenderCNEInstance(tmpl []byte, cl *intent.Cluster, getter func(string) stri
 		TmmMemory:        cl.Bnk.TmmMemory,
 		TmmHugepages:     cl.Bnk.TmmHugepages,
 		PalCpuSet:        cl.Bnk.PalCpuSet,
+		RegistryHost:     cl.Bnk.RegistryHost,
 		// State-derived
 		InstanceNameCR:      cl.Metadata.Name + "-bnk",
 		InstanceNS:          cneInstanceNamespace,

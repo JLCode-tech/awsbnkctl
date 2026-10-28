@@ -20,6 +20,7 @@ import (
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/state"
 	"github.com/JLCode-tech/awsbnkctl/internal/intent"
+	k8smanifests "github.com/JLCode-tech/awsbnkctl/internal/k8s/manifests"
 )
 
 // buildScheme builds a runtime.Scheme with core types + cert-manager CRD stubs
@@ -350,7 +351,7 @@ func TestPhase12_FreshApply_CreatesNamespacesAndSecrets(t *testing.T) {
 
 	// Sub-test: apply FAR secrets.
 	farData := []byte(`{"auths":{}}`)
-	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData); err != nil {
+	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData, "repo.f5.com"); err != nil {
 		t.Fatalf("applyFARSecrets: %v", err)
 	}
 
@@ -413,7 +414,7 @@ func TestPhase12_IdempotentSecrets(t *testing.T) {
 	jwtData := []byte("jwt-token-content")
 
 	// First invocation — creates secrets.
-	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData); err != nil {
+	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData, "repo.f5.com"); err != nil {
 		t.Fatalf("first applyFARSecrets: %v", err)
 	}
 	if err := applyLicenseJWTSecret(ctx, clients, operatorNS, jwtData); err != nil {
@@ -424,7 +425,7 @@ func TestPhase12_IdempotentSecrets(t *testing.T) {
 	cs.ClearActions()
 
 	// Second invocation — should update (Get+Update), never create.
-	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData); err != nil {
+	if err := applyFARSecrets(ctx, clients, farSecretNamespaces, farData, "repo.f5.com"); err != nil {
 		t.Fatalf("second applyFARSecrets (idempotent): %v", err)
 	}
 	if err := applyLicenseJWTSecret(ctx, clients, operatorNS, jwtData); err != nil {
@@ -624,5 +625,56 @@ metadata:
 	}
 	if !strings.Contains(err.Error(), "NotARealKind") {
 		t.Errorf("error should reference unknown kind: %v", err)
+	}
+}
+
+// TestPhase12_GIEManifest_ParsesAndContainsInferencePoolCRD verifies the
+// embedded Gateway API Inference Extension bundle parses cleanly and
+// contains the inferencepools.inference.networking.k8s.io CRD definition.
+//
+// (This checks parse-correctness only, not a live apply: k8s.io/client-go's
+// dynamic fake client does not fully emulate server-side-apply semantics for
+// CRDs that don't already exist, so a fake-client round-trip here would test
+// client-go's fake implementation rather than awsbnkctl's code. The real
+// apply path — applyRawYAML via Phase12K8sFoundation — was verified live
+// against an actual EKS API server: before this fix, f5-cne-controller
+// CrashLoopBackOffed with "timed out waiting for cache to be synced for Kind
+// *v1.InferencePool"; after applying this manifest in phase12, the CRD
+// existed and the controller started cleanly.)
+//
+// Without this CRD, the f5-cne-controller's EPP ("f5epp") manager source
+// fails cache-sync at startup and CrashLoopBackOffs indefinitely on every
+// BNK 2.4+ cluster (EPP defaults on — see CNEInstanceVars.EPP in
+// internal/k8s/render/render.go). This was a latent bug: the gie/ manifest
+// was embedded (embed.go) but never applied by any phase until phase12
+// wired it in alongside Multus.
+func TestPhase12_GIEManifest_ParsesAndContainsInferencePoolCRD(t *testing.T) {
+	gieYAML, err := k8smanifests.FS.ReadFile(gieYAMLPath)
+	if err != nil {
+		t.Fatalf("reading embedded gie YAML: %v", err)
+	}
+	docs, err := parseYAMLDocs(gieYAML)
+	if err != nil {
+		t.Fatalf("parsing embedded gie YAML: %v", err)
+	}
+	if len(docs) == 0 {
+		t.Fatal("embedded gie YAML parsed to zero documents")
+	}
+
+	var found bool
+	for _, doc := range docs {
+		kind, _ := doc["kind"].(string)
+		if kind != "CustomResourceDefinition" {
+			continue
+		}
+		meta, _ := doc["metadata"].(map[string]interface{})
+		name, _ := meta["name"].(string)
+		if name == gieCRDName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("embedded gie YAML does not define CRD %q", gieCRDName)
 	}
 }
