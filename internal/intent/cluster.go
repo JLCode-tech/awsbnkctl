@@ -880,6 +880,37 @@ func (r *byteReader) Read(p []byte) (int, error) {
 // Bump when cert-manager's support window moves past the EKS floor.
 const EmbeddedCertManagerVersion = "1.21.1"
 
+func allSubnetAZsEmptyOrAuto(c *Cluster) bool {
+	hasAny := false
+	for _, s := range c.Network.Subnets.Public {
+		hasAny = true
+		if s.AZ != "" && s.AZ != "auto" {
+			return false
+		}
+	}
+	for _, s := range c.Network.Subnets.Private {
+		hasAny = true
+		if s.AZ != "" && s.AZ != "auto" {
+			return false
+		}
+	}
+	if c.Network.DataPath != nil {
+		if c.Network.DataPath.External.CIDR != "" {
+			hasAny = true
+			if c.Network.DataPath.External.AZ != "" && c.Network.DataPath.External.AZ != "auto" {
+				return false
+			}
+		}
+		if c.Network.DataPath.Internal.CIDR != "" {
+			hasAny = true
+			if c.Network.DataPath.Internal.AZ != "" && c.Network.DataPath.Internal.AZ != "auto" {
+				return false
+			}
+		}
+	}
+	return hasAny
+}
+
 // applyDefaults fills in zero-value fields with their documented defaults.
 // Called before validate so validation sees the post-default values.
 func applyDefaults(c *Cluster) {
@@ -887,6 +918,30 @@ func applyDefaults(c *Cluster) {
 	// pattern up front so every default below + every downstream phase sees one
 	// value. Must run before the IsBNKPattern()/HasInternalInterface() checks.
 	c.Pattern = normalizePattern(c.Pattern)
+
+	if len(c.Network.AZs) == 0 && c.Metadata.Region != "" && allSubnetAZsEmptyOrAuto(c) {
+		c.Network.AZs = []string{c.Metadata.Region + "a", c.Metadata.Region + "b"}
+	}
+	if len(c.Network.AZs) > 0 {
+		for i := range c.Network.Subnets.Public {
+			if c.Network.Subnets.Public[i].AZ == "" || c.Network.Subnets.Public[i].AZ == "auto" {
+				c.Network.Subnets.Public[i].AZ = c.Network.AZs[i%len(c.Network.AZs)]
+			}
+		}
+		for i := range c.Network.Subnets.Private {
+			if c.Network.Subnets.Private[i].AZ == "" || c.Network.Subnets.Private[i].AZ == "auto" {
+				c.Network.Subnets.Private[i].AZ = c.Network.AZs[i%len(c.Network.AZs)]
+			}
+		}
+		if c.Network.DataPath != nil {
+			if c.Network.DataPath.External.CIDR != "" && (c.Network.DataPath.External.AZ == "" || c.Network.DataPath.External.AZ == "auto") {
+				c.Network.DataPath.External.AZ = c.Network.AZs[0]
+			}
+			if c.Network.DataPath.Internal.CIDR != "" && (c.Network.DataPath.Internal.AZ == "" || c.Network.DataPath.Internal.AZ == "auto") {
+				c.Network.DataPath.Internal.AZ = c.Network.AZs[0]
+			}
+		}
+	}
 
 	if c.ClusterSpec != nil {
 		if c.ClusterSpec.KubernetesVersion == "" {
