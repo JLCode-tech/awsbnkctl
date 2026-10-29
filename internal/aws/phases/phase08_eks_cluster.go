@@ -138,12 +138,25 @@ func Phase08EKSClusterDown(ctx context.Context, cl *intent.Cluster, st *state.St
 		clusterName = name
 	}
 
-	_, err := clients.EKS.DeleteCluster(ctx, &eks.DeleteClusterInput{Name: ptr(clusterName)})
-	if err != nil {
+	for attempt := 0; attempt < 20; attempt++ {
+		_, err := clients.EKS.DeleteCluster(ctx, &eks.DeleteClusterInput{Name: ptr(clusterName)})
+		if err == nil {
+			break
+		}
 		if isEKSNotFound(err) {
 			fmt.Fprintf(os.Stderr, "[phase 08 down] cluster %s already gone\n", clusterName)
 			clearClusterState(st)
 			return st.Save()
+		}
+		var inUse *ekstypes.ResourceInUseException
+		if (errors.As(err, &inUse) || isDependencyViolation(err)) && attempt < 19 {
+			fmt.Fprintf(os.Stderr, "[phase 08 down] cluster %s still has dependencies (%v), retrying in %s...\n", clusterName, err, eksDeleteRetryWait)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(eksDeleteRetryWait):
+			}
+			continue
 		}
 		return fmt.Errorf("phase08 down: DeleteCluster: %w", err)
 	}
@@ -156,6 +169,8 @@ func Phase08EKSClusterDown(ctx context.Context, cl *intent.Cluster, st *state.St
 	clearClusterState(st)
 	return st.Save()
 }
+
+var eksDeleteRetryWait = 15 * time.Second
 
 // --- helpers ---
 

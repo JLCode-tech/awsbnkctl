@@ -108,9 +108,21 @@ func Phase04IGWDown(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 			InternetGatewayId: ptr(igwID),
 			VpcId:             ptr(vpcID),
 		})
-		if err := ignoreNotFound(err); err != nil {
-			// Swallow "not attached" error too.
-			if !isDetachError(err) {
+		if err := ignoreNotFound(err); err != nil && !isDetachError(err) {
+			if isDependencyViolation(err) {
+				sweepVPCInstancesAndENIs(ctx, clients.EC2, vpcID)
+				_, retryErr := clients.EC2.DetachInternetGateway(ctx, &ec2.DetachInternetGatewayInput{
+					InternetGatewayId: ptr(igwID),
+					VpcId:             ptr(vpcID),
+				})
+				if retryErr = ignoreNotFound(retryErr); retryErr != nil && !isDetachError(retryErr) {
+					if isDependencyViolation(retryErr) {
+						fmt.Fprintf(os.Stderr, "[phase 04 down] warning: DetachInternetGateway %s from %s still has dependencies (%v); deferring to phase 02 vpc sweep\n", igwID, vpcID, retryErr)
+						return nil
+					}
+					return fmt.Errorf("phase04 down: ec2:DetachInternetGateway: %w", retryErr)
+				}
+			} else {
 				return fmt.Errorf("phase04 down: ec2:DetachInternetGateway: %w", err)
 			}
 		}
@@ -120,6 +132,10 @@ func Phase04IGWDown(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 		InternetGatewayId: ptr(igwID),
 	})
 	if err := ignoreNotFound(err); err != nil {
+		if isDependencyViolation(err) {
+			fmt.Fprintf(os.Stderr, "[phase 04 down] warning: DeleteInternetGateway %s still has dependencies (%v); deferring to phase 02 vpc sweep\n", igwID, err)
+			return nil
+		}
 		return fmt.Errorf("phase04 down: ec2:DeleteInternetGateway: %w", err)
 	}
 

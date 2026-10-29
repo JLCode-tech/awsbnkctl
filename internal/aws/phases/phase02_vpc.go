@@ -125,11 +125,70 @@ func Phase02VPCDown(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 	return st.Save()
 }
 
+// sweepVPCInstancesAndENIs terminates any non-terminated EC2 instances in vpcID,
+// waits for termination, and detaches/deletes any remaining non-primary ENIs so
+// IGW detachment, subnet deletion, and VPC deletion do not fail with
+// DependencyViolation when external demo scripts (e.g. setup-stranger.sh) leave
+// helper instances or secondary ENIs in the VPC.
+func sweepVPCInstancesAndENIs(ctx context.Context, ec2c EC2API, vpcID string) {
+	if vpcID == "" {
+		return
+	}
+	vpcFilter := []ec2types.Filter{{Name: ptr("vpc-id"), Values: []string{vpcID}}}
+
+	// 1. Terminate any non-terminated EC2 instances in the VPC and wait for termination.
+	if instOut, err := ec2c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		Filters: []ec2types.Filter{
+			{Name: ptr("vpc-id"), Values: []string{vpcID}},
+			{Name: ptr("instance-state-name"), Values: []string{"pending", "running", "stopping", "stopped", "shutting-down"}},
+		},
+	}); err == nil {
+		var toTerminate []string
+		for _, res := range instOut.Reservations {
+			for _, inst := range res.Instances {
+				if inst.InstanceId != nil && *inst.InstanceId != "" {
+					toTerminate = append(toTerminate, *inst.InstanceId)
+				}
+			}
+		}
+		if len(toTerminate) > 0 {
+			fmt.Fprintf(os.Stderr, "[vpc sweep] terminating residual instances %v in %s\n", toTerminate, vpcID)
+			_, _ = ec2c.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+				InstanceIds: toTerminate,
+			})
+			for _, id := range toTerminate {
+				_ = waitInstanceTerminated(ctx, ec2c, id)
+			}
+		}
+	}
+
+	// 2. Detach (if attached) and delete any residual ENIs in the VPC.
+	if eniOut, err := ec2c.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
+		Filters: vpcFilter,
+	}); err == nil {
+		for _, eni := range eniOut.NetworkInterfaces {
+			if eni.NetworkInterfaceId == nil || *eni.NetworkInterfaceId == "" {
+				continue
+			}
+			eniID := *eni.NetworkInterfaceId
+			if eni.Attachment != nil && eni.Attachment.DeviceIndex != nil && *eni.Attachment.DeviceIndex == 0 &&
+				eni.Status != ec2types.NetworkInterfaceStatusAvailable {
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "[vpc sweep] sweeping residual ENI %s in %s\n", eniID, vpcID)
+			_ = detachAndDeleteENI(ctx, ec2c, eniID)
+		}
+	}
+}
+
 // sweepVPCResiduals performs a best-effort cleanup of residual resources inside
 // vpcID that commonly block DeleteVpc with DependencyViolation when state.env
 // was partial or external scripts created helper resources in the VPC.
 func sweepVPCResiduals(ctx context.Context, ec2c EC2API, vpcID string) {
 	vpcFilter := []ec2types.Filter{{Name: ptr("vpc-id"), Values: []string{vpcID}}}
+
+	// 0. Terminate any residual EC2 instances and detach/delete residual ENIs.
+	sweepVPCInstancesAndENIs(ctx, ec2c, vpcID)
 
 	// 1. Delete any lingering EC2 Instance Connect Endpoints in the VPC.
 	if eiceOut, err := ec2c.DescribeInstanceConnectEndpoints(ctx, &ec2.DescribeInstanceConnectEndpointsInput{

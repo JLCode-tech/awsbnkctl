@@ -101,30 +101,34 @@ func Phase17bJumphost(ctx context.Context, cl *intent.Cluster, st *state.State, 
 	if bnkExtSubnet == "" {
 		return fmt.Errorf("phase17b: BNK_EXT_SUBNET not in state (run phase03 first)")
 	}
-	// Pick MGMT subnet by index.
-	if len(cl.Network.Subnets.Public) == 0 {
-		return fmt.Errorf("phase17b: no public subnets defined in cluster.yaml")
+	// Pick MGMT subnet by index. Prefer private subnets when populated in state so
+	// the jumphost primary NIC (eth0) does not receive an auto-assigned public IPv4
+	// address (which AWS stops routing once a secondary ENI is attached).
+	mgmtSubnets := cl.Network.Subnets.Public
+	mgmtStateKey := "PUBLIC_SUBNETS"
+	if len(cl.Network.Subnets.Private) > 0 && st.Get("PRIVATE_SUBNETS") != "" {
+		mgmtSubnets = cl.Network.Subnets.Private
+		mgmtStateKey = "PRIVATE_SUBNETS"
+	}
+	if len(mgmtSubnets) == 0 {
+		return fmt.Errorf("phase17b: no public/private subnets defined in cluster.yaml")
 	}
 	idx := jh.MgmtSubnetIndex
-	if idx >= len(cl.Network.Subnets.Public) {
+	if idx >= len(mgmtSubnets) {
 		idx = 0
 	}
-	mgmtSubnetCIDR := cl.Network.Subnets.Public[idx].CIDR
-	// Resolve MGMT subnet ID by parsing PUBLIC_SUBNETS (csv) from state.
-	// State is flat key=value — no array indexing — so the original
-	// `PUBLIC_SUBNETS[0]` lookup never resolved and the MGMT_SUBNET
-	// fallback only works if phase 19 has already run (it hasn't at 17b time).
-	publicCSV := st.Get("PUBLIC_SUBNETS")
-	if publicCSV == "" {
-		return fmt.Errorf("phase17b: PUBLIC_SUBNETS not in state (run phase03 first)")
+	mgmtSubnetCIDR := mgmtSubnets[idx].CIDR
+	subnetCSV := st.Get(mgmtStateKey)
+	if subnetCSV == "" {
+		return fmt.Errorf("phase17b: %s not in state (run phase03 first)", mgmtStateKey)
 	}
-	publicIDs := strings.Split(publicCSV, ",")
-	if idx >= len(publicIDs) {
-		return fmt.Errorf("phase17b: mgmtSubnetIndex=%d but PUBLIC_SUBNETS has only %d entries", idx, len(publicIDs))
+	subnetIDs := strings.Split(subnetCSV, ",")
+	if idx >= len(subnetIDs) {
+		return fmt.Errorf("phase17b: mgmtSubnetIndex=%d but %s has only %d entries", idx, mgmtStateKey, len(subnetIDs))
 	}
-	mgmtSubnetID := strings.TrimSpace(publicIDs[idx])
+	mgmtSubnetID := strings.TrimSpace(subnetIDs[idx])
 	if mgmtSubnetID == "" {
-		return fmt.Errorf("phase17b: PUBLIC_SUBNETS[%d] is empty (corrupted state.env?)", idx)
+		return fmt.Errorf("phase17b: %s[%d] is empty (corrupted state.env?)", mgmtStateKey, idx)
 	}
 	_ = mgmtSubnetCIDR // available for logging if needed
 

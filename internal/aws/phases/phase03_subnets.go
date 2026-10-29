@@ -98,15 +98,29 @@ func Phase03SubnetsDown(ctx context.Context, cl *intent.Cluster, st *state.State
 	name := cl.Metadata.Name
 	fmt.Fprintf(os.Stderr, "[phase 03 down] subnets: cluster=%s\n", name)
 
+	vpcID := st.Get("VPC_ID")
+	swept := false
+	deleteOneSubnet := func(label, sid string) error {
+		fmt.Fprintf(os.Stderr, "[phase 03 down] deleting %s (%s)\n", label, sid)
+		_, err := clients.EC2.DeleteSubnet(ctx, &ec2.DeleteSubnetInput{SubnetId: ptr(sid)})
+		if err = ignoreNotFound(err); err != nil && isDependencyViolation(err) && !swept {
+			swept = true
+			if vpcID != "" {
+				sweepVPCInstancesAndENIs(ctx, clients.EC2, vpcID)
+			}
+			_, err = clients.EC2.DeleteSubnet(ctx, &ec2.DeleteSubnetInput{SubnetId: ptr(sid)})
+			err = ignoreNotFound(err)
+		}
+		return err
+	}
+
 	// Delete data-path subnets first (reverse order).
 	for _, key := range []string{"BNK_INT_SUBNET", "BNK_EXT_SUBNET"} {
 		sid := st.Get(key)
 		if sid == "" {
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "[phase 03 down] deleting data-path subnet %s (%s)\n", key, sid)
-		_, err := clients.EC2.DeleteSubnet(ctx, &ec2.DeleteSubnetInput{SubnetId: ptr(sid)})
-		if err := ignoreNotFound(err); err != nil {
+		if err := deleteOneSubnet("data-path subnet "+key, sid); err != nil {
 			return fmt.Errorf("phase03 down: ec2:DeleteSubnet %s (%s): %w", key, sid, err)
 		}
 		st.Set(key, "")
@@ -116,9 +130,7 @@ func Phase03SubnetsDown(ctx context.Context, cl *intent.Cluster, st *state.State
 	subnetIDs := collectSubnetIDs(ctx, clients.EC2, name, st)
 
 	for _, sid := range subnetIDs {
-		fmt.Fprintf(os.Stderr, "[phase 03 down] deleting subnet %s\n", sid)
-		_, err := clients.EC2.DeleteSubnet(ctx, &ec2.DeleteSubnetInput{SubnetId: ptr(sid)})
-		if err := ignoreNotFound(err); err != nil {
+		if err := deleteOneSubnet("subnet", sid); err != nil {
 			return fmt.Errorf("phase03 down: ec2:DeleteSubnet %s: %w", sid, err)
 		}
 	}
