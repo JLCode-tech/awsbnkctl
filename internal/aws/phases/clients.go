@@ -24,6 +24,7 @@ import (
 
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
+	awspkg "github.com/JLCode-tech/awsbnkctl/internal/aws"
 	"github.com/JLCode-tech/awsbnkctl/internal/aws/awsmw"
 	"github.com/JLCode-tech/awsbnkctl/internal/forge"
 	k8sclient "github.com/JLCode-tech/awsbnkctl/internal/k8s"
@@ -326,6 +327,9 @@ func NewClients(ctx context.Context, region, profile string) (*Clients, error) {
 	}
 	if cfg.Region == "" {
 		return nil, fmt.Errorf("AWS region is empty; set metadata.region in cluster.yaml or AWS_REGION")
+	}
+	if cfg.Credentials != nil {
+		cfg.Credentials = awspkg.WithCLICacheFallback(cfg.Credentials)
 	}
 
 	return &Clients{

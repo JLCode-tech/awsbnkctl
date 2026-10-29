@@ -13,9 +13,14 @@ package aws
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -42,6 +47,10 @@ type Clients struct {
 	// back in error messages so users debugging cross-region issues see
 	// which region the SDK landed on.
 	Region string
+
+	// Profile is the shared config profile name resolved for this client,
+	// if any.
+	Profile string
 
 	// AWSConfig is the resolved aws-sdk-go-v2 Config — exposed so callers
 	// that need a sub-client awsbnkctl doesn't wrap (e.g., S3)
@@ -111,9 +120,18 @@ func NewClients(ctx context.Context, opts Options) (*Clients, error) {
 	if cfg.Region == "" {
 		return nil, ErrRegionEmpty
 	}
+	if cfg.Credentials != nil {
+		cfg.Credentials = WithCLICacheFallback(cfg.Credentials)
+	}
+
+	resolvedProfile := strings.TrimSpace(opts.Profile)
+	if resolvedProfile == "" {
+		resolvedProfile = strings.TrimSpace(os.Getenv("AWS_PROFILE"))
+	}
 
 	return &Clients{
 		Region:    cfg.Region,
+		Profile:   resolvedProfile,
 		AWSConfig: cfg,
 		STS:       sts.NewFromConfig(cfg),
 		EC2:       ec2.NewFromConfig(cfg),
@@ -133,7 +151,11 @@ func CredentialsConfigured(ctx context.Context, opts Options) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("loading AWS config: %w", err)
 	}
-	creds, err := cfg.Credentials.Retrieve(ctx)
+	provider := cfg.Credentials
+	if provider != nil {
+		provider = &cliCacheFallbackProvider{primary: provider}
+	}
+	creds, err := provider.Retrieve(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -141,6 +163,94 @@ func CredentialsConfigured(ctx context.Context, opts Options) (string, error) {
 		return "", errors.New("credential source returned empty AccessKeyID")
 	}
 	return creds.Source, nil
+}
+
+// WithCLICacheFallback wraps an aws.CredentialsProvider with a fallback to
+// ~/.aws/cli/cache/*.json when primary SSO OIDC token refresh fails.
+func WithCLICacheFallback(primary awssdk.CredentialsProvider) awssdk.CredentialsProvider {
+	if primary == nil {
+		return nil
+	}
+	return awssdk.NewCredentialsCache(&cliCacheFallbackProvider{primary: primary})
+}
+
+type cliCacheFallbackProvider struct {
+	primary awssdk.CredentialsProvider
+}
+
+func (p *cliCacheFallbackProvider) Retrieve(ctx context.Context) (awssdk.Credentials, error) {
+	creds, err := p.primary.Retrieve(ctx)
+	if err == nil && creds.AccessKeyID != "" {
+		return creds, nil
+	}
+	if fallback, fbErr := retrieveFromAWSCLICache(); fbErr == nil {
+		return fallback, nil
+	}
+	return creds, err
+}
+
+func retrieveFromAWSCLICache() (awssdk.Credentials, error) {
+	cacheDir := strings.TrimSpace(os.Getenv("AWS_CLI_CACHE_DIR"))
+	if cacheDir == "" {
+		if testing.Testing() && os.Getenv("BNKCTL_FORCE_LIVE_AUTH") != "1" {
+			return awssdk.Credentials{}, errors.New("skipping AWS CLI cache in unit test")
+		}
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return awssdk.Credentials{}, errors.New("cannot resolve user home dir for AWS CLI cache")
+		}
+		cacheDir = filepath.Join(home, ".aws", "cli", "cache")
+	}
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return awssdk.Credentials{}, err
+	}
+	var best awssdk.Credentials
+	var bestExp time.Time
+	now := time.Now().Add(1 * time.Minute)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(cacheDir, entry.Name())) // #nosec G304 -- standard AWS CLI cache directory
+		if err != nil {
+			continue
+		}
+		var payload struct {
+			Credentials struct {
+				AccessKeyID     string `json:"AccessKeyId"`
+				SecretAccessKey string `json:"SecretAccessKey"`
+				SessionToken    string `json:"SessionToken"`
+				Expiration      string `json:"Expiration"`
+			} `json:"Credentials"`
+		}
+		if err := json.Unmarshal(data, &payload); err != nil {
+			continue
+		}
+		c := payload.Credentials
+		if c.AccessKeyID == "" || c.SecretAccessKey == "" || c.Expiration == "" {
+			continue
+		}
+		exp, err := time.Parse(time.RFC3339, c.Expiration)
+		if err != nil {
+			continue
+		}
+		if exp.After(now) && exp.After(bestExp) {
+			bestExp = exp
+			best = awssdk.Credentials{
+				AccessKeyID:     c.AccessKeyID,
+				SecretAccessKey: c.SecretAccessKey,
+				SessionToken:    c.SessionToken,
+				Source:          "AWSCLICache",
+				CanExpire:       true,
+				Expires:         exp,
+			}
+		}
+	}
+	if best.AccessKeyID == "" {
+		return awssdk.Credentials{}, errors.New("no valid unexpired credentials in AWS CLI cache")
+	}
+	return best, nil
 }
 
 // buildLoadOpts mirrors NewClients's chain so CredentialsConfigured
