@@ -144,9 +144,33 @@ func Phase17cIfaceDiscovery(ctx context.Context, cl *intent.Cluster, st *state.S
 		st.Set("EXTERNAL_IFNAME", extIf)
 		st.Set("EXTERNAL_PCI", extPCI)
 		st.Set("CLOUD_HOST_DEVICE_NAME", extIf)
+		if clients.EC2 != nil {
+			if extENIID := st.Get("EXTERNAL_ENI"); extENIID != "" && extIf != "" {
+				_, _ = clients.EC2.CreateTags(ctx, &ec2.CreateTagsInput{
+					Resources: []string{extENIID},
+					Tags: []ec2types.Tag{
+						{Key: ptr("f5-cne-device"), Value: ptr(extIf)},
+						{Key: ptr("bnk.f5.com/ifname"), Value: ptr(extIf)},
+						{Key: ptr("bnk.f5.com/pci"), Value: ptr(extPCI)},
+					},
+				})
+			}
+		}
 		if hasInternal {
 			st.Set("INTERNAL_IFNAME", intIf)
 			st.Set("INTERNAL_PCI", intPCI)
+			if clients.EC2 != nil {
+				if intENIID := st.Get("INTERNAL_ENI"); intENIID != "" && intIf != "" {
+					_, _ = clients.EC2.CreateTags(ctx, &ec2.CreateTagsInput{
+						Resources: []string{intENIID},
+						Tags: []ec2types.Tag{
+							{Key: ptr("f5-cne-device"), Value: ptr(intIf)},
+							{Key: ptr("bnk.f5.com/ifname"), Value: ptr(intIf)},
+							{Key: ptr("bnk.f5.com/pci"), Value: ptr(intPCI)},
+						},
+					})
+				}
+			}
 		}
 		if hasInternal {
 			fmt.Fprintf(os.Stderr, "[phase 17c] discovered: external=%s(%s) internal=%s(%s)\n",

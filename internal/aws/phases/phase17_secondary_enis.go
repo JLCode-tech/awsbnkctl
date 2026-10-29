@@ -290,11 +290,16 @@ func ensureSecondaryENI(ctx context.Context, ec2c EC2API, clusterName, subnetID,
 	}
 
 	// Create.
+	datapathRole := "external"
+	if component == tags.CompENIInternal {
+		datapathRole = "internal"
+	}
 	eniName := clusterName + "-tmm-" + ifname
 	eniTags := tags.Merge(
 		tags.Required(clusterName, component),
 		map[string]string{
 			tags.KeyName:                       eniName,
+			"bnk.f5.com/datapath":              datapathRole,
 			"f5-cne-device":                    ifname,
 			"node.k8s.amazonaws.com/no_manage": "true",
 		},
