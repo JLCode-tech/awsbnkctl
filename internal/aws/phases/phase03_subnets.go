@@ -20,9 +20,11 @@ func resolveClusterAZs(ctx context.Context, cl *intent.Cluster, ec2c EC2API) {
 		return
 	}
 	stateName := "state"
+	optInName := "opt-in-status"
 	out, err := ec2c.DescribeAvailabilityZones(ctx, &ec2.DescribeAvailabilityZonesInput{
 		Filters: []ec2types.Filter{
 			{Name: &stateName, Values: []string{"available"}},
+			{Name: &optInName, Values: []string{"opt-in-not-required", "opted-in"}},
 		},
 	})
 	if err != nil || out == nil || len(out.AvailabilityZones) == 0 {
@@ -134,6 +136,9 @@ func Phase03Subnets(ctx context.Context, cl *intent.Cluster, st *state.State, cl
 	}
 
 	resolveClusterAZs(ctx, cl, clients.EC2)
+	if len(cl.Network.AZs) > 0 {
+		st.Set("ACTIVE_AZS", strings.Join(cl.Network.AZs, ","))
+	}
 
 	publicIDs, err := provisionSubnets(ctx, clients.EC2, name, vpcID,
 		cl.Network.Subnets.Public, tags.CompSubnetPublic, true, cl.Tags, cl.Metadata.Labels, dryRun)
@@ -220,6 +225,7 @@ func Phase03SubnetsDown(ctx context.Context, cl *intent.Cluster, st *state.State
 
 	st.Set("PUBLIC_SUBNETS", "")
 	st.Set("PRIVATE_SUBNETS", "")
+	st.Set("ACTIVE_AZS", "")
 	return st.Save()
 }
 

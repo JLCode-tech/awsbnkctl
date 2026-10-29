@@ -259,6 +259,7 @@ func populateClusterState(st *state.State, c *ekstypes.Cluster) error {
 	// TMM_K8S_ROUTES in the CNEInstance): EKS assigns it at create time.
 	if c.KubernetesNetworkConfig != nil && c.KubernetesNetworkConfig.ServiceIpv4Cidr != nil {
 		st.Set(render.ServiceCIDRStateKey, *c.KubernetesNetworkConfig.ServiceIpv4Cidr)
+		st.Set("SERVICE_CIDR", *c.KubernetesNetworkConfig.ServiceIpv4Cidr)
 	}
 	return st.Save()
 }
@@ -272,6 +273,7 @@ func clearClusterState(st *state.State) {
 	st.Set("EKS_SECURITY_GROUP", "")
 	st.Set("EKS_VERSION", "")
 	st.Set(render.ServiceCIDRStateKey, "")
+	st.Set("SERVICE_CIDR", "")
 }
 
 func oidcURL(c *ekstypes.Cluster) string {
