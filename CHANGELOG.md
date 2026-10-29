@@ -4,6 +4,31 @@ All notable changes to `awsbnkctl` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-`v1.0.0` minor versions may include breaking changes — see the per-version notes.
 
+## [2.5.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.4.1...v2.5.0) (2026-10-29)
+
+
+### Features
+
+* **aws:** dynamic AZ, IMDSv2 subnet/VPC CIDR, and service CIDR discovery ([639bf58](https://github.com/JLCode-tech/awsbnkctl/commit/639bf58c483b22fb7783664d2386dbd537292d0c))
+* **bnk:** add bnk.registryHost config field; fix missing Gateway API Inference Extension CRDs ([4dbd782](https://github.com/JLCode-tech/awsbnkctl/commit/4dbd78276063372a44f9603fa8afb86c77ee3f47))
+* **bnk:** add bnk.registryHost to support F5 dev/staging registries ([3cc6ad8](https://github.com/JLCode-tech/awsbnkctl/commit/3cc6ad8cc02b6cf6544b15c4f4ea308b0adabc8a))
+* **manifest:** add BNK 2.4.1 release and FLO chart v2.30.1-0.0.8 mapping ([3125565](https://github.com/JLCode-tech/awsbnkctl/commit/31255655595955255c79769c84eb38844f46031e))
+
+
+### Bug Fixes
+
+* **agentcore-demo:** align forge projectName/cloud-aws labels and f5-cne-system comments ([d18f699](https://github.com/JLCode-tech/awsbnkctl/commit/d18f6999bf3eb5ef134ffa79ef9aacc146beaf45))
+* **agentcore-demo:** ensure cross-AZ stranger subnet discovery via bnk.f5.com/datapath and awsbnkctl:component tags ([e355e52](https://github.com/JLCode-tech/awsbnkctl/commit/e355e52721f12a326545a90b4b38124c74518704))
+* **agentcore-demo:** use OpenAI-compatible Bedrock model IDs for /openai/v1/chat/completions ([784361e](https://github.com/JLCode-tech/awsbnkctl/commit/784361e824c0d4b45149fae0cd5968f2a06f83eb))
+* **agentcore-demo:** zero-touch e2e lifecycle, TMM asymmetric conntrack, Forge governance sync, and clean teardown ([9118cb5](https://github.com/JLCode-tech/awsbnkctl/commit/9118cb569675b1590e6899c749e5a32184f7ac28))
+* **aws,agentcore-demo:** sweep residual VPC instances before IGW/subnet teardown and scope MCP rate limits by session ([9f50045](https://github.com/JLCode-tech/awsbnkctl/commit/9f500457e5c4e5ae5fa91c6dc83879086adb1368))
+* **aws:** add VPC quota preflight check and harden VPC/subnet/jumphost teardown ([d62c124](https://github.com/JLCode-tech/awsbnkctl/commit/d62c12453f0a333136b076ece3352c2bd3b50ce4))
+* **aws:** complete dynamic AZ/CIDR discovery and sync agentcore-demo ([ea355d3](https://github.com/JLCode-tech/awsbnkctl/commit/ea355d3fe88ff1512029c0c52c355a45953fae3c))
+* **aws:** fallback to AWS CLI credential cache on SSO token expiry and pin AWS_PROFILE in kubeconfig ([558c7c7](https://github.com/JLCode-tech/awsbnkctl/commit/558c7c72e0d9e7f1fcf6eebb487d5d188546e030))
+* **dataplane:** bake BNK 2.4.1 AWS ENA dataplane fixes and LLM gateway provisioning ([7412709](https://github.com/JLCode-tech/awsbnkctl/commit/7412709f080d5546a56b9ae108baf1d14fcae0d5))
+* **dataplane:** bake BNK 2.4.1 AWS ENA dataplane fixes and LLM gateway provisioning ([1914cfb](https://github.com/JLCode-tech/awsbnkctl/commit/1914cfb85e84c86a2ea58e6ac73f19105a5fc445))
+* **phase12:** apply Gateway API Inference Extension CRDs (fixes f5-cne-controller CrashLoopBackOff) ([56e08e2](https://github.com/JLCode-tech/awsbnkctl/commit/56e08e20e5086c0c4540569bd4b91f8047111f6b))
+
 ## [2.4.0](https://github.com/JLCode-tech/awsbnkctl/compare/v2.3.0...v2.4.0) (2026-09-15)
 
 
