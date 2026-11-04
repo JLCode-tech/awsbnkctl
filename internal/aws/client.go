@@ -212,7 +212,7 @@ func retrieveFromAWSCLICache() (awssdk.Credentials, error) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(cacheDir, entry.Name())) // #nosec G304 -- standard AWS CLI cache directory
+		data, err := os.ReadFile(filepath.Join(cacheDir, entry.Name())) // #nosec G304 G703 -- standard AWS CLI cache directory
 		if err != nil {
 			continue
 		}
