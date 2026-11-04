@@ -220,15 +220,14 @@ func pollNATState(ctx context.Context, ec2c EC2API, natID string, want ec2types.
 		})
 		if err != nil {
 			if err2 := ignoreNotFound(err); err2 == nil {
-				// NAT is gone — treat as deleted.
+				// NAT is gone — treat as deleted, or retry transient read-after-write NotFound after CreateNatGateway.
 				if want == ec2types.NatGatewayStateDeleted {
 					return nil
 				}
-				return fmt.Errorf("NAT GW %s disappeared while waiting for %s", natID, want)
+			} else {
+				return err
 			}
-			return err
-		}
-		if len(out.NatGateways) == 0 {
+		} else if len(out.NatGateways) == 0 {
 			// DescribeNatGateways returns nothing when the ID isn't known to AWS
 			// (fully purged) — treat as deleted.
 			if want == ec2types.NatGatewayStateDeleted {

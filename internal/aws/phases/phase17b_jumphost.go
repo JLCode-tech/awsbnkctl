@@ -769,6 +769,9 @@ func waitInstanceRunning(ctx context.Context, ec2c EC2API, instanceID string) er
 		out, err := ec2c.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 			InstanceIds: []string{instanceID},
 		})
+		if err != nil && ignoreNotFound(err) != nil {
+			return fmt.Errorf("ec2:DescribeInstances %s: %w", instanceID, err)
+		}
 		if err == nil && len(out.Reservations) > 0 && len(out.Reservations[0].Instances) > 0 {
 			state := out.Reservations[0].Instances[0].State
 			if state != nil && state.Name == ec2types.InstanceStateNameRunning {
